@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+  // Prisma says driverAdapters no longer needs previewFeatures, but leaving it is harmless.
+  // We can remove later.
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/*
+These tables already exist in Postgres and are snake_case.
+We map Prisma models -> existing tables using @@map().
+We keep column names as-is (snake_case), so we do not need @map() per field.
+*/
+
+model Business {
+  id            String   @id @db.Uuid
+  name          String
+  owner_user_id String
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  roles         UserBusinessRole[]
+  accounts      Account[]
+  entries       Entry[]
+
+  @@index([owner_user_id], map: "idx_business_owner_user_id")
+  @@map("business")
+}
+
+model UserBusinessRole {
+  id          String   @id @db.Uuid
+  business_id String   @db.Uuid
+  user_id     String
+  role        String
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  business    Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, user_id], map: "user_business_role_business_id_user_id_key")
+  @@index([user_id], map: "idx_ubr_user_id")
+  @@index([business_id, role], map: "idx_ubr_business_role")
+  @@map("user_business_role")
+}
+
+model Account {
+  id                    String   @id @db.Uuid
+  business_id           String   @db.Uuid
+  name                  String
+  type                  String
+  opening_balance_cents BigInt
+  opening_balance_date  DateTime @db.Timestamptz(6)
+  archived_at           DateTime? @db.Timestamptz(6)
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @default(now()) @db.Timestamptz(6)
+
+  business              Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  entries               Entry[]
+
+  @@index([business_id, archived_at], map: "idx_account_business_archived")
+  @@index([business_id, name], map: "idx_account_business_name")
+  @@map("account")
+}
+
+model Entry {
+  id           String    @id @db.Uuid
+  business_id  String    @db.Uuid
+  account_id   String    @db.Uuid
+
+  date         DateTime  @db.Date
+  payee        String?
+  memo         String?
+  amount_cents BigInt
+  type         String
+  method       String?
+  category_id  String?   @db.Uuid
+  vendor_id    String?   @db.Uuid
+  status       String    @default("EXPECTED")
+
+  deleted_at   DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  business     Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  account      Account   @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, account_id, date, created_at], map: "idx_entry_business_account_date_created")
+  @@index([business_id, account_id, deleted_at], map: "idx_entry_business_account_deleted")
+  @@map("entry")
+}

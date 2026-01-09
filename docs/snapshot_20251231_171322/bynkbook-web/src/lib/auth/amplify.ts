@@ -1,0 +1,13 @@
+import { Amplify } from "aws-amplify";
+
+export function configureAmplify() {
+  Amplify.configure({
+    Auth: {
+      Cognito: {
+        userPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID!,
+        userPoolClientId: process.env.NEXT_PUBLIC_COGNITO_APP_CLIENT_ID!,
+        region: process.env.NEXT_PUBLIC_AWS_REGION!,
+      },
+    },
+  });
+}

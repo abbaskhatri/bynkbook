@@ -1,0 +1,36 @@
+"use client";
+
+import React, { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { configureAmplify } from "@/lib/auth/amplify";
+
+// Configure immediately so auth checks never race.
+configureAmplify();
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            // Treat data as fresh longer to avoid refetching on every nav.
+            staleTime: 2 * 60_000,
+            gcTime: 30 * 60_000,
+
+            // Kill common refetch storms.
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+            refetchOnMount: false,
+
+            // Fail fast; we already do optimistic UI.
+            retry: 0,
+          },
+          mutations: {
+            retry: 0,
+          },
+        },
+      })
+  );
+
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+}

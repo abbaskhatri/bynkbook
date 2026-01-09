@@ -1,0 +1,115 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+export function TotalsFooter(props: {
+  rowsPerPage: number;
+  setRowsPerPage: (n: number) => void;
+
+  page: number;
+  setPage: (n: number) => void;
+
+  totalPages: number;
+  canPrev: boolean;
+  canNext: boolean;
+
+  incomeText: string;
+  expenseText: string;
+  netText: string;
+  balanceText: string;
+}) {
+  const {
+    rowsPerPage,
+    setRowsPerPage,
+    page,
+    setPage,
+    totalPages,
+    canPrev,
+    canNext,
+    incomeText,
+    expenseText,
+    netText,
+    balanceText,
+  } = props;
+
+  const netIsNeg = netText.includes("(");
+
+  return (
+    <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+      {/* Left: rows + paging */}
+      <div className="flex items-center gap-2">
+        <span>Rows:</span>
+
+        <Select
+          value={String(rowsPerPage)}
+          onValueChange={(v) => {
+            const n = Number(v);
+            setRowsPerPage(n);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="h-7 w-[84px] px-2 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent side="top" align="start">
+            <SelectItem value="50">50</SelectItem>
+            <SelectItem value="100">100</SelectItem>
+            <SelectItem value="200">200</SelectItem>
+            <SelectItem value="500">500</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button
+          variant="outline"
+          className="h-7 w-8 p-0"
+          disabled={!canPrev}
+          onClick={() => setPage(Math.max(1, page - 1))}
+          aria-label="Previous page"
+        >
+          ‹
+        </Button>
+
+        <div className="min-w-[90px] text-center">
+          Page {page} of {totalPages}
+        </div>
+
+        <Button
+          variant="outline"
+          className="h-7 w-8 p-0"
+          disabled={!canNext}
+          onClick={() => setPage(page + 1)}
+          aria-label="Next page"
+        >
+          ›
+        </Button>
+      </div>
+
+      {/* Right: totals */}
+      <div className="flex items-center gap-6 tabular-nums">
+        <div>
+          <span className="mr-1">Income:</span>
+          <span className="text-slate-900">{incomeText}</span>
+        </div>
+        <div>
+          <span className="mr-1">Expense:</span>
+          <span className="text-slate-900">{expenseText}</span>
+        </div>
+        <div>
+          <span className="mr-1">Net:</span>
+          <span className={netIsNeg ? "text-red-600" : "text-slate-900"}>{netText}</span>
+        </div>
+        <div>
+          <span className="mr-1">Balance:</span>
+          <span className="text-slate-900">{balanceText}</span>
+        </div>
+      </div>
+    </div>
+  );
+}

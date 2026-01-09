@@ -1,0 +1,617 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getCurrentUser } from "aws-amplify/auth";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
+import { useEntries } from "@/lib/queries/useEntries";
+import { useLedgerSummary } from "@/lib/queries/useLedgerSummary";
+import { createEntry, deleteEntry, type Entry } from "@/lib/api/entries";
+import { metrics } from "@/lib/perf/metrics";
+
+import { PageHeader } from "@/components/app/page-header";
+import { CapsuleSelect } from "@/components/app/capsule-select";
+import { FilterBar } from "@/components/app/filter-bar";
+import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
+import { TotalsFooter } from "@/components/ledger/totals-footer";
+
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+
+function todayYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function monthStartYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}-01`;
+}
+function toBigIntSafe(v: unknown): bigint {
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number") return BigInt(Math.trunc(v));
+    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
+  } catch {}
+  return 0n;
+}
+function formatUsdFromCents(cents: bigint) {
+  const neg = cents < 0n;
+  const abs = neg ? -cents : cents;
+  const dollars = abs / 100n;
+  const pennies = abs % 100n;
+  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
+  return neg ? `(${core})` : core;
+}
+function parseMoneyToCents(input: string): number {
+  const raw = (input || "").trim();
+  if (!raw) return 0;
+  const cleaned = raw.replace(/[\$,]/g, "");
+  const m = cleaned.match(/^(-)?(\d+)(?:\.(\d{0,2}))?$/);
+  if (!m) return 0;
+  const neg = !!m[1];
+  const dollars = Number(m[2] || "0");
+  const centsPart = (m[3] || "").padEnd(2, "0").slice(0, 2);
+  const cents = Number(centsPart || "0");
+  const total = dollars * 100 + cents;
+  return neg ? -total : total;
+}
+function sortEntriesDisplayDesc(a: Entry, b: Entry) {
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+  const ca = a.created_at || "";
+  const cb = b.created_at || "";
+  if (ca === cb) return 0;
+  return ca < cb ? 1 : -1;
+}
+function sortEntriesChronAsc(a: Entry, b: Entry) {
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  const ca = a.created_at || "";
+  const cb = b.created_at || "";
+  if (ca === cb) return 0;
+  return ca < cb ? -1 : 1;
+}
+function titleCase(s: string) {
+  const t = (s || "").trim().toLowerCase();
+  if (!t) return "";
+  return t.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+type UiType = "INCOME" | "EXPENSE" | "TRANSFER" | "ADJUSTMENT";
+type UiMethod = "CASH" | "CARD" | "CHECK" | "ACH" | "WIRE" | "OTHER";
+
+function normalizeBackendType(uiType: UiType): "INCOME" | "EXPENSE" {
+  if (uiType === "INCOME") return "INCOME";
+  return "EXPENSE";
+}
+function normalizeBackendMethod(uiMethod: UiMethod): string {
+  if (uiMethod === "CASH") return "CASH";
+  if (uiMethod === "CHECK") return "CHECK";
+  if (uiMethod === "ACH") return "ACH";
+  if (uiMethod === "CARD") return "CARD";
+  return "CARD";
+}
+
+export default function LedgerPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const qc = useQueryClient();
+
+  const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
+
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        await getCurrentUser();
+        setAuthReady(true);
+      } catch {
+        router.replace("/login");
+      }
+    })();
+  }, [router]);
+
+  const businessesQ = useBusinesses();
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
+  const accountIdFromUrl = sp.get("accountId");
+
+  const selectedBusinessId = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    if (bizIdFromUrl) return bizIdFromUrl;
+    return list[0]?.id ?? null;
+  }, [bizIdFromUrl, businessesQ.data]);
+
+  const accountsQ = useAccounts(selectedBusinessId);
+
+  const selectedAccountId = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    if (accountIdFromUrl) return accountIdFromUrl;
+    return list.find((a) => !a.archived_at)?.id ?? "";
+  }, [accountsQ.data, accountIdFromUrl]);
+
+  const selectedAccount = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    return list.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accountsQ.data, selectedAccountId]);
+
+  // paging
+  const [rowsPerPage, setRowsPerPage] = useState(100);
+  const [page, setPage] = useState(1);
+  const maxFetch = 500;
+  const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage * page), [rowsPerPage, page]);
+  const entriesKey = useMemo(
+    () => ["entries", selectedBusinessId, selectedAccountId, fetchLimit] as const,
+    [selectedBusinessId, selectedAccountId, fetchLimit]
+  );
+
+  const entriesQ = useEntries({ businessId: selectedBusinessId, accountId: selectedAccountId, limit: fetchLimit });
+
+  const from = monthStartYmd();
+  const to = todayYmd();
+  const summaryQ = useLedgerSummary({ businessId: selectedBusinessId, accountId: selectedAccountId, from, to });
+
+  // opening balance synthetic row
+  const openingBalanceCents = useMemo(() => BigInt(Number(selectedAccount?.opening_balance_cents ?? 0)), [selectedAccount]);
+
+  const openingEntry: Entry | null = useMemo(() => {
+    if (!selectedBusinessId || !selectedAccountId || !selectedAccount) return null;
+    const date = String(selectedAccount.opening_balance_date ?? "").slice(0, 10);
+    if (!date || date.length !== 10) return null;
+
+    return {
+      id: "opening_balance",
+      business_id: selectedBusinessId,
+      account_id: selectedAccountId,
+      date,
+      payee: "Opening Balance",
+      memo: selectedAccount.name ?? null,
+      amount_cents: String(Number(selectedAccount.opening_balance_cents ?? 0)),
+      type: "OPENING",
+      method: null,
+      status: "SYSTEM",
+      deleted_at: null,
+      created_at: date + "T00:00:00.000Z",
+      updated_at: date + "T00:00:00.000Z",
+    };
+  }, [selectedBusinessId, selectedAccountId, selectedAccount]);
+
+  const entriesSorted = useMemo(() => {
+    const list = (entriesQ.data ?? []).slice();
+    list.sort(sortEntriesDisplayDesc);
+    return list;
+  }, [entriesQ.data]);
+
+  const entriesWithOpening = useMemo(() => {
+    if (!openingEntry) return entriesSorted;
+    const list = entriesSorted.slice();
+    if (!list.some((e) => e.id === "opening_balance")) list.push(openingEntry);
+    list.sort(sortEntriesDisplayDesc);
+    return list;
+  }, [entriesSorted, openingEntry]);
+
+  const rowModels = useMemo(() => {
+    const listDesc = entriesWithOpening.slice();
+    const listAsc = entriesWithOpening.slice().sort(sortEntriesChronAsc);
+    const idxOpen = listAsc.findIndex((e) => e.id === "opening_balance");
+
+    const delta = listAsc.map((e) => (e.id === "opening_balance" ? 0n : toBigIntSafe(e.amount_cents)));
+    const bal = new Array<bigint>(listAsc.length).fill(0n);
+
+    if (idxOpen >= 0) {
+      bal[idxOpen] = openingBalanceCents;
+      for (let i = idxOpen + 1; i < listAsc.length; i++) bal[i] = bal[i - 1] + delta[i];
+      for (let i = idxOpen - 1; i >= 0; i--) bal[i] = bal[i + 1] - delta[i + 1];
+    } else {
+      for (let i = 0; i < listAsc.length; i++) bal[i] = (i === 0 ? 0n : bal[i - 1]) + delta[i];
+    }
+
+    const balById = new Map<string, bigint>();
+    for (let i = 0; i < listAsc.length; i++) balById.set(listAsc[i].id, bal[i]);
+
+    const clsNum = (c: bigint) => (c < 0n ? "text-right text-red-600 tabular-nums" : "text-right tabular-nums");
+
+    return listDesc.map((e) => {
+      const amt = toBigIntSafe(e.amount_cents);
+      const rowBal = balById.get(e.id) ?? 0n;
+      const isTemp = e.id.startsWith("temp_");
+
+      return {
+        id: e.id,
+        date: e.date,
+        ref: "",
+        payee: e.payee ?? "",
+        type: titleCase(e.type ?? ""),
+        method: titleCase(e.method ?? ""),
+        category: "",
+        amountStr: formatUsdFromCents(amt),
+        amountClass: clsNum(amt),
+        balanceStr: formatUsdFromCents(rowBal),
+        balanceClass: clsNum(rowBal),
+        statusUpper: (e.status ?? "").toUpperCase(),
+        canDelete: e.id !== "opening_balance" && !isTemp,
+        rowStatus: isTemp ? "SAVING…" : "",
+      };
+    });
+  }, [entriesWithOpening, openingBalanceCents]);
+
+  const [searchPayee, setSearchPayee] = useState("");
+  const filteredRowsAll = useMemo(() => {
+    const q = searchPayee.trim().toLowerCase();
+    if (!q) return rowModels;
+    return rowModels.filter((r) => r.payee.toLowerCase().includes(q));
+  }, [rowModels, searchPayee]);
+
+  const startIdx = (page - 1) * rowsPerPage;
+  const endIdx = page * rowsPerPage;
+  const pageRows = filteredRowsAll.slice(startIdx, endIdx);
+
+  const hasMoreOnServer = (entriesQ.data?.length ?? 0) === fetchLimit && fetchLimit < maxFetch;
+  const canNext = endIdx < filteredRowsAll.length || hasMoreOnServer;
+  const canPrev = page > 1;
+  const totalPages = Math.max(1, Math.ceil(filteredRowsAll.length / rowsPerPage));
+
+  // circle checkbox
+  const circleCheckboxClass =
+    "h-4 w-4 appearance-none rounded-full border border-slate-400/50 " +
+    "checked:bg-slate-900 checked:border-slate-900 " +
+    "checked:shadow-[inset_0_0_0_3px_white]";
+
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const allPageSelected = useMemo(() => {
+    const ids = pageRows.filter((r) => r.id !== "opening_balance").map((r) => r.id);
+    if (ids.length === 0) return false;
+    return ids.every((id) => !!selectedIds[id]);
+  }, [pageRows, selectedIds]);
+
+  function toggleRow(id: string) {
+    setSelectedIds((m) => ({ ...m, [id]: !m[id] }));
+  }
+  function toggleAllPage() {
+    const ids = pageRows.filter((r) => r.id !== "opening_balance").map((r) => r.id);
+    const next = { ...selectedIds };
+    const shouldSelect = !allPageSelected;
+    for (const id of ids) next[id] = shouldSelect;
+    setSelectedIds(next);
+  }
+
+  // add row state
+  const [draftDate, setDraftDate] = useState(todayYmd());
+  const [draftRef, setDraftRef] = useState("");
+  const [draftPayee, setDraftPayee] = useState("");
+  const [draftType, setDraftType] = useState<UiType>("EXPENSE");
+  const [draftMethod, setDraftMethod] = useState<UiMethod>("CASH");
+  const [draftCategory, setDraftCategory] = useState("");
+  const [draftAmount, setDraftAmount] = useState("0.00");
+  const [err, setErr] = useState<string | null>(null);
+  const payeeRef = useRef<HTMLInputElement | null>(null);
+
+  const createMut = useMutation({
+    mutationFn: async (vars: { draft: DraftEntry; tempId: string }) => {
+      const { draft } = vars;
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+
+      const cents = parseMoneyToCents(draft.amount);
+      const backendType = normalizeBackendType(draft.type);
+      const signed = backendType === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+      return createEntry({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        input: {
+          date: draft.date,
+          payee: (draft.payee || "").trim(),
+          memo: undefined,
+          amount_cents: signed,
+          type: backendType,
+          method: normalizeBackendMethod(draft.method),
+          status: "EXPECTED",
+        },
+      });
+    },
+
+    onMutate: async (vars) => {
+      const start = performance.now();
+      setErr(null);
+
+      const { draft, tempId } = vars;
+      if (!selectedBusinessId || !selectedAccountId) return;
+
+      await qc.cancelQueries({ queryKey: entriesKey });
+
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const nowIso = new Date().toISOString();
+
+      const cents = parseMoneyToCents(draft.amount);
+      const backendType = normalizeBackendType(draft.type);
+      const signed = backendType === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+      const optimistic: Entry = {
+        id: tempId,
+        business_id: selectedBusinessId,
+        account_id: selectedAccountId,
+        date: draft.date,
+        payee: (draft.payee || "").trim(),
+        memo: null,
+        amount_cents: String(signed),
+        type: backendType,
+        method: normalizeBackendMethod(draft.method),
+        status: "EXPECTED",
+        deleted_at: null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      qc.setQueryData(entriesKey, [optimistic, ...previous]);
+      metrics.timeUi("createEntry click->row", start);
+
+      setDraftRef("");
+      setDraftPayee("");
+      setDraftCategory("");
+      setDraftAmount("0.00");
+      setDraftType("EXPENSE");
+      setDraftMethod("CASH");
+      requestAnimationFrame(() => payeeRef.current?.focus());
+
+      return { previous, tempId };
+    },
+
+    onError: (e: any, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+      setErr(e?.message || "Failed to create entry");
+    },
+
+    onSuccess: async (serverEntry, vars) => {
+      const current = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      qc.setQueryData(entriesKey, current.map((e) => (e.id === vars.tempId ? serverEntry : e)));
+      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to] });
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async (entryId: string) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+      return deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId });
+    },
+
+    onMutate: async (entryId: string) => {
+      const start = performance.now();
+      setErr(null);
+
+      await qc.cancelQueries({ queryKey: entriesKey });
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      qc.setQueryData(entriesKey, previous.filter((e) => e.id !== entryId));
+
+      metrics.timeUi("deleteEntry click->rowRemoved", start);
+      return { previous };
+    },
+
+    onError: (_e: any, _id, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+    },
+
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to] });
+    },
+  });
+
+  function submitInline() {
+    const tempId = `temp_${Date.now()}`;
+    createMut.mutate({
+      draft: { date: draftDate, ref: draftRef, payee: draftPayee, type: draftType, method: draftMethod, category: draftCategory, amount: draftAmount },
+      tempId,
+    });
+  }
+
+  const accountOptions = (accountsQ.data ?? []).filter((a) => !a.archived_at).map((a) => ({ value: a.id, label: a.name }));
+  const accountCapsule = (
+    <CapsuleSelect
+      loading={accountsQ.isLoading}
+      value={selectedAccountId || (accountOptions[0]?.value ?? "")}
+      onValueChange={(v) => { setPage(1); router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${v}`); }}
+      options={accountOptions}
+      placeholder="Select account"
+    />
+  );
+
+  if (!authReady) return <Skeleton className="h-10 w-64" />;
+
+  // Base44 widths, but Payee is flexible
+  const colgroup = (
+    <>
+      <col style={{ width: "40px" }} />
+      <col style={{ width: "90px" }} />
+      <col style={{ width: "100px" }} />
+      <col />
+      <col style={{ width: "60px" }} />
+      <col style={{ width: "60px" }} />
+      <col style={{ width: "120px" }} />
+      <col style={{ width: "100px" }} />
+      <col style={{ width: "100px" }} />
+      <col style={{ width: "24px" }} />
+      <col style={{ width: "70px" }} />
+      <col style={{ width: "80px" }} />
+    </>
+  );
+
+  const headerRow = (
+    <tr className="sticky top-0 z-40 bg-slate-50 border-b border-slate-200 h-[44px]">
+      <th className="w-[40px] px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">
+        <input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className={circleCheckboxClass} />
+      </th>
+      <th className="w-[90px] px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Date</th>
+      <th className="w-[100px] px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Ref</th>
+      <th className="px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Payee</th>
+      <th className="w-[60px] px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Type</th>
+      <th className="w-[60px] px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Method</th>
+      <th className="w-[120px] px-2 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Category</th>
+      <th className="w-[100px] px-2 py-1.5 text-right bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide tabular-nums">Amount</th>
+      <th className="w-[100px] px-2 py-1.5 text-right bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide tabular-nums">Balance</th>
+      <th className="w-[24px] px-1 py-1.5 text-center bg-slate-50"></th>
+      <th className="w-[70px] px-1 py-1.5 text-left bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide">Status</th>
+      <th className="w-[80px] px-2 py-1.5 text-right bg-slate-50 text-xs font-medium text-slate-600 uppercase tracking-wide"></th>
+    </tr>
+  );
+
+  const stickyCell = "sticky top-[var(--ledger-head-h)] z-30 bg-emerald-50";
+
+  const addRow = (
+    <tr className="h-[44px] border-b-2 border-emerald-200">
+      <td className={stickyCell + " px-2 py-1.5"}></td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <input className="h-7 w-full text-xs px-1 bg-transparent border-0 border-b border-slate-300/60 focus:outline-none focus:border-emerald-400" type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} />
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <input className="h-7 w-full text-xs px-1 bg-transparent border-0 border-b border-slate-300/60 focus:outline-none focus:border-emerald-400" placeholder="Ref" value={draftRef} onChange={(e) => setDraftRef(e.target.value)} />
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <input
+          ref={payeeRef}
+          className="h-7 w-full text-xs px-1 bg-transparent border-0 border-b border-slate-300/60 focus:outline-none focus:border-emerald-400"
+          placeholder="Payee"
+          value={draftPayee}
+          onChange={(e) => setDraftPayee(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submitInline(); }}
+        />
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <select className="h-6 w-full text-xs px-2 bg-slate-50 rounded-md border border-slate-300/60" value={draftType} onChange={(e) => setDraftType(e.target.value as any)}>
+          <option value="INCOME">Income</option>
+          <option value="EXPENSE">Expense</option>
+          <option value="TRANSFER">Transfer</option>
+          <option value="ADJUSTMENT">Adjustment</option>
+        </select>
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <select className="h-6 w-full text-xs px-2 bg-slate-50 rounded-md border border-slate-300/60" value={draftMethod} onChange={(e) => setDraftMethod(e.target.value as any)}>
+          <option value="CASH">Cash</option>
+          <option value="CARD">Card</option>
+          <option value="CHECK">Check</option>
+          <option value="ACH">Ach</option>
+          <option value="WIRE">Wire</option>
+          <option value="OTHER">Other</option>
+        </select>
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <input className="h-6 w-full text-xs px-2 bg-slate-50 rounded-md border border-slate-300/60" placeholder="Category" value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)} />
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5"}>
+        <input className="h-7 w-full text-sm font-semibold px-1 text-right bg-transparent border-0 border-b border-slate-300/60 focus:outline-none focus:border-emerald-400 tabular-nums" placeholder="0.00" value={draftAmount} onChange={(e) => setDraftAmount(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitInline(); }} />
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5 text-right tabular-nums text-slate-500"}></td>
+
+      <td className={stickyCell + " px-1 py-1.5 text-center"}>
+        <span className="inline-block w-3 h-3 rounded-full border border-slate-400/60"></span>
+      </td>
+
+      <td className={stickyCell + " px-1 py-1.5"}>
+        <span className="inline-flex items-center px-2 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-300 text-[10px]">
+          Expected
+        </span>
+      </td>
+
+      <td className={stickyCell + " px-2 py-1.5 text-right pr-2"}>
+        <button
+          onClick={submitInline}
+          disabled={!draftPayee.trim() || createMut.isPending}
+          className="text-xs font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+        >
+          {createMut.isPending ? "Saving…" : "Add"}
+        </button>
+      </td>
+    </tr>
+  );
+
+  const body = entriesQ.isLoading ? (
+    <tr><td className="p-6 text-slate-500" colSpan={12}>Loading…</td></tr>
+  ) : (
+    pageRows.map((r) => (
+      <tr key={r.id} className="h-9 border-b border-slate-100 hover:bg-slate-50">
+        <td className="px-2 py-1.5">
+          {r.id !== "opening_balance" ? (
+            <input type="checkbox" checked={!!selectedIds[r.id]} onChange={() => toggleRow(r.id)} className={circleCheckboxClass} />
+          ) : null}
+        </td>
+
+        <td className="px-2 py-1.5 text-xs truncate">{r.date}</td>
+        <td className="px-2 py-1.5 text-xs truncate text-slate-500">{r.ref}</td>
+        <td className="px-2 py-1.5 text-xs truncate font-medium">{r.payee}</td>
+        <td className="px-2 py-1.5 text-xs truncate">{r.type}</td>
+        <td className="px-2 py-1.5 text-xs truncate">{r.method}</td>
+        <td className="px-2 py-1.5 text-xs truncate">{r.category}</td>
+        <td className={"px-2 py-1.5 text-xs truncate " + r.amountClass}>{r.amountStr}</td>
+        <td className={"px-2 py-1.5 text-xs truncate " + r.balanceClass}>{r.balanceStr}</td>
+        <td className="px-1 py-1.5 text-center">
+          <span className="inline-block w-3 h-3 rounded-full border border-slate-400/60"></span>
+        </td>
+        <td className="px-1 py-1.5 text-[10px] uppercase tracking-wide text-slate-500">
+          {(r.rowStatus || r.statusUpper || "").toUpperCase()}
+        </td>
+        <td className="px-2 py-1.5 text-right">
+          {r.canDelete ? (
+            <Button
+              variant="outline"
+              className="h-7 px-3"
+              disabled={deleteMut.isPending}
+              onClick={() => {
+                const ok = window.confirm("Delete this entry?");
+                if (!ok) return;
+                deleteMut.mutate(r.id);
+              }}
+            >
+              Delete
+            </Button>
+          ) : null}
+        </td>
+      </tr>
+    ))
+  );
+
+  return (
+    <div className="flex flex-col gap-3 overflow-hidden" style={containerStyle}>
+      <PageHeader title="Ledger" subtitle="Account-scoped" inlineAfterTitle={accountCapsule} />
+
+      <FilterBar
+        searchValue={searchPayee}
+        onSearchChange={setSearchPayee}
+        onReset={() => setSearchPayee("")}
+        right={err ? <div className="text-sm text-red-600">{err}</div> : null}
+      />
+
+      <LedgerTableShell
+        header={headerRow}
+        addRow={addRow}
+        body={body}
+        footer={
+          <TotalsFooter
+            rowsPerPage={rowsPerPage}
+            setRowsPerPage={setRowsPerPage}
+            page={page}
+            setPage={setPage}
+            totalPages={totalPages}
+            canPrev={canPrev}
+            canNext={canNext}
+            incomeText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
+            expenseText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
+            netText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
+            balanceText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
+          />
+        }
+      />
+    </div>
+  );
+}

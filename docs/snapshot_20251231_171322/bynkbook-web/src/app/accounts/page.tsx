@@ -1,0 +1,194 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getCurrentUser } from "aws-amplify/auth";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
+import { createAccount, type AccountType } from "@/lib/api/accounts";
+
+import { PageHeader } from "@/components/app/page-header";
+import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow } from "@/components/ui/table";
+
+function todayYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function ymdToIso(ymd: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return `${ymd}T00:00:00Z`;
+  return ymd;
+}
+
+export default function AccountsPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const qc = useQueryClient();
+
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try { await getCurrentUser(); setAuthReady(true); } catch { router.replace("/login"); }
+    })();
+  }, [router]);
+
+  const businessesQ = useBusinesses();
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
+
+  const selectedBusinessId = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    if (bizIdFromUrl) return bizIdFromUrl;
+    return list[0]?.id ?? null;
+  }, [bizIdFromUrl, businessesQ.data]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (businessesQ.isLoading) return;
+    if (!selectedBusinessId) return;
+    if (!sp.get("businessId")) router.replace(`/accounts?businessId=${selectedBusinessId}`);
+  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+
+  const accountsQ = useAccounts(selectedBusinessId);
+
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [type, setType] = useState<AccountType>("CHECKING");
+  const [openingBalance, setOpeningBalance] = useState("0.00");
+  const [openingDate, setOpeningDate] = useState(todayYmd());
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onCreate() {
+    if (!selectedBusinessId) return;
+    setSaving(true);
+    setErr(null);
+
+    const cents = Math.round(Number(openingBalance || "0") * 100);
+
+    try {
+      await createAccount(selectedBusinessId, {
+        name: name.trim(),
+        type,
+        opening_balance_cents: cents,
+        opening_balance_date: ymdToIso(openingDate),
+      });
+
+      setOpen(false);
+      setName("");
+      setType("CHECKING");
+      setOpeningBalance("0.00");
+      setOpeningDate(todayYmd());
+
+      await qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+    } catch (e: any) {
+      setErr(e?.message || "Failed to create account");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!authReady) return <Skeleton className="h-10 w-64" />;
+
+  return (
+    <div className="space-y-6 max-w-6xl">
+      <PageHeader
+        title="Accounts"
+        subtitle="Create and manage accounts"
+        right={
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild><Button>Create account</Button></DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Create account</DialogTitle></DialogHeader>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Account name</Label>
+                  <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select value={type} onValueChange={(v: any) => setType(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CHECKING">Checking</SelectItem>
+                      <SelectItem value="SAVINGS">Savings</SelectItem>
+                      <SelectItem value="CREDIT_CARD">Credit Card</SelectItem>
+                      <SelectItem value="CASH">Cash</SelectItem>
+                      <SelectItem value="OTHER">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ob">Opening balance (USD)</Label>
+                    <Input id="ob" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} inputMode="decimal" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="od">Opening date</Label>
+                    <Input id="od" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} placeholder="YYYY-MM-DD" />
+                  </div>
+                </div>
+
+                {err ? <div className="text-sm text-red-600">{err}</div> : null}
+              </div>
+
+              <DialogFooter>
+                <Button onClick={onCreate} disabled={saving || name.trim().length < 2}>
+                  {saving ? "Creating…" : "Create"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
+      />
+
+      <Card>
+        <CHeader><CardTitle>Accounts</CardTitle></CHeader>
+        <CardContent>
+          {accountsQ.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (accountsQ.data?.length ?? 0) === 0 ? (
+            <div className="text-sm text-muted-foreground">No accounts yet.</div>
+          ) : (
+            <Table>
+              <THead>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Opening balance</TableHead>
+                  <TableHead>Opening date</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </THead>
+              <TableBody>
+                {(accountsQ.data ?? []).map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="font-medium">{a.name}</TableCell>
+                    <TableCell>{a.type}</TableCell>
+                    <TableCell>{(a.opening_balance_cents / 100).toFixed(2)}</TableCell>
+                    <TableCell>{a.opening_balance_date}</TableCell>
+                    <TableCell>{a.archived_at ? "Archived" : "Active"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

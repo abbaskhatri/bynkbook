@@ -1,0 +1,59 @@
+"use client";
+
+import { ChevronDown } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export function CapsuleSelect(props: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  loading?: boolean;
+  includeAllOption?: boolean;
+  allLabel?: string;
+}) {
+  const {
+    value,
+    onValueChange,
+    options,
+    placeholder,
+    loading,
+    includeAllOption,
+    allLabel = "All Accounts",
+  } = props;
+
+  if (loading) {
+    return <Skeleton className="h-6 w-40 rounded-full" />;
+  }
+
+  const label =
+    value === "all"
+      ? allLabel
+      : options.find((o) => o.value === value)?.label ?? placeholder;
+
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger asChild>
+        <button
+          type="button"
+          title={label}
+          className="inline-flex items-center h-6 px-3 rounded-full border bg-muted text-sm leading-none max-w-[320px] gap-2"
+          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+        >
+          <span className="truncate">{label}</span>
+          <ChevronDown className="h-4 w-4 opacity-60 shrink-0" />
+        </button>
+      </SelectTrigger>
+
+      <SelectContent>
+        {includeAllOption ? <SelectItem value="all">{allLabel}</SelectItem> : null}
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}

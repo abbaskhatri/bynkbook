@@ -1,0 +1,79 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getCurrentUser } from "aws-amplify/auth";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
+
+import { PageHeader } from "@/components/app/page-header";
+import { CapsuleSelect } from "@/components/app/capsule-select";
+import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export default function ReportsPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try { await getCurrentUser(); setAuthReady(true); } catch { router.replace("/login"); }
+    })();
+  }, [router]);
+
+  const businessesQ = useBusinesses();
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
+  const selectedAccountOrAll = sp.get("accountId") ?? "all";
+
+  const selectedBusinessId = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    if (bizIdFromUrl) return bizIdFromUrl;
+    return list[0]?.id ?? null;
+  }, [bizIdFromUrl, businessesQ.data]);
+
+  const accountsQ = useAccounts(selectedBusinessId);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (businessesQ.isLoading) return;
+    if (!selectedBusinessId) return;
+
+    if (!sp.get("businessId")) {
+      router.replace(`/reports?businessId=${selectedBusinessId}&accountId=all`);
+    }
+  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+
+  if (!authReady) return <Skeleton className="h-10 w-64" />;
+
+  const opts = (accountsQ.data ?? [])
+    .filter((a) => !a.archived_at)
+    .map((a) => ({ value: a.id, label: a.name }));
+
+  const capsule = (
+    <CapsuleSelect
+      loading={accountsQ.isLoading}
+      value={selectedAccountOrAll}
+      onValueChange={(v) => router.replace(`/reports?businessId=${selectedBusinessId}&accountId=${v}`)}
+      options={opts}
+      placeholder="All Accounts"
+      includeAllOption
+      allLabel="All Accounts"
+    />
+  );
+
+  return (
+    <div className="space-y-6 max-w-6xl">
+      <PageHeader title="Reports" subtitle="Business-scoped (MVP)" inlineAfterTitle={capsule} />
+
+      <Card>
+        <CHeader><CardTitle>Coming soon</CardTitle></CHeader>
+        <CardContent className="text-sm text-muted-foreground space-y-2">
+          <div>Reports will include P&L, balance sheet, cash flow, and exports.</div>
+          <div>Selection chooses All Accounts or one account (UI-only for now).</div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

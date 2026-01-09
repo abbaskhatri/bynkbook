@@ -1,0 +1,6 @@
+{
+  "requestContext": {
+    "http": { "method": "GET", "path": "/v1/businesses" },
+    "authorizer": { "jwt": { "claims": { "sub": "b4684408-5081-70e8-cf45-c9de9daf4706", "email": "m.abbaskhatri@gmail.com" } } }
+  }
+}

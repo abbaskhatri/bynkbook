@@ -1,0 +1,44 @@
+"use client";
+
+import React from "react";
+
+export function LedgerTableShell(props: {
+  colgroup: React.ReactNode; // <col .../> elements ONLY (we'll filter)
+  header: React.ReactNode;   // header <tr>...
+  addRow: React.ReactNode;   // add row <tr>...
+  body: React.ReactNode;     // body rows
+  footer: React.ReactNode;   // <tr><td colSpan=...>...</td></tr>
+  headHeightPx?: number;     // defaults to 44
+}) {
+  const { colgroup, header, addRow, body, footer, headHeightPx = 44 } = props;
+
+  // Fix Next.js hydration: strip whitespace text nodes from colgroup
+  const safeCols = React.Children.toArray(colgroup).filter(
+    (c) => typeof c !== "string" && typeof c !== "number"
+  );
+
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden rounded-lg border bg-white">
+      <div
+        className="h-full min-h-0 overflow-y-auto overflow-x-hidden"
+        style={{ ["--ledger-head-h" as any]: `${headHeightPx}px` }}
+      >
+        <table className="w-full table-fixed border-separate border-spacing-0">
+          <colgroup>{safeCols}</colgroup>
+
+          <thead>{header}</thead>
+
+          {/* IMPORTANT: addRow is inside tbody (fixes overlap) */}
+          <tbody>
+            {addRow}
+            {body}
+          </tbody>
+
+          <tfoot className="sticky bottom-0 z-20 bg-white border-t">
+            {footer}
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}

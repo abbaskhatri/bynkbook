@@ -1,0 +1,68 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+
+export function TotalsFooter(props: {
+  rowsPerPage: number;
+  setRowsPerPage: (n: number) => void;
+  page: number;
+  setPage: (n: number) => void;
+  canPrev: boolean;
+  canNext: boolean;
+
+  incomeText: string;
+  expenseText: string;
+  netText: string;
+  balanceText: string;
+}) {
+  const {
+    rowsPerPage,
+    setRowsPerPage,
+    page,
+    setPage,
+    canPrev,
+    canNext,
+    incomeText,
+    expenseText,
+    netText,
+    balanceText,
+  } = props;
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 h-9">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>Rows:</span>
+        <select
+          className="h-8 rounded-md border bg-background px-2 text-sm"
+          value={rowsPerPage}
+          onChange={(e) => {
+            setRowsPerPage(Number(e.target.value));
+            setPage(1);
+          }}
+        >
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
+
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="h-8 px-3" disabled={!canPrev} onClick={() => setPage(Math.max(1, page - 1))}>
+            ←
+          </Button>
+          <span>Page {page}</span>
+          <Button variant="outline" className="h-8 px-3" disabled={!canNext} onClick={() => setPage(page + 1)}>
+            →
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-6 text-sm text-muted-foreground">
+        <span>Income: {incomeText}</span>
+        <span>Expense: {expenseText}</span>
+        <span>Net: {netText}</span>
+        <span>Bal: {balanceText}</span>
+      </div>
+    </div>
+  );
+}
