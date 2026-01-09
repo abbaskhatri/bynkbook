@@ -1,0 +1,14 @@
+# frontend
+bynkbook-web/node_modules
+bynkbook-web/.next
+bynkbook-web/.env.local
+
+# infra
+infra-sst/node_modules
+infra-sst/.sst
+infra-sst/.env
+infra-sst/**/*.pem
+infra-sst/ca-secret
+
+# general
+.DS_Store
