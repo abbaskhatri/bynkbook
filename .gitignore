@@ -1,0 +1,21 @@
+# --- Frontend (Next.js) ---
+bynkbook-web/node_modules/
+bynkbook-web/.next/
+bynkbook-web/.env.local
+
+# --- Infra (SST) ---
+infra-sst/node_modules/
+infra-sst/.sst/
+infra-sst/.env
+infra-sst/**/*.pem
+infra-sst/ca-secret
+infra-sst/sst-state-*
+infra-sst/sst-deploy-debug
+infra-sst/debug/
+infra-sst/invoke-*
+infra-sst/npm-install
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
