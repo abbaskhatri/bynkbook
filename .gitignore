@@ -19,3 +19,8 @@ infra-sst/npm-install
 .DS_Store
 Thumbs.db
 .vscode/
+
+# --- Snapshots: never track secrets/certs ---
+docs/**/.env
+docs/**/ca-secret*.json
+docs/**/*.pem
