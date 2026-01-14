@@ -1,0 +1,637 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getCurrentUser } from "aws-amplify/auth";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
+import { useEntries } from "@/lib/queries/useEntries";
+import { useLedgerSummary } from "@/lib/queries/useLedgerSummary";
+import { createEntry, deleteEntry, type Entry } from "@/lib/api/entries";
+import { metrics } from "@/lib/perf/metrics";
+
+import { PageHeader } from "@/components/app/page-header";
+import { CapsuleSelect } from "@/components/app/capsule-select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+import { FilterBar } from "@/components/app/filter-bar";
+import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
+import { TotalsFooter } from "@/components/ledger/totals-footer";
+
+function todayYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function monthStartYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}-01`;
+}
+
+function toBigIntSafe(v: unknown): bigint {
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number") return BigInt(Math.trunc(v));
+    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
+  } catch {}
+  return 0n;
+}
+
+function formatUsdFromCents(cents: bigint) {
+  const neg = cents < 0n;
+  const abs = neg ? -cents : cents;
+  const dollars = abs / 100n;
+  const pennies = abs % 100n;
+  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
+  return neg ? `(${core})` : core;
+}
+
+function parseMoneyToCents(input: string): number {
+  const raw = (input || "").trim();
+  if (!raw) return 0;
+  const cleaned = raw.replace(/[\$,]/g, "");
+  const m = cleaned.match(/^(-)?(\d+)(?:\.(\d{0,2}))?$/);
+  if (!m) return 0;
+
+  const neg = !!m[1];
+  const dollars = Number(m[2] || "0");
+  const centsPart = (m[3] || "").padEnd(2, "0").slice(0, 2);
+  const cents = Number(centsPart || "0");
+  const total = dollars * 100 + cents;
+  return neg ? -total : total;
+}
+
+function sortEntriesDisplayDesc(a: Entry, b: Entry) {
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+  const ca = a.created_at || "";
+  const cb = b.created_at || "";
+  if (ca === cb) return 0;
+  return ca < cb ? 1 : -1;
+}
+
+function sortEntriesChronAsc(a: Entry, b: Entry) {
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  const ca = a.created_at || "";
+  const cb = b.created_at || "";
+  if (ca === cb) return 0;
+  return ca < cb ? -1 : 1;
+}
+
+type DraftEntry = {
+  date: string;
+  ref: string;
+  payee: string;
+  type: "EXPENSE" | "INCOME" | "TRANSFER" | "ADJUSTMENT";
+  method: "CASH" | "CHECK" | "ACH" | "CARD" | "WIRE" | "OTHER";
+  category: string;
+  memo: string;
+  amount: string;
+};
+
+export default function LedgerPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const qc = useQueryClient();
+
+  const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
+
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try { await getCurrentUser(); setAuthReady(true); } catch { router.replace("/login"); }
+    })();
+  }, [router]);
+
+  const businessesQ = useBusinesses();
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
+  const accountIdFromUrl = sp.get("accountId");
+
+  const selectedBusinessId = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    if (bizIdFromUrl) return bizIdFromUrl;
+    return list[0]?.id ?? null;
+  }, [bizIdFromUrl, businessesQ.data]);
+
+  const accountsQ = useAccounts(selectedBusinessId);
+
+  const selectedAccountId = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    if (accountIdFromUrl) return accountIdFromUrl;
+    return list.find((a) => !a.archived_at)?.id ?? "";
+  }, [accountsQ.data, accountIdFromUrl]);
+
+  const selectedAccount = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    return list.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accountsQ.data, selectedAccountId]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (businessesQ.isLoading) return;
+    if (!selectedBusinessId) return;
+
+    if (!sp.get("businessId")) {
+      router.replace(`/ledger?businessId=${selectedBusinessId}`);
+      return;
+    }
+
+    if (accountsQ.isLoading) return;
+
+    if (selectedAccountId && !accountIdFromUrl) {
+      router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
+    }
+  }, [authReady, businessesQ.isLoading, selectedBusinessId, accountsQ.isLoading, selectedAccountId, accountIdFromUrl, router, sp]);
+
+  // paging + rows-per-page
+  const [rowsPerPage, setRowsPerPage] = useState(100);
+  const [page, setPage] = useState(1);
+  const maxFetch = 500;
+
+  const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage * page), [rowsPerPage, page]);
+  const entriesKey = useMemo(
+    () => ["entries", selectedBusinessId, selectedAccountId, fetchLimit] as const,
+    [selectedBusinessId, selectedAccountId, fetchLimit]
+  );
+
+  const entriesQ = useEntries({
+    businessId: selectedBusinessId,
+    accountId: selectedAccountId,
+    limit: fetchLimit,
+  });
+
+  const from = monthStartYmd();
+  const to = todayYmd();
+
+  const summaryQ = useLedgerSummary({
+    businessId: selectedBusinessId,
+    accountId: selectedAccountId,
+    from,
+    to,
+  });
+
+  const openingBalanceCents = useMemo(() => BigInt(Number(selectedAccount?.opening_balance_cents ?? 0)), [selectedAccount]);
+
+  const openingEntry: Entry | null = useMemo(() => {
+    if (!selectedBusinessId || !selectedAccountId || !selectedAccount) return null;
+    const date = String(selectedAccount.opening_balance_date ?? "").slice(0, 10);
+    if (!date || date.length !== 10) return null;
+
+    return {
+      id: "opening_balance",
+      business_id: selectedBusinessId,
+      account_id: selectedAccountId,
+      date,
+      payee: "Opening Balance",
+      memo: selectedAccount.name ?? null,
+      amount_cents: String(Number(selectedAccount.opening_balance_cents ?? 0)),
+      type: "OPENING",
+      method: null,
+      status: "SYSTEM",
+      deleted_at: null,
+      created_at: date + "T00:00:00.000Z",
+      updated_at: date + "T00:00:00.000Z",
+    };
+  }, [selectedBusinessId, selectedAccountId, selectedAccount]);
+
+  const entriesSorted = useMemo(() => {
+    const list = (entriesQ.data ?? []).slice();
+    list.sort(sortEntriesDisplayDesc);
+    return list;
+  }, [entriesQ.data]);
+
+  const entriesWithOpening = useMemo(() => {
+    if (!openingEntry) return entriesSorted;
+    const list = entriesSorted.slice();
+    if (!list.some((e) => e.id === "opening_balance")) list.push(openingEntry);
+    list.sort(sortEntriesDisplayDesc);
+    return list;
+  }, [entriesSorted, openingEntry]);
+
+  // balances
+  const rowModels = useMemo(() => {
+    const listDesc = entriesWithOpening.slice();
+    const listAsc = entriesWithOpening.slice().sort(sortEntriesChronAsc);
+    const idxOpen = listAsc.findIndex((e) => e.id === "opening_balance");
+
+    const delta = listAsc.map((e) => (e.id === "opening_balance" ? 0n : toBigIntSafe(e.amount_cents)));
+    const bal = new Array<bigint>(listAsc.length).fill(0n);
+
+    if (idxOpen >= 0) {
+      bal[idxOpen] = openingBalanceCents;
+      for (let i = idxOpen + 1; i < listAsc.length; i++) bal[i] = bal[i - 1] + delta[i];
+      for (let i = idxOpen - 1; i >= 0; i--) bal[i] = bal[i + 1] - delta[i + 1];
+    } else {
+      for (let i = 0; i < listAsc.length; i++) bal[i] = (i === 0 ? 0n : bal[i - 1]) + delta[i];
+    }
+
+    const balById = new Map<string, bigint>();
+    for (let i = 0; i < listAsc.length; i++) balById.set(listAsc[i].id, bal[i]);
+
+    const cls = (c: bigint) => (c < 0n ? "text-right text-red-600" : "text-right");
+
+    return listDesc.map((e) => {
+      const amt = toBigIntSafe(e.amount_cents);
+      const rowBal = balById.get(e.id) ?? 0n;
+      const isTemp = e.id.startsWith("temp_");
+      return {
+        id: e.id,
+        date: e.date,
+        ref: "", // UI-only for now
+        payee: e.payee ?? "",
+        type: (e.type ?? "").toUpperCase(),
+        method: (e.method ?? "").toUpperCase(),
+        category: "", // UI-only for now
+        memo: e.memo ?? "",
+        amountStr: formatUsdFromCents(amt),
+        amountClass: cls(amt),
+        balanceStr: formatUsdFromCents(rowBal),
+        balanceClass: cls(rowBal),
+        status: (e.status ?? "").toUpperCase(),
+        canDelete: e.id !== "opening_balance" && !isTemp,
+        rowStatus: isTemp ? "SAVING…" : "",
+      };
+    });
+  }, [entriesWithOpening, openingBalanceCents]);
+
+  // filters
+  const [searchPayee, setSearchPayee] = useState("");
+  const filteredRowsAll = useMemo(() => {
+    const q = searchPayee.trim().toLowerCase();
+    if (!q) return rowModels;
+    return rowModels.filter((r) => r.payee.toLowerCase().includes(q));
+  }, [rowModels, searchPayee]);
+
+  // page window
+  const startIdx = (page - 1) * rowsPerPage;
+  const endIdx = page * rowsPerPage;
+  const pageRows = filteredRowsAll.slice(startIdx, endIdx);
+
+  const hasMoreOnServer = (entriesQ.data?.length ?? 0) === fetchLimit && fetchLimit < maxFetch;
+  const canNext = (endIdx < filteredRowsAll.length) || hasMoreOnServer;
+  const canPrev = page > 1;
+
+  // bulk selection
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+
+  const allPageSelected = useMemo(() => {
+    const ids = pageRows.filter((r) => r.id !== "opening_balance").map((r) => r.id);
+    if (ids.length === 0) return false;
+    return ids.every((id) => !!selectedIds[id]);
+  }, [pageRows, selectedIds]);
+
+  function toggleRow(id: string) {
+    setSelectedIds((m) => ({ ...m, [id]: !m[id] }));
+  }
+
+  function toggleAllPage() {
+    const ids = pageRows.filter((r) => r.id !== "opening_balance").map((r) => r.id);
+    const next = { ...selectedIds };
+    const shouldSelect = !allPageSelected;
+    for (const id of ids) next[id] = shouldSelect;
+    setSelectedIds(next);
+  }
+
+  // inline add row
+  const [draftDate, setDraftDate] = useState(todayYmd());
+  const [draftRef, setDraftRef] = useState("");
+  const [draftPayee, setDraftPayee] = useState("");
+  const [draftType, setDraftType] = useState<DraftEntry["type"]>("EXPENSE");
+  const [draftMethod, setDraftMethod] = useState<DraftEntry["method"]>("CASH");
+  const [draftCategory, setDraftCategory] = useState("");
+  const [draftMemo, setDraftMemo] = useState("");
+  const [draftAmount, setDraftAmount] = useState("0.00");
+  const [err, setErr] = useState<string | null>(null);
+
+  const payeeRef = useRef<HTMLInputElement | null>(null);
+
+  const createMut = useMutation({
+    mutationFn: async (vars: { draft: DraftEntry; tempId: string }) => {
+      const { draft } = vars;
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+
+      // Backend supports: date, payee, memo, amount_cents, type, method, status
+      // We map UI type/method into those fields and keep ref/category UI-only for now.
+      const cents = parseMoneyToCents(draft.amount);
+      const signed = draft.type === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+      return createEntry({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        input: {
+          date: draft.date,
+          payee: (draft.payee || "").trim(),
+          memo: (draft.memo || "").trim() ? (draft.memo || "").trim() : undefined,
+          amount_cents: signed,
+          type: draft.type,
+          method: draft.method,
+          status: "EXPECTED",
+        },
+      });
+    },
+
+    onMutate: async (vars) => {
+      const start = performance.now();
+      setErr(null);
+
+      const { draft, tempId } = vars;
+      if (!selectedBusinessId || !selectedAccountId) return;
+
+      await qc.cancelQueries({ queryKey: entriesKey });
+
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const nowIso = new Date().toISOString();
+
+      const cents = parseMoneyToCents(draft.amount);
+      const signed = draft.type === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+      const optimistic: Entry = {
+        id: tempId,
+        business_id: selectedBusinessId,
+        account_id: selectedAccountId,
+        date: draft.date,
+        payee: (draft.payee || "").trim(),
+        memo: (draft.memo || "").trim() ? (draft.memo || "").trim() : null,
+        amount_cents: String(signed),
+        type: draft.type,
+        method: draft.method,
+        status: "EXPECTED",
+        deleted_at: null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      const next = [optimistic, ...previous].slice().sort(sortEntriesDisplayDesc);
+      qc.setQueryData(entriesKey, next);
+
+      metrics.timeUi("createEntry click->row", start);
+
+      // reset inline
+      setDraftRef("");
+      setDraftPayee("");
+      setDraftMemo("");
+      setDraftCategory("");
+      setDraftAmount("0.00");
+      setDraftType("EXPENSE");
+      setDraftMethod("CASH");
+      requestAnimationFrame(() => payeeRef.current?.focus());
+
+      return { previous, tempId };
+    },
+
+    onError: (e: any, _vars, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+      setErr(e?.message || "Failed to create entry");
+    },
+
+    onSuccess: async (serverEntry, vars) => {
+      const current = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const replaced = current.map((e) => (e.id === vars.tempId ? serverEntry : e)).sort(sortEntriesDisplayDesc);
+      qc.setQueryData(entriesKey, replaced);
+
+      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to] });
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async (entryId: string) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+      return deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId });
+    },
+
+    onMutate: async (entryId: string) => {
+      const start = performance.now();
+      setErr(null);
+
+      await qc.cancelQueries({ queryKey: entriesKey });
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const next = previous.filter((e) => e.id !== entryId);
+      qc.setQueryData(entriesKey, next);
+
+      metrics.timeUi("deleteEntry click->rowRemoved", start);
+      return { previous };
+    },
+
+    onError: (_e: any, _entryId, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+    },
+
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to] });
+    },
+  });
+
+  function submitInline() {
+    const tempId = `temp_${new Date().toISOString()}`;
+    createMut.mutate({
+      draft: {
+        date: draftDate,
+        ref: draftRef,
+        payee: draftPayee,
+        type: draftType,
+        method: draftMethod,
+        category: draftCategory,
+        memo: draftMemo,
+        amount: draftAmount,
+      },
+      tempId,
+    });
+  }
+
+  const accountOptions = (accountsQ.data ?? [])
+    .filter((a) => !a.archived_at)
+    .map((a) => ({ value: a.id, label: a.name }));
+
+  const accountCapsule = (
+    <CapsuleSelect
+      loading={accountsQ.isLoading}
+      value={selectedAccountId || (accountOptions[0]?.value ?? "")}
+      onValueChange={(v) => {
+        setPage(1);
+        router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${v}`);
+      }}
+      options={accountOptions}
+      placeholder="Select account"
+    />
+  );
+
+  if (!authReady) return <Skeleton className="h-10 w-64" />;
+
+  return (
+    <div className="flex flex-col gap-3 overflow-hidden" style={containerStyle}>
+      <PageHeader title="Ledger" subtitle="Account-scoped" inlineAfterTitle={accountCapsule} />
+
+      <div className="flex items-center gap-3">
+        <Input className="h-8 w-[260px]" placeholder="Search payee…" value={searchPayee} onChange={(e) => setSearchPayee(e.target.value)} />
+        <Button variant="outline" className="h-8" onClick={() => setSearchPayee("")}>Reset</Button>
+        {err ? <div className="text-sm text-red-600 ml-2">{err}</div> : null}
+      </div>
+
+      <div className="flex-1 overflow-hidden rounded-lg border bg-background">
+        <div className="h-full overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-20 bg-background">
+              <tr className="h-7 border-b">
+                <th className="px-3 text-left w-[44px]">
+                  <input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="h-4 w-4 rounded-full" />
+                </th>
+                <th className="text-left px-3 font-medium w-[120px]">Date</th>
+                <th className="text-left px-3 font-medium w-[90px]">Ref</th>
+                <th className="text-left px-3 font-medium">Payee</th>
+                <th className="text-left px-3 font-medium w-[140px]">Type</th>
+                <th className="text-left px-3 font-medium w-[140px]">Method</th>
+                <th className="text-left px-3 font-medium w-[180px]">Category</th>
+                <th className="text-right px-3 font-medium w-[140px]">Amount</th>
+                <th className="text-right px-3 font-medium w-[140px]">Balance</th>
+                <th className="text-left px-3 font-medium w-[120px]">Status</th>
+                <th className="text-right px-3 font-medium w-[120px]">Actions</th>
+              </tr>
+
+              {/* sticky add row */}
+              <tr className="sticky top-7 z-20 bg-background border-b">
+                <td className="px-3 py-1">
+                  <span className="text-muted-foreground text-xs">+</span>
+                </td>
+
+                <td className="px-3 py-1">
+                  <input
+                    className="h-7 w-[120px] rounded-md border px-2"
+                    type="date"
+                    value={draftDate}
+                    onChange={(e) => setDraftDate(e.target.value)}
+                  />
+                </td>
+
+                <td className="px-3 py-1">
+                  <input className="h-7 w-[90px] rounded-md border px-2" placeholder="Ref" value={draftRef} onChange={(e) => setDraftRef(e.target.value)} />
+                </td>
+
+                <td className="px-3 py-1">
+                  <input ref={payeeRef} className="h-7 w-full rounded-md border px-2" placeholder="Payee…" value={draftPayee} onChange={(e) => setDraftPayee(e.target.value)} />
+                </td>
+
+                <td className="px-3 py-1">
+                  <select className="h-7 w-[140px] rounded-md border bg-background px-2 text-sm" value={draftType} onChange={(e) => setDraftType(e.target.value as any)}>
+                    <option value="INCOME">Income</option>
+                    <option value="EXPENSE">Expense</option>
+                    <option value="TRANSFER">Transfer</option>
+                    <option value="ADJUSTMENT">Adjustment</option>
+                  </select>
+                </td>
+
+                <td className="px-3 py-1">
+                  <select className="h-7 w-[140px] rounded-md border bg-background px-2 text-sm" value={draftMethod} onChange={(e) => setDraftMethod(e.target.value as any)}>
+                    <option value="CASH">Cash</option>
+                    <option value="CHECK">Check</option>
+                    <option value="ACH">ACH</option>
+                    <option value="CARD">Card</option>
+                    <option value="WIRE">Wire</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </td>
+
+                <td className="px-3 py-1">
+                  <input className="h-7 w-[180px] rounded-md border px-2" placeholder="Category…" value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)} />
+                </td>
+
+                <td className="px-3 py-1 text-right">
+                  <input className="h-7 w-[140px] rounded-md border px-2 text-right" placeholder="0.00" value={draftAmount} onChange={(e) => setDraftAmount(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitInline(); }} />
+                </td>
+
+                <td className="px-3 py-1 text-right text-muted-foreground">—</td>
+
+                <td className="px-3 py-1 text-muted-foreground text-xs">EXPECTED</td>
+
+                <td className="px-3 py-1 text-right">
+                  <Button className="h-7 px-3" disabled={createMut.isPending || draftPayee.trim().length < 1} onClick={submitInline}>
+                    {createMut.isPending ? "…" : "Add"}
+                  </Button>
+                </td>
+              </tr>
+            </thead>
+
+            <tbody>
+              {entriesQ.isLoading ? (
+                <tr><td className="p-6 text-muted-foreground" colSpan={11}>Loading…</td></tr>
+              ) : (
+                pageRows.map((r) => (
+                  <tr key={r.id} className="h-6 border-b">
+                    <td className="px-3 py-1">
+                      {r.id !== "opening_balance" ? (
+                        <input type="checkbox" checked={!!selectedIds[r.id]} onChange={() => toggleRow(r.id)} className="h-4 w-4 rounded-full" />
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-1">{r.date}</td>
+                    <td className="px-3 py-1 text-muted-foreground">{r.ref}</td>
+                    <td className="px-3 py-1 font-medium">{r.payee}</td>
+                    <td className="px-3 py-1">{r.type}</td>
+                    <td className="px-3 py-1">{r.method}</td>
+                    <td className="px-3 py-1">{r.category}</td>
+                    <td className={"px-3 py-1 " + r.amountClass}>{r.amountStr}</td>
+                    <td className={"px-3 py-1 " + r.balanceClass}>{r.balanceStr}</td>
+                    <td className="px-3 py-1 text-muted-foreground">{r.rowStatus || r.status}</td>
+                    <td className="px-3 py-1 text-right">
+                      {r.canDelete ? (
+                        <Button variant="outline" className="h-7 px-3" disabled={deleteMut.isPending} onClick={() => {
+                          const ok = window.confirm("Delete this entry?");
+                          if (!ok) return;
+                          deleteMut.mutate(r.id);
+                        }}>
+                          Delete
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+
+            <tfoot className="sticky bottom-0 z-20 bg-background border-t">
+              <tr className="h-9">
+                <td className="px-3 py-2 text-muted-foreground" colSpan={6}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm">Rows:</span>
+                    <select className="h-8 rounded-md border bg-background px-2 text-sm" value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(1); }}>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                      <option value="200">200</option>
+                      <option value="500">500</option>
+                    </select>
+
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" className="h-8 px-3" disabled={!canPrev} onClick={() => setPage((p) => Math.max(1, p - 1))}>←</Button>
+                      <span className="text-sm">Page {page}</span>
+                      <Button variant="outline" className="h-8 px-3" disabled={!canNext} onClick={() => setPage((p) => p + 1)}>→</Button>
+                    </div>
+                  </div>
+                </td>
+
+                <td className="px-3 py-2 text-right text-muted-foreground" colSpan={2}>
+                  Income: {summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
+                </td>
+                <td className="px-3 py-2 text-right text-muted-foreground" colSpan={1}>
+                  Expense: {summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
+                </td>
+                <td className="px-3 py-2 text-right text-muted-foreground" colSpan={1}>
+                  Net: {summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
+                </td>
+                <td className="px-3 py-2 text-right text-muted-foreground" colSpan={1}>
+                  Bal: {summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

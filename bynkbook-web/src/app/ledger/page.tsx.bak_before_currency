@@ -1,0 +1,626 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getCurrentUser } from "aws-amplify/auth";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
+import { useEntries } from "@/lib/queries/useEntries";
+import { useLedgerSummary } from "@/lib/queries/useLedgerSummary";
+import { createEntry, deleteEntry, type Entry } from "@/lib/api/entries";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader as THead,
+  TableRow,
+} from "@/components/ui/table";
+
+function todayYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function monthStartYmd() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}-01`;
+}
+
+function toBigIntSafe(v: unknown): bigint {
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number") return BigInt(Math.trunc(v));
+    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
+  } catch {}
+  return 0n;
+}
+
+function centsToMoney(cents: bigint) {
+  const neg = cents < 0n;
+  const abs = neg ? -cents : cents;
+  const dollars = abs / 100n;
+  const pennies = abs % 100n;
+  const s = `${dollars.toString()}.${pennies.toString().padStart(2, "0")}`;
+  return neg ? `-${s}` : s;
+}
+
+function parseMoneyToCents(input: string): number {
+  // Accept: "40", "40.00", "$40.00", "4,000.25", "-12.3"
+  const raw = (input || "").trim();
+  if (!raw) return 0;
+
+  const cleaned = raw.replace(/[\$,]/g, "");
+  const m = cleaned.match(/^(-)?(\d+)(?:\.(\d{0,2}))?$/);
+  if (!m) return 0;
+
+  const neg = !!m[1];
+  const dollars = Number(m[2] || "0");
+  const centsPart = (m[3] || "").padEnd(2, "0").slice(0, 2);
+  const cents = Number(centsPart || "0");
+
+  const total = dollars * 100 + cents;
+  return neg ? -total : total;
+}
+
+function formatCentsPreview(cents: number): string {
+  return centsToMoney(BigInt(cents));
+}
+
+function sortEntries(a: Entry, b: Entry) {
+  // date DESC, created_at DESC
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+  const ca = a.created_at || "";
+  const cb = b.created_at || "";
+  if (ca === cb) return 0;
+  return ca < cb ? 1 : -1;
+}
+
+type DraftEntry = {
+  date: string;
+  payee: string;
+  memo: string;
+  amount: string; // dollars string
+  direction: "EXPENSE" | "INCOME";
+};
+
+export default function LedgerPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const qc = useQueryClient();
+
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        await getCurrentUser();
+        setAuthReady(true);
+      } catch {
+        router.replace("/login");
+      }
+    })();
+  }, [router]);
+
+  const businessesQ = useBusinesses();
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
+  const accountIdFromUrl = sp.get("accountId");
+
+  const selectedBusinessId = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    if (bizIdFromUrl) return bizIdFromUrl;
+    return list[0]?.id ?? null;
+  }, [bizIdFromUrl, businessesQ.data]);
+
+  const accountsQ = useAccounts(selectedBusinessId);
+
+  const selectedAccountId = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    if (accountIdFromUrl) return accountIdFromUrl;
+    const firstActive = list.find((a) => !a.archived_at);
+    return firstActive?.id ?? null;
+  }, [accountsQ.data, accountIdFromUrl]);
+
+  const selectedAccount = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    return list.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accountsQ.data, selectedAccountId]);
+
+  // Normalize URL to include businessId + accountId
+  useEffect(() => {
+    if (!authReady) return;
+    if (businessesQ.isLoading) return;
+    if (!selectedBusinessId) return;
+
+    if (!bizIdFromUrl) {
+      router.replace(`/ledger?businessId=${selectedBusinessId}`);
+      return;
+    }
+
+    if (accountsQ.isLoading) return;
+
+    if (selectedAccountId && !accountIdFromUrl) {
+      router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
+    }
+  }, [
+    authReady,
+    businessesQ.isLoading,
+    selectedBusinessId,
+    bizIdFromUrl,
+    accountsQ.isLoading,
+    selectedAccountId,
+    accountIdFromUrl,
+    router,
+  ]);
+
+  const [limit, setLimit] = useState(50);
+
+  const entriesQ = useEntries({
+    businessId: selectedBusinessId,
+    accountId: selectedAccountId,
+    limit,
+  });
+
+  const from = monthStartYmd();
+  const to = todayYmd();
+
+  const summaryQ = useLedgerSummary({
+    businessId: selectedBusinessId,
+    accountId: selectedAccountId,
+    from,
+    to,
+  });
+
+  const currentBalance = toBigIntSafe(summaryQ.data?.balance_cents);
+
+  const entriesSorted = useMemo(() => {
+    const list = (entriesQ.data ?? []).slice();
+    list.sort(sortEntries);
+    return list;
+  }, [entriesQ.data]);
+
+  // Opening balance synthetic row (UI-only, always shown even if 0)
+  const openingEntry: Entry | null = useMemo(() => {
+    if (!selectedBusinessId || !selectedAccountId || !selectedAccount) return null;
+
+    const cents = Number(selectedAccount.opening_balance_cents ?? 0);
+    const date = String(selectedAccount.opening_balance_date ?? "").slice(0, 10);
+    if (!date || date.length !== 10) return null;
+
+    return {
+      id: "opening_balance",
+      business_id: selectedBusinessId,
+      account_id: selectedAccountId,
+      date,
+      payee: "Opening Balance",
+      memo: selectedAccount.name ?? null,
+      amount_cents: String(cents),
+      type: "OPENING",
+      method: null,
+      status: "SYSTEM",
+      deleted_at: null,
+      created_at: date + "T00:00:00.000Z",
+      updated_at: date + "T00:00:00.000Z",
+    };
+  }, [selectedBusinessId, selectedAccountId, selectedAccount]);
+
+  const entriesWithOpening = useMemo(() => {
+    if (!openingEntry) return entriesSorted;
+    const list = entriesSorted.slice();
+    if (list.some((e) => e.id === "opening_balance")) return list;
+    list.push(openingEntry);
+    list.sort(sortEntries);
+    return list;
+  }, [entriesSorted, openingEntry]);
+
+  // Running balance computed backwards from current balance (for loaded window)
+  const balancesById = useMemo(() => {
+    const map = new Map<string, bigint>();
+    let newerSum = 0n;
+    for (const e of entriesWithOpening) {
+      const balAtRow = currentBalance - newerSum;
+      map.set(e.id, balAtRow);
+      newerSum += toBigIntSafe(e.amount_cents);
+    }
+    return map;
+  }, [entriesWithOpening, currentBalance]);
+
+  // Add Entry dialog state
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(todayYmd());
+  const [payee, setPayee] = useState("");
+  const [memo, setMemo] = useState("");
+  const [direction, setDirection] = useState<"EXPENSE" | "INCOME">("EXPENSE");
+  const [amount, setAmount] = useState("0.00");
+  const [err, setErr] = useState<string | null>(null);
+
+  const createMut = useMutation({
+    mutationFn: async (draft: DraftEntry) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+
+      const cents = parseMoneyToCents(draft.amount);
+      const signed = draft.direction === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+      return createEntry({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        input: {
+          date: draft.date,
+          payee: (draft.payee || "").trim(),
+          memo: (draft.memo || "").trim() ? (draft.memo || "").trim() : undefined,
+          amount_cents: signed,
+          type: draft.direction,
+          method: "CARD",
+          status: "EXPECTED",
+        },
+      });
+    },
+
+    onMutate: async (draft: DraftEntry) => {
+      setErr(null);
+      if (!selectedBusinessId || !selectedAccountId) return;
+
+      const key = ["entries", selectedBusinessId, selectedAccountId, limit];
+      await qc.cancelQueries({ queryKey: key });
+
+      const previous = qc.getQueryData<Entry[]>(key) ?? [];
+
+      const nowIso = new Date().toISOString();
+      const tempId = `temp_${nowIso}`;
+
+      const cents = parseMoneyToCents(draft.amount);
+      const signed = draft.direction === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+      const optimistic: Entry = {
+        id: tempId,
+        business_id: selectedBusinessId,
+        account_id: selectedAccountId,
+        date: draft.date,
+        payee: (draft.payee || "").trim(),
+        memo: (draft.memo || "").trim() ? (draft.memo || "").trim() : null,
+        amount_cents: String(signed),
+        type: draft.direction,
+        method: "CARD",
+        status: "EXPECTED",
+        deleted_at: null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      const next = [optimistic, ...previous].slice().sort(sortEntries);
+      qc.setQueryData<Entry[]>(key, next);
+
+      // Clear UI after we captured draft values
+      setOpen(false);
+      setPayee("");
+      setMemo("");
+      setAmount("0.00");
+      setDirection("EXPENSE");
+      setDate(todayYmd());
+
+      return { previous, key };
+    },
+
+    onError: (e: any, _vars, ctx: any) => {
+      if (ctx?.key && ctx?.previous) qc.setQueryData(ctx.key, ctx.previous);
+      setErr(e?.message || "Failed to create entry");
+    },
+
+    onSuccess: async (_data, _vars, ctx: any) => {
+      if (ctx?.key) await qc.invalidateQueries({ queryKey: ctx.key });
+      await qc.invalidateQueries({
+        queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to],
+      });
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async (entryId: string) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+      return deleteEntry({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        entryId,
+      });
+    },
+
+    onMutate: async (entryId: string) => {
+      if (!selectedBusinessId || !selectedAccountId) return;
+
+      const key = ["entries", selectedBusinessId, selectedAccountId, limit];
+      await qc.cancelQueries({ queryKey: key });
+
+      const previous = qc.getQueryData<Entry[]>(key) ?? [];
+      const next = previous.filter((e) => e.id !== entryId);
+      qc.setQueryData<Entry[]>(key, next);
+
+      return { previous, key };
+    },
+
+    onError: (_e: any, _entryId, ctx: any) => {
+      if (ctx?.key && ctx?.previous) qc.setQueryData(ctx.key, ctx.previous);
+    },
+
+    onSuccess: async (_data, _entryId, ctx: any) => {
+      if (ctx?.key) await qc.invalidateQueries({ queryKey: ctx.key });
+      await qc.invalidateQueries({
+        queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to],
+      });
+    },
+  });
+
+  if (!authReady) {
+    return (
+      <div className="p-6">
+        <Skeleton className="h-10 w-64" />
+      </div>
+    );
+  }
+
+  if (!accountsQ.isLoading && (accountsQ.data?.length ?? 0) === 0) {
+    return (
+      <div className="p-6 max-w-3xl space-y-4">
+        <h1 className="text-xl font-semibold">Ledger</h1>
+        <div className="text-sm text-muted-foreground">
+          You need at least one account before you can use the ledger.
+        </div>
+        <Button onClick={() => router.push(`/accounts?businessId=${selectedBusinessId ?? ""}`)}>
+          Go to Accounts
+        </Button>
+      </div>
+    );
+  }
+
+  const previewSignedCents =
+    (direction === "EXPENSE" ? -1 : 1) * Math.abs(parseMoneyToCents(amount));
+
+  return (
+    <div className="p-6 space-y-6 max-w-6xl">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">Ledger</h1>
+          <p className="text-sm text-muted-foreground">Account-scoped</p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="min-w-[260px]">
+            {accountsQ.isLoading ? (
+              <Skeleton className="h-10 w-full" />
+            ) : (
+              <Select
+                value={selectedAccountId ?? undefined}
+                onValueChange={(v) => {
+                  setLimit(50);
+                  router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${v}`);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(accountsQ.data ?? [])
+                    .filter((a) => !a.archived_at)
+                    .map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>Add entry</Button>
+            </DialogTrigger>
+
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add entry</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Date</Label>
+                  <Input value={date} onChange={(e) => setDate(e.target.value)} placeholder="YYYY-MM-DD" />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Payee</Label>
+                  <Input value={payee} onChange={(e) => setPayee(e.target.value)} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Memo</Label>
+                  <Input value={memo} onChange={(e) => setMemo(e.target.value)} />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={direction} onValueChange={(v: any) => setDirection(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="EXPENSE">Expense</SelectItem>
+                        <SelectItem value="INCOME">Income</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Amount (USD)</Label>
+                    <Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
+                    <div className="text-xs text-muted-foreground">
+                      Preview: {formatCentsPreview(previewSignedCents)}
+                    </div>
+                  </div>
+                </div>
+
+                {err ? <div className="text-sm text-red-600">{err}</div> : null}
+              </div>
+
+              <DialogFooter>
+                <Button
+                  onClick={() => createMut.mutate({ date, payee, memo, amount, direction })}
+                  disabled={createMut.isPending || payee.trim().length < 1}
+                >
+                  {createMut.isPending ? "Saving…" : "Save"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Income (month)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {summaryQ.isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <div className="text-2xl font-semibold">
+                {centsToMoney(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Expense (month)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {summaryQ.isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <div className="text-2xl font-semibold">
+                {centsToMoney(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Net (month)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {summaryQ.isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <div className="text-2xl font-semibold">
+                {centsToMoney(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Balance (as of {to})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {summaryQ.isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <div className="text-2xl font-semibold">{centsToMoney(currentBalance)}</div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Entries</CardTitle>
+          <Button
+            variant="outline"
+            onClick={() => setLimit((v) => Math.min(500, v + 50))}
+            disabled={entriesQ.isLoading || limit >= 500}
+          >
+            Load more
+          </Button>
+        </CardHeader>
+
+        <CardContent>
+          {entriesQ.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (entriesWithOpening.length ?? 0) === 0 ? (
+            <div className="text-sm text-muted-foreground">No entries yet. Add your first entry.</div>
+          ) : (
+            <Table>
+              <THead>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Payee</TableHead>
+                  <TableHead>Memo</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </THead>
+              <TableBody>
+                {entriesWithOpening.map((e) => {
+                  const amt = toBigIntSafe(e.amount_cents);
+                  const bal = balancesById.get(e.id) ?? 0n;
+
+                  return (
+                    <TableRow key={e.id}>
+                      <TableCell>{e.date}</TableCell>
+                      <TableCell className="font-medium">{e.payee ?? ""}</TableCell>
+                      <TableCell>{e.memo ?? ""}</TableCell>
+                      <TableCell className="text-right">{centsToMoney(amt)}</TableCell>
+                      <TableCell className="text-right">{centsToMoney(bal)}</TableCell>
+                      <TableCell className="text-right">
+                        {e.id === "opening_balance" ? null : (
+                          <Button
+                            variant="outline"
+                            disabled={e.id.startsWith("temp_") || deleteMut.isPending}
+                            onClick={() => {
+                              if (e.id.startsWith("temp_")) return;
+                              const ok = window.confirm("Delete this entry?");
+                              if (!ok) return;
+                              deleteMut.mutate(e.id);
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

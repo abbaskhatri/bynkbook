@@ -1,0 +1,55 @@
+import { apiFetch } from "@/lib/api/client";
+
+export type Entry = {
+  id: string;
+  business_id: string;
+  account_id: string;
+  date: string; // YYYY-MM-DD
+  payee: string | null;
+  memo: string | null;
+  amount_cents: string; // backend returns stringified bigint
+  type: string;
+  method: string;
+  status: string;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listEntries(params: {
+  businessId: string;
+  accountId: string;
+  limit: number;
+}): Promise<Entry[]> {
+  const { businessId, accountId, limit } = params;
+  const res: any = await apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/entries?limit=${limit}`
+  );
+  return res?.entries ?? [];
+}
+
+export async function createEntry(params: {
+  businessId: string;
+  accountId: string;
+  input: {
+    date: string; // YYYY-MM-DD
+    payee: string;
+    memo?: string;
+    amount_cents: number;
+    type: "INCOME" | "EXPENSE";
+    method: "CARD";
+    status: "EXPECTED";
+  };
+}): Promise<Entry> {
+  const { businessId, accountId, input } = params;
+
+  const res: any = await apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/entries`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    }
+  );
+
+  return res?.entry;
+}

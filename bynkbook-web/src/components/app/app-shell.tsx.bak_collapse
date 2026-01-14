@@ -1,0 +1,117 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useMemo } from "react";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
+import { Button } from "@/components/ui/button";
+
+function navVariant(active: boolean) {
+  return active ? "default" : "outline";
+}
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const sp = useSearchParams();
+
+  // No chrome on login / debug pages
+  if (pathname.startsWith("/login") || pathname.startsWith("/me")) {
+    return <>{children}</>;
+  }
+
+  const businessesQ = useBusinesses();
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
+
+  const business = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    if (bizIdFromUrl) return list.find((b) => b.id === bizIdFromUrl) ?? list[0] ?? null;
+    return list[0] ?? null;
+  }, [bizIdFromUrl, businessesQ.data]);
+
+  const businessId = business?.id ?? bizIdFromUrl ?? "";
+
+  // Load accounts so we can generate account-scoped links without extra redirects
+  const accountsQ = useAccounts(businessId || null);
+
+  const firstActiveAccountId = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    return list.find((a) => !a.archived_at)?.id ?? null;
+  }, [accountsQ.data]);
+
+  // Preserve current account if user is already on an account-scoped page
+  const currentAccountId = sp.get("accountId") ?? firstActiveAccountId ?? "";
+
+  const href = (path: string, needsAccountId: boolean) => {
+    if (!businessId) return path;
+    const base = `${path}?businessId=${businessId}`;
+    return needsAccountId && currentAccountId ? `${base}&accountId=${currentAccountId}` : base;
+  };
+
+  const nav = [
+    { label: "Dashboard", path: "/dashboard", needsAccountId: false },
+    { label: "Accounts", path: "/accounts", needsAccountId: false },
+
+    { label: "Ledger", path: "/ledger", needsAccountId: true },
+    { label: "Reconcile", path: "/reconcile", needsAccountId: true },
+    { label: "Category Review", path: "/category-review", needsAccountId: true },
+    { label: "Closed Periods", path: "/closed-periods", needsAccountId: true },
+
+    { label: "Reports", path: "/reports", needsAccountId: false },
+    { label: "Vendors", path: "/vendors", needsAccountId: false },
+    { label: "Budgets", path: "/budgets", needsAccountId: false },
+    { label: "Goals", path: "/goals", needsAccountId: false },
+    { label: "Settings", path: "/settings", needsAccountId: false },
+  ];
+
+  return (
+    <div className="min-h-screen flex">
+      {/* Sidebar */}
+      <aside className="w-56 border-r bg-background">
+        {/* Make this the same height as top bar */}
+        <div className="h-14 px-4 border-b flex items-center">
+          <div>
+            <div className="text-sm font-semibold leading-none">BynkBook</div>
+          </div>
+        </div>
+
+        <div className="p-3 space-y-2">
+          {nav.map((item) => {
+            const active = pathname.startsWith(item.path);
+            return (
+              <Button
+                key={item.path}
+                asChild
+                variant={navVariant(active)}
+                className="w-full justify-start"
+                size="sm"
+              >
+                <Link href={href(item.path, item.needsAccountId)} prefetch>
+                  {item.label}
+                </Link>
+              </Button>
+            );
+          })}
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div className="flex-1">
+        {/* Top bar (single source of business display) */}
+        <header className="h-14 border-b flex items-center justify-between px-4">
+          <div className="text-xs px-3 py-1 rounded-full border bg-muted">
+            {businessesQ.isLoading ? "Loading business…" : (business?.name ?? "Business")}
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            {/* user/search later */}
+          </div>
+        </header>
+
+        {/* Content area */}
+        <main className="p-6">{children}</main>
+      </div>
+    </div>
+  );
+}

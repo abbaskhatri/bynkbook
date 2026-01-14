@@ -1,0 +1,31 @@
+"use client";
+
+export function LedgerTableShell(props: {
+  colgroup?: React.ReactNode;
+  header: React.ReactNode; // should contain a sticky header <tr>
+  addRow: React.ReactNode; // should contain a sticky add-row <tr> (or sticky cells)
+  body: React.ReactNode;
+  footer: React.ReactNode; // sticky footer container
+}) {
+  const { colgroup, header, addRow, body, footer } = props;
+
+  return (
+    <div className="flex-1 overflow-hidden rounded-lg border bg-background">
+      {/* vertical scroll only; NO horizontal bar */}
+      <div className="h-full overflow-y-auto overflow-x-hidden">
+        <table className="w-full table-fixed text-sm">
+          {colgroup ? <colgroup>{colgroup}</colgroup> : null}
+          <thead>{header}{addRow}</thead>
+          <tbody>{body}</tbody>
+          <tfoot className="sticky bottom-0 z-20 bg-background border-t">
+            <tr>
+              <td colSpan={999} className="p-0">
+                {footer}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}

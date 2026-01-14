@@ -1,0 +1,59 @@
+"use client";
+
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export function CapsuleSelect(props: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  loading?: boolean;
+  includeAllOption?: boolean;
+  allLabel?: string;
+}) {
+  const {
+    value,
+    onValueChange,
+    options,
+    placeholder,
+    loading,
+    includeAllOption,
+    allLabel = "All Accounts",
+  } = props;
+
+  if (loading) {
+    return <Skeleton className="h-6 w-40 rounded-full" />;
+  }
+
+  const label =
+    value === "all"
+      ? allLabel
+      : options.find((o) => o.value === value)?.label ?? placeholder;
+
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      {/* Capsule: force same height as business pill (h-6) */}
+      <SelectTrigger
+        title={label}
+        className="h-6 min-h-0 w-auto inline-flex rounded-full bg-muted border px-3 py-0 text-sm leading-none"
+      >
+        <span
+          className="truncate max-w-[260px]"
+          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+        >
+          {label}
+        </span>
+      </SelectTrigger>
+
+      <SelectContent>
+        {includeAllOption ? <SelectItem value="all">{allLabel}</SelectItem> : null}
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}

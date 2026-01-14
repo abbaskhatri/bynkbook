@@ -1,0 +1,33 @@
+"use client";
+
+export function LedgerTableShell(props: {
+  header: React.ReactNode;
+  addRow: React.ReactNode;
+  body: React.ReactNode;
+  footer: React.ReactNode;
+}) {
+  const { header, addRow, body, footer } = props;
+
+  return (
+    <div className="flex-1 overflow-hidden rounded-lg border bg-background">
+      <div className="h-full overflow-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-20 bg-background">
+            {header}
+            {addRow}
+          </thead>
+
+          <tbody>{body}</tbody>
+
+          <tfoot className="sticky bottom-0 z-20 bg-background border-t">
+            <tr>
+              <td colSpan={999} className="p-0">
+                {footer}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
