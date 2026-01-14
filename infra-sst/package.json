@@ -1,0 +1,32 @@
+{
+  "name": "infra-sst",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "sst dev",
+    "build": "sst build",
+    "deploy": "sst deploy",
+    "remove": "sst remove",
+    "console": "sst console",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tsconfig/node18": "^18.2.6",
+    "aws-cdk-lib": "2.142.1",
+    "constructs": "10.3.0",
+    "sst": "^3.17.25",
+    "typescript": "^5.9.3"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "dependencies": {
+    "@aws-sdk/client-kms": "^3.966.0",
+    "@aws-sdk/client-secrets-manager": "^3.957.0",
+    "@prisma/adapter-pg": "^7.2.0",
+    "@prisma/client": "^7.2.0",
+    "pg": "^8.16.3",
+    "prisma": "^7.2.0"
+  }
+}

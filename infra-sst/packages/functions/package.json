@@ -1,0 +1,22 @@
+{
+  "name": "@infra-sst/functions",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "sst bind vitest",
+    "typecheck": "tsc -noEmit"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.159",
+    "@types/node": "^25.0.3",
+    "@types/pg": "^8.16.0",
+    "sst": "^3.17.25",
+    "vitest": "^4.0.16"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.966.0",
+    "@aws-sdk/s3-request-presigner": "^3.966.0",
+    "@prisma/client": "^7.2.0",
+    "plaid": "^41.0.0"
+  }
+}

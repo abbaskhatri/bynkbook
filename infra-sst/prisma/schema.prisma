@@ -1,0 +1,247 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Business {
+  id               String             @id @db.Uuid
+  name             String
+  owner_user_id    String
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  accounts         Account[]
+  entries          Entry[]
+  roles            UserBusinessRole[]
+  uploads          Upload[]
+  bankConnections  BankConnection[]
+  bankTransactions BankTransaction[]
+  bankMatches      BankMatch[]
+
+  @@index([owner_user_id], map: "idx_business_owner_user_id")
+  @@map("business")
+}
+
+model UserBusinessRole {
+  id          String   @id @db.Uuid
+  business_id String   @db.Uuid
+  user_id     String
+  role        String
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  business    Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, user_id])
+  @@index([user_id], map: "idx_ubr_user_id")
+  @@index([business_id, role], map: "idx_ubr_business_role")
+  @@map("user_business_role")
+}
+
+model Account {
+  id                    String            @id @db.Uuid
+  business_id           String            @db.Uuid
+  name                  String
+  type                  String
+  opening_balance_cents BigInt
+  opening_balance_date  DateTime          @db.Timestamptz(6)
+  archived_at           DateTime?         @db.Timestamptz(6)
+  created_at            DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime          @default(now()) @db.Timestamptz(6)
+  business              Business          @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entries               Entry[]
+  uploads               Upload[]
+  bankConnections       BankConnection[]
+  bankTransactions      BankTransaction[]
+  bankMatches           BankMatch[]
+
+  @@index([business_id, archived_at], map: "idx_account_business_archived")
+  @@index([business_id, name], map: "idx_account_business_name")
+  @@map("account")
+}
+
+model Entry {
+  id           String    @id @db.Uuid
+  business_id  String    @db.Uuid
+  account_id   String    @db.Uuid
+  date         DateTime  @db.Date
+  payee        String?
+  memo         String?
+  amount_cents BigInt
+  type         String
+  method       String?
+  category_id  String?   @db.Uuid
+  vendor_id    String?   @db.Uuid
+  status       String    @default("EXPECTED")
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  // Phase 4D: ledger-only adjustment (reversible later)
+  is_adjustment       Boolean   @default(false)
+  adjusted_at         DateTime? @db.Timestamptz(6)
+  adjusted_by_user_id String?   @db.Uuid
+  adjustment_reason   String?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  account    Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  business   Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  bankMatches BankMatch[]
+
+  @@index([business_id, account_id, date, created_at], map: "idx_entry_business_account_date_created")
+  @@index([business_id, account_id, deleted_at], map: "idx_entry_business_account_deleted")
+  @@map("entry")
+}
+
+model EntryIssue {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String    @db.Uuid
+  account_id  String    @db.Uuid
+  entry_id    String    @db.Uuid
+  issue_type  String
+  status      String    @default("OPEN")
+  severity    String    @default("WARNING")
+  group_key   String?
+  details     String
+  detected_at DateTime  @default(now()) @db.Timestamptz(6)
+  resolved_at DateTime? @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([business_id, account_id, entry_id, issue_type], name: "u_entry_issues_scope", map: "u_entry_issues_scope")
+  @@index([business_id, account_id, status], map: "i_entry_issues_scope_status")
+  @@index([business_id, account_id, issue_type], map: "i_entry_issues_scope_type")
+  @@map("entry_issues")
+}
+
+model Upload {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id        String    @db.Uuid
+  account_id         String?   @db.Uuid
+  upload_type        String
+  s3_bucket          String
+  s3_key             String
+  original_filename  String
+  content_type       String
+  size_bytes         BigInt
+  status             String    @default("INITIATED")
+  created_by_user_id String
+  meta               Json?
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  completed_at       DateTime? @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account? @relation(fields: [account_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([business_id, created_at], map: "idx_upload_business_created")
+  @@index([business_id, account_id, created_at], map: "idx_upload_business_account_created")
+  @@index([business_id, upload_type, status], map: "idx_upload_business_type_status")
+  @@map("upload")
+}
+
+model BankConnection {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+
+  plaid_item_id           String
+  plaid_account_id        String
+  access_token_ciphertext String
+
+  effective_start_date DateTime @db.Date
+
+  sync_cursor  String?
+  last_sync_at DateTime? @db.Timestamptz(6)
+
+  has_new_transactions Boolean @default(false)
+
+  last_known_balance_cents BigInt?
+  last_known_balance_at    DateTime? @db.Timestamptz(6)
+
+  opening_adjustment_created_at DateTime? @db.Timestamptz(6)
+
+  institution_name String?
+  institution_id   String?
+  status           String  @default("CONNECTED")
+  error_code       String?
+  error_message    String?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, account_id], map: "u_bank_connection_scope_account")
+  @@unique([business_id, plaid_account_id], map: "u_bank_connection_scope_plaid_account")
+  @@index([business_id, status], map: "i_bank_connection_scope_status")
+  @@map("bank_connection")
+}
+
+model BankTransaction {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+
+  plaid_transaction_id String?
+  plaid_account_id     String?
+
+  // Source tracking (Phase 4C CSV import)
+  source           String? // "PLAID" | "CSV" (PLAID rows may leave null)
+  source_upload_id String? @db.Uuid
+  source_parser    String? // e.g. "BANK_OF_AMERICA"
+  import_hash      String? // sha256 for idempotent CSV import
+
+  posted_date DateTime @db.Date
+
+  authorized_date   DateTime? @db.Date
+  amount_cents      BigInt
+  name              String
+  is_pending        Boolean   @default(false)
+  iso_currency_code String?
+
+  is_removed Boolean   @default(false)
+  removed_at DateTime? @db.Timestamptz(6)
+
+  raw Json?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, plaid_transaction_id], map: "u_bank_txn_scope_plaid_txn")
+  @@unique([business_id, account_id, source, import_hash], map: "u_bank_txn_csv_dedupe")
+  @@index([business_id, account_id, posted_date, created_at], map: "i_bank_txn_scope_account_posted_created")
+  @@index([business_id, account_id, is_removed, is_pending], map: "i_bank_txn_scope_flags")
+  @@map("bank_transaction")
+}
+
+model BankMatch {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+
+  bank_transaction_id String @db.Uuid
+  entry_id            String @db.Uuid
+
+  match_type           String // FULL | PARTIAL
+  matched_amount_cents BigInt // stored WITH SIGN
+
+  created_by_user_id String
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  voided_at         DateTime? @db.Timestamptz(6)
+  voided_by_user_id String?
+
+  // Relations
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entry    Entry    @relation(fields: [entry_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([business_id, account_id, bank_transaction_id], map: "i_bank_match_bank_txn")
+  @@index([business_id, account_id, entry_id], map: "i_bank_match_entry")
+  @@index([business_id, account_id, voided_at], map: "i_bank_match_voided")
+  @@map("bank_match")
+}

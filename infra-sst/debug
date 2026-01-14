@@ -1,0 +1,332 @@
+time=2026-01-13T15:34:49.311-06:00 level=INFO msg="checking for pulumi" path=C:\Users\abbas\AppData\Roaming\sst\bin\pulumi.exe
+time=2026-01-13T15:34:49.519-06:00 level=INFO msg="checking for bun" path=C:\Users\abbas\AppData\Roaming\sst\bin\bun.exe
+time=2026-01-13T15:34:49.551-06:00 level=INFO msg="initializing project" version=3.17.25
+time=2026-01-13T15:34:49.554-06:00 level=INFO msg="esbuild building" out=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768340089554.mjs
+time=2026-01-13T15:34:49.593-06:00 level=INFO msg="esbuild built" outfile=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768340089554.mjs
+time=2026-01-13T15:34:49.593-06:00 level=INFO msg="evaluating config"
+time=2026-01-13T15:34:49.661-06:00 level=INFO msg="config evaluated"
+time=2026-01-13T15:34:49.662-06:00 level=INFO msg="checking platform"
+time=2026-01-13T15:34:49.663-06:00 level=INFO msg="loading home"
+time=2026-01-13T15:34:49.663-06:00 level=INFO msg="aws credentials found" region=us-east-1 profile=""
+time=2026-01-13T15:34:49.663-06:00 level=INFO msg="fetching bootstrap"
+time=2026-01-13T15:34:49.897-06:00 level=INFO msg="found existing bootstrap" data="{\"version\":5,\"asset\":\"sst-asset-budakabokxmv\",\"assetEcrRegistryId\":\"116846786465\",\"assetEcrUrl\":\"116846786465.dkr.ecr.us-east-1.amazonaws.com/sst-asset\",\"state\":\"sst-state-budakabokxmv\",\"appsyncHttp\":\"\",\"appsyncRealtime\":\"\"}"
+time=2026-01-13T15:34:49.897-06:00 level=INFO msg="loaded config" app=ledrigo stage=dev
+time=2026-01-13T15:34:49.897-06:00 level=INFO msg="initializing ui" isTTY=true
+time=2026-01-13T15:34:49.899-06:00 level=INFO msg="server port assigned" port=13557
+time=2026-01-13T15:34:49.899-06:00 level=INFO msg="running stack command" service=project.run cmd=deploy
+time=2026-01-13T15:34:49.900-06:00 level=INFO msg="INFO locking app=ledrigo stage=dev"
+time=2026-01-13T15:34:49.900-06:00 level=INFO msg="INFO getting data key=lock app=ledrigo stage=dev"
+time=2026-01-13T15:34:49.900-06:00 level=INFO msg=starting service=server
+time=2026-01-13T15:34:49.901-06:00 level=INFO msg=server service=server addr=0.0.0.0:13557
+time=2026-01-13T15:34:50.241-06:00 level=INFO msg="INFO putting update app=ledrigo stage=dev"
+time=2026-01-13T15:34:50.393-06:00 level=INFO msg="INFO getting passphrase app=ledrigo stage=dev"
+time=2026-01-13T15:34:50.595-06:00 level=INFO msg="INFO pulling state app=ledrigo stage=dev out=C:\\Users\\abbas\\Bynkbook-app\\infra-sst\\.sst\\pulumi\\fe6446b793d318d398ccebfa\\.pulumi\\stacks\\ledrigo\\dev.json"
+time=2026-01-13T15:34:51.399-06:00 level=INFO msg="got previous deployment" service=project.run updateID=fe6446b793d318d398ccebfa
+time=2026-01-13T15:34:51.399-06:00 level=INFO msg="esbuild building" out=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768340090593.mjs
+time=2026-01-13T15:34:51.483-06:00 level=INFO msg="esbuild built" outfile=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768340090593.mjs
+time=2026-01-13T15:34:51.490-06:00 level=INFO msg="built sst.config.ts" service=project.run updateID=fe6446b793d318d398ccebfa to=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768340090593.mjs
+time=2026-01-13T15:34:51.492-06:00 level=INFO msg="tracked files" service=project.run updateID=fe6446b793d318d398ccebfa
+time=2026-01-13T15:34:51.492-06:00 level=INFO msg="INFO getting data key=secret app=ledrigo stage=_fallback"
+time=2026-01-13T15:34:51.492-06:00 level=INFO msg="INFO getting data key=secret app=ledrigo stage=dev"
+time=2026-01-13T15:34:51.656-06:00 level=INFO msg="starting pulumi" service=project.run updateID=fe6446b793d318d398ccebfa args="[C:\\Users\\abbas\\AppData\\Roaming\\sst\\bin\\pulumi.exe up --yes -f --stack organization/ledrigo/dev --non-interactive --event-log C:\\Users\\abbas\\Bynkbook-app\\infra-sst\\.sst\\pulumi\\fe6446b793d318d398ccebfa\\eventlog.json --config aws:defaultTags={\"tags\":{\"sst:app\":\"ledrigo\",\"sst:stage\":\"dev\"}} --config aws:region=us-east-1]"
+time=2026-01-13T15:34:56.658-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.716-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.717-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.737-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:34:58.756-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.781-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.781-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.782-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.788-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.789-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.791-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.791-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.792-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.794-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.797-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.897-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.897-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteFfrefoHandler
+time=2026-01-13T15:34:58.897-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.897-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteVkkaaaHandler
+time=2026-01-13T15:34:58.898-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteFfrefoHandler loader=map[]
+time=2026-01-13T15:34:58.898-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteFfrefoHandler
+time=2026-01-13T15:34:58.899-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.899-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteHdskahHandler
+time=2026-01-13T15:34:58.900-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteHdskahHandler loader=map[]
+time=2026-01-13T15:34:58.900-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteHdskahHandler
+time=2026-01-13T15:34:58.902-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteVkkaaaHandler loader=map[]
+time=2026-01-13T15:34:58.902-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteVkkaaaHandler
+time=2026-01-13T15:34:58.908-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteFfrefoHandler
+time=2026-01-13T15:34:58.908-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteFfrefoHandler
+time=2026-01-13T15:34:58.910-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.910-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNackvhHandler
+time=2026-01-13T15:34:58.912-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNackvhHandler loader=map[]
+time=2026-01-13T15:34:58.912-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNackvhHandler
+time=2026-01-13T15:34:58.913-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.913-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWheoakHandler
+time=2026-01-13T15:34:58.914-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWheoakHandler loader=map[]
+time=2026-01-13T15:34:58.914-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWheoakHandler
+time=2026-01-13T15:34:58.985-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.987-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.988-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBebedaHandler
+time=2026-01-13T15:34:58.988-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.988-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBcsadrHandler
+time=2026-01-13T15:34:58.989-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.989-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteFvnkfaHandler
+time=2026-01-13T15:34:58.990-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.990-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWdnbsxHandler
+time=2026-01-13T15:34:58.992-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:58.992-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteMnurzmHandler
+time=2026-01-13T15:34:59.036-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.036-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNffvxoHandler
+time=2026-01-13T15:34:59.040-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.040-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteRzxnrvHandler
+time=2026-01-13T15:34:59.053-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.053-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteKvabruHandler
+time=2026-01-13T15:34:59.055-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.055-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteOknvfwHandler
+time=2026-01-13T15:34:59.066-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.066-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNfonkmHandler
+time=2026-01-13T15:34:59.073-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.073-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNrnhbdHandler
+time=2026-01-13T15:34:59.078-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.078-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBocarhHandler
+time=2026-01-13T15:34:59.086-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.086-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWfozukHandler
+time=2026-01-13T15:34:59.091-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.091-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteVbtwdzHandler
+time=2026-01-13T15:34:59.099-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.099-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteTdtmmdHandler
+time=2026-01-13T15:34:59.104-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.104-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteSaaoexHandler
+time=2026-01-13T15:34:59.109-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.109-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBaneraHandler
+time=2026-01-13T15:34:59.116-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.116-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWrotbuHandler
+time=2026-01-13T15:34:59.119-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.119-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteRwbmscHandler
+time=2026-01-13T15:34:59.123-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.123-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBbemmzHandler
+time=2026-01-13T15:34:59.128-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.128-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteUbruxbHandler
+time=2026-01-13T15:34:59.131-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.131-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBszunuHandler
+time=2026-01-13T15:34:59.135-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.135-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBazowaHandler
+time=2026-01-13T15:34:59.139-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.139-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWweebkHandler
+time=2026-01-13T15:34:59.148-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.148-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteRbbrdrHandler
+time=2026-01-13T15:34:59.198-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteHdskahHandler
+time=2026-01-13T15:34:59.202-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBebedaHandler loader=map[]
+time=2026-01-13T15:34:59.202-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBebedaHandler
+time=2026-01-13T15:34:59.202-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteHdskahHandler
+time=2026-01-13T15:34:59.215-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWheoakHandler
+time=2026-01-13T15:34:59.217-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNackvhHandler
+time=2026-01-13T15:34:59.221-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWheoakHandler
+time=2026-01-13T15:34:59.221-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteFvnkfaHandler loader=map[]
+time=2026-01-13T15:34:59.221-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteFvnkfaHandler
+time=2026-01-13T15:34:59.221-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWdnbsxHandler loader=map[]
+time=2026-01-13T15:34:59.221-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWdnbsxHandler
+time=2026-01-13T15:34:59.221-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNackvhHandler
+time=2026-01-13T15:34:59.232-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteVkkaaaHandler
+time=2026-01-13T15:34:59.236-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteVkkaaaHandler
+time=2026-01-13T15:34:59.238-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBcsadrHandler loader=map[]
+time=2026-01-13T15:34:59.238-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBcsadrHandler
+time=2026-01-13T15:34:59.256-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:34:59.508-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBebedaHandler
+time=2026-01-13T15:34:59.515-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBebedaHandler
+time=2026-01-13T15:34:59.517-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteMnurzmHandler loader=map[]
+time=2026-01-13T15:34:59.517-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteMnurzmHandler
+time=2026-01-13T15:34:59.543-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWdnbsxHandler
+time=2026-01-13T15:34:59.550-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNffvxoHandler loader=map[]
+time=2026-01-13T15:34:59.550-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNffvxoHandler
+time=2026-01-13T15:34:59.557-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWdnbsxHandler
+time=2026-01-13T15:34:59.571-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteFvnkfaHandler
+time=2026-01-13T15:34:59.575-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRzxnrvHandler loader=map[]
+time=2026-01-13T15:34:59.575-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRzxnrvHandler
+time=2026-01-13T15:34:59.578-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteFvnkfaHandler
+time=2026-01-13T15:34:59.614-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.737-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.816-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.843-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:34:59.843-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBcucknHandler
+time=2026-01-13T15:34:59.862-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNffvxoHandler
+time=2026-01-13T15:34:59.867-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteKvabruHandler loader=map[]
+time=2026-01-13T15:34:59.867-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteKvabruHandler
+time=2026-01-13T15:34:59.868-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNffvxoHandler
+time=2026-01-13T15:34:59.883-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:34:59.899-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteMnurzmHandler
+time=2026-01-13T15:34:59.902-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBcsadrHandler
+time=2026-01-13T15:34:59.911-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteOknvfwHandler loader=map[]
+time=2026-01-13T15:34:59.981-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteOknvfwHandler
+time=2026-01-13T15:34:59.952-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteMnurzmHandler
+time=2026-01-13T15:34:59.989-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBcsadrHandler
+time=2026-01-13T15:34:59.989-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNfonkmHandler loader=map[]
+time=2026-01-13T15:34:59.990-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNfonkmHandler
+time=2026-01-13T15:35:00.005-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.014-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRzxnrvHandler
+time=2026-01-13T15:35:00.027-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteRzxnrvHandler
+time=2026-01-13T15:35:00.027-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNrnhbdHandler loader=map[]
+time=2026-01-13T15:35:00.027-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNrnhbdHandler
+time=2026-01-13T15:35:00.039-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.126-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteKvabruHandler
+time=2026-01-13T15:35:00.130-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteKvabruHandler
+time=2026-01-13T15:35:00.130-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBocarhHandler loader=map[]
+time=2026-01-13T15:35:00.130-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBocarhHandler
+time=2026-01-13T15:35:00.243-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.258-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteOknvfwHandler
+time=2026-01-13T15:35:00.269-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteOknvfwHandler
+time=2026-01-13T15:35:00.269-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWfozukHandler loader=map[]
+time=2026-01-13T15:35:00.269-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWfozukHandler
+time=2026-01-13T15:35:00.283-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWfozukHandler
+time=2026-01-13T15:35:00.283-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWfozukHandler
+time=2026-01-13T15:35:00.283-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteVbtwdzHandler loader=map[]
+time=2026-01-13T15:35:00.283-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteVbtwdzHandler
+time=2026-01-13T15:35:00.287-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.346-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNfonkmHandler
+time=2026-01-13T15:35:00.350-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNfonkmHandler
+time=2026-01-13T15:35:00.351-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.354-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteTdtmmdHandler loader=map[]
+time=2026-01-13T15:35:00.355-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteTdtmmdHandler
+time=2026-01-13T15:35:00.452-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:00.457-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.653-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.699-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.787-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.824-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:00.941-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteTdtmmdHandler
+time=2026-01-13T15:35:00.941-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBocarhHandler
+time=2026-01-13T15:35:00.946-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteNrnhbdHandler
+time=2026-01-13T15:35:00.946-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteVbtwdzHandler
+time=2026-01-13T15:35:00.953-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteSaaoexHandler loader=map[]
+time=2026-01-13T15:35:00.953-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteSaaoexHandler
+time=2026-01-13T15:35:00.953-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBaneraHandler loader=map[]
+time=2026-01-13T15:35:00.953-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBaneraHandler
+time=2026-01-13T15:35:00.954-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRwbmscHandler loader=map[]
+time=2026-01-13T15:35:00.954-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRwbmscHandler
+time=2026-01-13T15:35:00.954-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWrotbuHandler loader=map[]
+time=2026-01-13T15:35:00.954-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWrotbuHandler
+time=2026-01-13T15:35:00.955-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteTdtmmdHandler
+time=2026-01-13T15:35:00.956-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBocarhHandler
+time=2026-01-13T15:35:00.957-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteVbtwdzHandler
+time=2026-01-13T15:35:00.958-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteNrnhbdHandler
+time=2026-01-13T15:35:01.001-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.092-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.135-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:01.231-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.231-06:00 level=INFO msg="building function" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteEfwkuoHandler
+time=2026-01-13T15:35:01.278-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteSaaoexHandler
+time=2026-01-13T15:35:01.278-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.285-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteSaaoexHandler
+time=2026-01-13T15:35:01.285-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBbemmzHandler loader=map[]
+time=2026-01-13T15:35:01.285-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBbemmzHandler
+time=2026-01-13T15:35:01.296-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBaneraHandler
+time=2026-01-13T15:35:01.304-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBaneraHandler
+time=2026-01-13T15:35:01.304-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteUbruxbHandler loader=map[]
+time=2026-01-13T15:35:01.304-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteUbruxbHandler
+time=2026-01-13T15:35:01.346-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRwbmscHandler
+time=2026-01-13T15:35:01.350-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteRwbmscHandler
+time=2026-01-13T15:35:01.350-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBazowaHandler loader=map[]
+time=2026-01-13T15:35:01.350-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBazowaHandler
+time=2026-01-13T15:35:01.459-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.513-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.515-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWrotbuHandler
+time=2026-01-13T15:35:01.523-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWrotbuHandler
+time=2026-01-13T15:35:01.523-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWweebkHandler loader=map[]
+time=2026-01-13T15:35:01.523-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWweebkHandler
+time=2026-01-13T15:35:01.573-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBbemmzHandler
+time=2026-01-13T15:35:01.578-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRbbrdrHandler loader=map[]
+time=2026-01-13T15:35:01.578-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRbbrdrHandler
+time=2026-01-13T15:35:01.579-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBbemmzHandler
+time=2026-01-13T15:35:01.587-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.604-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBazowaHandler
+time=2026-01-13T15:35:01.613-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBazowaHandler
+time=2026-01-13T15:35:01.614-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBszunuHandler loader=map[]
+time=2026-01-13T15:35:01.614-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBszunuHandler
+time=2026-01-13T15:35:01.685-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteUbruxbHandler
+time=2026-01-13T15:35:01.689-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteUbruxbHandler
+time=2026-01-13T15:35:01.689-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBcucknHandler loader=map[]
+time=2026-01-13T15:35:01.689-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBcucknHandler
+time=2026-01-13T15:35:01.826-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.934-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:01.971-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteWweebkHandler
+time=2026-01-13T15:35:01.979-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteWweebkHandler
+time=2026-01-13T15:35:01.979-06:00 level=INFO msg="loader info" service=runtime.node functionID=ledrigo-dev-sst-apiRouteEfwkuoHandler loader=map[]
+time=2026-01-13T15:35:01.979-06:00 level=INFO msg="running esbuild" service=runtime.node functionID=ledrigo-dev-sst-apiRouteEfwkuoHandler
+time=2026-01-13T15:35:01.981-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBcucknHandler
+time=2026-01-13T15:35:01.992-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBcucknHandler
+time=2026-01-13T15:35:02.020-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteBszunuHandler
+time=2026-01-13T15:35:02.026-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteRbbrdrHandler
+time=2026-01-13T15:35:02.031-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteBszunuHandler
+time=2026-01-13T15:35:02.034-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteRbbrdrHandler
+time=2026-01-13T15:35:02.048-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.095-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.153-06:00 level=INFO msg="esbuild finished" service=runtime.node functionID=ledrigo-dev-sst-apiRouteEfwkuoHandler
+time=2026-01-13T15:35:02.157-06:00 level=INFO msg="function built" runtime=nodejs22.x functionID=ledrigo-dev-sst-apiRouteEfwkuoHandler
+time=2026-01-13T15:35:02.172-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.238-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:02.279-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.347-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.448-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.556-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.627-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.685-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:02.779-06:00 level=INFO msg="rpc request" method=POST url=/rpc
+time=2026-01-13T15:35:03.247-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:04.037-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:04.525-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:09.061-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:09.552-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:10.052-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:10.590-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:16.916-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:17.498-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:18.089-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:18.630-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:19.144-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:19.616-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:20.198-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:20.804-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:21.268-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:21.784-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:22.499-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:23.020-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:23.619-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:24.069-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:24.559-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:24.700-06:00 level=INFO msg="pulumi exited" service=project.run updateID=fe6446b793d318d398ccebfa err=<nil>
+time=2026-01-13T15:35:24.707-06:00 level=INFO msg="eof and exited" service=project.run updateID=fe6446b793d318d398ccebfa eofs=0
+time=2026-01-13T15:35:24.707-06:00 level=INFO msg="eof and exited" service=project.run updateID=fe6446b793d318d398ccebfa eofs=1
+time=2026-01-13T15:35:24.707-06:00 level=INFO msg="breaking out of tail loop" service=project.run updateID=fe6446b793d318d398ccebfa
+time=2026-01-13T15:35:24.707-06:00 level=INFO msg="parsing state" service=project.run updateID=fe6446b793d318d398ccebfa
+time=2026-01-13T15:35:24.880-06:00 level=INFO msg="generating types" root=C:\Users\abbas\Bynkbook-app\infra-sst
+time=2026-01-13T15:35:24.889-06:00 level=INFO msg="canceling partial" service=project.run updateID=fe6446b793d318d398ccebfa
+time=2026-01-13T15:35:24.889-06:00 level=INFO msg="waiting for partial to exit" service=project.run updateID=fe6446b793d318d398ccebfa
+time=2026-01-13T15:35:25.155-06:00 level=INFO msg="INFO pushing partial state updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:25.872-06:00 level=INFO msg="INFO pushing eventlog updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:25.872-06:00 level=INFO msg="INFO pushing snapshot updateID=fe6446b793d318d398ccebfa"
+time=2026-01-13T15:35:26.485-06:00 level=INFO msg="INFO putting update app=ledrigo stage=dev"
+time=2026-01-13T15:35:26.627-06:00 level=INFO msg="done running stack command" service=project.run updateID=fe6446b793d318d398ccebfa resources=331
+time=2026-01-13T15:35:26.643-06:00 level=INFO msg="INFO unlocking app=ledrigo stage=dev"
+time=2026-01-13T15:35:26.777-06:00 level=INFO msg="shutting down server" service=server
+time=2026-01-13T15:35:26.779-06:00 level=INFO msg="server done" service=server

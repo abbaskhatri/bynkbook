@@ -1,0 +1,226 @@
+{
+    "Items": [
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "0a9rzor",
+            "RouteKey": "GET /v1/businesses/{businessId}/accounts/{accountId}/entries",
+            "Target": "integrations/5bxfwv6"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "14llk2t",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts/{accountId}/issues/scan",
+            "Target": "integrations/340meo9"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "1bta54m",
+            "RouteKey": "POST /v1/businesses/{businessId}/uploads/{uploadId}/import",
+            "Target": "integrations/xn3fbrd"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "1h92m66",
+            "RouteKey": "GET /v1/businesses",
+            "Target": "integrations/jgrmt0r"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "2jdcnto",
+            "RouteKey": "GET /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions",
+            "Target": "integrations/rxbfhpn"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "4dtg82c",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts",
+            "Target": "integrations/nnx9c7a"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "4ypwfn6",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/exchange",
+            "Target": "integrations/jymaqqs"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "6ogo2ym",
+            "RouteKey": "GET /v1/businesses/{businessId}/uploads/{uploadId}/download",
+            "Target": "integrations/wzazggu"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "72cura5",
+            "RouteKey": "GET /v1/businesses/{businessId}/accounts/{accountId}/ledger-summary",
+            "Target": "integrations/klg9u9h"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "7jjz127",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/link-token",
+            "Target": "integrations/jpo1xy6"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "7omp6s2",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/sync",
+            "Target": "integrations/jt45sqf"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "b9nha8g",
+            "RouteKey": "POST /v1/businesses/{businessId}/uploads/mark-uploaded",
+            "Target": "integrations/mc2gu88"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "chfr4zm",
+            "RouteKey": "POST /v1/businesses/{businessId}/uploads/init",
+            "Target": "integrations/4jhy751"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "dhiy0du",
+            "RouteKey": "GET /v1/businesses/{businessId}/accounts/{accountId}/plaid/status",
+            "Target": "integrations/kx7l2ks"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "duh3pwf",
+            "RouteKey": "DELETE /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/hard",
+            "Target": "integrations/6bfnd32"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "gh4fwku",
+            "RouteKey": "GET /v1/me",
+            "Target": "integrations/15q2o66"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "ljqaq8c",
+            "RouteKey": "GET /v1/businesses/{businessId}/accounts/{accountId}/issues",
+            "Target": "integrations/kp4r80r"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "mig8blm",
+            "RouteKey": "DELETE /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}",
+            "Target": "integrations/1v81ufn"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "ovvj1ji",
+            "RouteKey": "PUT /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}",
+            "Target": "integrations/d9sixs4"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "NONE",
+            "RouteId": "qibkrka",
+            "RouteKey": "POST /v1/plaid/webhook",
+            "Target": "integrations/6dgy3xp"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "NONE",
+            "RouteId": "s9io6tm",
+            "RouteKey": "GET /v1/health",
+            "Target": "integrations/oyq08vp"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "skxlnp1",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts/{accountId}/entries",
+            "Target": "integrations/ukvbjb4"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "ts8ne1k",
+            "RouteKey": "POST /v1/businesses/{businessId}/uploads/complete",
+            "Target": "integrations/d2nyzpi"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "veki9th",
+            "RouteKey": "GET /v1/businesses/{businessId}/uploads",
+            "Target": "integrations/1es6nii"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "x68aeht",
+            "RouteKey": "PATCH /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}",
+            "Target": "integrations/6tmmuoq"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "ys7bfk0",
+            "RouteKey": "POST /v1/businesses",
+            "Target": "integrations/low158a"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "zke4e2l",
+            "RouteKey": "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/restore",
+            "Target": "integrations/3c6n2j2"
+        },
+        {
+            "ApiKeyRequired": false,
+            "AuthorizationType": "JWT",
+            "AuthorizerId": "3ym8l8",
+            "RouteId": "zw1f3sj",
+            "RouteKey": "GET /v1/businesses/{businessId}/accounts",
+            "Target": "integrations/zalg7ao"
+        }
+    ]
+}

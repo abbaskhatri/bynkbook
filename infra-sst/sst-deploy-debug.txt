@@ -1,0 +1,43 @@
+time=2026-01-13T11:38:04.503-06:00 level=INFO msg="checking for pulumi" path=C:\Users\abbas\AppData\Roaming\sst\bin\pulumi.exe
+time=2026-01-13T11:38:04.851-06:00 level=INFO msg="checking for bun" path=C:\Users\abbas\AppData\Roaming\sst\bin\bun.exe
+time=2026-01-13T11:38:05.023-06:00 level=INFO msg="initializing project" version=3.17.25
+time=2026-01-13T11:38:05.024-06:00 level=INFO msg="esbuild building" out=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768325885024.mjs
+time=2026-01-13T11:38:05.036-06:00 level=INFO msg="esbuild built" outfile=C:\Users\abbas\Bynkbook-app\infra-sst\.sst\platform\sst.config.1768325885024.mjs
+time=2026-01-13T11:38:05.038-06:00 level=INFO msg="evaluating config"
+time=2026-01-13T11:38:05.109-06:00 level=INFO msg="config evaluated"
+time=2026-01-13T11:38:05.110-06:00 level=INFO msg="checking platform"
+time=2026-01-13T11:38:05.110-06:00 level=ERROR msg="open C:\\Users\\abbas\\Bynkbook-app\\infra-sst\\.sst\\platform\\version: The system cannot find the file specified."
+time=2026-01-13T11:38:05.110-06:00 level=INFO msg="installing platform"
+time=2026-01-13T11:38:05.248-06:00 level=INFO msg="installing deps"
+time=2026-01-13T11:38:05.248-06:00 level=INFO msg="getting package" name=@sst-provider/aws version=latest
+time=2026-01-13T11:38:05.603-06:00 level=INFO msg="getting package" name=@pulumi/aws version=latest
+time=2026-01-13T11:38:05.807-06:00 level=INFO msg="writing package.json"
+time=2026-01-13T11:38:05.808-06:00 level=INFO msg="adding dependency" name=aws
+time=2026-01-13T11:38:05.809-06:00 level=INFO msg="fetching deps"
+time=2026-01-13T11:39:18.190-06:00 level=INFO msg="writing types"
+time=2026-01-13T11:39:18.193-06:00 level=INFO msg="loading home"
+time=2026-01-13T11:39:18.193-06:00 level=INFO msg="aws credentials found" region=us-east-1 profile=""
+time=2026-01-13T11:39:18.193-06:00 level=INFO msg="fetching bootstrap"
+time=2026-01-13T11:39:18.406-06:00 level=INFO msg="found existing bootstrap" data="{\"version\":5,\"asset\":\"sst-asset-budakabokxmv\",\"assetEcrRegistryId\":\"116846786465\",\"assetEcrUrl\":\"116846786465.dkr.ecr.us-east-1.amazonaws.com/sst-asset\",\"state\":\"sst-state-budakabokxmv\",\"appsyncHttp\":\"\",\"appsyncRealtime\":\"\"}"
+time=2026-01-13T11:39:18.406-06:00 level=INFO msg="loaded config" app=ledrigo stage=dev
+time=2026-01-13T11:39:18.406-06:00 level=INFO msg="initializing ui" isTTY=false
+time=2026-01-13T11:39:18.407-06:00 level=INFO msg="server port assigned" port=13557
+time=2026-01-13T11:39:18.407-06:00 level=INFO msg=starting service=server
+time=2026-01-13T11:39:18.407-06:00 level=INFO msg="running stack command" service=project.run cmd=deploy
+time=2026-01-13T11:39:18.407-06:00 level=INFO msg="INFO locking app=ledrigo stage=dev"
+time=2026-01-13T11:39:18.407-06:00 level=INFO msg="INFO getting data key=lock app=ledrigo stage=dev"
+SST 3.17.25  ready!
+
+Γ₧£  App:        ledrigo
+   Stage:      dev
+
+~  Deploy
+
+time=2026-01-13T11:39:18.408-06:00 level=INFO msg=server service=server addr=0.0.0.0:13557
+time=2026-01-13T11:39:18.723-06:00 level=INFO msg="INFO putting update app=ledrigo stage=dev"
+time=2026-01-13T11:39:18.868-06:00 level=INFO msg="INFO getting passphrase app=ledrigo stage=dev"
+time=2026-01-13T11:39:19.083-06:00 level=INFO msg="INFO unlocking app=ledrigo stage=dev"
+time=2026-01-13T11:39:19.335-06:00 level=INFO msg="shutting down server" service=server
+time=2026-01-13T11:39:19.336-06:00 level=INFO msg="server done" service=server
+time=2026-01-13T11:39:19.336-06:00 level=ERROR msg="exited with error" err="open C:\\Users\\abbas\\Bynkbook-app\\infra-sst\\.sst\\log\\pulumi.log: The system cannot find the path specified."
+Γ£ò  Unexpected error occurred. Please run with --print-logs or check .sst/log/sst.log if available.
