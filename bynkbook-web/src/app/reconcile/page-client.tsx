@@ -23,7 +23,7 @@ import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
 
-import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle } from "lucide-react";
+import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus } from "lucide-react";
 
 function toBigIntSafe(v: unknown): bigint {
   try {
@@ -48,14 +48,46 @@ function formatUsdFromCents(cents: bigint) {
   return neg ? `(${core})` : core;
 }
 
-// Parses user input like "123.45" -> 12345n cents (ABS value)
-function parseMoneyToAbsCents(input: string): bigint | null {
-  const t = (input ?? "").trim();
-  if (!t) return null;
-  const cleaned = t.replace(/[$,]/g, "");
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return null;
-  return BigInt(Math.round(Math.abs(n) * 100));
+function ymdToTime(ymd: string): number {
+  try {
+    return new Date(`${ymd}T00:00:00Z`).getTime();
+  } catch {
+    return 0;
+  }
+}
+
+function isoToYmd(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
+function normalizeDesc(s: string): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/\b(des|desc|id|indn|trn|conf#|conf)\b/g, " ")
+    .replace(/[0-9]/g, " ")
+    .replace(/[^a-z\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenSet(s: string): Set<string> {
+  const t = normalizeDesc(s);
+  const parts = t.split(" ").filter(Boolean);
+  return new Set(parts.filter((p) => p.length >= 3));
+}
+
+function tokenOverlap(a: string, b: string): number {
+  const A = tokenSet(a);
+  const B = tokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let hit = 0;
+  for (const x of A) if (B.has(x)) hit++;
+  return hit;
 }
 
 export default function ReconcilePageClient() {
@@ -156,13 +188,11 @@ export default function ReconcilePageClient() {
   const [openUpload, setOpenUpload] = useState(false);
   const [openStatementHistory, setOpenStatementHistory] = useState(false);
 
-  // Phase 4D: Match dialog
+  // Phase 4D: Match dialog (bank txn → many entries, v1)
   const [openMatch, setOpenMatch] = useState(false);
   const [matchBankTxnId, setMatchBankTxnId] = useState<string | null>(null);
   const [matchSearch, setMatchSearch] = useState("");
-  const [matchSelectedEntryId, setMatchSelectedEntryId] = useState<string | null>(null);
-  const [matchType, setMatchType] = useState<"FULL" | "PARTIAL">("FULL");
-  const [matchAmount, setMatchAmount] = useState(""); // dollars input for partial
+  const [matchSelectedEntryIds, setMatchSelectedEntryIds] = useState<Set<string>>(() => new Set());
   const [matchBusy, setMatchBusy] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
 
@@ -172,6 +202,14 @@ export default function ReconcilePageClient() {
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustBusy, setAdjustBusy] = useState(false);
   const [adjustError, setAdjustError] = useState<string | null>(null);
+
+  // Phase 4D: Entry → Bank match dialog (Expected row Match button)
+  const [openEntryMatch, setOpenEntryMatch] = useState(false);
+  const [entryMatchEntryId, setEntryMatchEntryId] = useState<string | null>(null);
+  const [entryMatchSelectedBankTxnId, setEntryMatchSelectedBankTxnId] = useState<string | null>(null);
+  const [entryMatchSearch, setEntryMatchSearch] = useState("");
+  const [entryMatchBusy, setEntryMatchBusy] = useState(false);
+  const [entryMatchError, setEntryMatchError] = useState<string | null>(null);
 
   // Hide adjusted entries locally (until we refetch entries with adjustment status)
   const [locallyAdjusted, setLocallyAdjusted] = useState<Set<string>>(() => new Set());
@@ -290,13 +328,20 @@ export default function ReconcilePageClient() {
     return m;
   }, [matches]);
 
-  // Counts
+  const remainingAbsByBankTxnId = useMemo(() => {
+    const m = new Map<string, bigint>();
+    for (const t of bankTxSorted ?? []) {
+      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
+      const matchedAbs = matchedAbsByBankTxnId.get(t.id) ?? 0n;
+      const remaining = bankAbs - matchedAbs;
+      m.set(t.id, remaining > 0n ? remaining : 0n);
+    }
+    return m;
+  }, [bankTxSorted, matchedAbsByBankTxnId]);
+
   const expectedCount = allEntriesSorted.length;
   const matchedCount = 0;
 
-  // -------------------------
-  // UI primitives
-  // -------------------------
   const opts = (accountsQ.data ?? [])
     .filter((a) => !a.archived_at)
     .map((a) => ({ value: a.id, label: a.name }));
@@ -427,19 +472,13 @@ export default function ReconcilePageClient() {
   const balanceSpan = (() => {
     const bal = plaid?.lastKnownBalanceCents ? toBigIntSafe(plaid.lastKnownBalanceCents) : null;
     const neg = bal !== null && bal < 0n;
-    return (
-      <span className={`font-semibold ${neg ? "!text-red-700" : "text-slate-900"}`}>
-        {bal !== null ? formatUsdFromCents(bal) : "—"}
-      </span>
-    );
+    return <span className={`font-semibold ${neg ? "!text-red-700" : "text-slate-900"}`}>{bal !== null ? formatUsdFromCents(bal) : "—"}</span>;
   })();
 
-  // IMPORTANT: authReady guard must be AFTER hooks (this is safe now)
   if (!authReady) return null;
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
-      {/* Header */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<GitMerge className="h-4 w-4" />} title="Reconcile" afterTitle={accountCapsule} right={headerRight} />
@@ -455,7 +494,6 @@ export default function ReconcilePageClient() {
         {differenceBar}
       </div>
 
-      {/* Two cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
         {/* Expected Entries */}
         <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-white">
@@ -493,11 +531,11 @@ export default function ReconcilePageClient() {
               ) : (
                 <table className="w-full table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 105 }} />
+                    <col style={{ width: 110 }} />
                     <col />
                     <col style={{ width: 140 }} />
-                    <col style={{ width: 110 }} />
-                    <col style={{ width: 110 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 90 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -523,26 +561,43 @@ export default function ReconcilePageClient() {
                         <tr key={e.id} className={trClass + (isPartial ? " bg-amber-50" : "")}>
                           <td className={`${tdClass} text-center`}>{e.date}</td>
                           <td className={`${tdClass} font-medium truncate`}>{payee}</td>
-                          <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
-                            {formatUsdFromCents(amt)}
-                          </td>
+                          <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-center pl-3`}>
                             <StatusChip label={isPartial ? "Partial" : "Expected"} tone={isPartial ? "warning" : "default"} />
                           </td>
                           <td className={`${tdClass} text-right`}>
-                            <button
-                              type="button"
-                              className="h-6 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
-                              onClick={() => {
-                                setAdjustEntryId(e.id);
-                                setAdjustReason("");
-                                setAdjustError(null);
-                                setOpenAdjust(true);
-                              }}
-                              title="Mark entry as adjustment (ledger-only)"
-                            >
-                              Adjustment
-                            </button>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                onClick={() => {
+                                  setEntryMatchEntryId(e.id);
+                                  setEntryMatchSelectedBankTxnId(null);
+                                  setEntryMatchSearch("");
+                                  setEntryMatchError(null);
+                                  setOpenEntryMatch(true);
+                                }}
+                                title="Match entry"
+                                aria-label="Match entry"
+                              >
+                                <GitMerge className="h-4 w-4 text-slate-700" />
+                              </button>
+
+                              <button
+                                type="button"
+                                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                onClick={() => {
+                                  setAdjustEntryId(e.id);
+                                  setAdjustReason("");
+                                  setAdjustError(null);
+                                  setOpenAdjust(true);
+                                }}
+                                title="Mark adjustment (ledger-only)"
+                                aria-label="Mark adjustment"
+                              >
+                                <Wrench className="h-4 w-4 text-slate-700" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -680,10 +735,10 @@ export default function ReconcilePageClient() {
             <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
               <table className="w-full table-fixed border-collapse">
                 <colgroup>
-                  <col style={{ width: 105 }} />
+                  <col style={{ width: 110 }} />
                   <col />
                   <col style={{ width: 140 }} />
-                  <col style={{ width: 120 }} />
+                  <col style={{ width: 110 }} />
                 </colgroup>
 
                 <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -736,22 +791,70 @@ export default function ReconcilePageClient() {
                           <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
                             {formatUsdFromCents(amt)}
                           </td>
+
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">
                               <button
                                 type="button"
-                                className="h-6 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
                                 onClick={() => {
                                   setMatchBankTxnId(t.id);
                                   setMatchSearch("");
-                                  setMatchSelectedEntryId(null);
-                                  setMatchType("FULL");
-                                  setMatchAmount("");
+                                  setMatchSelectedEntryIds(new Set());
                                   setMatchError(null);
+
+                                  // Best initial seed: closest abs amount, then closest date
+                                  const bankAmt = toBigIntSafe(t.amount_cents);
+                                  const bankAbs = absBig(bankAmt);
+                                  const bankSign = bankAmt < 0n ? -1n : 1n;
+                                  const bankDateYmd = isoToYmd(t.posted_date);
+                                  const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
+
+                                  const eligible = allEntriesSorted.filter((e: any) => {
+                                    if (matchByEntryId.has(e.id)) return false;
+                                    const entryAmt = toBigIntSafe(e.amount_cents);
+                                    const entrySign = entryAmt < 0n ? -1n : 1n;
+                                    if (entrySign !== bankSign) return false;
+                                    return true;
+                                  });
+
+                                  let bestId: string | null = null;
+                                  let bestScore = Number.POSITIVE_INFINITY;
+
+                                  for (const e of eligible) {
+                                    const entryAmt = toBigIntSafe(e.amount_cents);
+                                    const entryAbs = absBig(entryAmt);
+                                    const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+                                    const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
+                                    const score = Number(diff) * 1_000_000 + dt;
+                                    if (score < bestScore) {
+                                      bestScore = score;
+                                      bestId = e.id;
+                                    }
+                                  }
+
+                                  setMatchSelectedEntryIds(() => {
+                                    const s = new Set<string>();
+                                    if (bestId) s.add(bestId);
+                                    return s;
+                                  });
+
                                   setOpenMatch(true);
                                 }}
+                                title="Match this bank transaction"
+                                aria-label="Match bank transaction"
                               >
-                                Match…
+                                <GitMerge className="h-4 w-4 text-slate-700" />
+                              </button>
+
+                              <button
+                                type="button"
+                                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white opacity-50 cursor-not-allowed focus-visible:outline-none"
+                                disabled
+                                title="Create entry (Coming soon)"
+                                aria-label="Create entry (coming soon)"
+                              >
+                                <Plus className="h-4 w-4 text-slate-700" />
                               </button>
 
                               {(() => {
@@ -764,7 +867,7 @@ export default function ReconcilePageClient() {
                                 return (
                                   <button
                                     type="button"
-                                    className="h-6 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                                    className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
                                     onClick={async () => {
                                       if (!selectedBusinessId || !selectedAccountId) return;
                                       try {
@@ -779,8 +882,10 @@ export default function ReconcilePageClient() {
                                         // ignore
                                       }
                                     }}
+                                    title="Unmatch (void audit)"
+                                    aria-label="Unmatch bank transaction"
                                   >
-                                    Unmatch
+                                    <Undo2 className="h-4 w-4 text-slate-700" />
                                   </button>
                                 );
                               })()}
@@ -797,13 +902,12 @@ export default function ReconcilePageClient() {
         </div>
       </div>
 
-      {/* Phase 4D: Match dialog */}
+      {/* Phase 4D: Match dialog (Bank txn → many entries) */}
       <AppDialog open={openMatch} onClose={() => setOpenMatch(false)} title="Match bank transaction" size="lg">
         <div className="flex flex-col max-h-[70vh]">
+          {/* Body (scroll only this area) */}
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-slate-600 mb-2">
-              Select an eligible entry (v1: an entry can be matched to at most one bank transaction).
-            </div>
+            <div className="text-xs text-slate-600 mb-2">Select eligible entries (v1: entry matches at most one bank txn).</div>
 
             <div className="mb-2">
               <input
@@ -814,141 +918,307 @@ export default function ReconcilePageClient() {
               />
             </div>
 
-            <div className="mb-2 flex items-center gap-2">
-              <button
-                type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  matchType === "FULL" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500"
-                }`}
-                onClick={() => setMatchType("FULL")}
-              >
-                Full
-              </button>
-              <button
-                type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  matchType === "PARTIAL" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500"
-                }`}
-                onClick={() => setMatchType("PARTIAL")}
-              >
-                Partial
-              </button>
+            {(() => {
+              const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+              const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
+              const bankAbs = absBig(bankAmt);
 
-              {matchType === "PARTIAL" ? (
-                <input
-                  className="h-7 w-[140px] px-2 text-xs border border-slate-200 rounded-md tabular-nums"
-                  placeholder="Amount"
-                  value={matchAmount}
-                  onChange={(e) => setMatchAmount(e.target.value)}
-                />
-              ) : null}
-            </div>
+              let selectedAbs = 0n;
+              for (const id of matchSelectedEntryIds) {
+                const e = allEntriesSorted.find((x: any) => x.id === id);
+                if (!e) continue;
+                selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+              }
+
+              const deltaAbs = bankAbs - selectedAbs;
+
+              return (
+                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold text-slate-900">Combined Match Summary</div>
+                    <div className="text-xs text-slate-500 tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Bank transaction</span>
+                      <span className={`tabular-nums ${bankAmt < 0n ? "text-red-700" : "text-slate-900"}`}>{formatUsdFromCents(bankAmt)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Selected entries</span>
+                      <span className="tabular-nums text-slate-900">{formatUsdFromCents(selectedAbs)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Remaining Δ</span>
+                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-emerald-700" : "text-amber-700"}`}>
+                        {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-1 text-[11px] text-slate-500">v1: select multiple entries until Remaining Δ is exactly 0. No manual amount input.</div>
+                </div>
+              );
+            })()}
 
             {matchError ? <div className="text-xs text-red-700 mb-2">{matchError}</div> : null}
+
+            {/* Suggested (top candidates) */}
+            {(() => {
+              const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+              if (!bank) return null;
+
+              const bankAmt = toBigIntSafe(bank.amount_cents);
+              const bankAbs = absBig(bankAmt);
+              const bankSign = bankAmt < 0n ? -1n : 1n;
+              const bankTime = bank?.posted_date ? new Date(bank.posted_date).getTime() : 0;
+
+              const q = matchSearch.trim().toLowerCase();
+
+              const ranked = allEntriesSorted
+                .filter((e: any) => {
+                  if (matchByEntryId.has(e.id)) return false;
+                  const entryAmt = toBigIntSafe(e.amount_cents);
+                  const entrySign = entryAmt < 0n ? -1n : 1n;
+                  if (entrySign !== bankSign) return false;
+
+                  if (!q) return true;
+                  const payee = (e.payee ?? "").toString().toLowerCase();
+                  const date = (e.date ?? "").toString().toLowerCase();
+                  return payee.includes(q) || date.includes(q);
+                })
+                .map((e: any) => {
+                  const entryAmt = toBigIntSafe(e.amount_cents);
+                  const entryAbs = absBig(entryAmt);
+                  const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+                  const dt = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
+                  const overlap = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
+                  const score = Number(diff) * 1_000_000 + dt - overlap * 50_000;
+                  return { e, score };
+                })
+                .sort((a: any, b: any) => a.score - b.score)
+                .map((x: any) => x.e);
+
+              const suggested = ranked.slice(0, 3);
+              if (suggested.length === 0) return null;
+
+              return (
+                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="text-[11px] font-semibold text-slate-600 mb-1">Suggested</div>
+                  <div className="flex flex-col gap-1">
+                    {suggested.map((e: any) => {
+                      const amt = toBigIntSafe(e.amount_cents);
+                      const selected = matchSelectedEntryIds.has(e.id);
+                      return (
+                        <button
+                          key={e.id}
+                          type="button"
+                          className={`w-full text-left h-10 px-2 rounded-md border ${
+                            selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                          } flex items-center justify-between gap-2`}
+                          onClick={() => {
+                            setMatchSelectedEntryIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(e.id)) next.delete(e.id);
+                              else next.add(e.id);
+                              return next;
+                            });
+                          }}
+                          title="Toggle suggested entry"
+                        >
+                          <span className="min-w-0 flex flex-col">
+                            <span className="truncate text-xs font-medium text-slate-800">{e.payee}</span>
+                            <span className="truncate text-[11px] text-slate-500">
+                              {(() => {
+                                const bankAbs = absBig(toBigIntSafe(bank.amount_cents));
+                                const entryAbs = absBig(toBigIntSafe(e.amount_cents));
+                                const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+                                const overlap = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
+                                return `Amount Δ ${formatUsdFromCents(diff)} • Text similarity ${overlap}`;
+                              })()}
+                            </span>
+                          </span>
+                          <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
+                            {formatUsdFromCents(amt)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 text-[11px] font-semibold text-slate-600">All eligible</div>
+                </div>
+              );
+            })()}
 
             <div className="rounded-md border border-slate-200 overflow-hidden">
               <div className="max-h-[44vh] overflow-y-auto">
                 <table className="w-full table-fixed border-collapse">
                   <colgroup>
+                    <col style={{ width: 36 }} />
                     <col style={{ width: 110 }} />
                     <col />
                     <col style={{ width: 140 }} />
                   </colgroup>
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                     <tr className="h-[28px]">
+                      <th className="px-2 text-xs font-semibold text-slate-600 text-left"></th>
                       <th className="px-2 text-xs font-semibold text-slate-600 text-left">DATE</th>
                       <th className="px-2 text-xs font-semibold text-slate-600 text-left">PAYEE</th>
                       <th className="px-2 text-xs font-semibold text-slate-600 text-right">AMOUNT</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {allEntriesSorted
-                      .filter((e: any) => {
-                        if (matchByEntryId.has(e.id)) return false; // v1 constraint
-                        const q = matchSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        const payee = (e.payee ?? "").toString().toLowerCase();
-                        const date = (e.date ?? "").toString().toLowerCase();
-                        return payee.includes(q) || date.includes(q);
-                      })
-                      .slice(0, 200)
-                      .map((e: any) => {
+                    {(() => {
+                      const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                      const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
+                      const bankAbs = absBig(bankAmt);
+                      const bankSign = bankAmt < 0n ? -1n : 1n;
+                      const bankTime = bank?.posted_date ? new Date(bank.posted_date).getTime() : 0;
+
+                      const q = matchSearch.trim().toLowerCase();
+
+                      const eligible = allEntriesSorted
+                        .filter((e: any) => {
+                          if (matchByEntryId.has(e.id)) return false;
+                          const entryAmt = toBigIntSafe(e.amount_cents);
+                          const entrySign = entryAmt < 0n ? -1n : 1n;
+                          if (entrySign !== bankSign) return false;
+
+                          if (!q) return true;
+                          const payee = (e.payee ?? "").toString().toLowerCase();
+                          const date = (e.date ?? "").toString().toLowerCase();
+                          return payee.includes(q) || date.includes(q);
+                        })
+                        .map((e: any) => {
+                          const entryAmt = toBigIntSafe(e.amount_cents);
+                          const entryAbs = absBig(entryAmt);
+                          const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+                          const dt = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
+                          const score = Number(diff) * 1_000_000 + dt;
+                          return { e, score };
+                        })
+                        .sort((a: any, b: any) => a.score - b.score)
+                        .slice(0, 200)
+                        .map((x: any) => x.e);
+
+                      return eligible.map((e: any) => {
                         const amt = toBigIntSafe(e.amount_cents);
-                        const selected = matchSelectedEntryId === e.id;
+                        const selected = matchSelectedEntryIds.has(e.id);
 
                         return (
                           <tr
                             key={e.id}
-                            className={`h-[30px] border-b border-slate-100 cursor-pointer ${
-                              selected ? "bg-emerald-50" : "hover:bg-slate-50"
-                            }`}
-                            onClick={() => setMatchSelectedEntryId(e.id)}
+                            className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-emerald-50" : "hover:bg-slate-50"}`}
+                            onClick={() => {
+                              setMatchSelectedEntryIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(e.id)) next.delete(e.id);
+                                else next.add(e.id);
+                                return next;
+                              });
+                            }}
                           >
+                            <td className="px-2">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => {
+                                  setMatchSelectedEntryIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(e.id)) next.delete(e.id);
+                                    else next.add(e.id);
+                                    return next;
+                                  });
+                                }}
+                                onClick={(ev) => ev.stopPropagation()}
+                                aria-label="Select entry"
+                                className="h-4 w-4"
+                              />
+                            </td>
                             <td className="px-2 text-xs text-slate-800">{e.date}</td>
                             <td className="px-2 text-xs text-slate-800 font-medium truncate">{e.payee}</td>
-                            <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
-                              {formatUsdFromCents(amt)}
-                            </td>
+                            <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
                           </tr>
                         );
-                      })}
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
 
+          {/* Footer (fixed) */}
           <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
               onClick={() => setOpenMatch(false)}
               disabled={matchBusy}
+              title="Cancel"
+              aria-label="Cancel"
             >
               Cancel
             </button>
 
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-              disabled={matchBusy || !matchBankTxnId || !matchSelectedEntryId}
+              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+              disabled={(() => {
+                if (matchBusy) return true;
+                if (!matchBankTxnId) return true;
+                if (matchSelectedEntryIds.size === 0) return true;
+
+                const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                const bankAbs = absBig(bank ? toBigIntSafe(bank.amount_cents) : 0n);
+
+                let selectedAbs = 0n;
+                for (const id of matchSelectedEntryIds) {
+                  const e = allEntriesSorted.find((x: any) => x.id === id);
+                  if (!e) continue;
+                  selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+                }
+                return bankAbs !== selectedAbs;
+              })()}
               onClick={async () => {
                 if (!selectedBusinessId || !selectedAccountId) return;
-                if (!matchBankTxnId || !matchSelectedEntryId) return;
+                if (!matchBankTxnId) return;
+
+                const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
+                const bankAbs = absBig(bankAmt);
+
+                let selectedAbs = 0n;
+                for (const id of matchSelectedEntryIds) {
+                  const e = allEntriesSorted.find((x: any) => x.id === id);
+                  if (!e) continue;
+                  selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+                }
+                if (selectedAbs !== bankAbs) {
+                  setMatchError("Select entries until Remaining Δ is exactly 0.");
+                  return;
+                }
 
                 setMatchBusy(true);
                 setMatchError(null);
                 try {
-                  const entry = allEntriesSorted.find((x: any) => x.id === matchSelectedEntryId);
-                  if (!entry) throw new Error("Entry not found");
+                  for (const entryId of matchSelectedEntryIds) {
+                    const entry = allEntriesSorted.find((x: any) => x.id === entryId);
+                    if (!entry) continue;
 
-                  const entryAmt = toBigIntSafe(entry.amount_cents);
-                  const sign = entryAmt < 0n ? -1n : 1n;
-
-                  let centsAbs: bigint;
-                  if (matchType === "FULL") {
-                    centsAbs = absBig(entryAmt);
-                  } else {
-                    const parsed = parseMoneyToAbsCents(matchAmount);
-                    if (parsed == null) throw new Error("Enter a valid partial amount");
-                    centsAbs = parsed;
-                    if (centsAbs <= 0n) throw new Error("Partial amount must be > 0");
-                    if (centsAbs >= absBig(entryAmt)) throw new Error("Partial must be less than full entry amount");
+                    await createMatch({
+                      businessId: selectedBusinessId,
+                      accountId: selectedAccountId,
+                      bankTransactionId: matchBankTxnId,
+                      entryId,
+                      matchType: "FULL",
+                      matchedAmountCents: String(entry.amount_cents),
+                    });
                   }
-
-                  const matchedSigned = (sign * centsAbs).toString();
-
-                  await createMatch({
-                    businessId: selectedBusinessId,
-                    accountId: selectedAccountId,
-                    bankTransactionId: matchBankTxnId,
-                    entryId: matchSelectedEntryId,
-                    matchType,
-                    matchedAmountCents: matchedSigned,
-                  });
 
                   const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
                   setMatches(m?.items ?? []);
+                  await entriesQ.refetch?.();
 
                   setOpenMatch(false);
                 } catch (e: any) {
@@ -957,20 +1227,20 @@ export default function ReconcilePageClient() {
                   setMatchBusy(false);
                 }
               }}
+              title={matchBusy ? "Matching…" : "Match selected entries (exact sum required)"}
+              aria-label="Match selected entries"
             >
-              {matchBusy ? "Matching…" : "Match"}
+              {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
             </button>
           </div>
         </div>
       </AppDialog>
 
-      {/* Phase 4D: Adjustment dialog */}
+      {/* Adjustment dialog */}
       <AppDialog open={openAdjust} onClose={() => setOpenAdjust(false)} title="Mark adjustment" size="md">
         <div className="flex flex-col max-h-[55vh]">
           <div className="flex-1 overflow-y-auto">
-            <div className="text-xs text-slate-600 mb-2">
-              Marking an entry as an adjustment is ledger-only and reversible later.
-            </div>
+            <div className="text-xs text-slate-600 mb-2">Marking an entry as an adjustment is ledger-only and reversible later.</div>
 
             <div className="mb-2">
               <label className="text-xs text-slate-600">Reason (required)</label>
@@ -987,16 +1257,18 @@ export default function ReconcilePageClient() {
           <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
               onClick={() => setOpenAdjust(false)}
               disabled={adjustBusy}
+              title="Cancel"
+              aria-label="Cancel"
             >
               Cancel
             </button>
 
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+              className="h-8 px-3 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
               disabled={adjustBusy || !adjustEntryId || !adjustReason.trim()}
               onClick={async () => {
                 if (!selectedBusinessId || !selectedAccountId) return;
@@ -1025,6 +1297,8 @@ export default function ReconcilePageClient() {
                   setAdjustBusy(false);
                 }
               }}
+              title={adjustBusy ? "Saving…" : "Mark adjustment"}
+              aria-label="Mark adjustment"
             >
               {adjustBusy ? "Saving…" : "Mark adjustment"}
             </button>
@@ -1032,13 +1306,209 @@ export default function ReconcilePageClient() {
         </div>
       </AppDialog>
 
+      {/* Entry → Bank match dialog */}
+      <AppDialog open={openEntryMatch} onClose={() => setOpenEntryMatch(false)} title="Match entry" size="lg">
+        <div className="flex flex-col max-h-[70vh]">
+          <div className="flex-1 overflow-y-auto pr-1">
+            <div className="text-xs text-slate-600 mb-2">
+              Select an eligible bank transaction (same sign; must have enough remaining; v1: entry matches at most one bank txn).
+            </div>
+
+            <div className="mb-2">
+              <input
+                className="h-8 w-full px-2 text-xs border border-slate-200 rounded-md"
+                placeholder="Search bank transactions…"
+                value={entryMatchSearch}
+                onChange={(e) => setEntryMatchSearch(e.target.value)}
+              />
+            </div>
+
+            {entryMatchError ? <div className="text-xs text-red-700 mb-2">{entryMatchError}</div> : null}
+
+            {/* Suggested (top candidates) */}
+            {(() => {
+              const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+              if (!entry) return null;
+
+              const entryAmt = toBigIntSafe(entry.amount_cents);
+              const entryAbs = absBig(entryAmt);
+              const entrySign = entryAmt < 0n ? -1n : 1n;
+
+              const q = entryMatchSearch.trim().toLowerCase();
+
+              const ranked = bankTxSorted
+                .filter((t: any) => {
+                  const bankAmt = toBigIntSafe(t.amount_cents);
+                  const bankSign = bankAmt < 0n ? -1n : 1n;
+                  if (bankSign !== entrySign) return false;
+
+                  const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+                  if (remaining < entryAbs) return false;
+
+                  if (!q) return true;
+                  const name = (t.name ?? "").toString().toLowerCase();
+                  const date = (t.posted_date ?? "").toString().toLowerCase();
+                  return name.includes(q) || date.includes(q);
+                })
+                .map((t: any) => {
+                  const bankAbs = absBig(toBigIntSafe(t.amount_cents));
+                  const diff = bankAbs > entryAbs ? bankAbs - entryAbs : entryAbs - bankAbs;
+                  const dt = Math.abs(new Date(t.posted_date).getTime() - new Date(`${entry.date}T00:00:00Z`).getTime());
+                  const score = Number(diff) * 1_000_000 + dt;
+                  return { t, score };
+                })
+                .sort((a: any, b: any) => a.score - b.score)
+                .map((x: any) => x.t);
+
+              const suggested = ranked.slice(0, 3);
+              if (suggested.length === 0) return null;
+
+              return (
+                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="text-[11px] font-semibold text-slate-600 mb-1">Suggested</div>
+                  <div className="flex flex-col gap-1">
+                    {suggested.map((t: any) => {
+                      const amt = toBigIntSafe(t.amount_cents);
+                      const selected = entryMatchSelectedBankTxnId === t.id;
+                      const dateStr = (() => {
+                        try {
+                          const d = new Date(t.posted_date);
+                          return d.toISOString().slice(0, 10);
+                        } catch {
+                          return String(t.posted_date ?? "");
+                        }
+                      })();
+
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`w-full text-left h-8 px-2 rounded-md border ${
+                            selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                          } flex items-center justify-between gap-2`}
+                          onClick={() => setEntryMatchSelectedBankTxnId(t.id)}
+                          title="Select suggested bank transaction"
+                        >
+                          <span className="truncate text-xs font-medium text-slate-800">{dateStr} • {t.name}</span>
+                          <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 text-[11px] font-semibold text-slate-600">All eligible</div>
+                </div>
+              );
+            })()}
+
+            <div className="rounded-md border border-slate-200 overflow-hidden">
+              <div className="max-h-[44vh] overflow-y-auto">
+                <table className="w-full table-fixed border-collapse">
+                  <colgroup>
+                    <col style={{ width: 110 }} />
+                    <col />
+                    <col style={{ width: 140 }} />
+                  </colgroup>
+                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                    <tr className="h-[28px]">
+                      <th className="px-2 text-xs font-semibold text-slate-600 text-left">DATE</th>
+                      <th className="px-2 text-xs font-semibold text-slate-600 text-left">DESCRIPTION</th>
+                      <th className="px-2 text-xs font-semibold text-slate-600 text-right">AMOUNT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+                      if (!entry) return null;
+
+                      const entryAmt = toBigIntSafe(entry.amount_cents);
+                      const entryAbs = absBig(entryAmt);
+                      const entrySign = entryAmt < 0n ? -1n : 1n;
+
+                      return bankTxSorted
+                        .filter((t: any) => {
+                          const q = entryMatchSearch.trim().toLowerCase();
+                          if (q) {
+                            const name = (t.name ?? "").toString().toLowerCase();
+                            const date = (t.posted_date ?? "").toString().toLowerCase();
+                            if (!name.includes(q) && !date.includes(q)) return false;
+                          }
+
+                          const bankAmt = toBigIntSafe(t.amount_cents);
+                          const bankSign = bankAmt < 0n ? -1n : 1n;
+                          if (bankSign !== entrySign) return false;
+
+                          const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+                          return remaining >= entryAbs;
+                        })
+                        .slice(0, 200)
+                        .map((t: any) => {
+                          const amt = toBigIntSafe(t.amount_cents);
+                          const selected = entryMatchSelectedBankTxnId === t.id;
+                          const dateStr = (() => {
+                            try {
+                              const d = new Date(t.posted_date);
+                              return d.toISOString().slice(0, 10);
+                            } catch {
+                              return String(t.posted_date ?? "");
+                            }
+                          })();
+
+                          return (
+                            <tr
+                              key={t.id}
+                              className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-emerald-50" : "hover:bg-slate-50"}`}
+                              onClick={() => setEntryMatchSelectedBankTxnId(t.id)}
+                            >
+                              <td className="px-2 text-xs text-slate-800">{dateStr}</td>
+                              <td className="px-2 text-xs text-slate-800 font-medium truncate">{t.name}</td>
+                              <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
+                            </tr>
+                          );
+                        });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
+            <button
+              type="button"
+              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+              onClick={() => setOpenEntryMatch(false)}
+              disabled={entryMatchBusy}
+              title="Cancel"
+              aria-label="Cancel"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+              disabled={entryMatchBusy || !entryMatchEntryId || !entryMatchSelectedBankTxnId}
+              title="Continue"
+              aria-label="Continue"
+              onClick={() => {
+                if (!entryMatchEntryId || !entryMatchSelectedBankTxnId) return;
+
+                setMatchBankTxnId(entryMatchSelectedBankTxnId);
+                setMatchSearch("");
+                setMatchError(null);
+                setMatchSelectedEntryIds(() => new Set([entryMatchEntryId]));
+                setOpenEntryMatch(false);
+                setOpenMatch(true);
+              }}
+            >
+              {entryMatchBusy ? "Loading…" : "Continue"}
+            </button>
+          </div>
+        </div>
+      </AppDialog>
+
       {/* Statement history dialog */}
-      <AppDialog
-        open={openStatementHistory}
-        onClose={() => setOpenStatementHistory(false)}
-        title="Statement history"
-        size="lg"
-      >
+      <AppDialog open={openStatementHistory} onClose={() => setOpenStatementHistory(false)} title="Statement history" size="lg">
         <UploadsList
           title="Bank statement history"
           businessId={selectedBusinessId ?? ""}

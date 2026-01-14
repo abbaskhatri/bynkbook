@@ -2685,14 +2685,6 @@ const filterRight = null;
   </div>
 </AppDialog>
 
-<UploadsList
-  title="Recent uploads"
-  businessId={selectedBusinessId ?? ""}
-  accountId={selectedAccountId ?? undefined}
-  type="RECEIPT,INVOICE"
-  limit={10}
-/>
-
 <UploadPanel
         open={openUpload}
         onClose={() => setOpenUpload(false)}
