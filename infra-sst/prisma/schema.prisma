@@ -19,6 +19,7 @@ model Business {
   bankConnections  BankConnection[]
   bankTransactions BankTransaction[]
   bankMatches      BankMatch[]
+  reconcileSnapshots ReconcileSnapshot[]
 
   @@index([owner_user_id], map: "idx_business_owner_user_id")
   @@map("business")
@@ -54,6 +55,7 @@ model Account {
   bankConnections       BankConnection[]
   bankTransactions      BankTransaction[]
   bankMatches           BankMatch[]
+  reconcileSnapshots    ReconcileSnapshot[]
 
   @@index([business_id, archived_at], map: "idx_account_business_archived")
   @@index([business_id, name], map: "idx_account_business_name")
@@ -244,4 +246,43 @@ model BankMatch {
   @@index([business_id, account_id, entry_id], map: "i_bank_match_entry")
   @@index([business_id, account_id, voided_at], map: "i_bank_match_voided")
   @@map("bank_match")
+}
+
+model ReconcileSnapshot {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+  month       String // YYYY-MM
+
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  created_by_user_id String
+
+  // Summary counts
+  bank_unmatched_count   Int @default(0)
+  bank_partial_count     Int @default(0)
+  bank_matched_count     Int @default(0)
+  entries_expected_count Int @default(0)
+  entries_matched_count  Int @default(0)
+  revert_count           Int @default(0)
+
+  // Totals
+  remaining_abs_cents BigInt @default(0)
+
+  // Export artifacts (S3 pointers)
+  bank_csv_s3_key    String
+  matches_csv_s3_key String
+  audit_csv_s3_key   String
+
+  // Optional integrity hashes
+  bank_csv_sha256    String?
+  matches_csv_sha256 String?
+  audit_csv_sha256   String?
+
+  // Relations
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, account_id, month], map: "u_reconcile_snapshot_scope_month")
+  @@index([business_id, account_id, created_at(sort: Desc)], map: "i_reconcile_snapshot_scope_created")
+  @@map("reconcile_snapshot")
 }

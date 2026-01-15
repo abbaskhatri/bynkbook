@@ -41,6 +41,12 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
+// Phase 6A: deny-by-default write permissions
+function canWrite(role: string | null) {
+  const r = (role ?? "").toString().trim().toUpperCase();
+  return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+}
+
 export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
@@ -194,6 +200,9 @@ export async function handler(event: any) {
 
   // POST /entries/{entryId}/mark-adjustment (Phase 4D v1)
   if (method === "POST" && ent && path?.endsWith("/mark-adjustment")) {
+    // Phase 6A: enforce write permission (deny-by-default)
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};

@@ -30,8 +30,15 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
+// Phase 6A: deny-by-default write permissions
+function canWrite(role: string | null) {
+  const r = (role ?? "").toString().trim().toUpperCase();
+  return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+}
+
 function parseLimit(q: any) {
   const raw = (q?.limit ?? "").toString().trim();
+
   const n = raw ? Number(raw) : 200;
   if (!Number.isFinite(n) || n <= 0) return 200;
   return Math.min(Math.max(Math.floor(n), 1), 500);
@@ -76,6 +83,9 @@ export async function handler(event: any) {
   const bankTransactionId = (event?.pathParameters?.bankTransactionId ?? "").toString().trim();
 
   if (method === "POST" && bankTransactionId) {
+    // Phase 6A: enforce write permission (deny-by-default)
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
     // Void all active matches for this bank txn in this scope
     const now = new Date();
 

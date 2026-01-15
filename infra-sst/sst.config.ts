@@ -240,6 +240,55 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/matches", match
 // List active matches (Phase 4D v1)
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/matches", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Reconcile Snapshots (Phase 6B) ----------
+const reconcileSnapshotsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/reconcileSnapshots.handler",
+  environment: {
+    ...bizHandler.environment,
+    UPLOADS_BUCKET_NAME: "ledrigo-dev-uploads-116846786465-us-east-1",
+  },
+  permissions: [
+    ...(bizHandler as any).permissions,
+
+    // S3 least-privilege: only our private business prefix
+    {
+      actions: ["s3:PutObject", "s3:GetObject"],
+      resources: ["arn:aws:s3:::ledrigo-dev-uploads-116846786465-us-east-1/private/biz/*"],
+    },
+
+    // KMS scoped to key ARN (SSE-KMS)
+    {
+      actions: ["kms:Encrypt", "kms:GenerateDataKey", "kms:DescribeKey", "kms:Decrypt"],
+      resources: ["arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36"],
+    },
+  ],
+} satisfies ApiHandler;
+
+api.route(
+  "GET /v1/businesses/{businessId}/accounts/{accountId}/reconcile-snapshots",
+  reconcileSnapshotsHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/reconcile-snapshots",
+  reconcileSnapshotsHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "GET /v1/businesses/{businessId}/accounts/{accountId}/reconcile-snapshots/{snapshotId}",
+  reconcileSnapshotsHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "GET /v1/businesses/{businessId}/accounts/{accountId}/reconcile-snapshots/{snapshotId}/exports/{kind}",
+  reconcileSnapshotsHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
 // Phase 4D v1: VOID matches for a bank transaction (audit safe)
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/{bankTransactionId}/unmatch", bankTxHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
