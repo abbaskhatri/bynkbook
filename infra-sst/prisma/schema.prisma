@@ -20,13 +20,14 @@ model Business {
   bankTransactions BankTransaction[]
   bankMatches      BankMatch[]
   reconcileSnapshots ReconcileSnapshot[]
+  invites          BusinessInvite[]
 
   @@index([owner_user_id], map: "idx_business_owner_user_id")
   @@map("business")
 }
 
 model UserBusinessRole {
-  id          String   @id @db.Uuid
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   business_id String   @db.Uuid
   user_id     String
   role        String
@@ -285,4 +286,36 @@ model ReconcileSnapshot {
   @@unique([business_id, account_id, month], map: "u_reconcile_snapshot_scope_month")
   @@index([business_id, account_id, created_at(sort: Desc)], map: "i_reconcile_snapshot_scope_created")
   @@map("reconcile_snapshot")
+}
+
+model BusinessInvite {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+
+  // Normalized lowercase email
+  email String
+
+  // Strict allowlist role (enforced in handler)
+  role String
+
+  // Unique accept token
+  token String @unique
+
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  created_by_user_id String
+
+  expires_at DateTime @db.Timestamptz(6)
+
+  accepted_at         DateTime? @db.Timestamptz(6)
+  accepted_by_user_id String?
+
+  // Idempotent revoke (no delete)
+  revoked_at         DateTime? @db.Timestamptz(6)
+  revoked_by_user_id String?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([business_id, created_at(sort: Desc)], map: "i_business_invite_scope_created")
+  @@index([business_id, email], map: "i_business_invite_scope_email")
+  @@map("business_invite")
 }

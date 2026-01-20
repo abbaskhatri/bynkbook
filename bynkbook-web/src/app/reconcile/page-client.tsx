@@ -261,25 +261,48 @@ export default function ReconcilePageClient() {
   const [revertBusy, setRevertBusy] = useState(false);
   const [revertError, setRevertError] = useState<string | null>(null);
 
-    // Phase 6B: Reconcile snapshots
+  // Phase 6B: Reconcile snapshots
   const [openSnapshots, setOpenSnapshots] = useState(false);
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [snapshots, setSnapshots] = useState<ReconcileSnapshotListItem[]>([]);
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null);
 
+  // Default month must be America/Chicago
   const [snapshotMonth, setSnapshotMonth] = useState(() => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      year: "numeric",
+      month: "2-digit",
+    }).formatToParts(new Date());
+
+    const yyyy = parts.find((p) => p.type === "year")?.value ?? String(new Date().getFullYear());
+    const mm = parts.find((p) => p.type === "month")?.value ?? String(new Date().getMonth() + 1).padStart(2, "0");
     return `${yyyy}-${mm}`;
   });
+
   const [snapshotCreateBusy, setSnapshotCreateBusy] = useState(false);
   const [snapshotCreateError, setSnapshotCreateError] = useState<string | null>(null);
+
+  // 409 "already exists" must be neutral info (not error) + provide View action
+  const [snapshotExistsInfo, setSnapshotExistsInfo] = useState<{ month: string; snapshotId: string } | null>(null);
 
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshot, setSnapshot] = useState<ReconcileSnapshot | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
+
+  // Disable Create when selected month already exists in list
+  const existingSnapshotForMonth = useMemo(() => {
+    return snapshots.find((s) => s.month === snapshotMonth) ?? null;
+  }, [snapshots, snapshotMonth]);
+
+  const monthAlreadyExists = !!existingSnapshotForMonth?.id;
+
+  // Clear the "exists" info banner whenever month changes
+  useEffect(() => {
+    setSnapshotExistsInfo(null);
+    setSnapshotCreateError(null);
+  }, [snapshotMonth]);
 
   // Phase 4D: Match dialog (bank txn → many entries, v1)
   const [openMatch, setOpenMatch] = useState(false);
@@ -1949,22 +1972,57 @@ export default function ReconcilePageClient() {
                         ? "border-slate-200 bg-white hover:bg-slate-50"
                         : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
                     }`}
-                    disabled={!canWriteSnapshots || snapshotCreateBusy}
-                    title={!canWriteSnapshots ? noPermTitle : "Create snapshot"}
+                    disabled={!canWriteSnapshots || snapshotCreateBusy || monthAlreadyExists}
+                    title={
+                      !canWriteSnapshots
+                        ? noPermTitle
+                        : monthAlreadyExists
+                          ? "Snapshot already exists for that month"
+                          : "Create snapshot"
+                    }
                     onClick={async () => {
                       if (!selectedBusinessId || !selectedAccountId) return;
+
+                      // If month exists, no API call — just select and show details
+                      if (monthAlreadyExists && existingSnapshotForMonth?.id) {
+                        setSelectedSnapshotId(existingSnapshotForMonth.id);
+                        setSnapshotExistsInfo({ month: snapshotMonth, snapshotId: existingSnapshotForMonth.id });
+                        return;
+                      }
+
                       setSnapshotCreateBusy(true);
                       setSnapshotCreateError(null);
+                      setSnapshotExistsInfo(null);
+
                       try {
                         const created = await createReconcileSnapshot(selectedBusinessId, selectedAccountId, snapshotMonth);
                         const items = await listReconcileSnapshots(selectedBusinessId, selectedAccountId);
                         setSnapshots(items ?? []);
-                        setSelectedSnapshotId(created?.id ?? null);
+                        if (created?.id) setSelectedSnapshotId(created.id);
                       } catch (e: any) {
-                        // If your apiFetch throws "API 409: <json>", keep this resilient
                         const msg = e?.message ?? "Failed to create snapshot";
+
+                        // 409 is expected: set neutral info + auto-select existing snapshot id
+                        let existingId: string | null = null;
+                        try {
+                          if (typeof msg === "string") {
+                            // apiFetch often throws "API 409: { ...json... }"
+                            const m = msg.match(/\bAPI\s+409:\s*(\{.*\})\s*$/s);
+                            if (m?.[1]) {
+                              const payload = JSON.parse(m[1]);
+                              existingId = payload?.snapshot?.id ?? null;
+                            }
+                          }
+                        } catch {
+                          // ignore parse errors
+                        }
+
+                        // Fallback: use list-derived id for the current month (if present)
+                        if (!existingId) existingId = existingSnapshotForMonth?.id ?? null;
+
                         if (typeof msg === "string" && msg.includes("409")) {
-                          setSnapshotCreateError("Snapshot already exists for that month.");
+                          if (existingId) setSelectedSnapshotId(existingId);
+                          setSnapshotExistsInfo({ month: snapshotMonth, snapshotId: existingId ?? "" });
                         } else {
                           setSnapshotCreateError(msg);
                         }
@@ -1973,9 +2031,32 @@ export default function ReconcilePageClient() {
                       }
                     }}
                   >
-                    {snapshotCreateBusy ? "Creating…" : "Create"}
+                    {monthAlreadyExists ? "Exists" : snapshotCreateBusy ? "Creating…" : "Create"}
                   </button>
                 </div>
+
+                {/* Neutral info banner when snapshot exists */}
+                {monthAlreadyExists || snapshotExistsInfo ? (
+                  <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
+                    <div className="text-xs text-slate-700">
+                      Snapshot already exists for <span className="font-semibold">{snapshotMonth}</span>.
+                    </div>
+
+                    <button
+                      type="button"
+                      className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      title="View snapshot"
+                      onClick={() => {
+                        const id = (snapshotExistsInfo?.snapshotId || existingSnapshotForMonth?.id || "").trim();
+                        if (!id) return;
+                        setSelectedSnapshotId(id);
+                      }}
+                      disabled={!((snapshotExistsInfo?.snapshotId || existingSnapshotForMonth?.id || "").trim())}
+                    >
+                      View
+                    </button>
+                  </div>
+                ) : null}
 
                 {snapshotCreateError ? <div className="mt-2 text-xs text-red-700">{snapshotCreateError}</div> : null}
               </div>

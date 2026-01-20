@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { createAccount, type Account, type AccountType } from "@/lib/api/accounts";
+import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -104,6 +105,27 @@ export default function SettingsPageClient() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Team (Phase 6C)
+  const selectedBusinessRole = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    const row = list.find((b) => b.id === selectedBusinessId);
+    return String(row?.role ?? "").toUpperCase();
+  }, [businessesQ.data, selectedBusinessId]);
+
+  const canWriteTeam = useMemo(() => ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(selectedBusinessRole), [selectedBusinessRole]);
+  const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBusinessRole]);
+
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamInvites, setTeamInvites] = useState<TeamInvite[]>([]);
+
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("MEMBER");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("CHECKING");
@@ -244,6 +266,35 @@ export default function SettingsPageClient() {
     }
   }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
 
+  // Load team data when Team tab is active
+  useEffect(() => {
+    const tab = sp.get("tab") || "business";
+    if (tab !== "team") return;
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+
+    let cancelled = false;
+    (async () => {
+      setTeamLoading(true);
+      setTeamError(null);
+      try {
+        const res = await getTeam(selectedBusinessId);
+        if (!cancelled) {
+          setTeamMembers(res.members ?? []);
+          setTeamInvites(res.invites ?? []);
+        }
+      } catch (e: any) {
+        if (!cancelled) setTeamError(e?.message ?? "Failed to load team");
+      } finally {
+        if (!cancelled) setTeamLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sp, authReady, selectedBusinessId]);
+
   async function onSignOut() {
     await signOut();
     router.replace("/login");
@@ -272,6 +323,7 @@ export default function SettingsPageClient() {
           <div className="flex gap-2 text-sm">
             {[
               { key: "business", label: "Business Profile" },
+              { key: "team", label: "Team" },
               { key: "bookkeeping", label: "Bookkeeping" },
               { key: "accounts", label: "Accounts" },
               { key: "ai", label: "AI & Automation" },
@@ -304,6 +356,261 @@ export default function SettingsPageClient() {
       {(() => {
         const rawTab = sp.get("tab") || "business";
         const tab = rawTab === "categories" ? "bookkeeping" : rawTab;
+
+        if (tab === "team") {
+          const noPerm = "Insufficient permissions";
+
+          return (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader className="space-y-0 pb-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <CardTitle>Team</CardTitle>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Manage members, roles, and pending invites.
+                      </div>
+                    </div>
+
+                    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                      Role: {selectedBusinessRole || "—"}
+                    </span>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  {/* Invite */}
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-medium text-slate-800">Invite member</div>
+                    <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <div className="md:col-span-2">
+                        <Label className="text-[11px]">Email</Label>
+                        <Input className="h-7" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" />
+                      </div>
+                      <div>
+                        <Label className="text-[11px]">Role</Label>
+                        <Select value={inviteRole} onValueChange={(v) => setInviteRole(v)}>
+                          <SelectTrigger className="h-7">
+                            <SelectValue placeholder="Select role" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="MEMBER">Member</SelectItem>
+                            <SelectItem value="ACCOUNTANT">Accountant</SelectItem>
+                            <SelectItem value="BOOKKEEPER">Bookkeeper</SelectItem>
+                            <SelectItem value="ADMIN">Admin</SelectItem>
+                            <SelectItem value="OWNER" disabled={!isOwnerRole}>Owner</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          if (!selectedBusinessId) return;
+                          setInviteBusy(true);
+                          setInviteMsg(null);
+                          setInviteToken(null);
+                          try {
+                            const inv = await createInvite(selectedBusinessId, inviteEmail, inviteRole);
+                            setInviteToken(inv?.token ?? null);
+                            setInviteMsg("Invite created.");
+                            const res = await getTeam(selectedBusinessId);
+                            setTeamMembers(res.members ?? []);
+                            setTeamInvites(res.invites ?? []);
+                          } catch (e: any) {
+                            const msg = e?.message ?? "Failed to create invite";
+                            setInviteMsg(msg);
+                          } finally {
+                            setInviteBusy(false);
+                          }
+                        }}
+                        disabled={!canWriteTeam || inviteBusy || !inviteEmail.trim()}
+                        title={!canWriteTeam ? noPerm : "Create invite"}
+                      >
+                        {inviteBusy ? "Creating…" : "Create invite"}
+                      </Button>
+
+                      {inviteToken ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const url = `${window.location.origin}/accept-invite?token=${encodeURIComponent(inviteToken)}`;
+                            navigator.clipboard.writeText(url);
+                            setInviteMsg("Invite link copied.");
+                          }}
+                        >
+                          Copy invite link
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    {inviteToken ? (
+                      <div className="mt-2 text-[11px] text-slate-600 break-all">
+                        Link: {`${typeof window !== "undefined" ? window.location.origin : ""}/accept-invite?token=${inviteToken}`}
+                      </div>
+                    ) : null}
+
+                    {inviteMsg ? (
+                      <div className="mt-2 text-xs text-slate-700">{inviteMsg}</div>
+                    ) : null}
+                  </div>
+
+                  {/* Pending invites */}
+                  <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                      <div className="text-xs font-medium text-slate-700">Pending invites</div>
+                    </div>
+
+                    {teamLoading ? (
+                      <div className="p-3"><Skeleton className="h-20 w-full" /></div>
+                    ) : teamError ? (
+                      <div className="p-3 text-xs text-red-600">{teamError}</div>
+                    ) : teamInvites.length === 0 ? (
+                      <div className="p-3 text-xs text-muted-foreground">No pending invites.</div>
+                    ) : (
+                      <Table>
+                        <THead className="bg-slate-50">
+                          <TableRow className="hover:bg-slate-50">
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Email</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Role</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Expires</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
+                          </TableRow>
+                        </THead>
+                        <TableBody>
+                          {teamInvites.map((i) => (
+                            <TableRow key={i.id} className="hover:bg-slate-50">
+                              <TableCell className="py-2 font-medium text-slate-900">{i.email}</TableCell>
+                              <TableCell className="py-2 text-slate-700">{i.role}</TableCell>
+                              <TableCell className="py-2 text-slate-700">{formatShortDate(i.expires_at)}</TableCell>
+                              <TableCell className="py-2 text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      const url = `${window.location.origin}/accept-invite?token=${encodeURIComponent((i as any).token ?? "")}`;
+                                      if ((i as any).token) navigator.clipboard.writeText(url);
+                                    }}
+                                    disabled={!canWriteTeam || !(i as any).token}
+                                    title={!canWriteTeam ? noPerm : "Copy link (token returned on create only)"}
+                                  >
+                                    Copy
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      if (!selectedBusinessId) return;
+                                      await revokeInvite(selectedBusinessId, i.id);
+                                      const res = await getTeam(selectedBusinessId);
+                                      setTeamMembers(res.members ?? []);
+                                      setTeamInvites(res.invites ?? []);
+                                    }}
+                                    disabled={!canWriteTeam}
+                                    title={!canWriteTeam ? noPerm : "Revoke invite"}
+                                  >
+                                    Revoke
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+
+                  {/* Members */}
+                  <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                      <div className="text-xs font-medium text-slate-700">Members</div>
+                    </div>
+
+                    {teamLoading ? (
+                      <div className="p-3"><Skeleton className="h-20 w-full" /></div>
+                    ) : teamError ? (
+                      <div className="p-3 text-xs text-red-600">{teamError}</div>
+                    ) : (
+                      <Table>
+                        <THead className="bg-slate-50">
+                          <TableRow className="hover:bg-slate-50">
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">User</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Role</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Added</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
+                          </TableRow>
+                        </THead>
+                        <TableBody>
+                          {teamMembers.map((m) => {
+                            const targetIsOwner = String(m.role).toUpperCase() === "OWNER";
+                            const disableOwnerActions = targetIsOwner && !isOwnerRole;
+
+                            return (
+                              <TableRow key={m.user_id} className="hover:bg-slate-50">
+                                <TableCell className="py-2 font-medium text-slate-900">{m.user_id}</TableCell>
+                                <TableCell className="py-2 text-slate-700">
+                                  <Select
+                                    value={m.role}
+                                    onValueChange={async (v) => {
+                                      if (!selectedBusinessId) return;
+                                      await updateMemberRole(selectedBusinessId, m.user_id, v);
+                                      const res = await getTeam(selectedBusinessId);
+                                      setTeamMembers(res.members ?? []);
+                                      setTeamInvites(res.invites ?? []);
+                                    }}
+                                    disabled={!canWriteTeam || disableOwnerActions}
+                                  >
+                                    <SelectTrigger className="h-7 w-40" title={!canWriteTeam ? noPerm : disableOwnerActions ? "Only OWNER can change an OWNER" : "Change role"}>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="MEMBER">Member</SelectItem>
+                                      <SelectItem value="ACCOUNTANT">Accountant</SelectItem>
+                                      <SelectItem value="BOOKKEEPER">Bookkeeper</SelectItem>
+                                      <SelectItem value="ADMIN">Admin</SelectItem>
+                                      <SelectItem value="OWNER" disabled={!isOwnerRole}>Owner</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell className="py-2 text-slate-700">{formatShortDate(m.created_at)}</TableCell>
+                                <TableCell className="py-2 text-right">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      if (!selectedBusinessId) return;
+                                      await removeMember(selectedBusinessId, m.user_id);
+                                      const res = await getTeam(selectedBusinessId);
+                                      setTeamMembers(res.members ?? []);
+                                      setTeamInvites(res.invites ?? []);
+                                    }}
+                                    disabled={!canWriteTeam || disableOwnerActions}
+                                    title={!canWriteTeam ? noPerm : disableOwnerActions ? "Only OWNER can remove an OWNER" : "Remove member"}
+                                  >
+                                    Remove
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+
+                  <div className="text-[11px] text-muted-foreground">
+                    Guardrails: last OWNER cannot be removed/downgraded; only OWNER can promote/remove an OWNER.
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          );
+        }
 
         if (tab === "accounts") {
           return (

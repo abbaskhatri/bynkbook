@@ -240,6 +240,36 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/matches", match
 // List active matches (Phase 4D v1)
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/matches", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Team & Roles (Phase 6C) ----------
+const teamHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/team.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/team", teamHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("POST /v1/businesses/{businessId}/team/invites", teamHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route(
+  "POST /v1/businesses/{businessId}/team/invites/{inviteId}/revoke",
+  teamHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "PATCH /v1/businesses/{businessId}/team/members/{userId}",
+  teamHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "DELETE /v1/businesses/{businessId}/team/members/{userId}",
+  teamHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route("POST /v1/team/invites/accept", teamHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // ---------- Reconcile Snapshots (Phase 6B) ----------
 const reconcileSnapshotsHandler = {
   ...bizHandler,
