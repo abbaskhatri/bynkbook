@@ -9,6 +9,7 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { createAccount, type Account, type AccountType } from "@/lib/api/accounts";
 import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
+import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow } from "@/components/ui/table";
 import { Settings, Pencil, Archive, Trash2 } from "lucide-react";
+import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 
 function todayYmd() {
   const d = new Date();
@@ -126,6 +128,19 @@ export default function SettingsPageClient() {
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteMsg, setInviteMsg] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
+
+  // Standard control sizing for Settings: use shared tokens (inputH7 / selectTriggerClass)
+
+  // Team sub-tab
+  const [teamSubTab, setTeamSubTab] = useState<"members" | "roles">("members");
+
+  // Role Policies (store-only, not enforced yet)
+  const [polLoading, setPolLoading] = useState(false);
+  const [polError, setPolError] = useState<string | null>(null);
+  const [polMsg, setPolMsg] = useState<string | null>(null);
+  const [polRows, setPolRows] = useState<RolePolicyRow[]>([]);
+  const [polDraft, setPolDraft] = useState<Record<string, Record<string, string>>>({});
+  const [polSaving, setPolSaving] = useState(false);
 
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("CHECKING");
@@ -295,6 +310,64 @@ export default function SettingsPageClient() {
     };
   }, [sp, authReady, selectedBusinessId]);
 
+  // Load role policies when in Team → Roles & Permissions
+  useEffect(() => {
+    const tab = sp.get("tab") || "business";
+    if (tab !== "team") return;
+    if (teamSubTab !== "roles") return;
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+
+    let cancelled = false;
+    (async () => {
+      setPolLoading(true);
+      setPolError(null);
+      setPolMsg(null);
+      try {
+        const res: any = await getRolePolicies(selectedBusinessId);
+        const items: RolePolicyRow[] = res?.items ?? [];
+        if (!cancelled) {
+          setPolRows(items);
+
+          // Build draft with defaults for missing roles
+          const roles = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"];
+          const keys = [
+            "dashboard",
+            "ledger",
+            "reconcile",
+            "issues",
+            "vendors",
+            "invoices",
+            "reports",
+            "settings",
+            "bank_connections",
+            "team_management",
+            "billing",
+            "ai_automation",
+          ];
+
+          const byRole: Record<string, Record<string, string>> = {};
+          for (const r of roles) {
+            const row = items.find((x) => String(x.role).toUpperCase() === r);
+            const cur = (row?.policy_json ?? {}) as Record<string, string>;
+            const filled: Record<string, string> = {};
+            for (const k of keys) filled[k] = String(cur[k] ?? "NONE").toUpperCase();
+            byRole[r] = filled;
+          }
+          setPolDraft(byRole);
+        }
+      } catch (e: any) {
+        if (!cancelled) setPolError(e?.message ?? "Failed to load role policies");
+      } finally {
+        if (!cancelled) setPolLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sp, teamSubTab, authReady, selectedBusinessId]);
+
   async function onSignOut() {
     await signOut();
     router.replace("/login");
@@ -379,18 +452,49 @@ export default function SettingsPageClient() {
                 </CardHeader>
 
                 <CardContent className="space-y-4">
-                  {/* Invite */}
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  {/* Team sub-tabs */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={`h-7 px-3 rounded-md text-xs font-medium transition ${
+                          teamSubTab === "members" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                        }`}
+                        onClick={() => setTeamSubTab("members")}
+                      >
+                        Team Members
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`h-7 px-3 rounded-md text-xs font-medium transition ${
+                          teamSubTab === "roles" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                        }`}
+                        onClick={() => setTeamSubTab("roles")}
+                      >
+                        Roles & Permissions
+                      </button>
+                    </div>
+
+                    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                      Not enforced yet
+                    </span>
+                  </div>
+
+                  {teamSubTab === "members" ? (
+                    <>
+                      {/* Invite */}
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
                     <div className="text-xs font-medium text-slate-800">Invite member</div>
                     <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
                       <div className="md:col-span-2">
                         <Label className="text-[11px]">Email</Label>
-                        <Input className="h-7" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" />
+                        <Input className={inputH7} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" />
                       </div>
                       <div>
                         <Label className="text-[11px]">Role</Label>
                         <Select value={inviteRole} onValueChange={(v) => setInviteRole(v)}>
-                          <SelectTrigger className="h-7">
+                          <SelectTrigger className={selectTriggerClass}>
                             <SelectValue placeholder="Select role" />
                           </SelectTrigger>
                           <SelectContent>
@@ -406,7 +510,7 @@ export default function SettingsPageClient() {
 
                     <div className="mt-2 flex items-center gap-2">
                       <Button
-                        size="sm"
+                        className="h-7 px-2 text-xs"
                         onClick={async () => {
                           if (!selectedBusinessId) return;
                           setInviteBusy(true);
@@ -434,7 +538,7 @@ export default function SettingsPageClient() {
 
                       {inviteToken ? (
                         <Button
-                          size="sm"
+                          className="h-7 px-2 text-xs"
                           variant="outline"
                           onClick={() => {
                             const url = `${window.location.origin}/accept-invite?token=${encodeURIComponent(inviteToken)}`;
@@ -565,7 +669,10 @@ export default function SettingsPageClient() {
                                     }}
                                     disabled={!canWriteTeam || disableOwnerActions}
                                   >
-                                    <SelectTrigger className="h-7 w-40" title={!canWriteTeam ? noPerm : disableOwnerActions ? "Only OWNER can change an OWNER" : "Change role"}>
+                                    <SelectTrigger
+                                      className={`${selectTriggerClass} w-40`}
+                                      title={!canWriteTeam ? noPerm : disableOwnerActions ? "Only OWNER can change an OWNER" : "Change role"}
+                                    >
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -580,7 +687,7 @@ export default function SettingsPageClient() {
                                 <TableCell className="py-2 text-slate-700">{formatShortDate(m.created_at)}</TableCell>
                                 <TableCell className="py-2 text-right">
                                   <Button
-                                    size="sm"
+                                    className="h-7 px-2 text-xs"
                                     variant="outline"
                                     onClick={async () => {
                                       if (!selectedBusinessId) return;
@@ -603,9 +710,128 @@ export default function SettingsPageClient() {
                     )}
                   </div>
 
-                  <div className="text-[11px] text-muted-foreground">
-                    Guardrails: last OWNER cannot be removed/downgraded; only OWNER can promote/remove an OWNER.
-                  </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Guardrails: last OWNER cannot be removed/downgraded; only OWNER can promote/remove an OWNER.
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-medium text-slate-800">Roles & Permissions</div>
+                            <div className="text-[11px] text-muted-foreground">
+                              Store-only. These settings are not enforced yet.
+                            </div>
+                          </div>
+
+                          <Button
+                            className="h-7 px-3 text-xs"
+                            disabled={!isOwnerRole || polSaving || polLoading || !selectedBusinessId}
+                            title={!isOwnerRole ? "Only OWNER can edit/save" : "Save role policies"}
+                            onClick={async () => {
+                              if (!selectedBusinessId) return;
+                              setPolSaving(true);
+                              setPolMsg(null);
+                              setPolError(null);
+                              try {
+                                // Save each role’s policy_json
+                                const roles = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"];
+                                for (const r of roles) {
+                                  await upsertRolePolicy(selectedBusinessId, r, polDraft[r] ?? {});
+                                }
+                                setPolMsg("Saved. (Not enforced yet)");
+                              } catch (e: any) {
+                                setPolError(e?.message ?? "Failed to save");
+                              } finally {
+                                setPolSaving(false);
+                              }
+                            }}
+                          >
+                            {polSaving ? "Saving…" : "Save"}
+                          </Button>
+                        </div>
+
+                        {polLoading ? <div className="mt-3"><Skeleton className="h-20 w-full" /></div> : null}
+                        {polError ? <div className="mt-3 text-xs text-red-600">{polError}</div> : null}
+                        {polMsg ? <div className="mt-3 text-xs text-slate-700">{polMsg}</div> : null}
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                        <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                          <div className="text-xs font-medium text-slate-700">Permissions matrix (store-only)</div>
+                        </div>
+
+                        <Table>
+                          <THead className="bg-slate-50">
+                            <TableRow className="hover:bg-slate-50">
+                              <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Feature</TableHead>
+                              {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => (
+                                <TableHead key={r} className="text-[11px] uppercase tracking-wide text-slate-500 text-center">
+                                  {r}
+                                </TableHead>
+                              ))}
+                            </TableRow>
+                          </THead>
+
+                          <TableBody>
+                            {[
+                              ["dashboard", "Dashboard"],
+                              ["ledger", "Ledger"],
+                              ["reconcile", "Reconcile"],
+                              ["issues", "Issues"],
+                              ["vendors", "Vendors"],
+                              ["invoices", "Invoices"],
+                              ["reports", "Reports"],
+                              ["settings", "Settings"],
+                              ["bank_connections", "Bank Connections"],
+                              ["team_management", "Team Management"],
+                              ["billing", "Billing"],
+                              ["ai_automation", "AI & Automation"],
+                            ].map(([key, label]) => (
+                              <TableRow key={key} className="hover:bg-slate-50">
+                                <TableCell className="py-2 font-medium text-slate-900">{label}</TableCell>
+
+                                {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => {
+                                  const value = polDraft?.[r]?.[key] ?? "NONE";
+                                  return (
+                                    <TableCell key={r} className="py-2 text-center">
+                                      <Select
+                                        value={value}
+                                        onValueChange={(v) =>
+                                          setPolDraft((cur) => ({
+                                            ...cur,
+                                            [r]: { ...(cur[r] ?? {}), [key]: v },
+                                          }))
+                                        }
+                                        disabled={!isOwnerRole}
+                                      >
+                                        <SelectTrigger
+                                          className={`${selectTriggerClass} mx-auto w-28 hover:bg-slate-50`}
+                                          title={!isOwnerRole ? "Only OWNER can edit" : "Set access"}
+                                        >
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="NONE">None</SelectItem>
+                                          <SelectItem value="VIEW">View</SelectItem>
+                                          <SelectItem value="FULL">Full</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </TableCell>
+                                  );
+                                })}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+
+                        <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-slate-200">
+                          Not enforced yet — existing Phase 6A allowlist rules remain the source of truth.
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

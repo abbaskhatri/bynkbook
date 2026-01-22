@@ -270,6 +270,15 @@ api.route(
 
 api.route("POST /v1/team/invites/accept", teamHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Role Policies (store-only) ----------
+const rolePoliciesHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/rolePolicies.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/role-policies", rolePoliciesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("PUT /v1/businesses/{businessId}/role-policies/{role}", rolePoliciesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // ---------- Reconcile Snapshots (Phase 6B) ----------
 const reconcileSnapshotsHandler = {
   ...bizHandler,
