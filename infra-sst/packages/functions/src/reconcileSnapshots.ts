@@ -3,6 +3,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash } from "node:crypto";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -356,6 +357,28 @@ export async function handler(event: any) {
   if (method === "POST" && !snapId) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
 
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "snapshots.create",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/reconcile-snapshots",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "snapshots.create",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -522,6 +545,28 @@ export async function handler(event: any) {
   // GET export presigned URL (write-protected)
   if (method === "GET" && snapId && (event?.requestContext?.http?.path ?? "").includes("/exports/")) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "snapshots.export.download",
+      requiredLevel: "FULL",
+      endpointForLog: "GET /v1/businesses/{businessId}/accounts/{accountId}/reconcile-snapshots/{snapshotId}/exports/{kind}",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "snapshots.export.download",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
 
     const kind = (pp(event)?.kind ?? "").toString().trim().toLowerCase();
     if (kind !== "bank" && kind !== "matches" && kind !== "audit") return json(400, { ok: false, error: "Invalid kind" });

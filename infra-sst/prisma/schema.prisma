@@ -11,6 +11,10 @@ model Business {
   id               String             @id @db.Uuid
   name             String
   owner_user_id    String
+  // Phase 7.1: per-business authz mode flag (default OFF)
+  authz_mode       String             @default("OFF")
+  // Phase 7.2: enforcement wave gate (0=none, 1=Team+RolePolicy, 2=Reconcile, 3=Snapshots/Exports)
+  authz_enforce_wave Int              @default(0)
   created_at       DateTime           @default(now()) @db.Timestamptz(6)
   accounts         Account[]
   entries          Entry[]

@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 
 // Reuse the same auth-claims helper pattern used elsewhere
 function getClaims(event: any) {
@@ -86,6 +87,28 @@ export async function handler(event: any) {
   if (method === "POST" && bankTransactionId) {
     // Phase 6A: enforce write permission (deny-by-default)
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: businessId,
+      scopeAccountId: accountId,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "reconcile.match.void",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/{bankTransactionId}/unmatch",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "reconcile.match.void",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
 
     // Void all active matches for this bank txn in this scope
     const now = new Date();

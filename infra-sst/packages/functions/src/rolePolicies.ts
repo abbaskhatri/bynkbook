@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -115,6 +116,27 @@ export async function handler(event: any) {
   if (method === "PUT" && path === `/v1/businesses/${biz}/role-policies/${String(role ?? "")}`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
     if (!isOwner(myRole)) return json(403, { ok: false, error: "Only OWNER can edit role policies" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "roles.policy.update",
+      requiredLevel: "FULL",
+      endpointForLog: "PUT /v1/businesses/{businessId}/role-policies/{role}",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "roles.policy.update",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
 
     const targetRole = normalizeRole(String(role ?? ""));
     if (!targetRole) return json(400, { ok: false, error: "Invalid role" });

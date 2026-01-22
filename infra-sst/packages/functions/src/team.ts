@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 import { randomBytes } from "node:crypto";
 
 function json(statusCode: number, body: any) {
@@ -107,6 +108,17 @@ export async function handler(event: any) {
       return json(400, { ok: false, error: "Invite expired" });
     }
 
+    // Phase 7.2: log authz for onboarding, but NEVER policy-block invite accept
+    // (authorizeWrite excludes team.invite.accept from enforcement by design)
+    await authorizeWrite(prisma, {
+      businessId: invite.business_id,
+      actorUserId: sub,
+      actorRole: "MEMBER",
+      actionKey: "team.invite.accept",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/team/invites/accept",
+    });
+
     // If already a business member, do NOT change their role via invite.
     const existing = await prisma.userBusinessRole.findFirst({
       where: { business_id: invite.business_id, user_id: sub },
@@ -210,6 +222,27 @@ export async function handler(event: any) {
     // Only OWNER can create OWNER invites
     if (role === "OWNER" && !isOwner(myRole)) return json(403, { ok: false, error: "Only OWNER can invite OWNER" });
 
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "team.invite.create",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/team/invites",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "team.invite.create",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
     // Prevent duplicate active invite per email (code-level)
     const now = new Date();
     const existing = await prisma.businessInvite.findFirst({
@@ -264,6 +297,27 @@ export async function handler(event: any) {
     const id = String(inviteId ?? "").trim();
     if (!id) return json(400, { ok: false, error: "Missing inviteId" });
 
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "team.invite.revoke",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/team/invites/{inviteId}/revoke",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "team.invite.revoke",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
     const row = await prisma.businessInvite.findFirst({
       where: { id, business_id: biz },
     });
@@ -308,6 +362,27 @@ export async function handler(event: any) {
     // OWNER-only promotions to OWNER
     if (newRole === "OWNER" && !isOwner(myRole)) return json(403, { ok: false, error: "Only OWNER can promote to OWNER" });
 
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "team.member.role_change",
+      requiredLevel: "FULL",
+      endpointForLog: "PATCH /v1/businesses/{businessId}/team/members/{userId}",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "team.member.role_change",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
     const target = await prisma.userBusinessRole.findFirst({
       where: { business_id: biz, user_id: targetUserId },
       select: { id: true, role: true },
@@ -343,6 +418,27 @@ export async function handler(event: any) {
   // DELETE /v1/businesses/{businessId}/team/members/{userId}
   if (method === "DELETE" && path === `/v1/businesses/${biz}/team/members/${userId}`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "team.member.remove",
+      requiredLevel: "FULL",
+      endpointForLog: "DELETE /v1/businesses/{businessId}/team/members/{userId}",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "team.member.remove",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
 
     const targetUserId = String(userId ?? "").trim();
     if (!targetUserId) return json(400, { ok: false, error: "Missing userId" });

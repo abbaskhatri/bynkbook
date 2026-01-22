@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -100,6 +101,28 @@ export async function handler(event: any) {
 
   // Phase 6A: enforce write permission (deny-by-default)
   if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+  const az = await authorizeWrite(prisma, {
+    businessId: businessId,
+    scopeAccountId: accountId,
+    actorUserId: sub,
+    actorRole: role,
+    actionKey: "reconcile.match.create",
+    requiredLevel: "FULL",
+    endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/matches",
+  });
+
+  if (!az.allowed) {
+    return json(403, {
+      ok: false,
+      error: "Policy denied",
+      code: "POLICY_DENIED",
+      actionKey: "reconcile.match.create",
+      requiredLevel: az.requiredLevel,
+      policyValue: az.policyValue,
+      policyKey: az.policyKey,
+    });
+  }
 
   let body: any = {};
   try {

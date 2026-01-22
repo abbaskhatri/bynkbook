@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 import { randomUUID } from "node:crypto";
 
 const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
@@ -204,6 +205,28 @@ export async function handler(event: any) {
     // Phase 6A: enforce write permission (deny-by-default)
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
 
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "reconcile.adjustment.mark",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/mark-adjustment",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "reconcile.adjustment.mark",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -246,6 +269,28 @@ export async function handler(event: any) {
   // POST /entries/{entryId}/unmark-adjustment (Phase 6D)
   if (method === "POST" && ent && path?.endsWith("/unmark-adjustment")) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "reconcile.adjustment.unmark",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/unmark-adjustment",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "reconcile.adjustment.unmark",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
 
     const updated = await prisma.entry.updateMany({
       where: {
