@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash } from "node:crypto";
+import { logActivity } from "./lib/activityLog";
 
 function json(statusCode: number, body: any) {
   return {
@@ -421,6 +422,14 @@ export async function handler(event: any) {
     await prisma.reconcileSnapshot.update({
       where: { id: created.id },
       data: { bank_csv_s3_key: bankKey, matches_csv_s3_key: matchesKey, audit_csv_s3_key: auditKey },
+    });
+
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      scopeAccountId: acct,
+      eventType: "RECONCILE_SNAPSHOT_CREATED",
+      payloadJson: { account_id: acct, snapshot_id: created.id, month },
     });
 
     return json(201, {

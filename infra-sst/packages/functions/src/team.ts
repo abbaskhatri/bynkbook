@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { logActivity } from "./lib/activityLog";
 import { randomBytes } from "node:crypto";
 
 function json(statusCode: number, body: any) {
@@ -119,6 +120,13 @@ export async function handler(event: any) {
         data: { accepted_at: now, accepted_by_user_id: sub },
       });
 
+      await logActivity(prisma, {
+        businessId: invite.business_id,
+        actorUserId: sub,
+        eventType: "TEAM_INVITE_ACCEPTED",
+        payloadJson: { invite_id: invite.id, email: invite.email, status: "already_member" },
+      });
+
       return json(200, {
         ok: true,
         status: "already_member",
@@ -140,6 +148,13 @@ export async function handler(event: any) {
     await prisma.businessInvite.update({
       where: { id: invite.id },
       data: { accepted_at: now, accepted_by_user_id: sub },
+    });
+
+    await logActivity(prisma, {
+      businessId: invite.business_id,
+      actorUserId: sub,
+      eventType: "TEAM_INVITE_ACCEPTED",
+      payloadJson: { invite_id: invite.id, email: invite.email, status: "accepted", role: invite.role },
     });
 
     return json(200, { ok: true, status: "accepted", businessId: invite.business_id, role: invite.role });
@@ -231,6 +246,13 @@ export async function handler(event: any) {
       select: { id: true, email: true, role: true, token: true, expires_at: true, created_at: true },
     });
 
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      eventType: "TEAM_INVITE_CREATED",
+      payloadJson: { invite_id: created.id, email: created.email, role: created.role, expires_at: created.expires_at },
+    });
+
     // Backend returns token/inviteId/expiresAt (frontend builds full URL using window.location.origin)
     return json(201, { ok: true, invite: created });
   }
@@ -255,6 +277,13 @@ export async function handler(event: any) {
     await prisma.businessInvite.update({
       where: { id },
       data: { revoked_at: new Date(), revoked_by_user_id: sub },
+    });
+
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      eventType: "TEAM_INVITE_REVOKED",
+      payloadJson: { invite_id: id, email: row.email },
     });
 
     return json(200, { ok: true, status: "revoked" });
@@ -301,6 +330,13 @@ export async function handler(event: any) {
       data: { role: newRole },
     });
 
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      eventType: "TEAM_ROLE_CHANGED",
+      payloadJson: { target_user_id: targetUserId, from_role: target.role, to_role: newRole },
+    });
+
     return json(200, { ok: true });
   }
 
@@ -329,6 +365,14 @@ export async function handler(event: any) {
     }
 
     await prisma.userBusinessRole.delete({ where: { id: target.id } });
+
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      eventType: "TEAM_MEMBER_REMOVED",
+      payloadJson: { target_user_id: targetUserId, target_role: target.role },
+    });
+
     return json(200, { ok: true });
   }
 

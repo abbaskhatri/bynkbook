@@ -10,6 +10,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { createAccount, type Account, type AccountType } from "@/lib/api/accounts";
 import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
 import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
+import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,14 @@ export default function SettingsPageClient() {
   const [polRows, setPolRows] = useState<RolePolicyRow[]>([]);
   const [polDraft, setPolDraft] = useState<Record<string, Record<string, string>>>({});
   const [polSaving, setPolSaving] = useState(false);
+
+  // Activity Log (Phase 6D)
+  const [actLoading, setActLoading] = useState(false);
+  const [actError, setActError] = useState<string | null>(null);
+  const [actItems, setActItems] = useState<ActivityLogItem[]>([]);
+  const [actEventType, setActEventType] = useState<string>("ALL"); // optional filter
+  const [actDetailsId, setActDetailsId] = useState<string | null>(null);
+  const [actBefore, setActBefore] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("CHECKING");
@@ -281,6 +290,40 @@ export default function SettingsPageClient() {
     }
   }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
 
+  // Load activity when Activity tab is active
+  useEffect(() => {
+    const tab = sp.get("tab") || "business";
+    if (tab !== "activity") return;
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+
+    let cancelled = false;
+    (async () => {
+      setActLoading(true);
+      setActError(null);
+      try {
+        const res: any = await getActivity(selectedBusinessId, {
+          limit: 50,
+          before: undefined,
+          eventType: actEventType === "ALL" ? undefined : actEventType,
+        });
+        if (!cancelled) {
+          const items: ActivityLogItem[] = res?.items ?? [];
+          setActItems(items);
+          setActBefore(items.length > 0 ? String(items[items.length - 1].created_at) : null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setActError(e?.message ?? "Failed to load activity");
+      } finally {
+        if (!cancelled) setActLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sp, authReady, selectedBusinessId, actEventType]);
+
   // Load team data when Team tab is active
   useEffect(() => {
     const tab = sp.get("tab") || "business";
@@ -397,6 +440,7 @@ export default function SettingsPageClient() {
             {[
               { key: "business", label: "Business Profile" },
               { key: "team", label: "Team" },
+              { key: "activity", label: "Activity Log" },
               { key: "bookkeeping", label: "Bookkeeping" },
               { key: "accounts", label: "Accounts" },
               { key: "ai", label: "AI & Automation" },
@@ -429,6 +473,130 @@ export default function SettingsPageClient() {
       {(() => {
         const rawTab = sp.get("tab") || "business";
         const tab = rawTab === "categories" ? "bookkeeping" : rawTab;
+
+        if (tab === "activity") {
+          const humanize = (t: string) => {
+            return String(t ?? "")
+              .replace(/_/g, " ")
+              .toLowerCase()
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+          };
+
+          return (
+            <div className="space-y-4">
+              <Card>
+                <CardHeader className="space-y-0 pb-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <CardTitle>Activity Log</CardTitle>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Business-scoped audit trail (read-only for members).
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-[260px]">
+                      <Label className="text-[11px]">Event type (optional)</Label>
+                      <Select value={actEventType} onValueChange={(v) => setActEventType(v)}>
+                        <SelectTrigger className={selectTriggerClass}>
+                          <SelectValue placeholder="All events" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ALL">All</SelectItem>
+                          <SelectItem value="TEAM_INVITE_CREATED">Team invite created</SelectItem>
+                          <SelectItem value="TEAM_INVITE_REVOKED">Team invite revoked</SelectItem>
+                          <SelectItem value="TEAM_INVITE_ACCEPTED">Team invite accepted</SelectItem>
+                          <SelectItem value="TEAM_ROLE_CHANGED">Team role changed</SelectItem>
+                          <SelectItem value="TEAM_MEMBER_REMOVED">Team member removed</SelectItem>
+                          <SelectItem value="ROLE_POLICY_UPDATED">Role policy updated</SelectItem>
+                          <SelectItem value="RECONCILE_MATCH_CREATED">Reconcile match created</SelectItem>
+                          <SelectItem value="RECONCILE_MATCH_VOIDED">Reconcile match voided</SelectItem>
+                          <SelectItem value="RECONCILE_ENTRY_ADJUSTMENT_MARKED">Entry adjustment marked</SelectItem>
+                          <SelectItem value="RECONCILE_ENTRY_ADJUSTMENT_UNMARKED">Entry adjustment unmarked</SelectItem>
+                          <SelectItem value="RECONCILE_SNAPSHOT_CREATED">Snapshot created</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex-1" />
+                    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                      Read-only
+                    </span>
+                  </div>
+
+                  {actLoading ? (
+                    <Skeleton className="h-24 w-full" />
+                  ) : actError ? (
+                    <div className="text-xs text-red-600">{actError}</div>
+                  ) : actItems.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">
+                      No activity yet. Actions recorded after Phase 6D deploy will appear here.
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                      <Table>
+                        <THead className="bg-slate-50">
+                          <TableRow className="hover:bg-slate-50">
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">When</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Event</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Actor</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Account</TableHead>
+                            <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Details</TableHead>
+                          </TableRow>
+                        </THead>
+
+                        <TableBody>
+                          {actItems.map((it) => {
+                            const when = (() => {
+                              try {
+                                return new Date(it.created_at).toLocaleString();
+                              } catch {
+                                return String(it.created_at);
+                              }
+                            })();
+
+                            return (
+                              <TableRow key={it.id} className="hover:bg-slate-50">
+                                <TableCell className="py-2 text-slate-700 text-xs whitespace-nowrap">{when}</TableCell>
+                                <TableCell className="py-2 text-slate-900 text-xs font-medium">{humanize(it.event_type)}</TableCell>
+                                <TableCell className="py-2 text-slate-700 text-xs font-mono">{String(it.actor_user_id).slice(0, 12)}…</TableCell>
+                                <TableCell className="py-2 text-slate-700 text-xs font-mono">
+                                  {it.scope_account_id ? String(it.scope_account_id).slice(0, 12) + "…" : "—"}
+                                </TableCell>
+                                <TableCell className="py-2 text-right">
+                                  <button
+                                    type="button"
+                                    className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 focus-visible:ring-offset-0"
+                                    onClick={() => setActDetailsId((cur) => (cur === it.id ? null : it.id))}
+                                  >
+                                    {actDetailsId === it.id ? "Hide" : "View"}
+                                  </button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+
+                          {actDetailsId ? (
+                            <TableRow className="bg-slate-50">
+                              <TableCell colSpan={5} className="py-2">
+                                <pre className="text-[11px] whitespace-pre-wrap break-words bg-white border border-slate-200 rounded-md p-2">
+{JSON.stringify(actItems.find((x) => x.id === actDetailsId)?.payload_json ?? {}, null, 2)}
+                                </pre>
+                              </TableCell>
+                            </TableRow>
+                          ) : null}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          );
+        }
 
         if (tab === "team") {
           const noPerm = "Insufficient permissions";

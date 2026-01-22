@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { logActivity } from "./lib/activityLog";
 
 function json(statusCode: number, body: any) {
   return {
@@ -133,6 +134,26 @@ export async function handler(event: any) {
       select: { id: true },
     });
 
+    let changedKeysCount = Object.keys(policy).length;
+
+    if (existing?.id) {
+      try {
+        const prev = await prisma.businessRolePolicy.findFirst({
+          where: { id: existing.id },
+          select: { policy_json: true },
+        });
+
+        const prevObj = (prev?.policy_json ?? {}) as Record<string, any>;
+        let n = 0;
+        for (const k of Object.keys(policy)) {
+          if (String(prevObj[k] ?? "NONE").toUpperCase() !== String((policy as any)[k]).toUpperCase()) n++;
+        }
+        changedKeysCount = n;
+      } catch {
+        // ignore
+      }
+    }
+
     const saved = existing
       ? await prisma.businessRolePolicy.update({
           where: { id: existing.id },
@@ -152,6 +173,13 @@ export async function handler(event: any) {
           },
           select: { role: true, policy_json: true, updated_at: true, updated_by_user_id: true },
         });
+
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      eventType: "ROLE_POLICY_UPDATED",
+      payloadJson: { role: targetRole, changed_keys_count: changedKeysCount },
+    });
 
     return json(200, { ok: true, item: saved, notEnforcedYet: true });
   }

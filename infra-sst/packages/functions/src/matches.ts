@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { logActivity } from "./lib/activityLog";
 
 function json(statusCode: number, body: any) {
   return {
@@ -201,5 +202,20 @@ export async function handler(event: any) {
     },
   });
 
-  return json(200, { ok: true, match: { id: created.id } });
+  await logActivity(prisma, {
+    businessId: businessId,
+    actorUserId: sub,
+    scopeAccountId: accountId,
+    eventType: "RECONCILE_MATCH_CREATED",
+    payloadJson: {
+      account_id: accountId,
+      match_id: created.id,
+      bank_transaction_id: bankTransactionId,
+      entry_id: entryId,
+      match_type: matchType,
+      matched_amount_cents: matchedAmountCents,
+    },
+  });
+
+  return json(201, { ok: true, match: created });
 }

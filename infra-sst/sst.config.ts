@@ -279,6 +279,14 @@ const rolePoliciesHandler = {
 api.route("GET /v1/businesses/{businessId}/role-policies", rolePoliciesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PUT /v1/businesses/{businessId}/role-policies/{role}", rolePoliciesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Activity Log (Phase 6D) ----------
+const activityHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/activity.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/activity", activityHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // ---------- Reconcile Snapshots (Phase 6B) ----------
 const reconcileSnapshotsHandler = {
   ...bizHandler,
@@ -333,6 +341,9 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactio
 
 // Phase 4D v1: Mark entry as adjustment (ledger-only)
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/mark-adjustment", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// Phase 6D: Unmark adjustment (ledger-only)
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/unmark-adjustment", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
     api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });

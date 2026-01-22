@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { logActivity } from "./lib/activityLog";
 
 // Reuse the same auth-claims helper pattern used elsewhere
 function getClaims(event: any) {
@@ -100,6 +101,14 @@ export async function handler(event: any) {
         voided_at: now,
         voided_by_user_id: sub,
       },
+    });
+
+    await logActivity(prisma, {
+      businessId: businessId,
+      actorUserId: sub,
+      scopeAccountId: accountId,
+      eventType: "RECONCILE_MATCH_VOIDED",
+      payloadJson: { account_id: accountId, bank_transaction_id: bankTransactionId, voided_count: updated.count },
     });
 
     return json(200, { ok: true, voidedCount: updated.count });

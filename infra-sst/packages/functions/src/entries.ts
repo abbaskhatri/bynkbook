@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { logActivity } from "./lib/activityLog";
 import { randomUUID } from "node:crypto";
 
 const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
@@ -231,7 +232,48 @@ export async function handler(event: any) {
 
     if (updated.count === 0) return json(404, { ok: false, error: "Entry not found" });
 
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      scopeAccountId: acct,
+      eventType: "RECONCILE_ENTRY_ADJUSTMENT_MARKED",
+      payloadJson: { account_id: acct, entry_id: ent },
+    });
+
     return json(200, { ok: true, entry_id: ent, isAdjustment: true });
+  }
+
+  // POST /entries/{entryId}/unmark-adjustment (Phase 6D)
+  if (method === "POST" && ent && path?.endsWith("/unmark-adjustment")) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const updated = await prisma.entry.updateMany({
+      where: {
+        id: ent,
+        business_id: biz,
+        account_id: acct,
+        deleted_at: null,
+      },
+      data: {
+        is_adjustment: false,
+        adjusted_at: null,
+        adjusted_by_user_id: null,
+        adjustment_reason: null,
+        updated_at: new Date(),
+      },
+    });
+
+    if (updated.count === 0) return json(404, { ok: false, error: "Entry not found" });
+
+    await logActivity(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      scopeAccountId: acct,
+      eventType: "RECONCILE_ENTRY_ADJUSTMENT_UNMARKED",
+      payloadJson: { account_id: acct, entry_id: ent },
+    });
+
+    return json(200, { ok: true, entry_id: ent, isAdjustment: false });
   }
 
   return json(404, { ok: false, error: "Not Found", method, path });
