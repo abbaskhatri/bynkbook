@@ -449,7 +449,7 @@ export default function SettingsPageClient() {
               <button
                 key={t.key}
                 onClick={() => {
-                  const params = new URLSearchParams(sp.toString());
+                  const params = new URLSearchParams(String(sp));
                   params.set("tab", t.key);
                   router.replace(`?${params.toString()}`);
                 }}
@@ -761,7 +761,7 @@ export default function SettingsPageClient() {
                               <TableCell className="py-2 text-right">
                                 <div className="flex justify-end gap-2">
                                   <Button
-                                    size="sm"
+                                    className="h-7 px-2 text-xs"
                                     variant="outline"
                                     onClick={() => {
                                       const url = `${window.location.origin}/accept-invite?token=${encodeURIComponent((i as any).token ?? "")}`;
@@ -774,7 +774,7 @@ export default function SettingsPageClient() {
                                   </Button>
 
                                   <Button
-                                    size="sm"
+                                    className="h-7 px-2 text-xs"
                                     variant="outline"
                                     onClick={async () => {
                                       if (!selectedBusinessId) return;
