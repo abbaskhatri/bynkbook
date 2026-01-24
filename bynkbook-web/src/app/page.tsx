@@ -11,9 +11,9 @@ export default function Home() {
     (async () => {
       try {
         await getCurrentUser();
-        router.replace("/me");
-      } catch {
         router.replace("/dashboard");
+      } catch {
+        router.replace("/login");
       }
     })();
   }, [router]);

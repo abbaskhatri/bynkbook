@@ -1,14 +1,16 @@
 import "./globals.css";
 import { Providers } from "./providers";
-import { AppShell } from "@/components/app/app-shell";
+
+export const metadata = {
+  title: "BynkBook",
+  description: "Bookkeeping & reconciliation",
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <Providers>
-          <AppShell>{children}</AppShell>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

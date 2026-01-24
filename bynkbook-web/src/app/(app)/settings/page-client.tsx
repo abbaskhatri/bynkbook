@@ -12,6 +12,9 @@ import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, ty
 import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 
+import { HintWrap } from "@/components/primitives/HintWrap";
+import { canWriteByRolePolicy } from "@/lib/auth/permissionHints";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -116,8 +119,21 @@ export default function SettingsPageClient() {
     return String(row?.role ?? "").toUpperCase();
   }, [businessesQ.data, selectedBusinessId]);
 
-  const canWriteTeam = useMemo(() => ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(selectedBusinessRole), [selectedBusinessRole]);
-  const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBusinessRole]);
+  const noPermTitle = "Insufficient permissions";
+  const policyDeniedTitle = "Not allowed by role policy";
+
+const canWriteTeamAllowlist = useMemo(
+  () => ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(selectedBusinessRole),
+  [selectedBusinessRole]
+);
+
+// Stage 1 rule: only OWNER/ADMIN can change member roles
+const canManageMemberRolesAllowlist = useMemo(
+  () => ["OWNER", "ADMIN"].includes(selectedBusinessRole),
+  [selectedBusinessRole]
+);
+
+const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBusinessRole]);
 
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
@@ -353,11 +369,12 @@ export default function SettingsPageClient() {
     };
   }, [sp, authReady, selectedBusinessId]);
 
-  // Load role policies when in Team → Roles & Permissions
+  // Load role policies when Team tab is active (members or roles)
+  // - Needed for Phase 7.2B permission hints
+  // - Also reused for Roles & Permissions editor when teamSubTab === "roles"
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "team") return;
-    if (teamSubTab !== "roles") return;
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
@@ -372,32 +389,34 @@ export default function SettingsPageClient() {
         if (!cancelled) {
           setPolRows(items);
 
-          // Build draft with defaults for missing roles
-          const roles = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"];
-          const keys = [
-            "dashboard",
-            "ledger",
-            "reconcile",
-            "issues",
-            "vendors",
-            "invoices",
-            "reports",
-            "settings",
-            "bank_connections",
-            "team_management",
-            "billing",
-            "ai_automation",
-          ];
+          // Only build the editable draft when in Roles & Permissions subtab
+          if (teamSubTab === "roles") {
+            const roles = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"];
+            const keys = [
+              "dashboard",
+              "ledger",
+              "reconcile",
+              "issues",
+              "vendors",
+              "invoices",
+              "reports",
+              "settings",
+              "bank_connections",
+              "team_management",
+              "billing",
+              "ai_automation",
+            ];
 
-          const byRole: Record<string, Record<string, string>> = {};
-          for (const r of roles) {
-            const row = items.find((x) => String(x.role).toUpperCase() === r);
-            const cur = (row?.policy_json ?? {}) as Record<string, string>;
-            const filled: Record<string, string> = {};
-            for (const k of keys) filled[k] = String(cur[k] ?? "NONE").toUpperCase();
-            byRole[r] = filled;
+            const byRole: Record<string, Record<string, string>> = {};
+            for (const r of roles) {
+              const row = items.find((x) => String(x.role).toUpperCase() === r);
+              const cur = (row?.policy_json ?? {}) as Record<string, string>;
+              const filled: Record<string, string> = {};
+              for (const k of keys) filled[k] = String(cur[k] ?? "NONE").toUpperCase();
+              byRole[r] = filled;
+            }
+            setPolDraft(byRole);
           }
-          setPolDraft(byRole);
         }
       } catch (e: any) {
         if (!cancelled) setPolError(e?.message ?? "Failed to load role policies");
@@ -599,7 +618,17 @@ export default function SettingsPageClient() {
         }
 
         if (tab === "team") {
-          const noPerm = "Insufficient permissions";
+          const policyTeamWrite = canWriteByRolePolicy(polRows, selectedBusinessRole, "team_management");
+          const canWriteTeam = canWriteTeamAllowlist && (policyTeamWrite === null ? true : policyTeamWrite);
+
+          // Stage 1: only OWNER/ADMIN can change member roles (and still subject to policy if present)
+          const policyManageMemberRoles = canWriteByRolePolicy(polRows, selectedBusinessRole, "team_management");
+          const canManageMemberRoles = canManageMemberRolesAllowlist && (policyManageMemberRoles === null ? true : policyManageMemberRoles);
+
+          const noPerm =
+            !canWriteTeamAllowlist ? noPermTitle :
+            policyTeamWrite === false ? policyDeniedTitle :
+            noPermTitle; // fallback (shouldn't be used when allowed)
 
           return (
             <div className="space-y-4">
@@ -677,9 +706,10 @@ export default function SettingsPageClient() {
                     </div>
 
                     <div className="mt-2 flex items-center gap-2">
-                      <Button
-                        className="h-7 px-2 text-xs"
-                        onClick={async () => {
+                      <HintWrap disabled={!canWriteTeam} reason={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : null}>
+                        <Button
+                          className="h-7 px-2 text-xs"
+                          onClick={async () => {
                           if (!selectedBusinessId) return;
                           setInviteBusy(true);
                           setInviteMsg(null);
@@ -699,10 +729,11 @@ export default function SettingsPageClient() {
                           }
                         }}
                         disabled={!canWriteTeam || inviteBusy || !inviteEmail.trim()}
-                        title={!canWriteTeam ? noPerm : "Create invite"}
+                        title={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : "Create invite"}
                       >
                         {inviteBusy ? "Creating…" : "Create invite"}
                       </Button>
+                      </HintWrap>
 
                       {inviteToken ? (
                         <Button
@@ -773,10 +804,11 @@ export default function SettingsPageClient() {
                                     Copy
                                   </Button>
 
-                                  <Button
-                                    className="h-7 px-2 text-xs"
-                                    variant="outline"
-                                    onClick={async () => {
+                                  <HintWrap disabled={!canWriteTeam} reason={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : null}>
+                                    <Button
+                                      className="h-7 px-2 text-xs"
+                                      variant="outline"
+                                      onClick={async () => {
                                       if (!selectedBusinessId) return;
                                       await revokeInvite(selectedBusinessId, i.id);
                                       const res = await getTeam(selectedBusinessId);
@@ -784,10 +816,11 @@ export default function SettingsPageClient() {
                                       setTeamInvites(res.invites ?? []);
                                     }}
                                     disabled={!canWriteTeam}
-                                    title={!canWriteTeam ? noPerm : "Revoke invite"}
+                                    title={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : "Revoke invite"}
                                   >
                                     Revoke
                                   </Button>
+                                  </HintWrap>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -826,23 +859,33 @@ export default function SettingsPageClient() {
                               <TableRow key={m.user_id} className="hover:bg-slate-50">
                                 <TableCell className="py-2 font-medium text-slate-900">{m.user_id}</TableCell>
                                 <TableCell className="py-2 text-slate-700">
-                                  <Select
-                                    value={m.role}
-                                    onValueChange={async (v) => {
-                                      if (!selectedBusinessId) return;
-                                      await updateMemberRole(selectedBusinessId, m.user_id, v);
-                                      const res = await getTeam(selectedBusinessId);
-                                      setTeamMembers(res.members ?? []);
-                                      setTeamInvites(res.invites ?? []);
-                                    }}
-                                    disabled={!canWriteTeam || disableOwnerActions}
-                                  >
-                                    <SelectTrigger
-                                      className={`${selectTriggerClass} w-40`}
-                                      title={!canWriteTeam ? noPerm : disableOwnerActions ? "Only OWNER can change an OWNER" : "Change role"}
-                                    >
+<Select
+  value={m.role}
+  onValueChange={async (v) => {
+    if (!selectedBusinessId) return;
+    await updateMemberRole(selectedBusinessId, m.user_id, v);
+    const res = await getTeam(selectedBusinessId);
+    setTeamMembers(res.members ?? []);
+    setTeamInvites(res.invites ?? []);
+  }}
+  disabled={!canManageMemberRoles || disableOwnerActions}
+>
+  <HintWrap
+    disabled={!canManageMemberRoles}
+    reason={
+      !canManageMemberRoles
+        ? (!canManageMemberRolesAllowlist ? "Only OWNER/Admin can change roles" : policyDeniedTitle)
+        : null
+    }
+    className="inline-flex"
+  >
+                                      <SelectTrigger
+                                        className={`${selectTriggerClass} w-40`}
+                                        title={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : disableOwnerActions ? "Only OWNER can change an OWNER" : "Change role"}
+                                      >
                                       <SelectValue />
                                     </SelectTrigger>
+                                    </HintWrap>
                                     <SelectContent>
                                       <SelectItem value="MEMBER">Member</SelectItem>
                                       <SelectItem value="ACCOUNTANT">Accountant</SelectItem>
@@ -854,10 +897,11 @@ export default function SettingsPageClient() {
                                 </TableCell>
                                 <TableCell className="py-2 text-slate-700">{formatShortDate(m.created_at)}</TableCell>
                                 <TableCell className="py-2 text-right">
-                                  <Button
-                                    className="h-7 px-2 text-xs"
-                                    variant="outline"
-                                    onClick={async () => {
+                                  <HintWrap disabled={!canWriteTeam} reason={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : null}>
+                                    <Button
+                                      className="h-7 px-2 text-xs"
+                                      variant="outline"
+                                      onClick={async () => {
                                       if (!selectedBusinessId) return;
                                       await removeMember(selectedBusinessId, m.user_id);
                                       const res = await getTeam(selectedBusinessId);
@@ -865,10 +909,11 @@ export default function SettingsPageClient() {
                                       setTeamInvites(res.invites ?? []);
                                     }}
                                     disabled={!canWriteTeam || disableOwnerActions}
-                                    title={!canWriteTeam ? noPerm : disableOwnerActions ? "Only OWNER can remove an OWNER" : "Remove member"}
+                                    title={!canWriteTeam ? (!canWriteTeamAllowlist ? noPermTitle : policyDeniedTitle) : disableOwnerActions ? "Only OWNER can remove an OWNER" : "Remove member"}
                                   >
                                     Remove
                                   </Button>
+                                  </HintWrap>
                                 </TableCell>
                               </TableRow>
                             );

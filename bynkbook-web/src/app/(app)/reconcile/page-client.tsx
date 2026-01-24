@@ -22,6 +22,9 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
+import { getRolePolicies, type RolePolicyRow } from "@/lib/api/rolePolicies";
+import { canWriteByRolePolicy } from "@/lib/auth/permissionHints";
+import { HintWrap } from "@/components/primitives/HintWrap";
 import {
   listReconcileSnapshots,
   createReconcileSnapshot,
@@ -167,6 +170,63 @@ export default function ReconcilePageClient() {
   const canWriteSnapshots = useMemo(() => {
     return ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(selectedBusinessRole);
   }, [selectedBusinessRole]);
+
+  // Phase 7.2B: role policy hints (frontend-only)
+  const policyDeniedTitle = "Not allowed by role policy";
+  const [rolePolicyRows, setRolePolicyRows] = useState<RolePolicyRow[]>([]);
+  const [rolePolicyLoaded, setRolePolicyLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res: any = await getRolePolicies(selectedBusinessId);
+        if (!cancelled) {
+          setRolePolicyRows(res?.items ?? []);
+          setRolePolicyLoaded(true);
+        }
+      } catch {
+        // If we cannot load policies, do not block UI (fallback to allowlist only)
+        if (!cancelled) {
+          setRolePolicyRows([]);
+          setRolePolicyLoaded(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, selectedBusinessId]);
+
+  const policyReconcileWrite = useMemo(() => {
+    // Key: "reconcile"
+    return canWriteByRolePolicy(rolePolicyRows, selectedBusinessRole, "reconcile");
+  }, [rolePolicyRows, selectedBusinessRole]);
+
+  const canWriteReconcileEffective = useMemo(() => {
+    // Allowlist remains hard rail; policy only blocks when explicitly known and denying
+    return canWrite && (policyReconcileWrite === null ? true : policyReconcileWrite);
+  }, [canWrite, policyReconcileWrite]);
+
+  const canWriteSnapshotsEffective = useMemo(() => {
+    return canWriteSnapshots && (policyReconcileWrite === null ? true : policyReconcileWrite);
+  }, [canWriteSnapshots, policyReconcileWrite]);
+
+  const reconcileWriteReason = useMemo(() => {
+    if (!canWrite) return noPermTitle;
+    if (policyReconcileWrite === false) return policyDeniedTitle;
+    return null;
+  }, [canWrite, noPermTitle, policyReconcileWrite]);
+
+  const snapshotWriteReason = useMemo(() => {
+    if (!canWriteSnapshots) return noPermTitle;
+    if (policyReconcileWrite === false) return policyDeniedTitle;
+    return null;
+  }, [canWriteSnapshots, noPermTitle, policyReconcileWrite]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -1131,20 +1191,22 @@ export default function ReconcilePageClient() {
         Snapshots
       </button>
 
-      <button
-        type="button"
-        className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${
-          canWrite ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-        }`}
-        onClick={() => {
-          if (!canWrite) return;
-          setOpenExportHub(true);
-        }}
-        disabled={!canWrite}
-        title={canWrite ? "Export (CSV)" : noPermTitle}
-      >
-        <Download className="h-3.5 w-3.5" /> Export
-      </button>
+      <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+        <button
+          type="button"
+          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${
+            canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+          }`}
+          onClick={() => {
+            if (!canWriteReconcileEffective) return;
+            setOpenExportHub(true);
+          }}
+          disabled={!canWriteReconcileEffective}
+          title={canWriteReconcileEffective ? "Export (CSV)" : (reconcileWriteReason ?? noPermTitle)}
+        >
+          <Download className="h-3.5 w-3.5" /> Export
+        </button>
+      </HintWrap>
       <button type="button" disabled title="Coming soon" className={disabledBtn}>
         <Sparkles className="h-3.5 w-3.5" /> Smart Auto Reconcile
       </button>
@@ -1452,61 +1514,65 @@ export default function ReconcilePageClient() {
                           </td>
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">
-                              {expectedTab === "matched" ? (
-                                <button
-                                  type="button"
-                                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-                                  onClick={(ev) => {
-                                    ev.stopPropagation();
-                                    openAuditForEntry();
-                                  }}
-                                  title="Revert (view audit)"
-                                  aria-label="Revert (view audit)"
-                                >
-                                  <Undo2 className="h-4 w-4 text-slate-700" />
-                                </button>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-                                      canWrite ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                    }`}
-                                    disabled={!canWrite}
-                                    title={canWrite ? "Match entry" : noPermTitle}
-                                    aria-label="Match entry"
-                                    onClick={() => {
-                                      if (!canWrite) return;
-                                      setEntryMatchEntryId(e.id);
-                                      setEntryMatchSelectedBankTxnId(null);
-                                      setEntryMatchSearch("");
-                                      setEntryMatchError(null);
-                                      setOpenEntryMatch(true);
-                                    }}
-                                  >
-                                    <GitMerge className="h-4 w-4 text-slate-700" />
-                                  </button>
+{expectedTab === "matched" ? (
+  <button
+    type="button"
+    className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+    onClick={(ev) => {
+      ev.stopPropagation();
+      openAuditForEntry();
+    }}
+    title="Revert (view audit)"
+    aria-label="Revert (view audit)"
+  >
+    <Undo2 className="h-4 w-4 text-slate-700" />
+  </button>
+) : (
+  <>
+    <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+      <button
+        type="button"
+        className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+          canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+        }`}
+        disabled={!canWriteReconcileEffective}
+        title={canWriteReconcileEffective ? "Match entry" : (reconcileWriteReason ?? noPermTitle)}
+        aria-label="Match entry"
+        onClick={() => {
+          if (!canWriteReconcileEffective) return;
+          setEntryMatchEntryId(e.id);
+          setEntryMatchSelectedBankTxnId(null);
+          setEntryMatchSearch("");
+          setEntryMatchError(null);
+          setOpenEntryMatch(true);
+        }}
+      >
+        <GitMerge className="h-4 w-4 text-slate-700" />
+      </button>
+    </HintWrap>
 
-                                  <button
-                                    type="button"
-                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-                                      canWrite ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                    }`}
-                                    disabled={!canWrite}
-                                    onClick={() => {
-                                      if (!canWrite) return;
-                                      setAdjustEntryId(e.id);
-                                      setAdjustReason("");
-                                      setAdjustError(null);
-                                      setOpenAdjust(true);
-                                    }}
-                                    title={canWrite ? "Mark adjustment (ledger-only)" : noPermTitle}
-                                    aria-label="Mark adjustment"
-                                  >
-                                    <Wrench className="h-4 w-4 text-slate-700" />
-                                  </button>
-                                </>
-                              )}
+    <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+      <button
+        type="button"
+        className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+          canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+        }`}
+        disabled={!canWriteReconcileEffective}
+        onClick={() => {
+          if (!canWriteReconcileEffective) return;
+          setAdjustEntryId(e.id);
+          setAdjustReason("");
+          setAdjustError(null);
+          setOpenAdjust(true);
+        }}
+        title={canWriteReconcileEffective ? "Mark adjustment (ledger-only)" : (reconcileWriteReason ?? noPermTitle)}
+        aria-label="Mark adjustment"
+      >
+        <Wrench className="h-4 w-4 text-slate-700" />
+      </button>
+    </HintWrap>
+  </>
+)}
                             </div>
                           </td>
                         </tr>
@@ -1779,62 +1845,64 @@ export default function ReconcilePageClient() {
                                   <Undo2 className="h-4 w-4 text-slate-700" />
                                 </button>
                               ) : (
-                                <button
-                                  type="button"
-                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-                                    canWrite ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                  }`}
-                                  disabled={!canWrite}
-                                  title={canWrite ? "Match this bank transaction" : noPermTitle}
-                                  onClick={() => {
-                                    if (!canWrite) return;
-                                    setMatchBankTxnId(t.id);
-                                    setMatchSearch("");
-                                    setMatchSelectedEntryIds(new Set());
-                                    setMatchError(null);
+<HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+  <button
+    type="button"
+    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+      canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+    }`}
+    disabled={!canWriteReconcileEffective}
+    title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
+    aria-label="Match bank transaction"
+    onClick={() => {
+      if (!canWriteReconcileEffective) return;
+      setMatchBankTxnId(t.id);
+      setMatchSearch("");
+      setMatchSelectedEntryIds(new Set());
+      setMatchError(null);
 
-                                  // Best initial seed: closest abs amount, then closest date
-                                  const bankAmt = toBigIntSafe(t.amount_cents);
-                                  const bankAbs = absBig(bankAmt);
-                                  const bankSign = bankAmt < 0n ? -1n : 1n;
-                                  const bankDateYmd = isoToYmd(t.posted_date);
-                                  const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
+      // Best initial seed: closest abs amount, then closest date
+      const bankAmt = toBigIntSafe(t.amount_cents);
+      const bankAbs = absBig(bankAmt);
+      const bankSign = bankAmt < 0n ? -1n : 1n;
+      const bankDateYmd = isoToYmd(t.posted_date);
+      const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
 
-                                  const eligible = allEntriesSorted.filter((e: any) => {
-                                    if (matchByEntryId.has(e.id)) return false;
-                                    const entryAmt = toBigIntSafe(e.amount_cents);
-                                    const entrySign = entryAmt < 0n ? -1n : 1n;
-                                    if (entrySign !== bankSign) return false;
-                                    return true;
-                                  });
+      const eligible = allEntriesSorted.filter((e: any) => {
+        if (matchByEntryId.has(e.id)) return false;
+        const entryAmt = toBigIntSafe(e.amount_cents);
+        const entrySign = entryAmt < 0n ? -1n : 1n;
+        if (entrySign !== bankSign) return false;
+        return true;
+      });
 
-                                  let bestId: string | null = null;
-                                  let bestScore = Number.POSITIVE_INFINITY;
+      let bestId: string | null = null;
+      let bestScore = Number.POSITIVE_INFINITY;
 
-                                  for (const e of eligible) {
-                                    const entryAmt = toBigIntSafe(e.amount_cents);
-                                    const entryAbs = absBig(entryAmt);
-                                    const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                                    const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
-                                    const score = Number(diff) * 1_000_000 + dt;
-                                    if (score < bestScore) {
-                                      bestScore = score;
-                                      bestId = e.id;
-                                    }
-                                  }
+      for (const e of eligible) {
+        const entryAmt = toBigIntSafe(e.amount_cents);
+        const entryAbs = absBig(entryAmt);
+        const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+        const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
+        const score = Number(diff) * 1_000_000 + dt;
+        if (score < bestScore) {
+          bestScore = score;
+          bestId = e.id;
+        }
+      }
 
-                                  setMatchSelectedEntryIds(() => {
-                                    const s = new Set<string>();
-                                    if (bestId) s.add(bestId);
-                                    return s;
-                                  });
+      setMatchSelectedEntryIds(() => {
+        const s = new Set<string>();
+        if (bestId) s.add(bestId);
+        return s;
+      });
 
-                                  setOpenMatch(true);
-                                }}
-                                aria-label="Match bank transaction"
-                              >
-                                <GitMerge className="h-4 w-4 text-slate-700" />
-                              </button>
+      setOpenMatch(true);
+    }}
+  >
+    <GitMerge className="h-4 w-4 text-slate-700" />
+  </button>
+</HintWrap>
                               )}
 
                               <button
@@ -1965,74 +2033,80 @@ export default function ReconcilePageClient() {
                     onChange={(e) => setSnapshotMonth(e.target.value)}
                   />
 
-                  <button
-                    type="button"
-                    className={`h-8 px-3 text-xs rounded-md border ${
-                      canWriteSnapshots
-                        ? "border-slate-200 bg-white hover:bg-slate-50"
-                        : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
-                    }`}
-                    disabled={!canWriteSnapshots || snapshotCreateBusy || monthAlreadyExists}
-                    title={
-                      !canWriteSnapshots
-                        ? noPermTitle
-                        : monthAlreadyExists
-                          ? "Snapshot already exists for that month"
-                          : "Create snapshot"
-                    }
-                    onClick={async () => {
-                      if (!selectedBusinessId || !selectedAccountId) return;
-
-                      // If month exists, no API call — just select and show details
-                      if (monthAlreadyExists && existingSnapshotForMonth?.id) {
-                        setSelectedSnapshotId(existingSnapshotForMonth.id);
-                        setSnapshotExistsInfo({ month: snapshotMonth, snapshotId: existingSnapshotForMonth.id });
-                        return;
-                      }
-
-                      setSnapshotCreateBusy(true);
-                      setSnapshotCreateError(null);
-                      setSnapshotExistsInfo(null);
-
-                      try {
-                        const created = await createReconcileSnapshot(selectedBusinessId, selectedAccountId, snapshotMonth);
-                        const items = await listReconcileSnapshots(selectedBusinessId, selectedAccountId);
-                        setSnapshots(items ?? []);
-                        if (created?.id) setSelectedSnapshotId(created.id);
-                      } catch (e: any) {
-                        const msg = e?.message ?? "Failed to create snapshot";
-
-                        // 409 is expected: set neutral info + auto-select existing snapshot id
-                        let existingId: string | null = null;
-                        try {
-                          if (typeof msg === "string") {
-                            // apiFetch often throws "API 409: { ...json... }"
-                            const m = msg.match(/\bAPI\s+409:\s*(\{.*\})\s*$/s);
-                            if (m?.[1]) {
-                              const payload = JSON.parse(m[1]);
-                              existingId = payload?.snapshot?.id ?? null;
-                            }
-                          }
-                        } catch {
-                          // ignore parse errors
-                        }
-
-                        // Fallback: use list-derived id for the current month (if present)
-                        if (!existingId) existingId = existingSnapshotForMonth?.id ?? null;
-
-                        if (typeof msg === "string" && msg.includes("409")) {
-                          if (existingId) setSelectedSnapshotId(existingId);
-                          setSnapshotExistsInfo({ month: snapshotMonth, snapshotId: existingId ?? "" });
-                        } else {
-                          setSnapshotCreateError(msg);
-                        }
-                      } finally {
-                        setSnapshotCreateBusy(false);
-                      }
-                    }}
+                  <HintWrap
+                    disabled={!canWriteSnapshotsEffective}
+                    reason={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : null}
                   >
-                    {monthAlreadyExists ? "Exists" : snapshotCreateBusy ? "Creating…" : "Create"}
-                  </button>
+                    <button
+                      type="button"
+                      className={`h-8 px-3 text-xs rounded-md border ${
+                        canWriteSnapshotsEffective
+                          ? "border-slate-200 bg-white hover:bg-slate-50"
+                          : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
+                      }`}
+                      disabled={!canWriteSnapshotsEffective || snapshotCreateBusy || monthAlreadyExists}
+                      title={
+                        !canWriteSnapshotsEffective
+                          ? (snapshotWriteReason ?? noPermTitle)
+                          : monthAlreadyExists
+                            ? "Snapshot already exists for that month"
+                            : "Create snapshot"
+                      }
+                      onClick={async () => {
+                        if (!canWriteSnapshotsEffective) return;
+                        if (!selectedBusinessId || !selectedAccountId) return;
+
+                        // If month exists, no API call — just select and show details
+                        if (monthAlreadyExists && existingSnapshotForMonth?.id) {
+                          setSelectedSnapshotId(existingSnapshotForMonth.id);
+                          setSnapshotExistsInfo({ month: snapshotMonth, snapshotId: existingSnapshotForMonth.id });
+                          return;
+                        }
+
+                        setSnapshotCreateBusy(true);
+                        setSnapshotCreateError(null);
+                        setSnapshotExistsInfo(null);
+
+                        try {
+                          const created = await createReconcileSnapshot(selectedBusinessId, selectedAccountId, snapshotMonth);
+                          const items = await listReconcileSnapshots(selectedBusinessId, selectedAccountId);
+                          setSnapshots(items ?? []);
+                          if (created?.id) setSelectedSnapshotId(created.id);
+                        } catch (e: any) {
+                          const msg = e?.message ?? "Failed to create snapshot";
+
+                          // 409 is expected: set neutral info + auto-select existing snapshot id
+                          let existingId: string | null = null;
+                          try {
+                            if (typeof msg === "string") {
+                              // apiFetch often throws "API 409: { ...json... }"
+                              const m = msg.match(/\bAPI\s+409:\s*(\{.*\})\s*$/s);
+                              if (m?.[1]) {
+                                const payload = JSON.parse(m[1]);
+                                existingId = payload?.snapshot?.id ?? null;
+                              }
+                            }
+                          } catch {
+                            // ignore parse errors
+                          }
+
+                          // Fallback: use list-derived id for the current month (if present)
+                          if (!existingId) existingId = existingSnapshotForMonth?.id ?? null;
+
+                          if (typeof msg === "string" && msg.includes("409")) {
+                            if (existingId) setSelectedSnapshotId(existingId);
+                            setSnapshotExistsInfo({ month: snapshotMonth, snapshotId: existingId ?? "" });
+                          } else {
+                            setSnapshotCreateError(msg);
+                          }
+                        } finally {
+                          setSnapshotCreateBusy(false);
+                        }
+                      }}
+                    >
+                      {monthAlreadyExists ? "Exists" : snapshotCreateBusy ? "Creating…" : "Create"}
+                    </button>
+                  </HintWrap>
                 </div>
 
                 {/* Neutral info banner when snapshot exists */}
@@ -2103,33 +2177,38 @@ export default function ReconcilePageClient() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {(["bank", "matches", "audit"] as const).map((k) => {
-                        const label = k === "bank" ? "Bank CSV" : k === "matches" ? "Matches CSV" : "Audit CSV";
-                        return (
-                          <button
-                            key={k}
-                            type="button"
-                            className={`h-8 px-3 text-xs rounded-md border ${
-                              canWriteSnapshots
-                                ? "border-slate-200 bg-white hover:bg-slate-50"
-                                : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
-                            }`}
-                            disabled={!canWriteSnapshots}
-                            title={!canWriteSnapshots ? noPermTitle : "Download"}
-                            onClick={async () => {
-                              if (!selectedBusinessId || !selectedAccountId || !snapshot?.id) return;
-                              try {
-                                const res = await getReconcileSnapshotExportUrl(selectedBusinessId, selectedAccountId, snapshot.id, k);
-                                if (res?.url) window.open(res.url, "_blank");
-                              } catch {
-                                // ignore
-                              }
-                            }}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
+{(["bank", "matches", "audit"] as const).map((k) => {
+  const label = k === "bank" ? "Bank CSV" : k === "matches" ? "Matches CSV" : "Audit CSV";
+return (
+  <HintWrap
+    key={k}
+    disabled={!canWriteSnapshotsEffective}
+    reason={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : null}
+  >
+    <button
+        type="button"
+        className={`h-8 px-3 text-xs rounded-md border ${
+          canWriteSnapshotsEffective
+            ? "border-slate-200 bg-white hover:bg-slate-50"
+            : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
+        }`}
+        disabled={!canWriteSnapshotsEffective}
+        title={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : "Download"}
+        onClick={async () => {
+          if (!selectedBusinessId || !selectedAccountId || !snapshot?.id) return;
+          try {
+            const res = await getReconcileSnapshotExportUrl(selectedBusinessId, selectedAccountId, snapshot.id, k);
+            if (res?.url) window.open(res.url, "_blank");
+          } catch {
+            // ignore
+          }
+        }}
+      >
+        {label}
+      </button>
+    </HintWrap>
+  );
+})}
                     </div>
                   </div>
                 )}
@@ -2398,13 +2477,15 @@ export default function ReconcilePageClient() {
               Cancel
             </button>
 
-            <button
-              type="button"
-              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-              disabled={(() => {
-                if (matchBusy) return true;
-                if (!matchBankTxnId) return true;
-                if (matchSelectedEntryIds.size === 0) return true;
+            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
+              <button
+                type="button"
+                className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                disabled={(() => {
+                  if (!canWriteReconcileEffective) return true;
+                  if (matchBusy) return true;
+                  if (!matchBankTxnId) return true;
+                  if (matchSelectedEntryIds.size === 0) return true;
 
                 const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
                 const bankAbs = absBig(bank ? toBigIntSafe(bank.amount_cents) : 0n);
@@ -2469,6 +2550,7 @@ export default function ReconcilePageClient() {
             >
               {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
             </button>
+            </HintWrap>
           </div>
         </div>
       </AppDialog>
@@ -2503,13 +2585,15 @@ export default function ReconcilePageClient() {
               Cancel
             </button>
 
-            <button
-              type="button"
-              className="h-8 px-3 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-              disabled={adjustBusy || !adjustEntryId || !adjustReason.trim()}
-              onClick={async () => {
-                if (!selectedBusinessId || !selectedAccountId) return;
-                if (!adjustEntryId) return;
+            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
+              <button
+                type="button"
+                className="h-8 px-3 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                disabled={!canWriteReconcileEffective || adjustBusy || !adjustEntryId || !adjustReason.trim()}
+                onClick={async () => {
+                  if (!canWriteReconcileEffective) return;
+                  if (!selectedBusinessId || !selectedAccountId) return;
+                  if (!adjustEntryId) return;
 
                 setAdjustBusy(true);
                 setAdjustError(null);
@@ -2539,6 +2623,7 @@ export default function ReconcilePageClient() {
             >
               {adjustBusy ? "Saving…" : "Mark adjustment"}
             </button>
+            </HintWrap>
           </div>
         </div>
       </AppDialog>

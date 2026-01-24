@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { getCurrentUser } from "aws-amplify/auth";
 import {
   Bell,
   HelpCircle,
@@ -34,9 +35,48 @@ function navVariant(active: boolean) {
 export default function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const sp = useSearchParams();
+  const router = useRouter();
+
+  const currentUrl = useMemo(() => {
+    const qs = sp.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  }, [pathname, sp]);
+
+  // Stage 1: global auth guard for all app routes (exclude auth pages themselves)
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
+
+  useEffect(() => {
+    if (pathname.startsWith("/login") || pathname.startsWith("/signup") || pathname.startsWith("/confirm-signup") || pathname.startsWith("/forgot-password") || pathname.startsWith("/reset-password") || pathname.startsWith("/accept-invite") || pathname.startsWith("/oauth-callback")) {
+      setAuthChecked(true);
+      setIsAuthed(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        await getCurrentUser();
+        setIsAuthed(true);
+      } catch {
+        router.replace(`/login?next=${encodeURIComponent(currentUrl)}`);
+      } finally {
+        setAuthChecked(true);
+      }
+    })();
+  }, [pathname, router, currentUrl]);
 
   // Hooks must always run; decide chrome after
-  const showChrome = !(pathname.startsWith("/login") || pathname.startsWith("/me"));
+  const isAuthRoute =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/signup") ||
+    pathname.startsWith("/confirm-signup") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password") ||
+    pathname.startsWith("/accept-invite") ||
+    pathname.startsWith("/oauth-callback") ||
+    pathname.startsWith("/create-business");
+
+  const showChrome = !isAuthRoute;
   const noPageScroll = pathname.startsWith("/ledger"); // ledger should not page-scroll
 
   const [collapsed, setCollapsed] = useState(false);
@@ -59,6 +99,19 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }
 
   const businessesQ = useBusinesses();
+
+  // Stage 1: if signed in but has no businesses, force create-business (except when already there)
+  useEffect(() => {
+    if (!authChecked || !isAuthed) return;
+    if (pathname.startsWith("/create-business")) return;
+    if (businessesQ.isLoading) return;
+
+    const list = businessesQ.data ?? [];
+    if (list.length === 0) {
+      router.replace(`/create-business?next=${encodeURIComponent(currentUrl)}`);
+    }
+  }, [authChecked, isAuthed, pathname, businessesQ.isLoading, businessesQ.data, router, currentUrl]);
+
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
 
   const business = useMemo(() => {
@@ -166,6 +219,27 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       ],
     },
   ];
+
+  // Stage 1: prevent app-page flash while we determine whether user must create a business
+  if (showChrome && authChecked && isAuthed && !pathname.startsWith("/create-business")) {
+    if (businessesQ.isLoading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6">
+          <div className="text-sm text-slate-600">Loading…</div>
+        </div>
+      );
+    }
+
+    const list = businessesQ.data ?? [];
+    if (list.length === 0) {
+      // Redirect effect will run; render a stable loading state to avoid flashing Dashboard.
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6">
+          <div className="text-sm text-slate-600">Loading…</div>
+        </div>
+      );
+    }
+  }
 
   if (!showChrome) return <>{children}</>;
 

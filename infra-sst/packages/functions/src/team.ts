@@ -39,6 +39,12 @@ const WRITE_ROLES = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
 function canWrite(role: string | null | undefined) {
   return !!role && WRITE_ROLES.has(String(role).toUpperCase());
 }
+
+const MANAGE_MEMBER_ROLES = new Set(["OWNER", "ADMIN"]);
+function canManageMemberRoles(role: string | null | undefined) {
+  return !!role && MANAGE_MEMBER_ROLES.has(String(role).toUpperCase());
+}
+
 function isOwner(role: string | null | undefined) {
   return String(role ?? "").toUpperCase() === "OWNER";
 }
@@ -205,7 +211,7 @@ export async function handler(event: any) {
 
   // POST /v1/businesses/{businessId}/team/invites
   if (method === "POST" && path === `/v1/businesses/${biz}/team/invites`) {
-    if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+  if (!canManageMemberRoles(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
 
     let body: any = {};
     try {
