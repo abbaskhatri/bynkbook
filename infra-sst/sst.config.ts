@@ -270,6 +270,16 @@ api.route(
 
 api.route("POST /v1/team/invites/accept", teamHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Reports (Stage 2B) ----------
+const reportsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/reports.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/reports/pnl", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/payees", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/categories", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // ---------- Role Policies (store-only) ----------
 const rolePoliciesHandler = {
   ...bizHandler,
