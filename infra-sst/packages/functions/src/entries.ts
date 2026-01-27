@@ -1,6 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
+import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { randomUUID } from "node:crypto";
 
 const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
@@ -126,6 +127,12 @@ export async function handler(event: any) {
     const amountRaw = body?.amount_cents;
 
     if (!date) return json(400, { ok: false, error: "date is required (YYYY-MM-DD)" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(400, { ok: false, error: "date must be YYYY-MM-DD" });
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: date });
+    if (!cp.ok) return cp.response;
+
     if (!ENTRY_TYPES.includes(type as any)) return json(400, { ok: false, error: "Invalid type" });
     if (!ENTRY_STATUS.includes(status as any)) return json(400, { ok: false, error: "Invalid status" });
 
@@ -167,6 +174,16 @@ export async function handler(event: any) {
 
   // DELETE /entries/{entryId} (soft delete)
   if (method === "DELETE" && ent) {
+    const existing = await prisma.entry.findFirst({
+      where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
+      select: { date: true },
+    });
+    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+    if (!cp.ok) return cp.response;
+
     await prisma.entry.updateMany({
       where: {
         id: ent,
@@ -185,6 +202,16 @@ export async function handler(event: any) {
 
   // POST /entries/{entryId}/restore
   if (method === "POST" && ent && path?.endsWith("/restore")) {
+    const existing = await prisma.entry.findFirst({
+      where: { id: ent, business_id: biz, account_id: acct },
+      select: { date: true },
+    });
+    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+    if (!cp.ok) return cp.response;
+
     await prisma.entry.updateMany({
       where: {
         id: ent,
@@ -236,6 +263,16 @@ export async function handler(event: any) {
 
     const reason = (body?.reason ?? "").toString().trim();
     if (!reason) return json(400, { ok: false, error: "reason is required" });
+
+    const existing = await prisma.entry.findFirst({
+      where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
+      select: { date: true },
+    });
+    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+    if (!cp.ok) return cp.response;
 
     const updated = await prisma.entry.updateMany({
       where: {
@@ -291,6 +328,16 @@ export async function handler(event: any) {
         policyKey: az.policyKey,
       });
     }
+
+    const existing = await prisma.entry.findFirst({
+      where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
+      select: { date: true },
+    });
+    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+    if (!cp.ok) return cp.response;
 
     const updated = await prisma.entry.updateMany({
       where: {

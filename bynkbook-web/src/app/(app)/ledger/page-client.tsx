@@ -58,6 +58,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { ClosePeriodDialog } from "@/components/ledger/close-period-dialog";
 
 import {
   AlertTriangle,
@@ -522,6 +523,14 @@ export default function LedgerPageClient() {
     if (bizIdFromUrl) return bizIdFromUrl;
     return list[0]?.id ?? null;
   }, [bizIdFromUrl, businessesQ.data]);
+
+  const myBusinessRole = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    const b = list.find((x: any) => x?.id === selectedBusinessId);
+    return String(b?.role ?? "").toUpperCase();
+  }, [businessesQ.data, selectedBusinessId]);
+
+  const canClosePeriod = myBusinessRole === "OWNER" || myBusinessRole === "ADMIN";
 
   const accountsQ = useAccounts(selectedBusinessId);
 
@@ -2052,6 +2061,9 @@ const filterRight = null;
   // Delete confirm dialog
   const [deleteDialog, setDeleteDialog] = useState<{ id: string; mode: "soft" | "hard" } | null>(null);
 
+  // Stage 2A: Close period dialog
+  const [closePeriodOpen, setClosePeriodOpen] = useState(false);
+
   // FixIssue dialog (reusable; Ledger + Issues page)
   const [fixDialog, setFixDialog] = useState<
     | {
@@ -2531,7 +2543,7 @@ const filterRight = null;
   Upload Receipt
 </button>
 
-                <button
+<button
   type="button"
   className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
   onClick={() => {
@@ -2540,6 +2552,16 @@ const filterRight = null;
   }}
 >
   Upload Invoice
+</button>
+
+<button
+  type="button"
+  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+  disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
+  title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
+  onClick={() => setClosePeriodOpen(true)}
+>
+  Close period
 </button>
               </div>
             }
@@ -2686,12 +2708,22 @@ const filterRight = null;
 </AppDialog>
 
 <UploadPanel
-        open={openUpload}
-        onClose={() => setOpenUpload(false)}
-        type={uploadType}
-        ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
-        allowMultiple={true}
-      />
+  open={openUpload}
+  onClose={() => setOpenUpload(false)}
+  type={uploadType}
+  ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
+  allowMultiple={true}
+/>
+
+{selectedBusinessId && selectedAccountId ? (
+  <ClosePeriodDialog
+    open={closePeriodOpen}
+    onOpenChange={setClosePeriodOpen}
+    businessId={selectedBusinessId}
+    accountId={selectedAccountId}
+    accountName={selectedAccount?.name ?? null}
+  />
+) : null}
     </div>
   );
 }

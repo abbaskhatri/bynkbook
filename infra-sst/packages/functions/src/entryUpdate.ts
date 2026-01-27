@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { assertNotClosedPeriod } from "./lib/closedPeriods";
 
 const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
 const ENTRY_STATUS = ["EXPECTED", "CLEARED"] as const;
@@ -116,6 +117,24 @@ export async function handler(event: any) {
 
     const acctOk = await requireAccountInBusiness(prisma, biz, acct);
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    // If body.date provided, enforce on the new date (string). Otherwise enforce on existing entry date.
+    if (body.date !== undefined) {
+      const ymd = String(body.date ?? "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return json(400, { ok: false, error: "date must be YYYY-MM-DD" });
+      const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: ymd });
+      if (!cp.ok) return cp.response;
+    } else {
+      const existing = await prisma.entry.findFirst({
+        where: { id: ent, business_id: biz, account_id: acct },
+        select: { date: true },
+      });
+      if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+      const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+      if (!cp.ok) return cp.response;
+    }
 
     // Build update payload (PATCH-like behavior for both PUT and PATCH)
     const data: any = { updated_at: new Date() };

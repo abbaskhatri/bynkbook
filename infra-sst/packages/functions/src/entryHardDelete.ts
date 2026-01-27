@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { assertNotClosedPeriod } from "./lib/closedPeriods";
 
 function json(statusCode: number, body: any) {
   return {
@@ -65,6 +66,27 @@ export async function handler(event: any) {
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
 
     // Safety: only allow hard delete after soft delete.
+    const existing = await prisma.entry.findFirst({
+      where: {
+        id: ent,
+        business_id: biz,
+        account_id: acct,
+        deleted_at: { not: null },
+      },
+      select: { date: true },
+    });
+
+    if (!existing) {
+      return json(409, {
+        ok: false,
+        error: "Entry must be in Deleted before permanent delete (soft delete first).",
+      });
+    }
+
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+    if (!cp.ok) return cp.response;
+
     const res = await prisma.entry.deleteMany({
       where: {
         id: ent,

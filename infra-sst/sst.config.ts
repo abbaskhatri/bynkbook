@@ -276,9 +276,19 @@ const reportsHandler = {
   handler: "packages/functions/src/reports.handler",
 } satisfies ApiHandler;
 
+const closedPeriodsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/closedPeriods.handler",
+} satisfies ApiHandler;
+
 api.route("GET /v1/businesses/{businessId}/reports/pnl", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/payees", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/categories", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("GET /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/closed-periods/preview", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("DELETE /v1/businesses/{businessId}/closed-periods/{month}", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Role Policies (store-only) ----------
 const rolePoliciesHandler = {

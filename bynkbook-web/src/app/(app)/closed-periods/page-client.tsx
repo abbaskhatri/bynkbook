@@ -1,148 +1,136 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
-
-import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { useAccounts } from "@/lib/queries/useAccounts";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
-import { CapsuleSelect } from "@/components/app/capsule-select";
-import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { FilterBar } from "@/components/primitives/FilterBar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Lock, Download, Plus, CalendarDays } from "lucide-react";
-import {CalendarCheck2} from "lucide-react";
+import { Lock } from "lucide-react";
+
+import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { listClosedPeriods, reopenPeriod } from "@/lib/api/closedPeriods";
 
 export default function ClosedPeriodsPageClient() {
-  const router = useRouter();
   const sp = useSearchParams();
-
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try { await getCurrentUser(); setAuthReady(true); } catch { router.replace("/login"); }
-    })();
-  }, [router]);
-
   const businessesQ = useBusinesses();
-  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
-  const accountIdFromUrl = sp.get("accountId");
 
-  const selectedBusinessId = useMemo(() => {
-    const list = businessesQ.data ?? [];
-    if (bizIdFromUrl) return bizIdFromUrl;
-    return list[0]?.id ?? null;
-  }, [bizIdFromUrl, businessesQ.data]);
+  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
+  const businessId = bizIdFromUrl ?? (businessesQ.data?.[0]?.id ?? null);
 
-  const accountsQ = useAccounts(selectedBusinessId);
+  const myRole = useMemo(() => {
+    if (!businessId) return null;
+    const b = (businessesQ.data ?? []).find((x: any) => x?.id === businessId);
+    return String(b?.role ?? "").toUpperCase();
+  }, [businessId, businessesQ.data]);
 
-  const selectedAccountId = useMemo(() => {
-    const list = accountsQ.data ?? [];
-    if (accountIdFromUrl) return accountIdFromUrl;
-    return list.find((a) => !a.archived_at)?.id ?? "";
-  }, [accountsQ.data, accountIdFromUrl]);
+  const canReopen = myRole === "OWNER";
 
-  useEffect(() => {
-    if (!authReady) return;
-    if (businessesQ.isLoading) return;
-    if (!selectedBusinessId) return;
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [rows, setRows] = useState<any[]>([]);
 
-    if (!sp.get("businessId")) {
-      router.replace(`/closed-periods?businessId=${selectedBusinessId}`);
-      return;
+  async function refresh() {
+    if (!businessId) return;
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await listClosedPeriods(businessId);
+      setRows(res.periods ?? []);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load closed periods");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    if (accountsQ.isLoading) return;
-
-    if (selectedAccountId && !accountIdFromUrl) {
-      router.replace(`/closed-periods?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
+  async function onReopen(m: string) {
+    if (!businessId) return;
+    setLoading(true);
+    setErr(null);
+    try {
+      await reopenPeriod(businessId, m);
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to reopen period");
+    } finally {
+      setLoading(false);
     }
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, accountsQ.isLoading, selectedAccountId, accountIdFromUrl, router, sp]);
+  }
 
-  if (!authReady) return <Skeleton className="h-10 w-64" />;
-
-  const opts = (accountsQ.data ?? [])
-    .filter((a) => !a.archived_at)
-    .map((a) => ({ value: a.id, label: a.name }));
-
-  const capsule = (
-    <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
-      <CapsuleSelect
-        variant="flat"
-        loading={accountsQ.isLoading}
-        value={selectedAccountId || (opts[0]?.value ?? "")}
-        onValueChange={(v) => router.replace(`/closed-periods?businessId=${selectedBusinessId}&accountId=${v}`)}
-        options={opts}
-        placeholder="Select account"
-      />
-    </div>
-  );
-
-  const closedCount = 0;
+  // Auto-load once businessId is known (matches your repo pattern)
+  useState(() => {
+    if (businessId && rows.length === 0 && !loading && !err) {
+      refresh();
+    }
+  });
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      {/* Unified header container (match Phase 3 standard) */}
+    <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
-          <PageHeader
-            icon={<Lock className="h-4 w-4" />}
-            title="Closed Periods"
-            afterTitle={capsule}
-            right={
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  disabled
-                  className="h-7 px-3 text-xs opacity-50 cursor-not-allowed"
-                  title="Coming soon"
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  Export
-                </Button>
+          <PageHeader icon={<Lock className="h-4 w-4" />} title="Closed periods" />
+        </div>
 
-                <Button
-                  disabled
-                  className="h-7 px-3 text-xs opacity-50 cursor-not-allowed"
-                  title="Coming soon"
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Close Period
+        <div className="mt-2 h-px bg-slate-200" />
+
+        <div className="px-3 py-2">
+          <FilterBar
+            left={<div className="text-xs text-slate-600">Close periods from Ledger → “Close period”.</div>}
+            right={
+              <>
+                <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
+                  Refresh
                 </Button>
-              </div>
+                {err ? <div className="text-xs text-red-600 ml-1">{err}</div> : null}
+              </>
             }
           />
-          <div className="mt-1 px-11 text-xs text-slate-500">
-            {closedCount} periods closed
-          </div>
         </div>
-        <div className="mt-2 h-px bg-slate-200" />
       </div>
 
-      {/* Empty state (old app style) */}
       <Card>
-        <CardContent className="py-14">
-          <div className="flex flex-col items-center text-center gap-3">
-            <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center">
-              <CalendarDays className="h-8 w-8 text-slate-400" />
-            </div>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Closed months</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading && rows.length === 0 ? (
+            <div className="text-sm text-slate-600">Loading…</div>
+          ) : rows.length === 0 ? (
+            <div className="text-sm text-slate-600">No closed periods yet.</div>
+          ) : (
+            <div className="rounded-md border border-slate-200 overflow-hidden">
+              <div className="grid grid-cols-[140px_1fr_220px] bg-slate-50 text-[11px] font-semibold text-slate-600 px-3 h-9 items-center border-b border-slate-200">
+                <div>Month</div>
+                <div>Closed by</div>
+                <div className="text-right">Actions</div>
+              </div>
 
-            <div className="text-lg font-semibold text-slate-900">No Closed Periods Yet</div>
-            <div className="text-sm text-slate-600 max-w-md">
-              You haven&apos;t closed any accounting periods. When you do, they will appear here.
+              {rows.map((r: any) => (
+                <div
+                  key={r.month}
+                  className="grid grid-cols-[140px_1fr_220px] px-3 h-9 items-center border-b border-slate-100 text-sm"
+                >
+                  <div className="tabular-nums">{r.month}</div>
+                  <div className="truncate text-slate-600">{r.closed_by_user_id}</div>
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      className="h-7 px-3 text-xs"
+                      disabled={!canReopen || loading}
+                      title={!canReopen ? "Only OWNER can reopen" : "Reopen month"}
+                      onClick={() => onReopen(r.month)}
+                    >
+                      Reopen
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
+          )}
 
-            <Button
-              disabled
-              className="h-9 px-4 text-sm opacity-50 cursor-not-allowed"
-              title="Coming soon"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Close Period
-            </Button>
-          </div>
+          {!canReopen ? <div className="mt-2 text-xs text-slate-500">Only OWNER can reopen periods.</div> : null}
         </CardContent>
       </Card>
     </div>

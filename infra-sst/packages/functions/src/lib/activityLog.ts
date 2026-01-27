@@ -12,7 +12,9 @@ export type ActivityEventType =
   | "RECONCILE_MATCH_VOIDED"
   | "RECONCILE_ENTRY_ADJUSTMENT_MARKED"
   | "RECONCILE_ENTRY_ADJUSTMENT_UNMARKED"
-  | "RECONCILE_SNAPSHOT_CREATED";
+  | "RECONCILE_SNAPSHOT_CREATED"
+  | "CLOSED_PERIOD_CLOSED"
+  | "CLOSED_PERIOD_REOPENED";
 
 export async function logActivity(prisma: any, args: {
   businessId: string;

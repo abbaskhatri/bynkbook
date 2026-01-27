@@ -26,7 +26,26 @@ export async function apiFetch(path: string, init?: RequestInit) {
   metrics.api(`${method} ${path}`, ms, res.status);
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    // Centralized CLOSED_PERIOD UX (Operational Core Ready)
+    const contentType = res.headers.get("content-type") || "";
+    let payload: any = null;
+    let text = "";
+
+    if (contentType.includes("application/json")) {
+      payload = await res.json().catch(() => null);
+    } else {
+      text = await res.text().catch(() => "");
+    }
+
+    if (res.status === 409 && payload?.code === "CLOSED_PERIOD") {
+      const month = payload?.month ? ` (${payload.month})` : "";
+      throw new Error(`This period is closed${month}. Reopen it in Closed Periods.`);
+    }
+
+    if (!text) {
+      text = payload ? JSON.stringify(payload) : res.statusText;
+    }
+
     throw new Error(`API ${res.status}: ${text || res.statusText}`);
   }
 
