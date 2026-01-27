@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { RotateCcw, AlertTriangle } from "lucide-react";
+import { RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 
 const ZERO = BigInt(0);
 
@@ -178,6 +178,87 @@ export default function IssuesPageClient() {
     const t = Date.parse(iso);
     if (!Number.isFinite(t)) return true;
     return Date.now() - t > 15 * 60 * 1000; // 15 minutes
+  }
+
+  function formatScanLabel(iso: string | null) {
+    if (!iso) return "Never";
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return "Unknown";
+    const diffMs = Date.now() - t;
+
+    const min = Math.floor(diffMs / 60000);
+    if (min < 1) return "Just now";
+    if (min < 60) return `${min}m ago`;
+
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+
+    const d = Math.floor(hr / 24);
+    return `${d}d ago`;
+  }
+
+  const [scanErr, setScanErr] = useState<string | null>(null);
+
+  async function runManualScan() {
+    if (scanBusy) return;
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    setScanErr(null);
+    setScanBusy(true);
+
+    try {
+      const session = await fetchAuthSession();
+      const token = session.tokens?.accessToken?.toString();
+      if (!token) throw new Error("Missing access token");
+
+      const base =
+        process.env.NEXT_PUBLIC_API_URL ||
+        process.env.NEXT_PUBLIC_API_BASE_URL ||
+        process.env.NEXT_PUBLIC_API_ENDPOINT ||
+        "";
+
+      if (!base) throw new Error("Missing NEXT_PUBLIC_API_URL");
+
+      const url = `${base}/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          includeMissingCategory: false,
+          dryRun: false,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Scan failed: ${res.status} ${text}`.trim());
+      }
+
+      // Targeted invalidation only
+      void qc.invalidateQueries({
+        queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
+        exact: false,
+      });
+
+      // Persist last scan timestamp (UI-only throttle)
+      const nowIso = new Date().toISOString();
+      if (scanKey) {
+        try {
+          localStorage.setItem(scanKey, nowIso);
+        } catch {
+          // ignore
+        }
+      }
+      setLastScanAt(nowIso);
+    } catch (e: any) {
+      setScanErr(e?.message || "Scan failed");
+    } finally {
+      setScanBusy(false);
+    }
   }
 
   async function runBackgroundScan() {
@@ -381,7 +462,6 @@ export default function IssuesPageClient() {
     return out;
   }, [issuesQ.data, entryById]);
 
-  // Apply local filters (payee + type + severity)
   const filteredIssues = useMemo(() => {
     const q = debouncedPayee.trim().toLowerCase();
     return issues.filter((r) => {
@@ -397,6 +477,14 @@ export default function IssuesPageClient() {
       return true;
     });
   }, [issues, debouncedPayee, filterIssueType, filterSeverity]);
+
+  const kpi = useMemo(() => {
+    // KPI is computed from the loaded (already status-filtered) issues list.
+    const openTotal = issues.length;
+    const dup = issues.filter((x) => x.kind === "DUPLICATE").length;
+    const stale = issues.filter((x) => x.kind === "STALE_CHECK").length;
+    return { openTotal, dup, stale };
+  }, [issues]);
 
   // ================================
   // Selection + bulk (UI-only)
@@ -697,12 +785,46 @@ export default function IssuesPageClient() {
             icon={<AlertTriangle className="h-4 w-4" />}
             title="Issues"
             afterTitle={accountCapsuleEl}
+            right={
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-600 whitespace-nowrap">
+                  Last scan: <span className="font-medium text-slate-900">{formatScanLabel(lastScanAt)}</span>
+                </span>
+
+                <Button
+                  variant="outline"
+                  className="h-7 px-2 text-xs inline-flex items-center gap-1"
+                  onClick={runManualScan}
+                  disabled={scanBusy}
+                  title="Scan issues"
+                >
+                  {scanBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Scan
+                </Button>
+              </div>
+            }
           />
         </div>
 
         <div className="mt-2 h-px bg-slate-200" />
 
         <FilterBar left={filterLeft} right={filterRight} />
+
+        <div className="h-px bg-slate-200" />
+
+        <div className="px-3 py-2 flex items-center gap-4 text-xs text-slate-600">
+          <span>
+            Open: <span className="font-medium text-slate-900">{kpi.openTotal}</span>
+          </span>
+          <span>
+            Duplicates: <span className="font-medium text-slate-900">{kpi.dup}</span>
+          </span>
+          <span>
+            Stale: <span className="font-medium text-slate-900">{kpi.stale}</span>
+          </span>
+
+          {scanErr ? <span className="text-red-600 ml-2">{scanErr}</span> : null}
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-white">
@@ -750,7 +872,9 @@ export default function IssuesPageClient() {
               ) : renderRows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-3 text-xs text-slate-500">
-                    No issues found (Stage B).
+                    {lastScanAt
+                      ? `No open issues. Last scan: ${formatScanLabel(lastScanAt)}.`
+                      : "No issues yet. Run Scan to generate issues."}
                   </td>
                 </tr>
               ) : null}
