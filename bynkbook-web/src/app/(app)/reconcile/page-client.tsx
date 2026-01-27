@@ -414,6 +414,36 @@ export default function ReconcilePageClient() {
     };
   }, [authReady, selectedBusinessId, selectedAccountId]);
 
+  async function refreshBankAndMatches() {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    setBankTxLoading(true);
+    try {
+      const res = await listBankTransactions({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        from: from || undefined,
+        to: to || undefined,
+        limit: 500,
+      });
+      setBankTx(res?.items ?? []);
+    } catch {
+      setBankTx([]);
+    } finally {
+      setBankTxLoading(false);
+    }
+
+    setMatchesLoading(true);
+    try {
+      const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
+      setMatches(m?.items ?? []);
+    } catch {
+      setMatches([]);
+    } finally {
+      setMatchesLoading(false);
+    }
+  }
+
   // Load bank txns + matches
   useEffect(() => {
     if (!authReady) return;
@@ -1080,16 +1110,36 @@ export default function ReconcilePageClient() {
     downloadCsv("reconcile_audit_events.csv", toCsv(headers, rows));
   };
 
+  // Local search (filters visible rows only; instant-fast)
+  const searchQ = useMemo(() => search.trim().toLowerCase(), [search]);
+
+  const matchesRowSearch = (hay: string) => {
+    if (!searchQ) return true;
+    return (hay ?? "").toLowerCase().includes(searchQ);
+  };
+
   // Tabs: Expected Entries
   const entriesExpectedList = useMemo(() => {
     // Expected tab shows only: unmatched AND not adjusted
-    return allEntriesSorted.filter((e: any) => !matchedEntryIdSet.has(e.id) && !isAdjustedEntry(e));
-  }, [allEntriesSorted, matchedEntryIdSet]);
+    return allEntriesSorted.filter((e: any) => {
+      if (matchedEntryIdSet.has(e.id)) return false;
+      if (isAdjustedEntry(e)) return false;
+
+      // search: payee + date + amount
+      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
+      return matchesRowSearch(hay);
+    });
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ]);
 
   const entriesMatchedList = useMemo(() => {
     // Matched tab shows: matched (includes adjusted-if-matched)
-    return allEntriesSorted.filter((e: any) => matchedEntryIdSet.has(e.id));
-  }, [allEntriesSorted, matchedEntryIdSet]);
+    return allEntriesSorted.filter((e: any) => {
+      if (!matchedEntryIdSet.has(e.id)) return false;
+
+      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
+      return matchesRowSearch(hay);
+    });
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ]);
 
   const expectedCount = entriesExpectedList.length;
   const matchedCount = entriesMatchedList.length;
@@ -1098,6 +1148,10 @@ export default function ReconcilePageClient() {
   const bankUnmatchedList = useMemo(() => {
     // Unmatched tab includes UNMATCHED + PARTIAL (abs-based remaining)
     return bankTxSorted.filter((t: any) => {
+      // search: description + date + amount
+      const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
+      if (!matchesRowSearch(hay)) return false;
+
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
       const matchedAbsSum = matchedAbsByBankTxnId.get(t.id) ?? 0n;
       const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
@@ -1106,15 +1160,18 @@ export default function ReconcilePageClient() {
       const isPartial = matchedAbsSum > 0n && !isMatched;
       return isUnmatched || isPartial;
     });
-  }, [bankTxSorted, matchedAbsByBankTxnId, remainingAbsByBankTxnId]);
+  }, [bankTxSorted, matchedAbsByBankTxnId, remainingAbsByBankTxnId, searchQ]);
 
   const bankMatchedList = useMemo(() => {
     return bankTxSorted.filter((t: any) => {
+      const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
+      if (!matchesRowSearch(hay)) return false;
+
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
       const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
       return bankAbs > 0n && remainingAbs === 0n;
     });
-  }, [bankTxSorted, remainingAbsByBankTxnId]);
+  }, [bankTxSorted, remainingAbsByBankTxnId, searchQ]);
 
   const bankUnmatchedCount = bankUnmatchedList.length;
   const bankMatchedCount = bankMatchedList.length;
@@ -2219,19 +2276,31 @@ return (
       </AppDialog>
 
       {/* Phase 4D: Match dialog (Bank txn → many entries) */}
-      <AppDialog open={openMatch} onClose={() => setOpenMatch(false)} title="Match bank transaction" size="lg">
+      <AppDialog
+        open={openMatch}
+        onClose={() => {
+          setOpenMatch(false);
+          setMatchError(null);
+          setMatchBusy(false);
+          setMatchSearch("");
+          setMatchSelectedEntryIds(new Set());
+          setMatchBankTxnId(null);
+        }}
+        title="Match bank transaction"
+        size="lg"
+      >
         <div className="flex flex-col max-h-[70vh]">
           {/* Body (scroll only this area) */}
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-slate-600 mb-2">Select eligible entries (v1: entry matches at most one bank txn).</div>
 
             <div className="mb-2">
-              <input
-                className="h-8 w-full px-2 text-xs border border-slate-200 rounded-md"
-                placeholder="Search entries…"
-                value={matchSearch}
-                onChange={(e) => setMatchSearch(e.target.value)}
-              />
+                <input
+                  className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
+                  placeholder="Search entries…"
+                  value={matchSearch}
+                  onChange={(e) => setMatchSearch(e.target.value)}
+                />
             </div>
 
             {(() => {
@@ -2534,8 +2603,7 @@ return (
                     });
                   }
 
-                  const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-                  setMatches(m?.items ?? []);
+                  await refreshBankAndMatches();
                   await entriesQ.refetch?.();
 
                   setOpenMatch(false);
@@ -2556,7 +2624,18 @@ return (
       </AppDialog>
 
       {/* Adjustment dialog */}
-      <AppDialog open={openAdjust} onClose={() => setOpenAdjust(false)} title="Mark adjustment" size="md">
+      <AppDialog
+        open={openAdjust}
+        onClose={() => {
+          setOpenAdjust(false);
+          setAdjustBusy(false);
+          setAdjustError(null);
+          setAdjustReason("");
+          setAdjustEntryId(null);
+        }}
+        title="Mark adjustment"
+        size="md"
+      >
         <div className="flex flex-col max-h-[55vh]">
           <div className="flex-1 overflow-y-auto">
             <div className="text-xs text-slate-600 mb-2">Marking an entry as an adjustment is ledger-only and reversible later.</div>
@@ -2611,6 +2690,9 @@ return (
                     return next;
                   });
 
+                  await entriesQ.refetch?.();
+                  await refreshBankAndMatches();
+
                   setOpenAdjust(false);
                 } catch (e: any) {
                   setAdjustError(e?.message ?? "Failed to mark adjustment");
@@ -2629,7 +2711,19 @@ return (
       </AppDialog>
 
       {/* Entry → Bank match dialog */}
-      <AppDialog open={openEntryMatch} onClose={() => setOpenEntryMatch(false)} title="Match entry" size="lg">
+      <AppDialog
+        open={openEntryMatch}
+        onClose={() => {
+          setOpenEntryMatch(false);
+          setEntryMatchBusy(false);
+          setEntryMatchError(null);
+          setEntryMatchSearch("");
+          setEntryMatchEntryId(null);
+          setEntryMatchSelectedBankTxnId(null);
+        }}
+        title="Match entry"
+        size="lg"
+      >
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-slate-600 mb-2">
@@ -2638,7 +2732,7 @@ return (
 
             <div className="mb-2">
               <input
-                className="h-8 w-full px-2 text-xs border border-slate-200 rounded-md"
+                className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
                 placeholder="Search bank transactions…"
                 value={entryMatchSearch}
                 onChange={(e) => setEntryMatchSearch(e.target.value)}
@@ -3078,8 +3172,8 @@ return (
                         bankTransactionId: bankTxnId,
                       });
 
-                      const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-                      setMatches(m?.items ?? []);
+                      await refreshBankAndMatches();
+                      await entriesQ.refetch?.();
 
                       // Close detail after success (clean, consistent)
                       setOpenReconAuditDetail(false);
@@ -3464,26 +3558,33 @@ return (
       <AppDialog open={openExportHub} onClose={() => setOpenExportHub(false)} title="Export" size="sm">
         <div className="p-3">
           <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
-              disabled={!canWrite || (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0}
-              title={
-                !canWrite
-                  ? noPermTitle
-                  : (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
-                    ? "No bank transactions to export"
-                    : "Export bank transactions (CSV)"
-              }
-              onClick={() => {
-                if (!canWrite) return;
-                exportBankCsv();
-              }}
-            >
-              <Download className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Bank txns</span>
-              <span className="text-[11px] text-slate-500">{(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length}</span>
-            </button>
+            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
+              <button
+                type="button"
+                className="h-24 w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
+                disabled={
+                  !canWriteReconcileEffective ||
+                  (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
+                }
+                title={
+                  !canWriteReconcileEffective
+                    ? (reconcileWriteReason ?? noPermTitle)
+                    : (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
+                      ? "No bank transactions to export"
+                      : "Export bank transactions (CSV)"
+                }
+                onClick={() => {
+                  if (!canWriteReconcileEffective) return;
+                  exportBankCsv();
+                }}
+              >
+                <Download className="h-6 w-6 text-slate-700" />
+                <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Bank txns</span>
+                <span className="text-[11px] text-slate-500">
+                  {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length}
+                </span>
+              </button>
+            </HintWrap>
 
             <button
               type="button"
