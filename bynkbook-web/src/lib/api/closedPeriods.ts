@@ -23,16 +23,17 @@ export async function reopenPeriod(businessId: string, month: string): Promise<a
   });
 }
 
+// Account-scoped preview (Ledger uses selected account)
 export async function previewClosedPeriods(args: {
   businessId: string;
+  accountId: string; // UUID (required)
   from: string; // YYYY-MM-DD
   to: string;   // YYYY-MM-DD
-  accountId: string; // "all" or UUID
 }) {
   const q = new URLSearchParams({
     from: args.from,
     to: args.to,
-    accountId: args.accountId ?? "all",
+    accountId: args.accountId,
   }).toString();
 
   return apiFetch(`/v1/businesses/${args.businessId}/closed-periods/preview?${q}`);

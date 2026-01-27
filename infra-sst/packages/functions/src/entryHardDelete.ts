@@ -65,27 +65,31 @@ export async function handler(event: any) {
     const acctOk = await requireAccountInBusiness(prisma, biz, acct);
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
 
-    // Safety: only allow hard delete after soft delete.
-    const existing = await prisma.entry.findFirst({
+    // Stage 2A: closed period enforcement must run BEFORE "must be deleted first"
+    // Fetch entry date regardless of deleted_at to enforce closed month consistently.
+    const anyEntry = await prisma.entry.findFirst({
       where: {
         id: ent,
         business_id: biz,
         account_id: acct,
-        deleted_at: { not: null },
       },
-      select: { date: true },
+      select: { date: true, deleted_at: true },
     });
 
-    if (!existing) {
+    if (!anyEntry) {
+      return json(404, { ok: false, error: "Entry not found" });
+    }
+
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: anyEntry.date });
+    if (!cp.ok) return cp.response;
+
+    // Safety: only allow hard delete after soft delete.
+    if (!anyEntry.deleted_at) {
       return json(409, {
         ok: false,
         error: "Entry must be in Deleted before permanent delete (soft delete first).",
       });
     }
-
-    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
-    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
-    if (!cp.ok) return cp.response;
 
     const res = await prisma.entry.deleteMany({
       where: {

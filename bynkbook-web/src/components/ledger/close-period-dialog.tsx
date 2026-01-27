@@ -115,6 +115,8 @@ export function ClosePeriodDialog(props: {
     if (!monthsAffected.length) return;
 
     if (!isClean && !override) return;
+
+    // First click after enabling override: confirm intent (v1)
     if (!isClean && override && !confirmOverride) {
       setConfirmOverride(true);
       return;
@@ -136,12 +138,13 @@ export function ClosePeriodDialog(props: {
     }
   }
 
+  // Close is enabled after preview.
+  // If not clean, requires override checkbox; first click becomes confirmation.
   const closeDisabled =
     !preview ||
     monthsAffected.length === 0 ||
     loading ||
-    (!isClean && !override) ||
-    (!isClean && override && !confirmOverride);
+    (!isClean && !override);
 
   return (
     <AppDialog
@@ -293,9 +296,9 @@ export function ClosePeriodDialog(props: {
               </label>
             ) : null}
 
-            {!isClean && override && confirmOverride ? (
+            {!isClean && override ? (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Override confirmed. Click Close again to proceed.
+                This period is not clean. {confirmOverride ? "Click Close again to proceed." : "Click Close to confirm override."}
               </div>
             ) : null}
           </div>
