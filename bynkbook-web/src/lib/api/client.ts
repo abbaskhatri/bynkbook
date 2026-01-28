@@ -1,7 +1,11 @@
 import { fetchAuthSession } from "aws-amplify/auth";
 import { metrics } from "@/lib/perf/metrics";
 
-const API_BASE = "https://lmvoixj337.execute-api.us-east-1.amazonaws.com";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+
+if (!API_BASE && process.env.NODE_ENV !== "production") {
+  throw new Error("Missing NEXT_PUBLIC_API_URL. Set it in .env.local (see .env.example).");
+}
 
 export async function apiFetch(path: string, init?: RequestInit) {
   const t0 = performance.now();
@@ -15,7 +19,7 @@ export async function apiFetch(path: string, init?: RequestInit) {
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE ?? ""}${path}`, {
     ...init,
     headers,
     cache: "no-store",

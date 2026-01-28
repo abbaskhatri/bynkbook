@@ -240,28 +240,65 @@ function exportActivityCsv() {
               </div>
             }
             right={
-  tab === "pnl" ? (
-    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportPnlCsv} disabled={!pnl}>
-      Export CSV
-    </Button>
-  ) : tab === "payees" ? (
-    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportPayeesCsv} disabled={!payees}>
-      Export CSV
-    </Button>
-  ) : tab === "cashflow" ? (
-    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportCashflowCsv} disabled={!cashflow}>
-      Export CSV
-    </Button>
-  ) : tab === "activity" ? (
-    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportActivityCsv} disabled={!activity}>
-      Export CSV
-    </Button>
-  ) : (
-    <Button variant="outline" className="h-7 px-3 text-xs" disabled title="Run report to enable export">
-      Export CSV
-    </Button>
-  )
-}
+              tab === "summary" ? (
+                <Button
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => {
+                    exportPnlCsv();
+                    exportPayeesCsv();
+                  }}
+                  disabled={!pnl || !payees}
+                  title={!pnl || !payees ? "Run P&L and Payees to enable Summary export." : "Export CSV"}
+                >
+                  Export CSV
+                </Button>
+              ) : tab === "pnl" ? (
+                <Button
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={exportPnlCsv}
+                  disabled={!pnl}
+                  title={!pnl ? "Run report to enable export" : "Export CSV"}
+                >
+                  Export CSV
+                </Button>
+              ) : tab === "payees" ? (
+                <Button
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={exportPayeesCsv}
+                  disabled={!payees}
+                  title={!payees ? "Run report to enable export" : "Export CSV"}
+                >
+                  Export CSV
+                </Button>
+              ) : tab === "cashflow" ? (
+                <Button
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={exportCashflowCsv}
+                  disabled={!cashflow}
+                  title={!cashflow ? "Run report to enable export" : "Export CSV"}
+                >
+                  Export CSV
+                </Button>
+              ) : tab === "activity" ? (
+                <Button
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={exportActivityCsv}
+                  disabled={!activity}
+                  title={!activity ? "Run report to enable export" : "Export CSV"}
+                >
+                  Export CSV
+                </Button>
+              ) : (
+                <Button variant="outline" className="h-7 px-3 text-xs" disabled title="Run report to enable export">
+                  Export CSV
+                </Button>
+              )
+            }
           />
         </div>
 
@@ -306,6 +343,11 @@ function exportActivityCsv() {
                 <div className="space-y-1">
                   <div className="text-[11px] text-slate-600">To</div>
                   <Input type="date" className="h-7 w-[160px] text-xs" value={to} onChange={(e) => setTo(e.target.value)} />
+                </div>
+
+                <div className="ml-2 flex flex-col justify-end">
+                  <div className="text-[11px] text-slate-500">Date basis: entry date</div>
+                  <div className="text-[11px] text-slate-400">{from} → {to}</div>
                 </div>
               </>
             }
@@ -508,15 +550,17 @@ function exportActivityCsv() {
                         No entries in range.
                       </td>
                     </tr>
+                  ) : (payees.rows ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-3 text-sm text-slate-600">
+                        No payees in range.
+                      </td>
+                    </tr>
                   ) : (
                     <>
-                      {(activity.rows ?? []).map((r: any) => (
-                        <tr key={r.entry_id} className="h-9 border-b border-slate-100">
-                          <td className="px-3 text-sm whitespace-nowrap">{r.date}</td>
-                          <td className="px-3 text-sm truncate">{r.account_name}</td>
-                          <td className="px-3 text-sm">{r.type}</td>
-                          <td className="px-3 text-sm truncate">{r.payee ?? ""}</td>
-                          <td className="px-3 text-sm truncate">{r.memo ?? ""}</td>
+                      {(payees.rows ?? []).map((r: any, idx: number) => (
+                        <tr key={`${r.payee}-${idx}`} className="h-9 border-b border-slate-100">
+                          <td className="px-3 text-sm truncate">{r.payee}</td>
                           <td
                             className={`px-3 text-sm text-right tabular-nums ${
                               formatUsdAccountingFromCents(r.amount_cents).isNeg ? "text-red-600" : ""
@@ -524,6 +568,7 @@ function exportActivityCsv() {
                           >
                             {formatUsdAccountingFromCents(r.amount_cents).text}
                           </td>
+                          <td className="px-3 text-sm text-right tabular-nums">{r.count}</td>
                         </tr>
                       ))}
                     </>

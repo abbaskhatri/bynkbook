@@ -64,21 +64,6 @@ const [kpis, setKpis] = useState<{
   issues?: number;
 }>({});
 
-  // Stage A attention indicators (UI-only read from localStorage; no new endpoints)
-  const [attnDup, setAttnDup] = useState(0);
-  const [attnStale, setAttnStale] = useState(0);
-
-  useEffect(() => {
-    try {
-      const dup = Number(localStorage.getItem("bb_attn_dup") || "0");
-      const stale = Number(localStorage.getItem("bb_attn_stale") || "0");
-      setAttnDup(Number.isFinite(dup) ? dup : 0);
-      setAttnStale(Number.isFinite(stale) ? stale : 0);
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const currency = useMemo(
     () =>
       new Intl.NumberFormat("en-US", {
@@ -95,6 +80,28 @@ const [kpis, setKpis] = useState<{
   }
   function moneyClass(n: number) {
     return n < 0 ? "text-rose-600" : "text-emerald-700";
+  }
+
+  function fmtUsdAccountingFromCents(centsStr?: string) {
+    if (!centsStr) return { text: "—", isNeg: false };
+    let n: bigint;
+    try {
+      n = BigInt(centsStr);
+    } catch {
+      return { text: "—", isNeg: false };
+    }
+
+    const isNeg = n < 0n;
+    const abs = isNeg ? -n : n;
+
+    const dollars = abs / 100n;
+    const cents = abs % 100n;
+
+    const dollarsStr = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const cents2 = cents.toString().padStart(2, "0");
+
+    const base = `$${dollarsStr}.${cents2}`;
+    return { text: isNeg ? `(${base})` : base, isNeg };
   }
   const formatAxis = useMemo(() => {
     return (n: number) => {
@@ -266,7 +273,28 @@ useEffect(() => {
             );
           })()}
         </div>
-        <div className="mt-2 h-px bg-slate-200" />
+      <div className="mt-2 h-px bg-slate-200" />
+    </div>
+
+      {/* KPI tiles (Bundle 2) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {[
+          { label: "Income", v: kpis.income },
+          { label: "Expense", v: kpis.expense },
+          { label: "Net", v: kpis.net },
+          { label: "Open Issues", v: typeof kpis.issues === "number" ? String(kpis.issues) : undefined, isCount: true },
+        ].map((x) => {
+          const money = x.isCount ? null : fmtUsdAccountingFromCents(x.v);
+          const text = x.isCount ? (x.v ?? "—") : money?.text ?? "—";
+          const isNeg = x.isCount ? false : !!money?.isNeg;
+
+          return (
+            <div key={x.label} className="rounded-xl border border-slate-200 bg-white shadow-sm px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-slate-500">{x.label}</div>
+              <div className={`mt-1 text-sm font-semibold ${isNeg ? "text-rose-600" : "text-slate-900"}`}>{text}</div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Main grid */}
@@ -517,40 +545,17 @@ useEffect(() => {
                   </div>
 
                   <div className="mt-2 text-[11px] text-muted-foreground">
+                    Currently entry-based; bank-based cash flow will come later.
+                  </div>
+
+                  <div className="mt-1 text-[11px] text-muted-foreground">
                     Phase 3 shell: placeholder monthly cash flow series with final chart structure.
                   </div>
                 </div>
 
-                {/* KPI boxes */}
-                {(() => {
-                  const net = cashFlowSeries.reduce((s, r) => s + r.net, 0);
-                  const incoming = cashFlowSeries.reduce((s, r) => s + r.cashIn, 0);
-                  const outgoing = cashFlowSeries.reduce((s, r) => s + r.cashOut, 0);
-                  const balance = incoming - outgoing; // placeholder
-                  const free = net * 0.8; // placeholder
-                  const runway = outgoing > 0 ? Math.max(0, (balance / outgoing) * 6) : 0; // placeholder
-
-                  return (
-                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500">Net Cash Flow</div>
-                        <div className={`text-sm font-semibold ${moneyClass(net)}`}>{fmtMoney(net)}</div>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500">Current Cash Balance</div>
-                        <div className={`text-sm font-semibold ${moneyClass(balance)}`}>{fmtMoney(balance)}</div>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500">Free Cash Flow</div>
-                        <div className={`text-sm font-semibold ${moneyClass(free)}`}>{fmtMoney(free)}</div>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wide text-slate-500">Runway (Months)</div>
-                        <div className="text-sm font-semibold text-slate-900">{runway.toFixed(1)}</div>
-                      </div>
-                    </div>
-                  );
-                })()}
+                <div className="mt-3 text-[11px] text-muted-foreground">
+                  Coming soon: monthly cash flow chart will be wired when monthly buckets are available (no client aggregation).
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -566,23 +571,9 @@ useEffect(() => {
 
             <CardContent className="pt-0">
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                {[
-                  { name: "Sales", amt: "$—" },
-                  { name: "Office Expense", amt: "$—" },
-                  { name: "Marketing", amt: "$—" },
-                  { name: "Rent", amt: "$—" },
-                  { name: "Utilities", amt: "$—" },
-                ].map((row) => (
-                  <div
-                    key={row.name}
-                    className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0"
-                  >
-                    <div className="text-sm font-medium text-slate-900 truncate">{row.name}</div>
-                    <div className="text-sm font-semibold text-slate-900">{row.amt}</div>
-                  </div>
-                ))}
+                <div className="px-3 py-3 text-sm text-slate-700">Coming soon</div>
                 <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
-                  Phase 3: category totals will be wired later (no backend changes in this phase).
+                  Category totals are not available yet (Category Summary is disabled).
                 </div>
               </div>
             </CardContent>
@@ -658,19 +649,12 @@ useEffect(() => {
 
             <CardContent className="pt-0">
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-                <div className="text-sm font-medium text-amber-900">{attnDup + attnStale} issues need review</div>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <span className="inline-flex items-center rounded-full bg-white border border-amber-200 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-                    Duplicate: {attnDup}
-                  </span>
-                  <span className="inline-flex items-center rounded-full bg-white border border-amber-200 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-                    Stale: {attnStale}
-                  </span>
+                <div className="text-sm font-medium text-amber-900">
+                  Open issues: {typeof kpis.issues === "number" ? kpis.issues : "—"}
                 </div>
 
                 <div className="mt-2 text-[11px] text-amber-800/80">
-                  Phase 3: uses Stage A indicators (duplicates + stale checks).
+                  Count of open issues for the selected business/account.
                 </div>
               </div>
             </CardContent>
