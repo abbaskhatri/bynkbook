@@ -157,6 +157,103 @@ export async function handler(event: any) {
     });
   }
 
+  // GET /v1/businesses/{businessId}/reports/cashflow (Bundle 1)
+  if (path === `/v1/businesses/${biz}/reports/cashflow`) {
+    const inAgg = await prisma.entry.aggregate({
+      where: { ...baseWhere, amount_cents: { gt: 0n } },
+      _sum: { amount_cents: true },
+    });
+
+    const outAgg = await prisma.entry.aggregate({
+      where: { ...baseWhere, amount_cents: { lt: 0n } },
+      _sum: { amount_cents: true },
+    });
+
+    const allAgg = await prisma.entry.aggregate({
+      where: baseWhere,
+      _sum: { amount_cents: true },
+    });
+
+    const cashIn = (inAgg?._sum?.amount_cents ?? 0n) as bigint;
+    const cashOut = (outAgg?._sum?.amount_cents ?? 0n) as bigint; // negative
+    const net = (allAgg?._sum?.amount_cents ?? 0n) as bigint;
+
+    return json(200, {
+      ok: true,
+      report: "cashflow",
+      from: fromYmd,
+      to: toYmd,
+      accountId,
+      totals: {
+        cash_in_cents: cashIn.toString(),
+        cash_out_cents: cashOut.toString(),
+        net_cents: net.toString(),
+      },
+    });
+  }
+
+  // GET /v1/businesses/{businessId}/reports/activity (Bundle 1)
+  if (path === `/v1/businesses/${biz}/reports/activity`) {
+    const incomeAgg = await prisma.entry.aggregate({
+      where: { ...baseWhere, type: "INCOME" },
+      _sum: { amount_cents: true },
+      _count: { _all: true },
+    });
+
+    const expenseAgg = await prisma.entry.aggregate({
+      where: { ...baseWhere, type: "EXPENSE" },
+      _sum: { amount_cents: true },
+      _count: { _all: true },
+    });
+
+    const income = (incomeAgg?._sum?.amount_cents ?? 0n) as bigint;
+    const expense = (expenseAgg?._sum?.amount_cents ?? 0n) as bigint;
+
+    const accounts = await prisma.account.findMany({
+      where: { business_id: biz, ...(accountId === "all" ? {} : { id: accountId }) },
+      select: { id: true, name: true },
+    });
+    const accountNameById = new Map<string, string>(accounts.map((a: any) => [String(a.id), String(a.name)]));
+
+    const rows = await prisma.entry.findMany({
+      where: baseWhere,
+      orderBy: [{ date: "desc" }, { id: "desc" }], // no created_at assumption
+      select: {
+        id: true,
+        date: true,
+        account_id: true,
+        type: true,
+        payee: true,
+        memo: true,
+        amount_cents: true,
+      },
+    });
+
+    return json(200, {
+      ok: true,
+      report: "activity",
+      from: fromYmd,
+      to: toYmd,
+      accountId,
+      totals: {
+        income_cents: income.toString(),
+        expense_cents: expense.toString(),
+        net_cents: (income + expense).toString(),
+        count: Number((incomeAgg?._count?._all ?? 0) + (expenseAgg?._count?._all ?? 0)),
+      },
+      rows: rows.map((r: any) => ({
+        date: String(r.date).slice(0, 10),
+        account_id: String(r.account_id),
+        account_name: accountNameById.get(String(r.account_id)) ?? "Account",
+        type: String(r.type),
+        payee: r.payee ?? null,
+        memo: r.memo ?? null,
+        amount_cents: (r.amount_cents ?? 0n).toString(),
+        entry_id: String(r.id),
+      })),
+    });
+  }
+
   // GET /v1/businesses/{businessId}/reports/categories
   // NOTE: Your Entry model/handlers do not include category fields yet, so category reporting is not available without schema expansion.
   if (path === `/v1/businesses/${biz}/reports/categories`) {

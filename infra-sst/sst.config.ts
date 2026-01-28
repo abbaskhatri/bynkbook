@@ -288,6 +288,8 @@ const vendorsHandler = {
 
 api.route("GET /v1/businesses/{businessId}/reports/pnl", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/payees", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/cashflow", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/activity", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/categories", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 api.route("GET /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
@@ -407,15 +409,23 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
       ],
     } satisfies ApiHandler;
 
-    api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/issues/scan", issuesScanHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/issues/scan", issuesScanHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
-    // ---------- Issues List ----------
-    const issuesListHandler = {
-      ...issuesScanHandler,
-      handler: "packages/functions/src/issuesList.handler",
-    } satisfies ApiHandler;
+// ---------- Issues List ----------
+const issuesListHandler = {
+  ...issuesScanHandler,
+  handler: "packages/functions/src/issuesList.handler",
+} satisfies ApiHandler;
 
-    api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/issues", issuesListHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/issues", issuesListHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// ---------- Issues Count (Bundle 1) ----------
+const issuesCountHandler = {
+  ...issuesScanHandler,
+  handler: "packages/functions/src/issuesCount.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/issues/count", issuesCountHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
     // ---------- Entry Update ----------
     const entryUpdateHandler = {
