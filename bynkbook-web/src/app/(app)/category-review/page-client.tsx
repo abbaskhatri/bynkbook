@@ -9,6 +9,7 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
+import { listCategories, type CategoryRow } from "@/lib/api/categories";
 
 import { PageHeader } from "@/components/app/page-header";
 import { selectTriggerClass } from "@/components/primitives/tokens";
@@ -121,19 +122,23 @@ export default function CategoryReviewPageClient() {
     includeDeleted: false,
   });
 
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const e of (entriesQ.data ?? []) as Entry[]) {
-      const c = String((e as any).memo ?? "").trim();
-      if (c && c.toLowerCase() !== "uncategorized") set.add(c);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [entriesQ.data]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      if (!selectedBusinessId) return;
+      try {
+        const res = await listCategories(selectedBusinessId, { includeArchived: false });
+        setCategories(res.rows ?? []);
+      } catch {
+        // ignore (UI can still render list empty)
+      }
+    })();
+  }, [selectedBusinessId]);
 
   const uncategorized = useMemo(() => {
-    return ((entriesQ.data ?? []) as Entry[]).filter((e) => {
-      const c = String((e as any).memo ?? "").trim();
-      return !c || c.toLowerCase() === "uncategorized";
+    return ((entriesQ.data ?? []) as Entry[]).filter((e: any) => {
+      return !e.category_id;
     });
   }, [entriesQ.data]);
 
@@ -145,14 +150,14 @@ export default function CategoryReviewPageClient() {
     mutationFn: async (p: { entryId: string; category: string }) => {
       if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
 
-      const memoStr =
-        p.category === "__UNCATEGORIZED__" ? undefined : (p.category || "").trim() || undefined;
+      const categoryId =
+        p.category === "__UNCATEGORIZED__" ? null : (p.category || "").trim() || null;
 
       return updateEntry({
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
         entryId: p.entryId,
-        updates: memoStr === undefined ? {} : { memo: memoStr },
+        updates: { category_id: categoryId },
       });
     },
     onMutate: async (p) => {
@@ -160,12 +165,12 @@ export default function CategoryReviewPageClient() {
 
       // Optimistic: update entry memo in cache so it disappears from uncategorized list immediately
       const prev = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
-      const memoValue =
+      const categoryValue =
         p.category === "__UNCATEGORIZED__"
-          ? ""
+          ? null
           : (p.category || "").trim();
 
-      const next = prev.map((e: any) => (e.id === p.entryId ? { ...e, memo: memoValue } : e));
+      const next = prev.map((e: any) => (e.id === p.entryId ? { ...e, category_id: categoryValue } : e));
       qc.setQueryData(entriesKey, next);
 
       return { prev };
@@ -180,10 +185,7 @@ export default function CategoryReviewPageClient() {
         if (selectedBusinessId && selectedAccountId) {
           const key = `bynkbook:attn:uncat:${selectedBusinessId}:${selectedAccountId}`;
           const current = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
-          const remaining = current.filter((e: any) => {
-            const c = String(e.memo ?? "").trim();
-            return !c || c.toLowerCase() === "uncategorized";
-          }).length;
+          const remaining = current.filter((e: any) => !e.category_id).length;
 
           localStorage.setItem(key, String(remaining));
           window.dispatchEvent(new CustomEvent("bynkbook:attnCountsUpdated"));
@@ -308,9 +310,9 @@ return (
                           </SelectTrigger>
                           <SelectContent side="bottom" align="start">
                             <SelectItem value="__UNCATEGORIZED__">Uncategorized</SelectItem>
-                            {categories.map((c, idx) => (
-                              <SelectItem key={`${c}__${idx}`} value={c}>
-                                {c}
+                            {categories.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.name}
                               </SelectItem>
                             ))}
                           </SelectContent>

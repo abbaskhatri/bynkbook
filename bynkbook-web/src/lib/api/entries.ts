@@ -186,6 +186,7 @@ export async function updateEntry(params: {
     type?: string;
     method?: string;
     status?: string;
+    category_id?: string | null;
   };
 }): Promise<Entry> {
   const { businessId, accountId, entryId, updates } = params;
