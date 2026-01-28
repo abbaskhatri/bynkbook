@@ -35,6 +35,7 @@ import {
 } from "@/lib/api/reconcileSnapshots";
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
+import { AutoReconcileDialog } from "@/components/reconcile/auto-reconcile-dialog";
 
 function toBigIntSafe(v: unknown): bigint {
   try {
@@ -291,6 +292,9 @@ export default function ReconcilePageClient() {
 
   // Phase 5D: Export hub (read-only)
   const [openExportHub, setOpenExportHub] = useState(false);
+
+  // Auto-reconcile v1 (suggestion-only)
+  const [openAutoReconcile, setOpenAutoReconcile] = useState(false);
 
   // History Hub (keeps headers clean)
   const [openHistoryHub, setOpenHistoryHub] = useState(false);
@@ -1264,9 +1268,33 @@ export default function ReconcilePageClient() {
           <Download className="h-3.5 w-3.5" /> Export
         </button>
       </HintWrap>
-      <button type="button" disabled title="Coming soon" className={disabledBtn}>
-        <Sparkles className="h-3.5 w-3.5" /> Smart Auto Reconcile
-      </button>
+      <HintWrap
+        disabled={!canWriteReconcileEffective}
+        reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
+      >
+        <button
+          type="button"
+          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${
+            canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+          }`}
+          disabled={!canWriteReconcileEffective || bankUnmatchedList.length === 0 || entriesExpectedList.length === 0}
+          title={
+            !canWriteReconcileEffective
+              ? (reconcileWriteReason ?? noPermTitle)
+              : bankUnmatchedList.length === 0
+                ? "No unmatched bank transactions"
+                : entriesExpectedList.length === 0
+                  ? "No expected entries"
+                  : "Generate deterministic suggestions"
+          }
+          onClick={() => {
+            if (!canWriteReconcileEffective) return;
+            setOpenAutoReconcile(true);
+          }}
+        >
+          <Sparkles className="h-3.5 w-3.5" /> Auto-reconcile
+        </button>
+      </HintWrap>
 
       <button
         type="button"
@@ -3659,6 +3687,22 @@ return (
           showStatementPeriod
         />
       </AppDialog>
+
+      <AutoReconcileDialog
+        open={openAutoReconcile}
+        onOpenChange={setOpenAutoReconcile}
+        businessId={selectedBusinessId ?? ""}
+        accountId={selectedAccountId ?? ""}
+        bankTxns={bankUnmatchedList}
+        expectedEntries={entriesExpectedList}
+        // existing helpers/state
+        canWrite={canWriteReconcileEffective}
+        canWriteReason={reconcileWriteReason ?? noPermTitle}
+        onApplied={async () => {
+          await refreshBankAndMatches();
+          await entriesQ.refetch?.();
+        }}
+      />
 
       <UploadPanel
         open={openUpload}
