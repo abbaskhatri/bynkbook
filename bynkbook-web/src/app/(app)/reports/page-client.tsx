@@ -94,9 +94,9 @@ export default function ReportsPageClient() {
     return b?.name ?? "Business";
   }, [businessId, businessesQ.data]);
 
-  const accountId = selectedAccountId;
+const accountId = selectedAccountId;
 
-  const [tab, setTab] = useState<TabKey>("summary");
+const [tab, setTab] = useState<TabKey>("summary");
   const [from, setFrom] = useState(firstOfThisMonth());
   const [to, setTo] = useState(todayYmd());
 
@@ -107,6 +107,37 @@ const [pnl, setPnl] = useState<any>(null);
 const [payees, setPayees] = useState<any>(null);
 const [cashflow, setCashflow] = useState<any>(null);
 const [activity, setActivity] = useState<any>(null);
+
+const [lastRun, setLastRun] = useState<
+  Partial<Record<TabKey, { ranAtIso: string; from: string; to: string; accountId: string }>>
+>({});
+
+const definitionsText = useMemo(() => {
+  if (tab === "summary") {
+    return "Income=sum(INCOME). Expenses=sum(EXPENSE). Net=Income+Expenses. Cash flow is currently entry-based.";
+  }
+  if (tab === "pnl") return "Income=sum(INCOME). Expenses=sum(EXPENSE). Net=Income+Expenses.";
+  if (tab === "cashflow")
+    return "Currently entry-based. Cash in=sum(positive entries). Cash out=sum(negative entries). Net=Cash in+Cash out.";
+  if (tab === "activity") return "Row-level entries in range (entry date basis).";
+  return "Grouped by payee (sum of entry amounts).";
+}, [tab]);
+
+const last = lastRun[tab];
+
+const lastRunText = useMemo(() => {
+  if (!last) return null;
+  const d = new Date(last.ranAtIso);
+  const when = d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const acctLabel = last.accountId === "all" ? "All accounts" : "Selected account";
+  return `Last run: ${when} • ${last.from} → ${last.to} • ${acctLabel}`;
+}, [last]);
 
   async function run() {
     if (!businessId) return;
@@ -121,30 +152,50 @@ const [activity, setActivity] = useState<any>(null);
         ]);
         setPnl(p);
         setPayees(y);
+        setLastRun((prev) => ({
+          ...prev,
+          summary: { ranAtIso: new Date().toISOString(), from, to, accountId },
+        }));
         return;
       }
 
       if (tab === "pnl") {
         const res = await getPnl(businessId, { from, to, accountId });
         setPnl(res);
+        setLastRun((prev) => ({
+          ...prev,
+          pnl: { ranAtIso: new Date().toISOString(), from, to, accountId },
+        }));
         return;
       }
 
       if (tab === "payees") {
         const res = await getPayees(businessId, { from, to, accountId });
         setPayees(res);
+        setLastRun((prev) => ({
+          ...prev,
+          payees: { ranAtIso: new Date().toISOString(), from, to, accountId },
+        }));
         return;
       }
 
       if (tab === "cashflow") {
         const res = await getCashflow(businessId, { from, to, accountId });
         setCashflow(res);
+        setLastRun((prev) => ({
+          ...prev,
+          cashflow: { ranAtIso: new Date().toISOString(), from, to, accountId },
+        }));
         return;
       }
 
       if (tab === "activity") {
         const res = await getActivity(businessId, { from, to, accountId });
         setActivity(res);
+        setLastRun((prev) => ({
+          ...prev,
+          activity: { ranAtIso: new Date().toISOString(), from, to, accountId },
+        }));
         return;
       }
     } catch (e: any) {
@@ -361,6 +412,16 @@ function exportActivityCsv() {
             }
           />
         </div>
+
+        {/* Definitions + Last run (Bundle 3) */}
+        <div className="px-3 pb-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] text-slate-500">
+              <span className="font-medium text-slate-600">Definitions:</span> {definitionsText}
+            </div>
+            {lastRunText ? <div className="text-[11px] text-slate-400">{lastRunText}</div> : null}
+          </div>
+        </div>
       </div>
 
       {/* Content */}
@@ -518,12 +579,12 @@ function exportActivityCsv() {
               <LedgerTableShell
                 colgroup={
                   <>
-                    <col style={{ width: 120 }} />
-                    <col />
-                    <col style={{ width: 110 }} />
-                    <col />
-                    <col />
-                    <col style={{ width: 160 }} />
+                    <col style={{ width: 120 }} />  {/* Date */}
+                    <col style={{ width: 280 }} />  {/* Account (wider) */}
+                    <col style={{ width: 110 }} />  {/* Type */}
+                    <col style={{ width: 260 }} />  {/* Payee (wider) */}
+                    <col />                         {/* Memo (flex) */}
+                    <col style={{ width: 160 }} />  {/* Amount (tight) */}
                   </>
                 }
                 header={
@@ -550,17 +611,15 @@ function exportActivityCsv() {
                         No entries in range.
                       </td>
                     </tr>
-                  ) : (payees.rows ?? []).length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="px-3 py-3 text-sm text-slate-600">
-                        No payees in range.
-                      </td>
-                    </tr>
                   ) : (
                     <>
-                      {(payees.rows ?? []).map((r: any, idx: number) => (
-                        <tr key={`${r.payee}-${idx}`} className="h-9 border-b border-slate-100">
-                          <td className="px-3 text-sm truncate">{r.payee}</td>
+                      {(activity.rows ?? []).map((r: any) => (
+                        <tr key={r.entry_id} className="h-9 border-b border-slate-100">
+                          <td className="px-3 text-sm whitespace-nowrap">{r.date}</td>
+                          <td className="px-3 text-sm truncate">{r.account_name}</td>
+                          <td className="px-3 text-sm whitespace-nowrap">{r.type}</td>
+                          <td className="px-3 text-sm truncate">{r.payee ?? ""}</td>
+                          <td className="px-3 text-sm truncate">{r.memo ?? ""}</td>
                           <td
                             className={`px-3 text-sm text-right tabular-nums ${
                               formatUsdAccountingFromCents(r.amount_cents).isNeg ? "text-red-600" : ""
@@ -568,7 +627,6 @@ function exportActivityCsv() {
                           >
                             {formatUsdAccountingFromCents(r.amount_cents).text}
                           </td>
-                          <td className="px-3 text-sm text-right tabular-nums">{r.count}</td>
                         </tr>
                       ))}
                     </>
