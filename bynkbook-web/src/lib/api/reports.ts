@@ -48,3 +48,52 @@ export async function getPayees(businessId: string, range: ReportsRange): Promis
   const q = qs({ from: range.from, to: range.to, accountId: range.accountId ?? "all" });
   return apiFetch(`/v1/businesses/${businessId}/reports/payees?${q}`);
 }
+
+/* ---------------- Bundle 1 ---------------- */
+
+export type CashflowResponse = {
+  ok: true;
+  report: "cashflow";
+  from: string;
+  to: string;
+  accountId: string;
+  totals: {
+    cash_in_cents: string;
+    cash_out_cents: string;
+    net_cents: string;
+  };
+};
+
+export type ActivityResponse = {
+  ok: true;
+  report: "activity";
+  from: string;
+  to: string;
+  accountId: string;
+  totals: {
+    income_cents: string;
+    expense_cents: string;
+    net_cents: string;
+    count: number;
+  };
+  rows: Array<{
+    date: string;
+    account_id: string;
+    account_name: string;
+    type: "INCOME" | "EXPENSE";
+    payee: string | null;
+    memo: string | null;
+    amount_cents: string;
+    entry_id: string;
+  }>;
+};
+
+export async function getCashflow(businessId: string, range: ReportsRange): Promise<CashflowResponse> {
+  const q = qs({ from: range.from, to: range.to, accountId: range.accountId ?? "all" });
+  return apiFetch(`/v1/businesses/${businessId}/reports/cashflow?${q}`);
+}
+
+export async function getActivity(businessId: string, range: ReportsRange): Promise<ActivityResponse> {
+  const q = qs({ from: range.from, to: range.to, accountId: range.accountId ?? "all" });
+  return apiFetch(`/v1/businesses/${businessId}/reports/activity?${q}`);
+}

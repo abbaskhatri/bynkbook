@@ -6,6 +6,8 @@ import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+import { getPnl, getCashflow } from "@/lib/api/reports";
+import { getIssuesCount } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
@@ -46,10 +48,21 @@ export default function DashboardPageClient() {
     if (!sp.get("businessId")) router.replace(`/dashboard?businessId=${selectedBusinessId}`);
   }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
 
+
+
   const accountsQ = useAccounts(selectedBusinessId);
 
   const accountIdFromUrl = sp.get("accountId"); // "all" | accountId
-  const [period, setPeriod] = useState<"90d" | "30d" | "ytd">("90d");
+const [period, setPeriod] = useState<"90d" | "30d" | "ytd">("90d");
+
+const [kpis, setKpis] = useState<{
+  income?: string;
+  expense?: string;
+  net?: string;
+  cashIn?: string;
+  cashOut?: string;
+  issues?: number;
+}>({});
 
   // Stage A attention indicators (UI-only read from localStorage; no new endpoints)
   const [attnDup, setAttnDup] = useState(0);
@@ -157,6 +170,40 @@ export default function DashboardPageClient() {
       router.replace(`/dashboard?businessId=${selectedBusinessId}&accountId=all`);
     }
   }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+
+useEffect(() => {
+  if (!selectedBusinessId) return;
+
+  const today = new Date();
+  const to = today.toISOString().slice(0, 10);
+  const from =
+    period === "30d"
+      ? new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10)
+      : period === "90d"
+      ? new Date(today.getTime() - 90 * 86400000).toISOString().slice(0, 10)
+      : `${today.getFullYear()}-01-01`;
+
+  (async () => {
+    try {
+      const [pnl, cashflow, issues] = await Promise.all([
+        getPnl(selectedBusinessId, { from, to, accountId: selectedAccountId }),
+        getCashflow(selectedBusinessId, { from, to, accountId: selectedAccountId }),
+        getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId }),
+      ]);
+
+      setKpis({
+        income: pnl.totals.income_cents,
+        expense: pnl.totals.expense_cents,
+        net: pnl.totals.net_cents,
+        cashIn: cashflow.totals.cash_in_cents,
+        cashOut: cashflow.totals.cash_out_cents,
+        issues: issues.count,
+      });
+    } catch {
+      // silent; dashboard remains empty
+    }
+  })();
+}, [selectedBusinessId, selectedAccountId, period]);
 
   // Tooltip state (single source of truth)
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);

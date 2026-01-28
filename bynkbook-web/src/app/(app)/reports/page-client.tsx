@@ -13,7 +13,7 @@ import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { FileText } from "lucide-react";
 
-import { getPnl, getPayees } from "@/lib/api/reports";
+import { getPnl, getPayees, getCashflow, getActivity } from "@/lib/api/reports";
 import { downloadCsv } from "@/lib/csv";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -67,7 +67,7 @@ function formatUsdAccountingFromCents(centsStr: string) {
   return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
-type TabKey = "summary" | "pnl" | "payees";
+type TabKey = "summary" | "pnl" | "payees" | "cashflow" | "activity";
 
 export default function ReportsPageClient() {
   const router = useRouter();
@@ -103,8 +103,10 @@ export default function ReportsPageClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [pnl, setPnl] = useState<any>(null);
-  const [payees, setPayees] = useState<any>(null);
+const [pnl, setPnl] = useState<any>(null);
+const [payees, setPayees] = useState<any>(null);
+const [cashflow, setCashflow] = useState<any>(null);
+const [activity, setActivity] = useState<any>(null);
 
   async function run() {
     if (!businessId) return;
@@ -131,6 +133,18 @@ export default function ReportsPageClient() {
       if (tab === "payees") {
         const res = await getPayees(businessId, { from, to, accountId });
         setPayees(res);
+        return;
+      }
+
+      if (tab === "cashflow") {
+        const res = await getCashflow(businessId, { from, to, accountId });
+        setCashflow(res);
+        return;
+      }
+
+      if (tab === "activity") {
+        const res = await getActivity(businessId, { from, to, accountId });
+        setActivity(res);
         return;
       }
     } catch (e: any) {
@@ -164,6 +178,38 @@ export default function ReportsPageClient() {
     );
   }
 
+  function exportCashflowCsv() {
+  if (!cashflow) return;
+  const filename = `BynkBook_${activeBusinessName ?? "Business"}_CashFlow_${from}_to_${to}.csv`;
+  downloadCsv(
+    filename,
+    ["Metric", "Amount"],
+    [
+      ["Cash in", formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).text],
+      ["Cash out", formatUsdAccountingFromCents(cashflow.totals.cash_out_cents).text],
+      ["Net", formatUsdAccountingFromCents(cashflow.totals.net_cents).text],
+    ]
+  );
+}
+
+function exportActivityCsv() {
+  if (!activity) return;
+  const filename = `BynkBook_${activeBusinessName ?? "Business"}_Activity_${from}_to_${to}.csv`;
+  downloadCsv(
+    filename,
+    ["Date", "Account", "Type", "Payee", "Memo", "Amount", "Entry ID"],
+    (activity.rows ?? []).map((r: any) => [
+      r.date,
+      r.account_name,
+      r.type,
+      r.payee ?? "",
+      r.memo ?? "",
+      formatUsdAccountingFromCents(r.amount_cents).text,
+      r.entry_id,
+    ])
+  );
+}
+
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
       {/* Header shell */}
@@ -194,29 +240,28 @@ export default function ReportsPageClient() {
               </div>
             }
             right={
-              tab === "pnl" ? (
-                <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportPnlCsv} disabled={!pnl}>
-                  Export CSV
-                </Button>
-              ) : tab === "payees" ? (
-                <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportPayeesCsv} disabled={!payees}>
-                  Export CSV
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  className="h-7 px-3 text-xs"
-                  onClick={() => {
-                    if (pnl) exportPnlCsv();
-                    else if (payees) exportPayeesCsv();
-                  }}
-                  disabled={!pnl && !payees}
-                  title={!pnl && !payees ? "Run report to enable export" : "Export CSV"}
-                >
-                  Export CSV
-                </Button>
-              )
-            }
+  tab === "pnl" ? (
+    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportPnlCsv} disabled={!pnl}>
+      Export CSV
+    </Button>
+  ) : tab === "payees" ? (
+    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportPayeesCsv} disabled={!payees}>
+      Export CSV
+    </Button>
+  ) : tab === "cashflow" ? (
+    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportCashflowCsv} disabled={!cashflow}>
+      Export CSV
+    </Button>
+  ) : tab === "activity" ? (
+    <Button variant="outline" className="h-7 px-3 text-xs" onClick={exportActivityCsv} disabled={!activity}>
+      Export CSV
+    </Button>
+  ) : (
+    <Button variant="outline" className="h-7 px-3 text-xs" disabled title="Run report to enable export">
+      Export CSV
+    </Button>
+  )
+}
           />
         </div>
 
@@ -226,10 +271,12 @@ export default function ReportsPageClient() {
         <div className="px-3 py-2">
           <div className="flex gap-2 text-sm">
             {[
-              { key: "summary", label: "Summary" },
-              { key: "pnl", label: "P&L" },
-              { key: "payees", label: "Payees" },
-            ].map((t) => (
+  { key: "summary", label: "Summary" },
+  { key: "pnl", label: "P&L" },
+  { key: "cashflow", label: "Cash Flow" },
+  { key: "activity", label: "Activity" },
+  { key: "payees", label: "Payees" },
+].map((t) => (
               <button
                 key={t.key}
                 type="button"
@@ -370,6 +417,123 @@ export default function ReportsPageClient() {
             )}
           </CardContent>
         </Card>
+      ) : tab === "cashflow" ? (
+        <div className="space-y-3">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Cash Flow Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!cashflow ? (
+                <div className="text-sm text-slate-600">Run the report to view results.</div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-md border border-slate-200 p-3">
+                    <div className="text-xs text-slate-600">Cash in</div>
+                    <div
+                      className={`text-sm font-semibold ${
+                        formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).isNeg ? "text-red-600" : ""
+                      }`}
+                    >
+                      {formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).text}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 p-3">
+                    <div className="text-xs text-slate-600">Cash out</div>
+                    <div
+                      className={`text-sm font-semibold ${
+                        formatUsdAccountingFromCents(cashflow.totals.cash_out_cents).isNeg ? "text-red-600" : ""
+                      }`}
+                    >
+                      {formatUsdAccountingFromCents(cashflow.totals.cash_out_cents).text}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 p-3">
+                    <div className="text-xs text-slate-600">Net</div>
+                    <div
+                      className={`text-sm font-semibold ${
+                        formatUsdAccountingFromCents(cashflow.totals.net_cents).isNeg ? "text-red-600" : ""
+                      }`}
+                    >
+                      {formatUsdAccountingFromCents(cashflow.totals.net_cents).text}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : tab === "activity" ? (
+        <div className="space-y-3">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Account Activity</CardTitle>
+            </CardHeader>
+
+            <CardContent className="pt-0">
+              <LedgerTableShell
+                colgroup={
+                  <>
+                    <col style={{ width: 120 }} />
+                    <col />
+                    <col style={{ width: 110 }} />
+                    <col />
+                    <col />
+                    <col style={{ width: 160 }} />
+                  </>
+                }
+                header={
+                  <tr className="h-9">
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Account</th>
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Type</th>
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Payee</th>
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Memo</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
+                  </tr>
+                }
+                addRow={null}
+                body={
+                  !activity ? (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-3 text-sm text-slate-600">
+                        Run the report to view results.
+                      </td>
+                    </tr>
+                  ) : (activity.rows ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-3 text-sm text-slate-600">
+                        No entries in range.
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      {(activity.rows ?? []).map((r: any) => (
+                        <tr key={r.entry_id} className="h-9 border-b border-slate-100">
+                          <td className="px-3 text-sm whitespace-nowrap">{r.date}</td>
+                          <td className="px-3 text-sm truncate">{r.account_name}</td>
+                          <td className="px-3 text-sm">{r.type}</td>
+                          <td className="px-3 text-sm truncate">{r.payee ?? ""}</td>
+                          <td className="px-3 text-sm truncate">{r.memo ?? ""}</td>
+                          <td
+                            className={`px-3 text-sm text-right tabular-nums ${
+                              formatUsdAccountingFromCents(r.amount_cents).isNeg ? "text-red-600" : ""
+                            }`}
+                          >
+                            {formatUsdAccountingFromCents(r.amount_cents).text}
+                          </td>
+                        </tr>
+                      ))}
+                    </>
+                  )
+                }
+                footer={null}
+              />
+            </CardContent>
+          </Card>
+        </div>
       ) : (
         <div className="space-y-3">
           <Card>
