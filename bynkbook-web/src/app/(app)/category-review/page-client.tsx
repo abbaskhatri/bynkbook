@@ -202,6 +202,14 @@ return (
           <PageHeader icon={<Tags className="h-4 w-4" />} title="Category Review" afterTitle={capsule} />
         </div>
         <div className="mt-2 h-px bg-slate-200" />
+
+        {/* Definitions (temporary) */}
+        <div className="px-3 pb-2">
+          <div className="text-[11px] text-slate-500">
+            <span className="font-medium text-slate-600">Definitions:</span> Categories are currently stored using the{" "}
+            <span className="font-medium text-slate-600">entry memo</span> field (temporary). A dedicated category system will replace this later.
+          </div>
+        </div>
       </div>
 
       <Card>
@@ -232,6 +240,10 @@ return (
             </div>
           ) : null}
 
+          <div className="text-[11px] text-slate-500">
+            Showing uncategorized entries for the selected account.
+          </div>
+
           {entriesQ.isLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : uncategorized.length === 0 ? (
@@ -243,7 +255,7 @@ return (
                 <div className="px-2 py-0.5 text-xs font-semibold text-slate-600">Payee</div>
                 <div className="px-2 py-0.5 text-xs font-semibold text-slate-600 text-center">Amount</div>
                 <div className="px-2 py-0.5 text-xs font-semibold text-slate-600 text-center">AI Suggestion</div>
-                <div className="px-2 py-0.5 text-xs font-semibold text-slate-600 text-center">Category</div>
+                <div className="px-2 py-0.5 text-xs font-semibold text-slate-600 text-center">Category (temporary)</div>
                 <div className="px-2 py-0.5 text-xs font-semibold text-slate-600 text-center">Apply</div>
               </div>
 
@@ -309,8 +321,8 @@ return (
                     <div className="px-2 py-0.5 flex items-center justify-center">
                       <Button
                         className="h-6 px-4 text-xs min-w-[72px]"
-                        disabled={applyMut.isPending}
-                        title="Apply category"
+                        disabled={applyMut.isPending || currentDraft === "__UNCATEGORIZED__"}
+                        title={currentDraft === "__UNCATEGORIZED__" ? "Select a category to apply" : "Apply category"}
                         onClick={() => applyMut.mutate({ entryId: id, category: currentDraft })}
                       >
                         Apply
