@@ -159,6 +159,12 @@ export default function CategoryReviewPageClient() {
     })();
   }, [selectedBusinessId]);
 
+  const categoryNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const c of categories) m[String(c.id)] = c.name;
+    return m;
+  }, [categories]);
+
   // Filters (inputs)
   const [from, setFrom] = useState(firstOfThisMonth());
   const [to, setTo] = useState(todayYmd());
@@ -325,19 +331,31 @@ export default function CategoryReviewPageClient() {
     const ids = Array.from(selectedIds);
     const BATCH = 8;
 
+    const successes = new Set<string>();
+
     for (let i = 0; i < ids.length; i += BATCH) {
       const chunk = ids.slice(i, i + BATCH);
-      await Promise.allSettled(chunk.map((id) => applyCategoryToEntry(id, categoryId)));
+      const results = await Promise.allSettled(chunk.map((id) => applyCategoryToEntry(id, categoryId)));
+      results.forEach((r, idx) => {
+        if (r.status === "fulfilled") successes.add(chunk[idx]);
+      });
     }
 
     setConfirmOpen(false);
-    clearSelection();
+
+    const remaining = ids.filter((id) => !successes.has(id)); // failures stay selected
+    if (remaining.length === 0) {
+      clearSelection();
+      return;
+    }
+
+    setSelectedIds(new Set(remaining));
   }
 
   if (!authReady) return <Skeleton className="h-10 w-64" />;
 
   return (
-    <div className="space-y-4 max-w-6xl overflow-hidden">
+    <div className="space-y-4 max-w-6xl">
       {/* Unified header container (match Ledger/Issues) */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
@@ -379,15 +397,19 @@ export default function CategoryReviewPageClient() {
                   />
                 </div>
 
-                <div className="ml-2 self-end h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center">
-                  <label className="inline-flex items-center gap-2 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={onlyUncategorized}
-                      onChange={(e) => setOnlyUncategorized(e.target.checked)}
-                    />
-                    Uncategorized only
-                  </label>
+                <div className="ml-2 space-y-1">
+                  <div className="text-[11px] text-slate-600">&nbsp;</div>
+                  <div className="h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center">
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-700 leading-none">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={onlyUncategorized}
+                        onChange={(e) => setOnlyUncategorized(e.target.checked)}
+                      />
+                      Uncategorized only
+                    </label>
+                  </div>
                 </div>
 
                 <div className="ml-2 text-[11px] text-slate-500 self-end">
@@ -396,7 +418,7 @@ export default function CategoryReviewPageClient() {
               </>
             }
             right={
-              <Button className="h-7 px-3 text-xs" onClick={runFilters} disabled={entriesQ.isLoading}>
+              <Button type="button" className="h-7 px-3 text-xs" onClick={runFilters} disabled={entriesQ.isLoading}>
                 Run
               </Button>
             }
@@ -430,7 +452,7 @@ export default function CategoryReviewPageClient() {
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="max-h-[calc(100vh-340px)] overflow-y-auto">
+              <div className="h-[calc(100vh-340px)] overflow-y-auto">
                 <LedgerTableShell
                   colgroup={
                     <>
@@ -444,12 +466,17 @@ export default function CategoryReviewPageClient() {
                     </>
                   }
                   header={
-                    <tr className="h-9">
-                      <th className="px-3 text-center align-middle">
-  <div className="flex items-center justify-center">
-    <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
-  </div>
-</th>
+                    <tr className="h-8">
+                      <th className="px-0 text-center align-middle">
+                        <div className="flex h-8 items-center justify-center">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAllVisible}
+                          />
+                        </div>
+                      </th>
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Payee</th>
                       <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
@@ -468,13 +495,22 @@ export default function CategoryReviewPageClient() {
                         const failMsg = failedById[id];
                         const isSelected = selectedIds.has(id);
 
+                        const categoryLabel = e.category_id
+                          ? (categoryNameById[String(e.category_id)] ?? "Unknown category")
+                          : "Uncategorized";
+
                         return (
-                          <tr key={id} className={`h-9 border-b border-slate-100 ${isSelected ? "bg-emerald-50/40" : ""}`}>
-                            <td className="px-3 text-center align-middle">
-  <div className="flex items-center justify-center">
-    <input type="checkbox" checked={isSelected} onChange={() => toggleRow(id)} />
-  </div>
-</td>
+                          <tr key={id} className={`h-8 border-b border-slate-100 ${isSelected ? "bg-emerald-50/40" : ""}`}>
+                            <td className="px-0 text-center align-middle">
+                              <div className="flex h-8 items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4"
+                                  checked={isSelected}
+                                  onChange={() => toggleRow(id)}
+                                />
+                              </div>
+                            </td>
 
                             <td className="px-3 text-sm text-slate-700 whitespace-nowrap">{dateYmd}</td>
 
@@ -497,7 +533,7 @@ export default function CategoryReviewPageClient() {
                             <td className="px-3">
                               <div className="flex items-center justify-center gap-2">
                                 <div className="h-6 w-[180px] rounded-md border border-slate-200 bg-slate-50 px-2 text-xs flex items-center">
-                                  <span className="truncate">{e.category_id ? "Categorized" : "Uncategorized"}</span>
+                                  <span className="truncate">{categoryLabel}</span>
                                 </div>
                                 {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
                               </div>
@@ -518,6 +554,9 @@ export default function CategoryReviewPageClient() {
               </div>
             </div>
           )}
+
+          {/* Reserve space so sticky bar doesn't cover last row */}
+          {selectedCount > 0 ? <div className="h-12" /> : null}
 
           {/* Sticky bulk action bar */}
           {selectedCount > 0 ? (
