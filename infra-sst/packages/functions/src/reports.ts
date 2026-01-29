@@ -254,13 +254,54 @@ export async function handler(event: any) {
     });
   }
 
-  // GET /v1/businesses/{businessId}/reports/categories
-  // NOTE: Your Entry model/handlers do not include category fields yet, so category reporting is not available without schema expansion.
+  // GET /v1/businesses/{businessId}/reports/categories (Category System v2)
   if (path === `/v1/businesses/${biz}/reports/categories`) {
-    return json(501, {
-      ok: false,
-      error: "Category summary is not available yet (no category field on entries).",
-      code: "NOT_IMPLEMENTED",
+    const grouped = await prisma.entry.groupBy({
+      by: ["category_id"],
+      where: baseWhere,
+      _sum: { amount_cents: true },
+      _count: { _all: true },
+      orderBy: [{ _sum: { amount_cents: "desc" } }],
+      take: 500,
+    });
+
+    const catIds = grouped
+      .map((g: any) => g.category_id)
+      .filter((x: any) => !!x)
+      .map((x: any) => String(x));
+
+    const cats = catIds.length
+      ? await prisma.category.findMany({
+          where: { business_id: biz, id: { in: catIds } },
+          select: { id: true, name: true, archived_at: true },
+        })
+      : [];
+
+    const nameById = new Map<string, string>(cats.map((c: any) => [String(c.id), String(c.name)]));
+
+    const rows = grouped.map((g: any) => {
+      const id = g.category_id ? String(g.category_id) : null;
+      const name = id ? nameById.get(id) ?? "Uncategorized" : "Uncategorized";
+      return {
+        category_id: id,
+        category: name,
+        amount_cents: (g._sum?.amount_cents ?? 0n).toString(),
+        count: Number(g._count?._all ?? 0),
+      };
+    });
+
+    // Ensure Uncategorized bucket exists even if not returned
+    if (!rows.some((r: any) => r.category_id === null)) {
+      rows.push({ category_id: null, category: "Uncategorized", amount_cents: "0", count: 0 });
+    }
+
+    return json(200, {
+      ok: true,
+      report: "categories",
+      from: fromYmd,
+      to: toYmd,
+      accountId,
+      rows,
     });
   }
 

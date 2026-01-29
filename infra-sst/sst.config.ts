@@ -282,6 +282,12 @@ const categoriesHandler = {
   handler: "packages/functions/src/categories.handler",
 } satisfies ApiHandler;
 
+// ---------- Category Migration (Category System v2) ----------
+const categoryMigrationHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/categoryMigration.handler",
+} satisfies ApiHandler;
+
 const closedPeriodsHandler = {
   ...bizHandler,
   handler: "packages/functions/src/closedPeriods.handler",
@@ -295,6 +301,10 @@ const vendorsHandler = {
 api.route("GET /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PATCH /v1/businesses/{businessId}/categories/{categoryId}", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("GET /v1/businesses/{businessId}/category-migration/preview", categoryMigrationHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/category-migration/apply", categoryMigrationHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 api.route("GET /v1/businesses/{businessId}/reports/payees", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/cashflow", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/activity", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });

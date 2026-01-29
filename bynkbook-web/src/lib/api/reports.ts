@@ -97,3 +97,24 @@ export async function getActivity(businessId: string, range: ReportsRange): Prom
   const q = qs({ from: range.from, to: range.to, accountId: range.accountId ?? "all" });
   return apiFetch(`/v1/businesses/${businessId}/reports/activity?${q}`);
 }
+
+/* ---------------- Bundle B ---------------- */
+
+export type CategoriesResponse = {
+  ok: true;
+  report: "categories";
+  from: string;
+  to: string;
+  accountId: string;
+  rows: Array<{
+    category_id: string | null;
+    category: string;
+    amount_cents: string;
+    count: number;
+  }>;
+};
+
+export async function getCategories(businessId: string, range: ReportsRange): Promise<CategoriesResponse> {
+  const q = qs({ from: range.from, to: range.to, accountId: range.accountId ?? "all" });
+  return apiFetch(`/v1/businesses/${businessId}/reports/categories?${q}`);
+}

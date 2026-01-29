@@ -13,7 +13,7 @@ import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { FileText } from "lucide-react";
 
-import { getPnl, getPayees, getCashflow, getActivity } from "@/lib/api/reports";
+import { getPnl, getPayees, getCashflow, getActivity, getCategories } from "@/lib/api/reports";
 import { downloadCsv } from "@/lib/csv";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -67,7 +67,7 @@ function formatUsdAccountingFromCents(centsStr: string) {
   return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
-type TabKey = "summary" | "pnl" | "payees" | "cashflow" | "activity";
+type TabKey = "summary" | "pnl" | "payees" | "cashflow" | "activity" | "categories";
 
 export default function ReportsPageClient() {
   const router = useRouter();
@@ -107,6 +107,7 @@ const [pnl, setPnl] = useState<any>(null);
 const [payees, setPayees] = useState<any>(null);
 const [cashflow, setCashflow] = useState<any>(null);
 const [activity, setActivity] = useState<any>(null);
+const [categories, setCategories] = useState<any>(null);
 
 const [lastRun, setLastRun] = useState<
   Partial<Record<TabKey, { ranAtIso: string; from: string; to: string; accountId: string }>>
@@ -120,6 +121,7 @@ const definitionsText = useMemo(() => {
   if (tab === "cashflow")
     return "Currently entry-based. Cash in=sum(positive entries). Cash out=sum(negative entries). Net=Cash in+Cash out.";
   if (tab === "activity") return "Row-level entries in range (entry date basis).";
+  if (tab === "categories") return "Grouped by category (sum of entry amounts). Includes Uncategorized bucket.";
   return "Grouped by payee (sum of entry amounts).";
 }, [tab]);
 
@@ -198,6 +200,16 @@ const lastRunText = useMemo(() => {
         }));
         return;
       }
+
+      if (tab === "categories") {
+        const res = await getCategories(businessId, { from, to, accountId });
+        setCategories(res);
+        setLastRun((prev) => ({
+          ...prev,
+          categories: { ranAtIso: new Date().toISOString(), from, to, accountId },
+        }));
+        return;
+      }
     } catch (e: any) {
       setErr(e?.message ?? "Failed to run report");
     } finally {
@@ -257,6 +269,20 @@ function exportActivityCsv() {
       r.memo ?? "",
       formatUsdAccountingFromCents(r.amount_cents).text,
       r.entry_id,
+    ])
+  );
+}
+
+function exportCategoriesCsv() {
+  if (!categories) return;
+  const filename = `BynkBook_${activeBusinessName ?? "Business"}_Categories_${from}_to_${to}.csv`;
+  downloadCsv(
+    filename,
+    ["Category", "Amount", "Count"],
+    (categories.rows ?? []).map((r: any) => [
+      r.category,
+      formatUsdAccountingFromCents(r.amount_cents).text,
+      r.count,
     ])
   );
 }
@@ -344,6 +370,16 @@ function exportActivityCsv() {
                 >
                   Export CSV
                 </Button>
+              ) : tab === "categories" ? (
+                <Button
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={exportCategoriesCsv}
+                  disabled={!categories}
+                  title={!categories ? "Run report to enable export" : "Export CSV"}
+                >
+                  Export CSV
+                </Button>
               ) : (
                 <Button variant="outline" className="h-7 px-3 text-xs" disabled title="Run report to enable export">
                   Export CSV
@@ -363,6 +399,7 @@ function exportActivityCsv() {
   { key: "pnl", label: "P&L" },
   { key: "cashflow", label: "Cash Flow" },
   { key: "activity", label: "Activity" },
+  { key: "categories", label: "Categories" },
   { key: "payees", label: "Payees" },
 ].map((t) => (
               <button
@@ -627,6 +664,66 @@ function exportActivityCsv() {
                           >
                             {formatUsdAccountingFromCents(r.amount_cents).text}
                           </td>
+                        </tr>
+                      ))}
+                    </>
+                  )
+                }
+                footer={null}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      ) : tab === "categories" ? (
+        <div className="space-y-3">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Category Summary</CardTitle>
+            </CardHeader>
+
+            <CardContent className="pt-0">
+              <LedgerTableShell
+                colgroup={
+                  <>
+                    <col />
+                    <col style={{ width: 180 }} />
+                    <col style={{ width: 100 }} />
+                  </>
+                }
+                header={
+                  <tr className="h-9">
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Category</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Count</th>
+                  </tr>
+                }
+                addRow={null}
+                body={
+                  !categories ? (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-3 text-sm text-slate-600">
+                        Run the report to view results.
+                      </td>
+                    </tr>
+                  ) : (categories.rows ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-3 py-3 text-sm text-slate-600">
+                        No categories in range.
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      {(categories.rows ?? []).map((r: any, idx: number) => (
+                        <tr key={`${r.category}-${idx}`} className="h-9 border-b border-slate-100">
+                          <td className="px-3 text-sm truncate">{r.category}</td>
+                          <td
+                            className={`px-3 text-sm text-right tabular-nums ${
+                              formatUsdAccountingFromCents(r.amount_cents).isNeg ? "text-red-600" : ""
+                            }`}
+                          >
+                            {formatUsdAccountingFromCents(r.amount_cents).text}
+                          </td>
+                          <td className="px-3 text-sm text-right tabular-nums">{r.count}</td>
                         </tr>
                       ))}
                     </>
