@@ -87,6 +87,27 @@ export default function PlanningPageClient() {
     return list[0]?.id ?? null;
   }, [bizIdFromUrl, businessesQ.data]);
 
+  const selectedBiz = useMemo(() => {
+    const list: any[] = (businessesQ.data as any[]) ?? [];
+    if (!selectedBusinessId) return null;
+    return list.find((b) => String(b.id) === String(selectedBusinessId)) ?? null;
+  }, [businessesQ.data, selectedBusinessId]);
+
+  // Reuse existing effective canWrite logic (same role allowlist as the rest of the app)
+  const canWrite = useMemo(() => {
+    const roleRaw =
+      (selectedBiz as any)?.role ??
+      (selectedBiz as any)?.my_role ??
+      (selectedBiz as any)?.user_role ??
+      (selectedBiz as any)?.membership_role ??
+      null;
+
+    const r = String(roleRaw ?? "").trim().toUpperCase();
+    return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+  }, [selectedBiz]);
+
+  const noWriteTitle = "You don’t have permission to edit. Ask an admin for access.";
+
   useEffect(() => {
     if (!authReady) return;
     if (businessesQ.isLoading) return;
@@ -285,11 +306,23 @@ export default function PlanningPageClient() {
             title="Planning"
             right={
               tab === "budgets" ? (
-                <Button type="button" className="h-7 px-3 text-xs" disabled={!budgetsDirty || saving || budgetsLoading} onClick={onSaveBudgets}>
+                <Button
+                  type="button"
+                  className="h-7 px-3 text-xs"
+                  disabled={!canWrite || !budgetsDirty || saving || budgetsLoading}
+                  onClick={onSaveBudgets}
+                  title={!canWrite ? noWriteTitle : undefined}
+                >
                   {saving ? "Saving…" : "Save"}
                 </Button>
               ) : (
-                <Button type="button" className="h-7 px-3 text-xs" onClick={() => setCreateOpen(true)} disabled={!selectedBusinessId}>
+                <Button
+                  type="button"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => setCreateOpen(true)}
+                  disabled={!selectedBusinessId || !canWrite}
+                  title={!canWrite ? noWriteTitle : undefined}
+                >
                   New goal
                 </Button>
               )
@@ -394,7 +427,7 @@ export default function PlanningPageClient() {
                 ) : budgetRows.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-3 py-3 text-sm text-slate-600">
-                      No categories found.
+                      No categories available for budgets. Budgets use active categories—create or unarchive categories to budget by category.
                     </td>
                   </tr>
                 ) : (
@@ -415,6 +448,8 @@ export default function PlanningPageClient() {
                               onChange={(e) => setDraftByCatId((m) => ({ ...m, [r.category_id]: e.target.value }))}
                               className={inputH7 + " w-[120px] text-right tabular-nums"}
                               inputMode="decimal"
+                              disabled={!canWrite}
+                              title={!canWrite ? noWriteTitle : undefined}
                             />
                           </td>
 
@@ -458,7 +493,7 @@ export default function PlanningPageClient() {
                 goalRows.length === 0 && !goalsLoading ? (
                   <tr>
                     <td colSpan={5} className="px-3 py-3 text-sm text-slate-600">
-                      No goals yet.
+                      No goals yet. Create an expense goal for a category to track progress month-by-month.
                     </td>
                   </tr>
                 ) : (

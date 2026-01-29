@@ -193,24 +193,24 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className="h-4 w-4" /> },
       ],
     },
-    {
-      group: "Bookkeeping",
-      items: [
-        { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className="h-4 w-4" /> },
-        { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className="h-4 w-4" /> },
-        { label: "Category Review", path: "/category-review", needsAccountId: true, icon: <Tags className="h-4 w-4" /> },
-        { label: "Closed Periods", path: "/closed-periods", needsAccountId: true, icon: <CalendarCheck2 className="h-4 w-4" /> },
-        { label: "Reports", path: "/reports", needsAccountId: false, icon: <BarChart3 className="h-4 w-4" /> },
-      ],
-    },
-    {
-      group: "Business",
-      items: [
-        { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className="h-4 w-4" /> },
-        { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className="h-4 w-4" /> },
-        { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className="h-4 w-4" /> },
-      ],
-    },
+      {
+        group: "Bookkeeping",
+        items: [
+          { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className="h-4 w-4" /> },
+          { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className="h-4 w-4" /> },
+          { label: "Category Review", path: "/category-review", needsAccountId: true, icon: <Tags className="h-4 w-4" /> },
+          { label: "Closed Periods", path: "/closed-periods", needsAccountId: true, icon: <CalendarCheck2 className="h-4 w-4" /> },
+          { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className="h-4 w-4" /> },
+          { label: "Reports", path: "/reports", needsAccountId: false, icon: <BarChart3 className="h-4 w-4" /> },
+        ],
+      },
+      {
+        group: "Business",
+        items: [
+          { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className="h-4 w-4" /> },
+          { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className="h-4 w-4" /> },
+        ],
+      },
     {
       group: "System",
       items: [

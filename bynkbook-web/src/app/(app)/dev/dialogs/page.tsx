@@ -1,5 +1,11 @@
 "use client";
 
+import { notFound } from "next/navigation";
+
+if (process.env.NODE_ENV === "production") {
+  notFound();
+}
+
 import { useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { AppSidePanel } from "@/components/primitives/AppSidePanel";
