@@ -31,6 +31,9 @@ model Business {
   closedPeriods      ClosedPeriod[]
   vendors            Vendor[]
 
+  budgets Budget[]
+  goals   Goal[]
+
   @@index([owner_user_id], map: "idx_business_owner_user_id")
   @@map("business")
 }
@@ -121,6 +124,9 @@ model Category {
 
   business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   entries  Entry[]
+
+  budgets Budget[]
+  goals   Goal[]
 
   @@unique([business_id, name], map: "u_category_business_name")
   @@index([business_id, archived_at], map: "i_category_business_archived")
@@ -415,4 +421,51 @@ model Vendor {
   @@unique([business_id, name], map: "u_vendor_scope_name")
   @@index([business_id, updated_at(sort: Desc)], map: "i_vendor_scope_updated_desc")
   @@map("vendor")
+}
+
+model Budget {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  month       String // YYYY-MM
+  category_id String @db.Uuid
+
+  // Stored as positive cents (budget target)
+  budget_cents BigInt
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  category Category @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, month, category_id], map: "u_budget_scope_month_category")
+  @@index([business_id, month], map: "i_budget_scope_month")
+  @@index([business_id, category_id], map: "i_budget_scope_category")
+  @@map("budget")
+}
+
+model Goal {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+
+  name        String
+  category_id String @db.Uuid // required (category-driven)
+  month_start String // YYYY-MM (start month anchor for v1)
+  month_end   String? // YYYY-MM optional
+
+  // Stored as positive cents (target)
+  target_cents BigInt
+
+  status String @default("ACTIVE") // ACTIVE | PAUSED | ARCHIVED
+
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @db.Timestamptz(6)
+  created_by_user_id String
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  category Category @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([business_id, status], map: "i_goal_scope_status")
+  @@index([business_id, category_id], map: "i_goal_scope_category")
+  @@map("goal")
 }

@@ -276,6 +276,17 @@ const reportsHandler = {
   handler: "packages/functions/src/reports.handler",
 } satisfies ApiHandler;
 
+// ---------- Budgets + Goals (Bundle D) ----------
+const budgetsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/budgets.handler",
+} satisfies ApiHandler;
+
+const goalsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/goals.handler",
+} satisfies ApiHandler;
+
 // ---------- Categories (Category System v2) ----------
 const categoriesHandler = {
   ...bizHandler,
@@ -297,6 +308,13 @@ const vendorsHandler = {
   ...bizHandler,
   handler: "packages/functions/src/vendors.handler",
 } satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/budgets", budgetsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("PUT /v1/businesses/{businessId}/budgets", budgetsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("GET /v1/businesses/{businessId}/goals", goalsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/goals", goalsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("PATCH /v1/businesses/{businessId}/goals/{goalId}", goalsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 api.route("GET /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
