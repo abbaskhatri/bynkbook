@@ -207,8 +207,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       group: "Business",
       items: [
         { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className="h-4 w-4" /> },
-        { label: "Budgets", path: "/budgets", needsAccountId: false, icon: <PieChart className="h-4 w-4" /> },
-        { label: "Goals", path: "/goals", needsAccountId: false, icon: <Target className="h-4 w-4" /> },
+        { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className="h-4 w-4" /> },
         { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className="h-4 w-4" /> },
       ],
     },
