@@ -101,6 +101,9 @@ export async function handler(event: any) {
         amount_cents: e.amount_cents.toString(),
         type: e.type,
         method: e.method,
+        category_id: e.category_id,
+        transfer_id: e.transfer_id,
+        is_adjustment: !!e.is_adjustment,
         status: e.status,
         deleted_at: e.deleted_at ? e.deleted_at.toISOString() : null,
         created_at: e.created_at.toISOString(),
@@ -136,8 +139,19 @@ export async function handler(event: any) {
     if (!ENTRY_TYPES.includes(type as any)) return json(400, { ok: false, error: "Invalid type" });
     if (!ENTRY_STATUS.includes(status as any)) return json(400, { ok: false, error: "Invalid status" });
 
-    const amount = BigInt(Math.trunc(Number(amountRaw)));
+    if (type === "TRANSFER") {
+      return json(400, { ok: false, error: "Use /transfers for TRANSFER entries" });
+    }
+
     if (!Number.isFinite(Number(amountRaw))) return json(400, { ok: false, error: "amount_cents must be a number" });
+    const amountIn = BigInt(Math.trunc(Number(amountRaw)));
+
+    let amount: bigint = amountIn;
+
+    // Enforce sign rules
+    if (type === "INCOME") amount = amountIn < 0n ? -amountIn : amountIn; // +abs
+    if (type === "EXPENSE") amount = amountIn > 0n ? -amountIn : amountIn; // -abs
+    // ADJUSTMENT keeps sign exactly as provided (no normalization)
 
     const entryUuid = randomUUID();
     const created = await prisma.entry.create({
@@ -152,6 +166,9 @@ export async function handler(event: any) {
         type,
         method: methodField,
         status,
+        is_adjustment: type === "ADJUSTMENT",
+        adjusted_at: type === "ADJUSTMENT" ? new Date() : null,
+        adjusted_by_user_id: type === "ADJUSTMENT" ? sub : null,
         deleted_at: null,
         created_at: new Date(),
         updated_at: new Date(),
@@ -283,6 +300,7 @@ export async function handler(event: any) {
       },
       data: {
         is_adjustment: true,
+        type: "ADJUSTMENT",
         adjusted_at: new Date(),
         adjusted_by_user_id: sub,
         adjustment_reason: reason,
@@ -331,7 +349,7 @@ export async function handler(event: any) {
 
     const existing = await prisma.entry.findFirst({
       where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
-      select: { date: true },
+      select: { date: true, amount_cents: true },
     });
     if (!existing) return json(404, { ok: false, error: "Entry not found" });
 
@@ -348,6 +366,7 @@ export async function handler(event: any) {
       },
       data: {
         is_adjustment: false,
+        type: existing.amount_cents >= 0 ? "INCOME" : "EXPENSE",
         adjusted_at: null,
         adjusted_by_user_id: null,
         adjustment_reason: null,

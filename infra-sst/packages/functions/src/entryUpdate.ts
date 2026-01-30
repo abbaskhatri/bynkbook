@@ -202,6 +202,53 @@ if (body.category_id !== undefined) {
         }
       }
     }
+      // Enforce entry-type rules & sign normalization (backend is source of truth)
+      // - TRANSFER cannot be updated via generic entry update; use /transfers
+      // - INCOME: +abs(amount)
+      // - EXPENSE: -abs(amount)
+      // - ADJUSTMENT: keep sign exactly as provided
+      {
+        // Load the latest version for normalization decisions
+        const current = await prisma.entry.findFirst({
+          where: { id: ent, business_id: biz, account_id: acct },
+          select: { type: true, amount_cents: true, is_adjustment: true },
+        });
+        if (!current) return json(404, { ok: false, error: "Entry not found" });
+
+        const nextType = (data.type ?? current.type) as string;
+        if (nextType === "TRANSFER") {
+          return json(400, { ok: false, error: "Use /transfers for TRANSFER entries" });
+        }
+
+        const nextAmount = (data.amount_cents ?? current.amount_cents) as bigint;
+
+        let normalizedAmount: bigint = nextAmount;
+
+        if (nextType === "INCOME") normalizedAmount = nextAmount < 0n ? -nextAmount : nextAmount;
+        if (nextType === "EXPENSE") normalizedAmount = nextAmount > 0n ? -nextAmount : nextAmount;
+        // ADJUSTMENT keeps sign
+
+        if (data.amount_cents !== undefined || data.type !== undefined) {
+          data.amount_cents = normalizedAmount;
+        }
+
+        // Keep legacy adjustment flags in sync for backwards compatibility
+        if (nextType === "ADJUSTMENT") {
+          data.is_adjustment = true;
+          data.adjusted_at = new Date();
+          data.adjusted_by_user_id = sub;
+          if (data.adjustment_reason === undefined) data.adjustment_reason = current.is_adjustment ? undefined : "Manual adjustment";
+        } else if (current.is_adjustment) {
+          // if moving away from ADJUSTMENT, clear flags
+          if (data.type !== undefined) {
+            data.is_adjustment = false;
+            data.adjusted_at = null;
+            data.adjusted_by_user_id = null;
+            data.adjustment_reason = null;
+          }
+        }
+      }
+
       // Must have at least one real field besides updated_at
       if (Object.keys(data).length === 1) {
         return json(400, { ok: false, error: "No updatable fields provided" });

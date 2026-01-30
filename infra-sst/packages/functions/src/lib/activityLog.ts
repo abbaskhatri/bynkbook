@@ -17,7 +17,11 @@ export type ActivityEventType =
   | "GOAL_CREATED"
   | "GOAL_UPDATED"
   | "CLOSED_PERIOD_CLOSED"
-  | "CLOSED_PERIOD_REOPENED";
+  | "CLOSED_PERIOD_REOPENED"
+  | "LEDGER_TRANSFER_CREATE"
+  | "LEDGER_TRANSFER_UPDATE"
+  | "LEDGER_TRANSFER_DELETE"
+  | "LEDGER_TRANSFER_RESTORE";
 
 export async function logActivity(prisma: any, args: {
   businessId: string;

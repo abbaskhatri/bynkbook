@@ -65,6 +65,12 @@ export default $config({
         CACHE_BUSTER: "20251224095558",
       },
       permissions: [
+        // CloudWatch Logs (required for any console.log / error logging)
+        {
+          actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+          resources: ["*"],
+        },
+
         {
           actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
           resources: [
@@ -416,6 +422,18 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
     api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/restore", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+    // ---------- Transfers ----------
+    const transferHandler = {
+      ...bizHandler,
+      handler: "packages/functions/src/transfers.handler",
+    } satisfies ApiHandler;
+
+    api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/transfers", transferHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("PUT /v1/businesses/{businessId}/accounts/{accountId}/transfers/{transferId}", transferHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("PATCH /v1/businesses/{businessId}/accounts/{accountId}/transfers/{transferId}", transferHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}/transfers/{transferId}", transferHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/transfers/{transferId}/restore", transferHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     // ---------- Issues Scan ----------
     const issuesScanHandler = {
       handler: "packages/functions/src/issuesScan.handler",
@@ -432,6 +450,12 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
         CACHE_BUSTER: "202601030001",
       },
       permissions: [
+        // CloudWatch Logs (required for any console.log / error logging)
+        {
+          actions: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+          resources: ["*"],
+        },
+
         {
           actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
           resources: [
@@ -455,6 +479,13 @@ const issuesListHandler = {
 
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/issues", issuesListHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Issues Resolve ----------
+const issuesResolveHandler = {
+  ...issuesScanHandler,
+  handler: "packages/functions/src/issuesResolve.handler",
+} satisfies ApiHandler;
+
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/issues/{issueId}/resolve", issuesResolveHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 // ---------- Issues Count (Bundle 1) ----------
 const issuesCountHandler = {
   ...issuesScanHandler,

@@ -65,6 +65,8 @@ export async function handler(event: any) {
     business_id: biz,
     account_id: acct,
     deleted_at: null,
+    // Lock: TRANSFER entries must be excluded from totals (P&L / cashflow / dashboard)
+    type: { not: "TRANSFER" },
     date: { gte: fromDate, lte: toDate },
   };
 
