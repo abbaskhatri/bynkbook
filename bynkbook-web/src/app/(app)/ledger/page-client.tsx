@@ -21,7 +21,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UploadPanel } from "@/components/uploads/UploadPanel";
 
 import { UploadsList } from "@/components/uploads/UploadsList";
@@ -34,11 +34,15 @@ import { useLedgerSummary } from "@/lib/queries/useLedgerSummary";
 import {
   createEntry,
   deleteEntry,
-  restoreEntry,
   hardDeleteEntry,
+  listEntries,
+  restoreEntry,
   updateEntry,
   type Entry,
 } from "@/lib/api/entries";
+
+import { listCategories, createCategory, type CategoryRow } from "@/lib/api/categories";
+import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -171,6 +175,14 @@ function stripMoneyDisplay(s: string): string {
   return cleaned;
 }
 
+function normalizeCategoryName(name: string): string {
+  return (name || "").trim().replace(/\s+/g, " ");
+}
+
+function normKey(name: string): string {
+  return normalizeCategoryName(name).toLowerCase();
+}
+
 // ================================
 // SECTION: Autocomplete (unchanged)
 // ================================
@@ -197,6 +209,10 @@ function AutoInput(props: {
   inputClassName?: string;
   onSubmit?: () => void;
   inputRef?: any;
+
+  // Create option (new)
+  allowCreate?: boolean;
+  onCreate?: (name: string) => void;
 }) {
   const {
     value,
@@ -217,6 +233,11 @@ function AutoInput(props: {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const filtered = useMemo(() => filterOptions(currentValue, options), [currentValue, options]);
+
+  const canCreate =
+    !!props.allowCreate &&
+    !!normalizeCategoryName(currentValue) &&
+    !options.some((o) => normKey(o) === normKey(currentValue));
 
   const applyValue = (next: string) => {
     if (isControlled) {
@@ -284,9 +305,25 @@ function AutoInput(props: {
         onKeyDown={onKeyDown}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
       />
-      {open && filtered.length > 0 ? (
+      {open && (filtered.length > 0 || canCreate) ? (
         <div className="absolute left-0 top-full mt-1 w-full z-50 rounded-md border bg-white shadow-md p-0 max-h-56 overflow-auto">
-          {filtered.map((opt: string, idx: number) => (
+          {canCreate ? (
+            <button
+              type="button"
+              className="w-full text-left px-2 py-1 text-xs hover:bg-slate-50"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const name = normalizeCategoryName(currentValue);
+                props.onCreate?.(name);
+                setOpen(false);
+              }}
+            >
+              <span className="text-slate-700">Create</span>{" "}
+              <span className="font-medium text-slate-900">“{normalizeCategoryName(currentValue)}”</span>
+            </button>
+          ) : null}
+
+          {filtered.map((opt, idx) => (
             <button
               key={opt}
               type="button"
@@ -406,7 +443,9 @@ type CreateVars = {
   payee: string;
   type: UiType;
   method: UiMethod;
-  category: string;
+  categoryName: string;
+  categoryId: string | null;
+  toAccountId?: string;
   amountStr: string;
   afterCreateEdit?: boolean;
 };
@@ -551,7 +590,7 @@ export default function LedgerPageClient() {
   const [showDeleted, setShowDeleted] = useState(false);
 
   // Advanced filters (UI-only; local filtering on cached rows)
-  const [filterType, setFilterType] = useState<"ALL" | "INCOME" | "EXPENSE">("ALL");
+  const [filterType, setFilterType] = useState<"ALL" | UiType>("ALL");
   const [filterMethod, setFilterMethod] = useState<string>("ALL");
   const [filterCategory, setFilterCategory] = useState<string>("ALL");
   const [filterFrom, setFilterFrom] = useState<string>("");
@@ -647,6 +686,29 @@ export default function LedgerPageClient() {
     return list;
   }, [entriesSorted, openingEntry]);
 
+  const categoriesQ = useQuery({
+    queryKey: ["categories", selectedBusinessId],
+    enabled: !!selectedBusinessId,
+    queryFn: async () => {
+      if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
+      return listCategories(selectedBusinessId, { includeArchived: false });
+    },
+  });
+
+  const categoryRows = categoriesQ.data?.rows ?? [];
+
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categoryRows) m.set(c.id, c.name);
+    return m;
+  }, [categoryRows]);
+
+  const categoryIdByNormName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categoryRows) m.set(normKey(c.name), c.id);
+    return m;
+  }, [categoryRows]);
+
   // Autofill options
   const payeeOptions = useMemo(() => {
     const set = new Set<string>();
@@ -658,13 +720,12 @@ export default function LedgerPageClient() {
   }, [entriesWithOpening]);
 
   const categoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const e of entriesWithOpening) {
-      const c = (e.memo || "").trim();
-      if (c && c !== (selectedAccount?.name ?? "")) set.add(c);
-    }
-    return Array.from(set);
-  }, [entriesWithOpening, selectedAccount?.name]);
+    // real categories (not memo)
+    return categoryRows
+      .filter((c) => !c.archived_at)
+      .map((c) => c.name)
+      .sort((a, b) => a.localeCompare(b));
+  }, [categoryRows]);
 
   // Header "Uncategorized" chip count is defined after rowModels (below).
 
@@ -702,7 +763,9 @@ export default function LedgerPageClient() {
         methodDisplay: titleCase(e.method ?? ""),
         rawType: (e.type ?? "").toString(),
         rawMethod: (e.method ?? "").toString(),
-        category: (e.memo ?? "") || "",
+        category: (categoryNameById.get((e as any).category_id ?? "") ?? ""),
+        categoryId: ((e as any).category_id ?? null) as string | null,
+        transferId: ((e as any).transfer_id ?? null) as string | null,
         amountCents: amt.toString(),
         amountStr: formatUsdFromCents(amt),
         amountNeg: amt < ZERO,
@@ -935,15 +998,13 @@ export default function LedgerPageClient() {
       if (mRaw !== want && mDisp !== want) return false;
     }
 
-    // Category filter (your row model stores category as a string)
+    // Category filter (real category_id)
     if (filterCategory !== "ALL") {
-      const c = (r.category || "").trim();
-
-      // Special: Uncategorized
+      const cid = r.categoryId;
       if (filterCategory === "__UNCATEGORIZED__") {
-        if (c) return false;
+        if (cid) return false;
       } else {
-        if (c !== filterCategory) return false;
+        if (cid !== filterCategory) return false;
       }
     }
 
@@ -1014,7 +1075,7 @@ export default function LedgerPageClient() {
     setSelectedIds(next);
   }
 
-  // Bulk actions (UI-only placeholders)
+  // Bulk actions (Ledger): bulk soft delete only
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
   function clearSelection() {
@@ -1022,10 +1083,42 @@ export default function LedgerPageClient() {
     setBulkMsg(null);
   }
 
-  function runBulkAction(label: string) {
-    setBulkMsg(`${label} (not connected yet)`);
-    setTimeout(() => setBulkMsg(null), 2200);
-  }
+  const bulkDeleteMut = useMutation({
+    mutationFn: async (entryIds: string[]) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+      const results = await Promise.allSettled(
+        entryIds.map((id) =>
+          deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: id })
+        )
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      return { failed, total: entryIds.length };
+    },
+    onMutate: async (entryIds) => {
+      setErr(null);
+      setBulkMsg(null);
+      await qc.cancelQueries({ queryKey: entriesKey });
+      const prev = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      // optimistic: hide by marking deleted_at
+      const nowIso = new Date().toISOString();
+      qc.setQueryData(
+        entriesKey,
+        prev.map((e) => (entryIds.includes(e.id) ? { ...e, deleted_at: nowIso } : e))
+      );
+      return { prev };
+    },
+    onError: (e: any, _ids: any, ctx: any) => {
+      if (ctx?.prev) qc.setQueryData(entriesKey, ctx.prev);
+      setErr(e?.message || "Bulk delete failed");
+    },
+    onSuccess: (res) => {
+      if (res.failed > 0) setBulkMsg(`Deleted with ${res.failed} failures`);
+      else setBulkMsg("Deleted");
+      scheduleEntriesRefresh("bulkDelete");
+      clearSelection();
+      setTimeout(() => setBulkMsg(null), 1800);
+    },
+  });
 
   // Add row
   const [draftDate, setDraftDate] = useState(todayYmd());
@@ -1034,6 +1127,10 @@ export default function LedgerPageClient() {
     const [draftType, setDraftType] = useState<UiType>("EXPENSE");
   const [draftMethod, setDraftMethod] = useState<UiMethod>("CASH");
   const [draftCategory, setDraftCategory] = useState("");
+  const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
+
+  const [draftToAccountId, setDraftToAccountId] = useState<string>("");
+
   const [draftAmount, setDraftAmount] = useState("0.00");
   const [err, setErr] = useState<string | null>(null);
 
@@ -1185,13 +1282,51 @@ export default function LedgerPageClient() {
     mutationFn: async (vars: any) => {
       if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
 
-      const centsAbs = Math.abs(parseMoneyToCents(vars.amountStr));
+      const centsRaw = parseMoneyToCents(vars.amountStr);
+      const centsAbs = Math.abs(centsRaw);
+
       if (!vars.payee.trim()) throw new Error("Payee is required");
       if (centsAbs === 0) throw new Error("Amount is required");
 
-      const cents = parseMoneyToCents(vars.amountStr);
-      const backendType = normalizeBackendType(vars.type);
-      const signed = backendType === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+      // TRANSFER: use transfer endpoint (double-entry)
+      if (vars.type === "TRANSFER") {
+        if (!vars.toAccountId) throw new Error("To account is required");
+        return createTransfer({
+          businessId: selectedBusinessId,
+          fromAccountId: selectedAccountId,
+          input: {
+            to_account_id: vars.toAccountId,
+            date: vars.date,
+            amount_cents: centsAbs,
+            payee: vars.payee.trim(),
+            memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : null,
+            method: "TRANSFER",
+            status: "EXPECTED",
+          },
+        });
+      }
+
+      // ADJUSTMENT: keep sign exactly as user typed
+      if (vars.type === "ADJUSTMENT") {
+        return createEntry({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          input: {
+            date: vars.date,
+            payee: vars.payee.trim(),
+            memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined,
+            category_id: vars.categoryId ?? null,
+            amount_cents: centsRaw,
+            type: "ADJUSTMENT",
+            method: normalizeBackendMethod(vars.method),
+            status: "EXPECTED",
+          },
+        });
+      }
+
+      // INCOME/EXPENSE: enforce sign rules (frontend + backend)
+      const backendType = vars.type === "INCOME" ? "INCOME" : "EXPENSE";
+      const signed = backendType === "EXPENSE" ? -Math.abs(centsRaw) : Math.abs(centsRaw);
 
       return createEntry({
         businessId: selectedBusinessId,
@@ -1199,7 +1334,8 @@ export default function LedgerPageClient() {
         input: {
           date: vars.date,
           payee: vars.payee.trim(),
-          memo: (vars.category || "").trim() || undefined,
+          memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined,
+          category_id: vars.categoryId ?? null,
           amount_cents: signed,
           type: backendType,
           method: normalizeBackendMethod(vars.method),
@@ -1219,8 +1355,24 @@ export default function LedgerPageClient() {
   const nowIso = new Date().toISOString();
 
   const cents = parseMoneyToCents(vars.amountStr);
-  const backendType = normalizeBackendType(vars.type);
-  const signed = backendType === "EXPENSE" ? -Math.abs(cents) : Math.abs(cents);
+
+  // optimistic amount/type rules
+  let backendType: string = vars.type;
+  let signed: number = cents;
+
+  if (vars.type === "TRANSFER") {
+    backendType = "TRANSFER";
+    signed = -Math.abs(cents); // from-leg is negative in current account
+  } else if (vars.type === "ADJUSTMENT") {
+    backendType = "ADJUSTMENT";
+    signed = cents; // keep sign
+  } else if (vars.type === "INCOME") {
+    backendType = "INCOME";
+    signed = Math.abs(cents);
+  } else {
+    backendType = "EXPENSE";
+    signed = -Math.abs(cents);
+  }
 
   const optimistic: Entry = {
     id: vars.tempId,
@@ -1228,7 +1380,8 @@ export default function LedgerPageClient() {
     account_id: selectedAccountId!,
     date: vars.date,
     payee: vars.payee.trim(),
-    memo: (vars.category || "").trim() || null,
+    memo: null,
+    category_id: vars.categoryId ?? null,
     amount_cents: String(signed),
     type: backendType,
     method: normalizeBackendMethod(vars.method),
@@ -1246,13 +1399,13 @@ export default function LedgerPageClient() {
   setDraftRef("");
   setDraftPayee("");
   setDraftCategory("");
+  setDraftCategoryId(null);
+  setDraftToAccountId("");
   setDraftAmount("0.00");
   setDraftType("EXPENSE");
   setDraftMethod("CASH");
 
-  if (payeeInputRef.current) payeeInputRef.current.value = "";
-  if (categoryInputRef.current) categoryInputRef.current.value = "";
-  if (amountInputRef.current) amountInputRef.current.value = "0.00";
+    // Controlled inputs reset via state; no direct DOM writes needed
 
   requestAnimationFrame(() => payeeInputRef.current?.focus());
 
@@ -1571,7 +1724,11 @@ export default function LedgerPageClient() {
     if (!payee) return setErr("Payee is required");
     if (centsAbs === 0) return setErr("Amount is required");
 
-    const category = (categoryInputRef.current?.value ?? draftCategory).trim();
+    const categoryName = normalizeCategoryName(categoryInputRef.current?.value ?? draftCategory);
+    const categoryId =
+      draftCategoryId ??
+      categoryIdByNormName.get(normKey(categoryName)) ??
+      null;
 
     createMut.mutate({
       tempId: `temp_${Date.now()}`,
@@ -1580,8 +1737,10 @@ export default function LedgerPageClient() {
       payee,
       type: draftType,
       method: draftMethod,
-      category,
+      categoryName,
+      categoryId,
       amountStr,
+      toAccountId: draftToAccountId,
     });
   }
 
@@ -1645,6 +1804,7 @@ export default function LedgerPageClient() {
     <tr>
       <td className={td + " " + center}></td>
 
+      {/* Date */}
       <td className={td}>
         <input
           className={inputH7}
@@ -1654,6 +1814,7 @@ export default function LedgerPageClient() {
         />
       </td>
 
+      {/* Ref */}
       <td className={td}>
         <input
           className={inputH7}
@@ -1664,9 +1825,11 @@ export default function LedgerPageClient() {
         />
       </td>
 
+      {/* Payee */}
       <td className={td}>
         <AutoInput
-          defaultValue={draftPayee}
+          value={draftPayee}
+          onValueChange={(v) => setDraftPayee(v)}
           options={payeeOptions}
           placeholder="Payee"
           inputRef={payeeInputRef}
@@ -1675,7 +1838,8 @@ export default function LedgerPageClient() {
         />
       </td>
 
-            <td className={td}>
+      {/* Type */}
+      <td className={td}>
         <Select
           open={typeOpen}
           onOpenChange={setTypeOpen}
@@ -1688,10 +1852,13 @@ export default function LedgerPageClient() {
           <SelectContent side="bottom" align="start">
             <SelectItem value="INCOME">Income</SelectItem>
             <SelectItem value="EXPENSE">Expense</SelectItem>
+            <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
+            <SelectItem value="TRANSFER">Transfer</SelectItem>
           </SelectContent>
         </Select>
       </td>
 
+      {/* Method */}
       <td className={td}>
         <Select
           open={methodOpen}
@@ -1716,34 +1883,81 @@ export default function LedgerPageClient() {
         </Select>
       </td>
 
+      {/* Category OR To Account for TRANSFER */}
       <td className={td}>
-        <AutoInput
-          defaultValue={draftCategory}
-          options={categoryOptions}
-          placeholder="Category"
-          inputRef={categoryInputRef}
-          inputClassName={inputH7}
-          onSubmit={submitInline}
-        />
+        {draftType === "TRANSFER" ? (
+          <Select value={draftToAccountId} onValueChange={(v) => setDraftToAccountId(v)}>
+            <SelectTrigger className={selectTriggerClass}>
+              <SelectValue placeholder="To account" />
+            </SelectTrigger>
+            <SelectContent side="bottom" align="start">
+              {(accountsQ.data ?? [])
+                .filter((a) => !a.archived_at && a.id !== selectedAccountId)
+                .map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <AutoInput
+            value={draftCategory}
+            onValueChange={(v) => {
+              setDraftCategory(v);
+              setDraftCategoryId(null); // typing changes selection; force re-resolve
+            }}
+            options={categoryOptions}
+            placeholder="Category"
+            inputRef={categoryInputRef}
+            inputClassName={inputH7}
+            allowCreate
+            onCreate={async (name) => {
+              if (!selectedBusinessId) return;
+
+              const n = normalizeCategoryName(name);
+              const hit = categoryIdByNormName.get(normKey(n));
+              if (hit) {
+                setDraftCategoryId(hit);
+                setDraftCategory(categoryNameById.get(hit) ?? n);
+                if (categoryInputRef.current) categoryInputRef.current.value = categoryNameById.get(hit) ?? n;
+                return;
+              }
+
+              const res = await createCategory(selectedBusinessId, n);
+              setDraftCategoryId(res.row.id);
+              setDraftCategory(res.row.name);
+              if (categoryInputRef.current) categoryInputRef.current.value = res.row.name;
+
+              void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId] });
+            }}
+            onSubmit={submitInline}
+          />
+        )}
       </td>
 
+      {/* Amount */}
       <td className={td + " " + num}>
         <input
           ref={amountInputRef}
           className={inputH7 + " text-right tabular-nums"}
-          defaultValue={draftAmount || "0.00"}
+          value={draftAmount}
+          onChange={(e) => setDraftAmount(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submitInline()}
         />
       </td>
 
+      {/* Balance */}
       <td className={td + " " + num + " text-slate-400"}>—</td>
 
+      {/* Status */}
       <td className={td + " " + center}></td>
 
-      {/* Tight DUP/CAT empty cells */}
+      {/* Issues columns */}
       <td className={td + " " + center + " px-0.5"}></td>
       <td className={td + " " + center + " px-0.5"}></td>
 
+      {/* Actions */}
       <td className={td + " text-right"}>
         <Button className="h-7 w-8 p-0" onClick={submitInline} title="Add entry">
           <Plus className="h-4 w-4" />
@@ -1791,6 +2005,8 @@ const filterLeft = useMemo(() => (
             <SelectItem value="ALL">All Types</SelectItem>
             <SelectItem value="INCOME">Income</SelectItem>
             <SelectItem value="EXPENSE">Expense</SelectItem>
+            <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
+            <SelectItem value="TRANSFER">Transfer</SelectItem>
           </SelectContent>
         </Select>
 
@@ -1821,13 +2037,13 @@ const filterLeft = useMemo(() => (
           <SelectContent align="start">
             <SelectItem value="ALL">All Categories</SelectItem>
 
-            {rowsUi.some((r) => !(r.category || "").trim()) ? (
+            {rowsUi.some((r) => !r.categoryId) ? (
               <SelectItem value="__UNCATEGORIZED__">Uncategorized</SelectItem>
             ) : null}
 
-            {categoryOptions.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
+            {categoryRows.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1882,19 +2098,11 @@ const filterLeft = useMemo(() => (
               <Button
                 variant="outline"
                 className="h-7 px-2 text-xs"
-                onClick={() => runBulkAction("Mark legitimate")}
-                title="Placeholder (UI-only)"
+                onClick={() => bulkDeleteMut.mutate(selectablePageIds.filter((id) => !!selectedIds[id]))}
+                disabled={bulkDeleteMut.isPending}
+                title="Delete selected entries"
               >
-                Mark legitimate
-              </Button>
-
-              <Button
-                variant="outline"
-                className="h-7 px-2 text-xs"
-                onClick={() => runBulkAction("Acknowledge stale")}
-                title="Placeholder (UI-only)"
-              >
-                Acknowledge stale
+                {bulkDeleteMut.isPending ? "Deleting…" : "Delete"}
               </Button>
 
               <Button

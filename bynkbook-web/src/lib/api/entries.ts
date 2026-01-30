@@ -14,6 +14,11 @@ export type Entry = {
   type: string;
   method: string | null;
   status: string;
+
+  category_id?: string | null;
+  transfer_id?: string | null;
+  is_adjustment?: boolean;
+
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -72,6 +77,16 @@ function normalizeEntry(raw: any): Entry {
   const method = asString(pick(raw, ["method", "entry_method", "entryMethod"])) ?? null;
   const status = asString(pick(raw, ["status"])) ?? "";
 
+  const category_id = asString(pick(raw, ["category_id", "categoryId"])) ?? null;
+  const transfer_id = asString(pick(raw, ["transfer_id", "transferId"])) ?? null;
+
+  const is_adjustment_raw = pick(raw, ["is_adjustment", "isAdjustment"]);
+  const is_adjustment = !!(
+    is_adjustment_raw === true ||
+    is_adjustment_raw === 1 ||
+    String(is_adjustment_raw ?? "").toLowerCase() === "true"
+  );
+
   const deleted_at = asString(pick(raw, ["deleted_at", "deletedAt"])) ?? null;
   const created_at = asString(pick(raw, ["created_at", "createdAt"])) ?? new Date().toISOString();
   const updated_at = asString(pick(raw, ["updated_at", "updatedAt"])) ?? created_at;
@@ -87,6 +102,9 @@ function normalizeEntry(raw: any): Entry {
     type,
     method,
     status,
+    category_id,
+    transfer_id,
+    is_adjustment,
     deleted_at,
     created_at,
     updated_at,
@@ -118,8 +136,9 @@ export async function createEntry(params: {
     date: string; // YYYY-MM-DD
     payee: string;
     memo?: string;
+    category_id?: string | null;
     amount_cents: number; // signed integer cents
-    type: string; // EXPENSE | INCOME | ...
+    type: string; // EXPENSE | INCOME | ADJUSTMENT | ...
     method: string; // CARD | ...
     status: string; // EXPECTED | ...
   };
@@ -135,6 +154,9 @@ export async function createEntry(params: {
 
     memo: input.memo ?? null,
     notes: input.memo ?? null,
+
+    category_id: input.category_id ?? null,
+    categoryId: input.category_id ?? null,
 
     amount_cents: input.amount_cents,
     amountCents: input.amount_cents,
