@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { assertNotClosedPeriod } from "./lib/closedPeriods";
 
 function json(statusCode: number, body: any) {
   return {
@@ -115,6 +116,16 @@ export async function handler(event: any) {
         select: { id: true },
       });
       if (!cat) return json(400, { ok: false, error: "Invalid category_id" });
+
+      // Closed period enforcement: fixing category is a write against the entry's date.
+      const entryForCheck = await prisma.entry.findFirst({
+        where: { id: row.entry_id, business_id: biz, account_id: acct, deleted_at: null },
+        select: { date: true },
+      });
+      if (!entryForCheck) return json(404, { ok: false, error: "Entry not found" });
+
+      const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: entryForCheck.date });
+      if (!cp.ok) return cp.response;
 
       await prisma.$transaction(async (tx: any) => {
         await tx.entry.updateMany({

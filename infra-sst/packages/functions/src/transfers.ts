@@ -58,9 +58,23 @@ function parseYmd(dateStr: any) {
 
 function parseBigIntAbs(val: any) {
   if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  if (!/^-?\d+$/.test(s)) return null;
   try {
-    const n = BigInt(val);
-    return n < 0n ? -n : n;
+    const bi = BigInt(s);
+    return bi < 0n ? -bi : bi;
+  } catch {
+    return null;
+  }
+}
+
+// Signed integer parser (used for transfers to determine direction relative to current account)
+function parseBigIntSigned(val: any) {
+  if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  if (!/^-?\d+$/.test(s)) return null;
+  try {
+    return BigInt(s);
   } catch {
     return null;
   }
@@ -138,9 +152,18 @@ export async function handler(event: any) {
       const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: date });
       if (!cp.ok) return cp.response;
 
-      const amtAbs = parseBigIntAbs(body?.amount_cents);
-      if (amtAbs === null) return json(400, { ok: false, error: "amount_cents must be an integer" });
-      if (amtAbs === 0n) return json(400, { ok: false, error: "amount_cents must be non-zero" });
+      // Signed amount: direction is relative to the current account (acct in the route).
+      // negative => money leaves current account to other account
+      // positive => money enters current account from other account
+      const amtSigned = parseBigIntSigned(body?.amount_cents);
+      if (amtSigned === null) return json(400, { ok: false, error: "amount_cents must be an integer" });
+      if (amtSigned === 0n) return json(400, { ok: false, error: "amount_cents must be non-zero" });
+
+      const amtAbs = amtSigned < 0n ? -amtSigned : amtSigned;
+
+      const direction = amtSigned < 0n ? "OUT" : "IN";
+      const fromAccountId = direction === "OUT" ? acct : toAccountId;
+      const toAccountFinalId = direction === "OUT" ? toAccountId : acct;
 
       const payee = body?.payee ?? null;
       const memo = body?.memo ?? null;
@@ -172,15 +195,19 @@ export async function handler(event: any) {
         const transfer = await tx.transfer.create({
           data: {
             business_id: biz,
-            from_account_id: acct,
-            to_account_id: toAccountId,
+            from_account_id: fromAccountId,
+            to_account_id: toAccountFinalId,
             created_at: new Date(),
             updated_at: new Date(),
           },
           select: { id: true },
         });
 
-        const fromLeg = await tx.entry.create({
+        // Leg for the current account (acct): sign matches the user input.
+        const currentLegAmount = direction === "OUT" ? -amtAbs : amtAbs;
+        const otherLegAmount = -currentLegAmount;
+
+        const currentLeg = await tx.entry.create({
           data: {
             id: randomUUID(),
             business_id: biz,
@@ -188,7 +215,7 @@ export async function handler(event: any) {
             date,
             payee,
             memo,
-            amount_cents: -amtAbs,
+            amount_cents: currentLegAmount,
             type: "TRANSFER",
             method: methodField,
             status,
@@ -200,7 +227,7 @@ export async function handler(event: any) {
           select: { id: true },
         });
 
-        const toLeg = await tx.entry.create({
+        const otherLeg = await tx.entry.create({
           data: {
             id: randomUUID(),
             business_id: biz,
@@ -208,7 +235,7 @@ export async function handler(event: any) {
             date,
             payee,
             memo,
-            amount_cents: amtAbs,
+            amount_cents: otherLegAmount,
             type: "TRANSFER",
             method: methodField,
             status,
@@ -220,7 +247,7 @@ export async function handler(event: any) {
           select: { id: true },
         });
 
-        return { transfer_id: transfer.id, from_entry_id: fromLeg.id, to_entry_id: toLeg.id };
+        return { transfer_id: transfer.id, from_entry_id: currentLeg.id, to_entry_id: otherLeg.id };
       });
 
       await logActivity(prisma, {
@@ -268,13 +295,26 @@ export async function handler(event: any) {
       const toOk = await requireAccountInBusiness(prisma, biz, nextToAccountId);
       if (!toOk) return json(400, { ok: false, error: "Invalid to_account_id" });
 
-      const amtAbs =
+      // Signed amount is relative to the current account (acct in the route).
+      const amtSigned =
         body?.amount_cents !== undefined
-          ? parseBigIntAbs(body.amount_cents)
-          : (fromLeg.amount_cents < 0n ? -fromLeg.amount_cents : fromLeg.amount_cents);
+          ? parseBigIntSigned(body.amount_cents)
+          : null;
 
-      if (amtAbs === null) return json(400, { ok: false, error: "amount_cents must be an integer" });
-      if (amtAbs === 0n) return json(400, { ok: false, error: "amount_cents must be non-zero" });
+      let nextSigned: bigint;
+      if (amtSigned === null) {
+        // Derive current account leg amount from existing legs:
+        const legForAcct = legs.find((l: any) => l.account_id === acct);
+        if (!legForAcct) return json(409, { ok: false, error: "Transfer leg for this account missing" });
+        nextSigned = BigInt(legForAcct.amount_cents);
+      } else {
+        nextSigned = amtSigned;
+      }
+
+      if (nextSigned === 0n) return json(400, { ok: false, error: "amount_cents must be non-zero" });
+
+      const amtAbs = nextSigned < 0n ? -nextSigned : nextSigned;
+      const direction = nextSigned < 0n ? "OUT" : "IN";
 
       const payee = body?.payee !== undefined ? (body.payee ?? null) : undefined;
       const memo = body?.memo !== undefined ? (body.memo ?? null) : undefined;
@@ -282,21 +322,26 @@ export async function handler(event: any) {
       const status = body?.status !== undefined ? String(body.status ?? "EXPECTED").trim() : undefined;
 
       await prisma.$transaction(async (tx: any) => {
-        if (nextToAccountId !== transfer.to_account_id) {
-          await tx.transfer.updateMany({
-            where: { id: tid, business_id: biz },
-            data: { to_account_id: nextToAccountId, updated_at: new Date() },
-          });
-        } else {
-          await tx.transfer.updateMany({
-            where: { id: tid, business_id: biz },
-            data: { updated_at: new Date() },
-          });
-        }
+        // Interpret nextToAccountId as the "other account" (counterparty).
+        const otherAccountId = nextToAccountId;
 
+        const fromAccountId = direction === "OUT" ? acct : otherAccountId;
+        const toAccountIdFinal = direction === "OUT" ? otherAccountId : acct;
+
+        await tx.transfer.updateMany({
+          where: { id: tid, business_id: biz },
+          data: { from_account_id: fromAccountId, to_account_id: toAccountIdFinal, updated_at: new Date() },
+        });
+
+        // Set leg amounts so that the current account (acct) matches the signed amount user provided.
+        const currentLegAmount = direction === "OUT" ? -amtAbs : amtAbs;
+        const otherLegAmount = -currentLegAmount;
+
+        // Reuse the two existing leg rows; set account_id + amount deterministically.
         await tx.entry.updateMany({
           where: { id: fromLeg.id, business_id: biz, transfer_id: tid },
           data: {
+            account_id: fromAccountId,
             date: nextDate,
             amount_cents: -amtAbs,
             ...(payee !== undefined ? { payee } : {}),
@@ -310,7 +355,7 @@ export async function handler(event: any) {
         await tx.entry.updateMany({
           where: { id: toLeg.id, business_id: biz, transfer_id: tid },
           data: {
-            account_id: nextToAccountId,
+            account_id: toAccountIdFinal,
             date: nextDate,
             amount_cents: amtAbs,
             ...(payee !== undefined ? { payee } : {}),
@@ -319,6 +364,23 @@ export async function handler(event: any) {
             ...(status !== undefined ? { status } : {}),
             updated_at: new Date(),
           },
+        });
+
+        // Ensure the *current account's* leg matches the signed amount.
+        // (Depending on direction, the current account is either the "from" leg or the "to" leg.)
+        const fixAcctLegId = fromAccountId === acct ? fromLeg.id : toLeg.id;
+        const fixAcctAmt = fromAccountId === acct ? currentLegAmount : currentLegAmount;
+
+        await tx.entry.updateMany({
+          where: { id: fixAcctLegId, business_id: biz, transfer_id: tid },
+          data: { amount_cents: currentLegAmount, updated_at: new Date() },
+        });
+
+        // And the other leg must be the inverse.
+        const fixOtherLegId = fixAcctLegId === fromLeg.id ? toLeg.id : fromLeg.id;
+        await tx.entry.updateMany({
+          where: { id: fixOtherLegId, business_id: biz, transfer_id: tid },
+          data: { amount_cents: -currentLegAmount, updated_at: new Date() },
         });
       });
 

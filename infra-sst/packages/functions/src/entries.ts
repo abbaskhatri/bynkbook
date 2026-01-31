@@ -124,6 +124,11 @@ export async function handler(event: any) {
     const date = (body?.date ?? "").toString().trim(); // YYYY-MM-DD
     const payee = body?.payee ?? null;
     const memo = body?.memo ?? null;
+
+    // Category (optional)
+    const categoryIdRaw = body?.category_id ?? body?.categoryId ?? null;
+    const category_id = categoryIdRaw ? categoryIdRaw.toString().trim() : null;
+
     const type = (body?.type ?? "").toString().trim();
     const methodField = body?.method ?? null;
     const status = (body?.status ?? "EXPECTED").toString().trim();
@@ -153,6 +158,16 @@ export async function handler(event: any) {
     if (type === "EXPENSE") amount = amountIn > 0n ? -amountIn : amountIn; // -abs
     // ADJUSTMENT keeps sign exactly as provided (no normalization)
 
+    // Category System v2: validate category_id (if provided) belongs to this business and is not archived.
+    // This prevents bad IDs from being stored and keeps Ledger/Issues/Reports consistent.
+    if (category_id) {
+      const hit = await prisma.category.findFirst({
+        where: { id: category_id, business_id: biz, archived_at: null },
+        select: { id: true },
+      });
+      if (!hit) return json(400, { ok: false, error: "Invalid category" });
+    }
+
     const entryUuid = randomUUID();
     const created = await prisma.entry.create({
       data: {
@@ -162,6 +177,7 @@ export async function handler(event: any) {
         date: new Date(date + "T00:00:00Z"),
         payee,
         memo,
+        category_id,
         amount_cents: amount,
         type,
         method: methodField,
@@ -185,6 +201,7 @@ export async function handler(event: any) {
         amount_cents: created.amount_cents.toString(),
         type: created.type,
         status: created.status,
+        category_id: created.category_id,
       },
     });
   }
@@ -195,7 +212,16 @@ export async function handler(event: any) {
       where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
       select: { date: true },
     });
-    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+    // Idempotent delete: if already deleted, return ok:true (prevents double-click confusion).
+    if (!existing) {
+      const already = await prisma.entry.findFirst({
+        where: { id: ent, business_id: biz, account_id: acct, deleted_at: { not: null } },
+        select: { id: true },
+      });
+      if (already) return json(200, { ok: true, deleted: true, entry_id: ent, already_deleted: true });
+      return json(404, { ok: false, error: "Entry not found" });
+    }
 
     // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
     const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });

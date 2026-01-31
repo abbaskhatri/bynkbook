@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "packages/functions/src/**/*.ts",
+    "packages/core/src/**/*.ts",
+    "sst.config.ts",
+    "stacks/**/*.ts"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "bookkeeping-app/**",
+    "**/*.backup.ts",
+    "**/*.bak.*",
+    "**/*.bak_*/**",
+
+    // Exclude SST template/example code that imports SST v2-only modules
+    "packages/core/src/event.ts",
+    "packages/core/src/todo.ts",
+    "packages/functions/src/events/**",
+    "packages/functions/src/lambda.ts",
+    "packages/functions/src/todo.ts",
+    "stacks/MyStack.ts"
+  ]
+}

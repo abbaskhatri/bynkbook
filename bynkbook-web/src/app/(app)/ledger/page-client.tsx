@@ -43,6 +43,7 @@ import {
 
 import { listCategories, createCategory, type CategoryRow } from "@/lib/api/categories";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
+import { getBusinessIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -237,7 +238,11 @@ function AutoInput(props: {
   const canCreate =
     !!props.allowCreate &&
     !!normalizeCategoryName(currentValue) &&
-    !options.some((o) => normKey(o) === normKey(currentValue));
+    !options.some((o) => normKey(o) === normKey(currentValue)) &&
+    // Extra guard: if categories already contain it (even if options lag), don't show Create
+    !(typeof (globalThis as any).__BYNK_CATEGORY_NORM_MAP_HAS === "function"
+      ? (globalThis as any).__BYNK_CATEGORY_NORM_MAP_HAS(normKey(currentValue))
+      : false);
 
   const applyValue = (next: string) => {
     if (isControlled) {
@@ -445,6 +450,7 @@ type CreateVars = {
   method: UiMethod;
   categoryName: string;
   categoryId: string | null;
+  note?: string;
   toAccountId?: string;
   amountStr: string;
   afterCreateEdit?: boolean;
@@ -523,9 +529,16 @@ export default function LedgerPageClient() {
     entriesRefreshTimerRef.current = window.setTimeout(() => {
       entriesRefreshTimerRef.current = null;
       // One background refresh (never block UI)
-      void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId] });
+      void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
       perfLog(`[PERF][entriesRefresh] fired (${reason})`);
     }, 15000); // 15s idle
+  };
+
+  const cancelEntriesRefresh = () => {
+    if (entriesRefreshTimerRef.current) {
+      window.clearTimeout(entriesRefreshTimerRef.current);
+      entriesRefreshTimerRef.current = null;
+    }
   };
 
   // Refresh on window focus (coalesced)
@@ -584,6 +597,15 @@ export default function LedgerPageClient() {
     return list.find((a) => a.id === selectedAccountId) ?? null;
   }, [accountsQ.data, selectedAccountId]);
 
+  const accountNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accountsQ.data ?? []) m.set(a.id, a.name);
+    return m;
+  }, [accountsQ.data]);
+
+  // Session-only transfer metadata (frontend-only): transfer_id -> {from,to}
+  const transferMetaRef = useRef(new Map<string, { from: string; to: string }>());
+
     // Filters + toggle
   const [searchPayee, setSearchPayee] = useState("");
   const [debouncedPayee, setDebouncedPayee] = useState("");
@@ -631,6 +653,34 @@ export default function LedgerPageClient() {
     limit: fetchLimit,
     includeDeleted: showDeleted,
   });
+
+  // Issues: backend truth (open issues + header button)
+  const issuesCountQ = useQuery({
+    queryKey: ["issuesCount", selectedBusinessId],
+    enabled: !!selectedBusinessId,
+    queryFn: async () => {
+      if (!selectedBusinessId) return { ok: true as const, total_open: 0, by_account: {} as Record<string, number> };
+      return getBusinessIssuesCount({ businessId: selectedBusinessId });
+    },
+  });
+
+  const issuesListQ = useQuery({
+    queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
+    enabled: !!selectedBusinessId && !!selectedAccountId,
+    queryFn: async () => {
+      if (!selectedBusinessId || !selectedAccountId) return { ok: true as const, issues: [] as EntryIssueRow[] };
+      return listAccountIssues({ businessId: selectedBusinessId, accountId: selectedAccountId, status: "OPEN", limit: 300 });
+    },
+  });
+
+  const openIssues = issuesListQ.data?.issues ?? [];
+
+  const openIssueCountForAccount = useMemo(() => {
+    const by = issuesCountQ.data?.by_account;
+    if (by && selectedAccountId) return Number(by[selectedAccountId] ?? 0) || 0;
+    // fallback to list count (account scoped)
+    return openIssues.length;
+  }, [issuesCountQ.data, openIssues.length, selectedAccountId]);
 
   // Totals scope (all-time for Phase 3)
   const from = allTimeStartYmd();
@@ -754,6 +804,9 @@ export default function LedgerPageClient() {
       const isDeleted = !!e.deleted_at;
       const amt = toBigIntSafe(e.amount_cents);
       const rowBal = balById.get(e.id);
+      const cid = ((e as any).category_id ?? (e as any).categoryId ?? null) as string | null;
+      const tid = ((e as any).transfer_id ?? (e as any).transferId ?? null) as string | null;
+
       return {
         id: e.id,
         date: e.date,
@@ -763,9 +816,48 @@ export default function LedgerPageClient() {
         methodDisplay: titleCase(e.method ?? ""),
         rawType: (e.type ?? "").toString(),
         rawMethod: (e.method ?? "").toString(),
-        category: (categoryNameById.get((e as any).category_id ?? "") ?? ""),
-        categoryId: ((e as any).category_id ?? null) as string | null,
-        transferId: ((e as any).transfer_id ?? null) as string | null,
+
+        category: (() => {
+          const t = (e.type ?? "").toString().toUpperCase();
+
+          // TRANSFER: show To/From account label in Category column (session-only)
+          if (t === "TRANSFER" && tid) {
+            const meta = transferMetaRef.current.get(tid);
+            if (meta) {
+              // if this row is the from leg => To: <to account>
+              if (e.account_id === meta.from) {
+                const nm = accountNameById.get(meta.to) ?? "Other account";
+                return `To: ${nm}`;
+              }
+              // if this row is the to leg => From: <from account>
+              if (e.account_id === meta.to) {
+                const nm = accountNameById.get(meta.from) ?? "Other account";
+                return `From: ${nm}`;
+              }
+            }
+            return "Transfer";
+          }
+
+          // ADJUSTMENT: show memo as note
+          if (t === "ADJUSTMENT") {
+            const note = (e.memo ?? "").toString().trim();
+            return note ? note : "";
+          }
+
+          // Default: real category label
+          return cid ? (categoryNameById.get(cid) ?? "Unknown") : "";
+        })(),
+        categoryTooltip: (() => {
+          const t = (e.type ?? "").toString().toUpperCase();
+          if (t === "ADJUSTMENT") {
+            const note = (e.memo ?? "").toString().trim();
+            return note || "";
+          }
+          // For Transfer label, tooltip not needed (label is short)
+          return "";
+        })(),
+        categoryId: cid,
+        transferId: tid,
         amountCents: amt.toString(),
         amountStr: formatUsdFromCents(amt),
         amountNeg: amt < ZERO,
@@ -785,7 +877,12 @@ export default function LedgerPageClient() {
     let n = 0;
     for (const r of rowModels) {
       if (r.isDeleted) continue;
+
+      // Ignore types that don't require categories
+      const t = (r.rawType || "").toString().toUpperCase();
       if (r.id === "opening_balance") continue;
+      if (t === "OPENING" || t === "TRANSFER" || t === "ADJUSTMENT") continue;
+
       const cat = (r.category || "").trim();
       if (!cat || cat.toLowerCase() === "uncategorized") n++;
     }
@@ -794,134 +891,69 @@ export default function LedgerPageClient() {
 
       // Issues: create separate columns
   const issuesById = useMemo(() => {
-
     const map: Record<
       string,
       {
         dup: boolean;
         missing: boolean;
         stale: boolean;
+        dupIssueId?: string;
+        missingIssueId?: string;
+        staleIssueId?: string;
+        dupGroupKey?: string | null;
         dupTooltip: string;
         missingTooltip: string;
         staleTooltip: string;
       }
     > = {};
 
-    const groups = new Map<string, Array<{ id: string; day: number }>>();
+    for (const iss of openIssues) {
+      const eid = iss.entry_id;
+      if (!eid) continue;
 
-    const ymdToDay = (ymd: string) => {
-      const s = (ymd || "").slice(0, 10);
-      const y = Number(s.slice(0, 4));
-      const m = Number(s.slice(5, 7));
-      const d = Number(s.slice(8, 10));
-      if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d) || !y || !m || !d) return NaN;
-      return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
-    };
+      const cur = map[eid] ?? {
+        dup: false,
+        missing: false,
+        stale: false,
+        dupIssueId: undefined,
+        missingIssueId: undefined,
+        staleIssueId: undefined,
+        dupGroupKey: null,
+        dupTooltip: "",
+        missingTooltip: "",
+        staleTooltip: "",
+      };
 
-    const todayDay = ymdToDay(todayYmd());
-
-    for (const r of rowModels) {
-      if (r.isDeleted) continue; // Deleted entries must NEVER create issues
-      if (r.id === "opening_balance") continue;
-
-      const cat = (r.category || "").trim();
-      if (!cat || cat.toLowerCase() === "uncategorized") {
-        map[r.id] = {
-          ...(map[r.id] || {
-            dup: false,
-            missing: false,
-            stale: false,
-            dupTooltip: "",
-            missingTooltip: "",
-            staleTooltip: "",
-          }),
-          missing: true,
-          missingTooltip: "• Category missing or uncategorized",
-        };
+      if (iss.issue_type === "DUPLICATE") {
+        cur.dup = true;
+        cur.dupIssueId = cur.dupIssueId ?? iss.id;
+        cur.dupGroupKey = iss.group_key ?? null;
+        cur.dupTooltip = iss.details || "• Potential duplicate";
       }
 
-      const day = ymdToDay(r.date);
-      if (!Number.isFinite(day) || !Number.isFinite(todayDay)) continue;
-
-      const methodRaw = (r.rawMethod || "").toString().toUpperCase();
-      const isCheck = methodRaw === "CHECK";
-
-      // STALE_CHECK: CHECK only, older than 45 days
-            if (isCheck && todayDay - day > 45) {
-        const ageDays = todayDay - day;
-        map[r.id] = {
-          ...(map[r.id] || {
-            dup: false,
-            missing: false,
-            stale: false,
-            dupTooltip: "",
-            missingTooltip: "",
-            staleTooltip: "",
-          }),
-          stale: true,
-          staleTooltip: `• Stale check — ${ageDays} days old`,
-        };
+      if (iss.issue_type === "MISSING_CATEGORY") {
+        cur.missing = true;
+        cur.missingIssueId = cur.missingIssueId ?? iss.id;
+        cur.missingTooltip = iss.details || "• Category missing";
       }
 
-      // Duplicate grouping key: CHECK vs NONCHECK + signed amountCents + normalized payee
-      const payeeKey = (r.payee || "").trim().toLowerCase();
-      const bucket = isCheck ? "CHECK" : "NONCHECK";
-      const key = `${bucket}|${r.amountCents}|${payeeKey}`;
-
-      const arr = groups.get(key);
-      if (arr) arr.push({ id: r.id, day });
-      else groups.set(key, [{ id: r.id, day }]);
-    }
-
-    // Duplicate clusters: general 7d, checks 30d
-    for (const [key, items] of groups.entries()) {
-      if (items.length <= 1) continue;
-
-      const bucket = key.startsWith("CHECK|") ? "CHECK" : "NONCHECK";
-      const windowDays = bucket === "CHECK" ? 30 : 7;
-      const tooltip =
-        bucket === "CHECK"
-          ? "• Potential duplicate entry (CHECK within 30 days)"
-          : "• Potential duplicate entry (within 7 days)";
-
-      items.sort((a, b) => a.day - b.day);
-
-      let start = 0;
-      for (let i = 1; i < items.length; i++) {
-        while (start < i && items[i].day - items[start].day > windowDays) start++;
-
-        if (i - start >= 1) {
-          for (let j = start; j <= i; j++) {
-            const id = items[j].id;
-            map[id] = {
-              ...(map[id] || {
-                dup: false,
-                missing: false,
-                stale: false,
-                dupTooltip: "",
-                missingTooltip: "",
-                staleTooltip: "",
-              }),
-              dup: true,
-              dupTooltip: tooltip,
-            };
-          }
-        }
+      if (iss.issue_type === "STALE_CHECK") {
+        cur.stale = true;
+        cur.staleIssueId = cur.staleIssueId ?? iss.id;
+        cur.staleTooltip = iss.details || "• Stale check";
       }
+
+      map[eid] = cur;
     }
 
     return map;
-  }, [rowModels]);
+  }, [openIssues]);
 
   // Stage A attention counts (UI-only; not authoritative)
-  const issuesAttentionCount = useMemo(() => {
-    // Stage A "Issues" attention count excludes missing category (owned by Category Review).
-    let n = 0;
-    for (const v of Object.values(issuesById)) {
-      if (v?.dup || v?.stale) n++;
-    }
-    return n;
-  }, [issuesById]);
+const issuesAttentionCount = useMemo(() => {
+    // Ledger badge should reflect real open issues for this account
+    return openIssueCountForAccount;
+  }, [openIssueCountForAccount]);
 
   // Persist attention counts for sidebar badges (per business+account)
   useEffect(() => {
@@ -1129,6 +1161,8 @@ export default function LedgerPageClient() {
   const [draftCategory, setDraftCategory] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
 
+  const [draftNote, setDraftNote] = useState("");
+
   const [draftToAccountId, setDraftToAccountId] = useState<string>("");
 
   const [draftAmount, setDraftAmount] = useState("0.00");
@@ -1314,7 +1348,9 @@ export default function LedgerPageClient() {
           input: {
             date: vars.date,
             payee: vars.payee.trim(),
-            memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined,
+            memo:
+              (vars.note ?? "").trim() ||
+              (vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined),
             category_id: vars.categoryId ?? null,
             amount_cents: centsRaw,
             type: "ADJUSTMENT",
@@ -1334,7 +1370,7 @@ export default function LedgerPageClient() {
         input: {
           date: vars.date,
           payee: vars.payee.trim(),
-          memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined,
+          memo: (vars.note ?? "").trim() || (vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined),
           category_id: vars.categoryId ?? null,
           amount_cents: signed,
           type: backendType,
@@ -1349,6 +1385,7 @@ export default function LedgerPageClient() {
   perfLog(`${mark} click→onMutate start`);
 
   setErr(null);
+  cancelEntriesRefresh();
   await qc.cancelQueries({ queryKey: entriesKey });
 
   const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
@@ -1380,7 +1417,7 @@ export default function LedgerPageClient() {
     account_id: selectedAccountId!,
     date: vars.date,
     payee: vars.payee.trim(),
-    memo: null,
+    memo: vars.type === "ADJUSTMENT" ? ((vars.note ?? "").trim() || null) : null,
     category_id: vars.categoryId ?? null,
     amount_cents: String(signed),
     type: backendType,
@@ -1400,6 +1437,7 @@ export default function LedgerPageClient() {
   setDraftPayee("");
   setDraftCategory("");
   setDraftCategoryId(null);
+  setDraftNote("");
   setDraftToAccountId("");
   setDraftAmount("0.00");
   setDraftType("EXPENSE");
@@ -1425,16 +1463,36 @@ export default function LedgerPageClient() {
       setErr(e?.message || "Create failed");
     },
     onSuccess: async (_data: any, vars: any, ctx: any) => {
-  const mark = ctx?.__perf?.mark || `[PERF][create][${vars?.tempId || "noid"}]`;
-  const t0 = ctx?.__perf?.t0 ?? performance.now();
-  const tOk = performance.now();
-  perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
+      const mark = ctx?.__perf?.mark || `[PERF][create][${vars?.tempId || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tOk = performance.now();
+      perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  scheduleEntriesRefresh("create");
+      // If we created a transfer, remember the from/to accounts so we can render To/From labels
+      if (vars?.type === "TRANSFER" && vars?.toAccountId && selectedAccountId && _data?.transfer_id) {
+        transferMetaRef.current.set(String(_data.transfer_id), {
+          from: String(selectedAccountId),
+          to: String(vars.toAccountId),
+        });
+      }
 
-  // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
-  // Totals remain last-known until a later refresh policy is applied.
-},
+      // Fast refresh (once): replace optimistic row with real server row
+      void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+
+      // Also refresh categories once (ensures new category names are available)
+      void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+
+      // Fast refresh issues (once): so icons update immediately
+      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+
+      // Best-effort scan so DUP/STALE issues appear without manual scan
+      // (silent; errors ignored)
+      void scanIssues();
+
+      // Keep coalesced refresh too (safe)
+      scheduleEntriesRefresh("create");
+    },
 
   });
 
@@ -1510,6 +1568,8 @@ export default function LedgerPageClient() {
 
   });
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const deleteMut = useMutation({
   mutationFn: async (entryId: string) => {
     if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
@@ -1521,6 +1581,8 @@ export default function LedgerPageClient() {
   perfLog(`${mark} click→onMutate start`);
 
   setShowDeleted(true);
+  setDeletingId(entryId);
+  cancelEntriesRefresh();
   void qc.cancelQueries({ queryKey: entriesKey });
 
   const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
@@ -1541,22 +1603,35 @@ export default function LedgerPageClient() {
 },
 
   onError: (e: any, id: any, ctx: any) => {
+    setDeletingId(null);
     const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
     const t0 = ctx?.__perf?.t0 ?? performance.now();
     const tErr = performance.now();
     perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
+    // If server says already gone, treat as success (idempotent UI)
+    const msg = String(e?.message ?? "");
+    if (msg.includes("404") || msg.includes("Entry not found")) {
+      setErr(null);
+      // ensure row stays deleted in UI
+      void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+      return;
+    }
+
     if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
     setErr("Delete failed");
   },
   onSuccess: async (_data: any, id: any, ctx: any) => {
+    setDeletingId(null);
   const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
   const t0 = ctx?.__perf?.t0 ?? performance.now();
   const tOk = performance.now();
   perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  scheduleEntriesRefresh("delete");
+  // Recompute issue groups after deletion (best-effort)
+  setTimeout(() => void scanIssues(), 1500);
 
+  scheduleEntriesRefresh("delete");
   // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
   // Totals remain last-known until a later refresh policy is applied.
 },
@@ -1609,8 +1684,9 @@ export default function LedgerPageClient() {
   const tOk = performance.now();
   perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  scheduleEntriesRefresh("restore");
+  void scanIssues();
 
+  scheduleEntriesRefresh("restore");
   // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
   // Totals remain last-known until a later refresh policy is applied.
 },
@@ -1627,6 +1703,7 @@ export default function LedgerPageClient() {
     perfLog(`${mark} click→onMutate start`);
 
     setErr(null);
+    cancelEntriesRefresh();
     void qc.cancelQueries({ queryKey: entriesKey });
 
     const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
@@ -1702,7 +1779,7 @@ export default function LedgerPageClient() {
       updates: {
         date: editDraft.date,
         payee: editDraft.payee.trim(),
-        memo: (editDraft.category || "").trim() || null,
+        // Category is category_id now; do not write memo from edit
         amount_cents: signed,
         type: backendType,
         method: normalizeBackendMethod(editDraft.method),
@@ -1739,6 +1816,7 @@ export default function LedgerPageClient() {
       method: draftMethod,
       categoryName,
       categoryId,
+      note: draftNote,
       amountStr,
       toAccountId: draftToAccountId,
     });
@@ -1883,7 +1961,7 @@ export default function LedgerPageClient() {
         </Select>
       </td>
 
-      {/* Category OR To Account for TRANSFER */}
+      {/* Category / Note / To Account */}
       <td className={td}>
         {draftType === "TRANSFER" ? (
           <Select value={draftToAccountId} onValueChange={(v) => setDraftToAccountId(v)}>
@@ -1900,12 +1978,20 @@ export default function LedgerPageClient() {
                 ))}
             </SelectContent>
           </Select>
+        ) : draftType === "ADJUSTMENT" ? (
+          <input
+            className={inputH7}
+            placeholder="Note"
+            value={draftNote}
+            onChange={(e) => setDraftNote(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitInline()}
+          />
         ) : (
           <AutoInput
             value={draftCategory}
             onValueChange={(v) => {
               setDraftCategory(v);
-              setDraftCategoryId(null); // typing changes selection; force re-resolve
+              setDraftCategoryId(null);
             }}
             options={categoryOptions}
             placeholder="Category"
@@ -2148,7 +2234,7 @@ const filterLeft = useMemo(() => (
             onClick={() => {
               setShowDeleted((v) => !v);
               setPage(1);
-              qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId] });
+              qc.invalidateQueries({ queryKey: entriesKey, exact: false });
             }}
             className={[
               "relative inline-flex items-center rounded-full transition-colors shrink-0",
@@ -2273,25 +2359,15 @@ const filterRight = null;
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
 
   // FixIssue dialog (reusable; Ledger + Issues page)
-  const [fixDialog, setFixDialog] = useState<
-    | {
-        id: string;
-        kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
-        flags: { dup: boolean; stale: boolean; missing: boolean };
-        entry: {
-          id: string;
-          date: string;
-          payee: string;
-          amountStr: string;
-          methodDisplay: string;
-          category: string;
-        };
-      }
-    | null
-  >(null);
+const [fixDialog, setFixDialog] = useState<
+  | {
+      id: string;
+      kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+    }
+  | null
+>(null);
 
   // Quick-fix: Missing Category inline (no dialog)
-  const [catQuickEdit, setCatQuickEdit] = useState<{ id: string; value: string } | null>(null);
 
   // Body rows (memoized so add-row typing doesn't rebuild the full table body)
   const bodyRows = useMemo(() => {
@@ -2430,7 +2506,7 @@ const filterRight = null;
           </td>
 
           {/* Category */}
-          <td className={td + " " + trunc + " " + deletedText}>
+          <td className={td + " min-w-0 " + deletedText}>
             {isEditing && editDraft ? (
               <input
                 className={inputH7}
@@ -2438,45 +2514,14 @@ const filterRight = null;
                 onChange={(e) => setEditDraft({ ...editDraft, category: e.target.value })}
                 onKeyDown={onEditKeyDown}
               />
-            ) : catQuickEdit?.id === r.id && !deletedRow ? (
-              <div className="min-w-0">
-                <Select value={catQuickEdit.value} onValueChange={(v) => setCatQuickEdit({ id: r.id, value: v })}>
-                  <SelectTrigger className={selectTriggerClass + " h-7 min-w-0"}>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent side="bottom" align="start">
-                    <SelectItem value="__UNCATEGORIZED__">Uncategorized</SelectItem>
-                    {categoryOptions.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {/* Actions row (below) */}
-                <div className="mt-1 flex items-center justify-end gap-1">
-                  <Button variant="outline" className="h-6 w-8 p-0" title="Cancel" onClick={() => setCatQuickEdit(null)}>
-                    <X className="h-4 w-4" />
-                  </Button>
-
-                  <Button
-                    className="h-6 w-8 p-0"
-                    title="Save"
-                    onClick={() => {
-                      const v = (catQuickEdit.value || "").trim();
-                      const memo = v === "__UNCATEGORIZED__" ? null : v || null;
-                      updateMut.mutate({ entryId: r.id, updates: { memo } } as any);
-                      setCatQuickEdit(null);
-                    }}
-                  >
-                    <Check className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+            ) : r.categoryTooltip ? (
+              <HoverTooltip text={r.categoryTooltip}>
+                <span className="block max-w-full truncate">{r.category}</span>
+              </HoverTooltip>
             ) : (
-              r.category
+              <span className="block max-w-full truncate">{r.category}</span>
             )}
+
           </td>
 
           {/* Amount */}
@@ -2524,19 +2569,10 @@ const filterRight = null;
                   className="inline-flex items-center justify-center"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                    setFixDialog({
-                      id: r.id,
-                      kind: r.hasDup ? "DUPLICATE" : "STALE_CHECK",
-                      flags: { dup: !!r.hasDup, stale: !!r.hasStale, missing: !!r.hasMissing },
-                      entry: {
-                        id: r.id,
-                        date: r.date,
-                        payee: r.payee,
-                        amountStr: r.amountStr,
-                        methodDisplay: r.methodDisplay,
-                        category: r.category || "",
-                      },
-                    });
+setFixDialog({
+  id: r.id,
+  kind: r.hasDup ? "DUPLICATE" : "STALE_CHECK",
+});
                   }}
                   title="Fix issue"
                 >
@@ -2553,10 +2589,10 @@ const filterRight = null;
                 <button
                   type="button"
                   className="inline-flex items-center justify-center"
-                  onClick={() => {
-                    const current = (r.category || "").trim();
-                    setCatQuickEdit({ id: r.id, value: current ? current : "__UNCATEGORIZED__" });
-                  }}
+onClick={() => {
+  if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+  setFixDialog({ id: r.id, kind: "MISSING_CATEGORY" });
+}}
                   title="Fix category"
                 >
                   <Info className="h-4 w-4 text-violet-500" />
@@ -2582,10 +2618,11 @@ const filterRight = null;
                     <RotateCcw className="h-4 w-4" />
                   </Button>
                   <Button
-                    variant="outline"
-                    className="h-6 w-8 p-0"
-                    title="Delete permanently"
-                    onClick={() => {
+  variant="outline"
+  className="h-6 w-8 p-0"
+  title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
+  disabled={deletingId === r.id || hardDeleteMut.isPending}
+  onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                       setDeleteDialog({ id: r.id, mode: "hard" });
                     }}
@@ -2672,15 +2709,21 @@ const filterRight = null;
                       ) : null}
 
                       <Button
-                        variant="outline"
-                        className="h-6 w-8 p-0"
-                        title="Move to Deleted"
-                        onClick={() => {
-                          if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                          setDeleteDialog({ id: r.id, mode: "soft" });
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
+  variant="outline"
+  className="h-6 w-8 p-0"
+  title="Move to Deleted"
+  disabled={deletingId === r.id || deleteMut.isPending}
+  onClick={() => {
+    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+    if (deletingId === r.id || deleteMut.isPending) return;
+    setDeleteDialog({ id: r.id, mode: "soft" });
+  }}
+>
+                        {deletingId === r.id || deleteMut.isPending ? (
+  <Loader2 className="h-4 w-4 animate-spin" />
+) : (
+  <Trash2 className="h-4 w-4" />
+)}
                       </Button>
                     </>
                   ) : null}
@@ -2691,7 +2734,7 @@ const filterRight = null;
         </tr>
       );
     });
-  }, [pageRows, menuOpenId, editingId, editDraft, selectedIds, editedIds, catQuickEdit, editTypeOpen, editMethodOpen, showDeleted]);
+  }, [pageRows, menuOpenId, editingId, editDraft, selectedIds, editedIds, editTypeOpen, editMethodOpen, showDeleted]);
 
   if (!authReady) return null;
 
@@ -2800,71 +2843,55 @@ const filterRight = null;
                 incomeText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
                 expenseText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
                 netText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
-                balanceText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
+                balanceText={
+  summaryQ.isLoading ? (
+    "…"
+  ) : (
+    <span className={toBigIntSafe(summaryQ.data?.balance_cents) < ZERO ? "text-red-700 font-semibold" : ""}>
+      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
+    </span>
+  )
+}
               />
             </td>
           </tr>
         }
       />
 
-             <FixIssueDialog
-         open={!!fixDialog}
-         onOpenChange={(open) => {
-           if (!open) setFixDialog(null);
-         }}
-         entry={fixDialog?.entry ?? null}
-         kind={fixDialog?.kind ?? null}
-         flags={fixDialog?.flags ?? null}
-         categoryOptions={categoryOptions}
-         onSaveCategory={(category) => {
-           if (!fixDialog) return;
-
-           if (fixDialog.id.startsWith("temp_")) {
-             setErr("Still syncing—try again in a moment.");
-             return;
-           }
-
-           // This uses existing update endpoint/mutation and resolves missing category immediately.
-           updateMut.mutate({
-             entryId: fixDialog.id,
-             updates: { memo: (category || "").trim() || null },
-           } as any);
-
-           // Quiet, targeted refresh of issue tags/highlights
-           if (selectedBusinessId && selectedAccountId) {
-             qc.invalidateQueries({
-               queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
-               exact: false,
-             });
-           }
-         }}
-         // Quiet placeholders for now: close-on-action happens inside the dialog.
-         // We only ensure the Issues tags/highlights do not linger by refreshing Stage A/B issue query.
-         onMerge={() => {
-           if (selectedBusinessId && selectedAccountId) {
-             qc.invalidateQueries({
-               queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
-               exact: false,
-             });
-           }
-         }}
-         onMarkLegit={() => {
-           if (selectedBusinessId && selectedAccountId) {
-             qc.invalidateQueries({
-               queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
-               exact: false,
-             });
-           }
-         }}
-         onAcknowledge={() => {
-           if (selectedBusinessId && selectedAccountId) {
-             qc.invalidateQueries({
-               queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
-               exact: false,
-             });
-           }
-         }}
-       />
+      <FixIssueDialog
+        open={!!fixDialog}
+        onOpenChange={(open) => {
+          if (!open) setFixDialog(null);
+        }}
+        businessId={selectedBusinessId ?? ""}
+        accountId={selectedAccountId ?? ""}
+        kind={fixDialog?.kind ?? null}
+        entryId={fixDialog?.id ?? null}
+        issues={openIssues}
+        rowsById={Object.fromEntries(
+          rowModels.map((r) => [
+            r.id,
+            {
+              id: r.id,
+              date: r.date,
+              payee: r.payee,
+              amountStr: r.amountStr,
+              methodDisplay: r.methodDisplay,
+              category: r.category || "",
+              categoryId: r.categoryId,
+            },
+          ])
+        )}
+        categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
+        onDidMutate={() => {
+          // refresh issues + entries after resolution
+          if (selectedBusinessId && selectedAccountId) {
+            void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+            void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+          }
+        }}
+      />
 
       <AppDialog
   open={!!deleteDialog}

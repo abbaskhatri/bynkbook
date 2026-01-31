@@ -10,6 +10,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 
 import { updateEntry, type Entry } from "@/lib/api/entries";
+import { listCategories, type CategoryRow } from "@/lib/api/categories";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -352,6 +353,30 @@ export default function IssuesPageClient() {
     return m;
   }, [entries]);
 
+  // Real categories (needed for FixIssueDialog: missing category fix)
+  const categoriesQ = useQuery({
+    queryKey: ["categories", selectedBusinessId],
+    enabled: !!selectedBusinessId,
+    queryFn: async () => {
+      if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
+      return listCategories(selectedBusinessId, { includeArchived: false });
+    },
+  });
+
+  const categoryRows = categoriesQ.data?.rows ?? [];
+
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categoryRows) m.set(c.id, c.name);
+    return m;
+  }, [categoryRows]);
+
+  const categoryIdByNormName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categoryRows) m.set(c.name.trim().toLowerCase(), c.id);
+    return m;
+  }, [categoryRows]);
+
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
     for (const e of entries) {
@@ -413,6 +438,19 @@ export default function IssuesPageClient() {
       };
     },
   });
+
+  const openIssues = (issuesQ.data?.issues ?? []).map((it) => ({
+    id: `${it.entry_id}|${it.issue_type}|${it.detected_at ?? ""}`, // synthetic id if backend doesn't provide one
+    business_id: selectedBusinessId ?? "",
+    account_id: selectedAccountId ?? "",
+    entry_id: it.entry_id,
+    issue_type: it.issue_type,
+    status: it.status,
+    severity: it.severity,
+    group_key: it.group_key,
+    details: it.details,
+    detected_at: it.detected_at,
+  }));
 
   // Map API issues to UI rows (exclude missing category on Issues page)
   const issues = useMemo(() => {
@@ -642,12 +680,13 @@ export default function IssuesPageClient() {
   // ================================
   // Fix dialog
   // ================================
-  const [fixDialog, setFixDialog] = useState<{
-    id: string;
-    kind: "DUPLICATE" | "STALE_CHECK";
-    flags: { dup: boolean; stale: boolean; missing: boolean };
-    entry: { id: string; date: string; payee: string; amountStr: string; methodDisplay: string; category: string };
-  } | null>(null);
+  const [fixDialog, setFixDialog] = useState<
+    | {
+        id: string;
+        kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+      }
+    | null
+  >(null);
 
   // kept (category quick fix on Issues page is not used anymore, but update mutation remains harmless)
   const updateMut = useMutation({
@@ -952,19 +991,7 @@ export default function IssuesPageClient() {
                           <Button
                             className="h-6 px-4 text-xs min-w-[72px]"
                             onClick={() => {
-                              setFixDialog({
-                                id: head.id,
-                                kind: "DUPLICATE",
-                                flags: { dup: true, stale: false, missing: false },
-                                entry: {
-                                  id: head.id,
-                                  date: head.date,
-                                  payee: head.payee,
-                                  amountStr: head.amountStr,
-                                  methodDisplay: head.methodDisplay,
-                                  category: head.category || "",
-                                },
-                              });
+setFixDialog({ id: head.id, kind: "DUPLICATE" });
                             }}
                           >
                             Fix
@@ -1036,19 +1063,7 @@ export default function IssuesPageClient() {
                         <Button
                           className="h-6 px-4 text-xs min-w-[72px]"
                           onClick={() => {
-                            setFixDialog({
-                              id: r.id,
-                              kind: isDup ? "DUPLICATE" : "STALE_CHECK",
-                              flags: { dup: isDup, stale: isStale, missing: false },
-                              entry: {
-                                id: r.id,
-                                date: r.date,
-                                payee: r.payee,
-                                amountStr: r.amountStr,
-                                methodDisplay: r.methodDisplay,
-                                category: r.category || "",
-                              },
-                            });
+setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" });
                           }}
                         >
                           Fix
@@ -1068,10 +1083,40 @@ export default function IssuesPageClient() {
         onOpenChange={(open) => {
           if (!open) setFixDialog(null);
         }}
-        entry={fixDialog?.entry ?? null}
+        businessId={selectedBusinessId ?? ""}
+        accountId={selectedAccountId ?? ""}
         kind={fixDialog?.kind ?? null}
-        flags={fixDialog?.flags ?? null}
-        categoryOptions={categoryOptions}
+        entryId={fixDialog?.id ?? null}
+        issues={openIssues as any}
+        rowsById={Object.fromEntries(
+          entries.map((e) => {
+            const amt = toBigIntSafe(e.amount_cents);
+            const categoryName =
+              categoryNameById.get((e as any).category_id ?? "") ??
+              "";
+
+            return [
+              e.id,
+              {
+                id: e.id,
+                date: e.date,
+                payee: e.payee ?? "",
+                amountStr: e.id ? formatUsdFromCents(amt) : "—",
+                methodDisplay: titleCase((e.method ?? "").toString()),
+                category: categoryName,
+                categoryId: ((e as any).category_id ?? null) as string | null,
+              },
+            ];
+          })
+        )}
+        categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
+        onDidMutate={() => {
+          if (selectedBusinessId && selectedAccountId) {
+            void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+            void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+          }
+        }}
       />
     </div>
   );

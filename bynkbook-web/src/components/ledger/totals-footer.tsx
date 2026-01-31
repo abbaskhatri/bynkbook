@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -25,10 +26,10 @@ export function TotalsFooter(props: {
   canPrev: boolean;
   canNext: boolean;
 
-  incomeText: string;
-  expenseText: string;
-  netText: string;
-  balanceText: string;
+  incomeText: ReactNode;
+  expenseText: ReactNode;
+  netText: ReactNode;
+  balanceText: ReactNode;
 }) {
   const {
     rowsPerPage,
@@ -43,8 +44,6 @@ export function TotalsFooter(props: {
     netText,
     balanceText,
   } = props;
-
-  const netIsNeg = netText.includes("(");
 
   const navBtnClass =
     "h-7 w-8 rounded-md " +
@@ -100,7 +99,7 @@ export function TotalsFooter(props: {
         </Button>
       </div>
 
-            {/* Right: totals */}
+      {/* Right: totals */}
       <div className="flex items-center gap-6 text-xs tabular-nums">
         <div>
           <span className="mr-1">Income:</span>
@@ -109,39 +108,19 @@ export function TotalsFooter(props: {
 
         <div>
           <span className="mr-1">Expense:</span>
-          <span className="font-semibold text-red-700">
-            {expenseText
-              ? expenseText.includes("(")
-                ? expenseText
-                : `(${expenseText.replace(/^\-/, "")})`
-              : expenseText}
-          </span>
+          <span className="font-semibold text-red-700">{expenseText}</span>
         </div>
 
         <div>
           <span className="mr-1">Net:</span>
-          <span
-            className={[
-              "font-semibold",
-              netIsNeg ? "text-red-700" : "text-emerald-700",
-            ].join(" ")}
-          >
-            {netText
-              ? netIsNeg
-                ? netText.includes("(")
-                  ? netText
-                  : `(${netText.replace(/^\-/, "")})`
-                : netText.replace(/[()]/g, "")
-              : netText}
-          </span>
+          <span className="font-semibold">{netText}</span>
         </div>
 
         <div>
           <span className="mr-1">Balance:</span>
-          <span className="font-semibold text-slate-900">{balanceText}</span>
+          <span className="font-semibold">{balanceText}</span>
         </div>
       </div>
-
-      </div>
+    </div>
   );
 }
