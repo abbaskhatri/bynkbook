@@ -118,16 +118,23 @@ export default $config({
           actions: ["kms:Encrypt", "kms:GenerateDataKey", "kms:DescribeKey", "kms:Decrypt"],
           resources: ["arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36"],
         },
+
+        // Textract (AnalyzeExpense) for invoice/receipt parsing
+        {
+          actions: ["textract:AnalyzeExpense"],
+          resources: ["*"],
+        },
       ],
     } satisfies ApiHandler;
 
-    api.route("POST /v1/businesses/{businessId}/uploads/init", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-    api.route("POST /v1/businesses/{businessId}/uploads/mark-uploaded", uploadsHandler, {
-  auth: { jwt: { authorizer: authorizer.id } },
-});
-    api.route("POST /v1/businesses/{businessId}/uploads/complete", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-    api.route("GET /v1/businesses/{businessId}/uploads", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-    api.route("GET /v1/businesses/{businessId}/uploads/{uploadId}/download", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/uploads/init", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/uploads/mark-uploaded", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/uploads/complete", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/uploads", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/uploads/{uploadId}/download", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("POST /v1/businesses/{businessId}/uploads/{uploadId}/create-entry", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/uploads/create-entries", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // Phase 4C: Manual CSV import (BANK_STATEMENT only)
 api.route("POST /v1/businesses/{businessId}/uploads/{uploadId}/import", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });

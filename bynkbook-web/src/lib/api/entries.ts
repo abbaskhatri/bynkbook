@@ -16,7 +16,16 @@ export type Entry = {
   status: string;
 
   category_id?: string | null;
+  category_name?: string | null;
+
+  vendor_id?: string | null;
+  vendor_name?: string | null;
+
   transfer_id?: string | null;
+  transfer_other_account_id?: string | null;
+  transfer_other_account_name?: string | null;
+  transfer_direction?: "IN" | "OUT" | null;
+
   is_adjustment?: boolean;
 
   deleted_at: string | null;
@@ -78,7 +87,22 @@ function normalizeEntry(raw: any): Entry {
   const status = asString(pick(raw, ["status"])) ?? "";
 
   const category_id = asString(pick(raw, ["category_id", "categoryId"])) ?? null;
+  const category_name = asString(pick(raw, ["category_name", "categoryName"])) ?? null;
+
+  const vendor_id = asString(pick(raw, ["vendor_id", "vendorId"])) ?? null;
+  const vendor_name = asString(pick(raw, ["vendor_name", "vendorName"])) ?? null;
+
   const transfer_id = asString(pick(raw, ["transfer_id", "transferId"])) ?? null;
+  const transfer_other_account_id =
+    asString(pick(raw, ["transfer_other_account_id", "transferOtherAccountId"])) ?? null;
+  const transfer_other_account_name =
+    asString(pick(raw, ["transfer_other_account_name", "transferOtherAccountName"])) ?? null;
+
+  const transfer_direction_raw = asString(pick(raw, ["transfer_direction", "transferDirection"])) ?? null;
+  const transfer_direction =
+    transfer_direction_raw && (transfer_direction_raw.toUpperCase() === "IN" || transfer_direction_raw.toUpperCase() === "OUT")
+      ? (transfer_direction_raw.toUpperCase() as "IN" | "OUT")
+      : null;
 
   const is_adjustment_raw = pick(raw, ["is_adjustment", "isAdjustment"]);
   const is_adjustment = !!(
@@ -103,7 +127,13 @@ function normalizeEntry(raw: any): Entry {
     method,
     status,
     category_id,
+    category_name,
+    vendor_id,
+    vendor_name,
     transfer_id,
+    transfer_other_account_id,
+    transfer_other_account_name,
+    transfer_direction,
     is_adjustment,
     deleted_at,
     created_at,

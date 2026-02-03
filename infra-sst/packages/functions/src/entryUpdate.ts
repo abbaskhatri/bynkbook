@@ -202,6 +202,27 @@ if (body.category_id !== undefined) {
         }
       }
     }
+
+    // Vendor link: allow vendor_id updates (nullable)
+    if (body.vendor_id !== undefined) {
+      const vendorRaw = body.vendor_id;
+
+      if (vendorRaw === null || vendorRaw === "") {
+        (data as any).vendor_id = null;
+      } else {
+        const vendorId = String(vendorRaw).trim();
+        if (!vendorId) {
+          (data as any).vendor_id = null;
+        } else {
+          const hit = await prisma.vendor.findFirst({
+            where: { id: vendorId, business_id: biz },
+            select: { id: true },
+          });
+          if (!hit) return json(400, { ok: false, error: "Invalid vendor" });
+          (data as any).vendor_id = vendorId;
+        }
+      }
+    }
       // Enforce entry-type rules & sign normalization (backend is source of truth)
       // - TRANSFER cannot be updated via generic entry update; use /transfers
       // - INCOME: +abs(amount)

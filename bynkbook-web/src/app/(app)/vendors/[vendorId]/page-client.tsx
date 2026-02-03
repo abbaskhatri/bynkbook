@@ -130,7 +130,7 @@ export default function VendorDetailPageClient() {
 
         <div className="px-3 py-2">
           <FilterBar
-            left={<div className="text-xs text-slate-600">Invoices are shown business/account-wide for now (vendor tagging later).</div>}
+            left={<div className="text-xs text-slate-600">Invoices are filtered by this vendor.</div>}
             right={
               <>
                 <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
@@ -169,11 +169,12 @@ export default function VendorDetailPageClient() {
   <CardContent>
     <div className="mt-1">
       <UploadsList
-  title="Invoice uploads"
-  businessId={businessId ?? ""}
-  accountId={sp.get("accountId") ?? undefined}
-  type="INVOICE"
-/>
+        title="Invoice uploads"
+        businessId={businessId ?? ""}
+        accountId={sp.get("accountId") ?? undefined}
+        type="INVOICE"
+        vendorId={vendorId}
+      />
     </div>
   </CardContent>
 </Card>

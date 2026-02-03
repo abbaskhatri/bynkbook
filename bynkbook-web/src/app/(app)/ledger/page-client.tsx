@@ -55,6 +55,7 @@ import { CapsuleSelect } from "@/components/app/capsule-select";
 import { TotalsFooter } from "@/components/ledger/totals-footer";
 
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api/client";
 import {
   Select,
   SelectContent,
@@ -409,6 +410,100 @@ function HoverTooltip(props: { text: string; children: any }) {
   );
 }
 
+function VendorSuggestPill(props: {
+  businessId: string;
+  accountId: string;
+  entryId: string;
+  payee: string;
+  onLinked: (vendor: { id: string; name: string }) => void;
+  onDismiss: () => void;
+}) {
+const { businessId, accountId, entryId, payee, onLinked, onDismiss } = props;
+  const [best, setBest] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    const q = (payee || "").trim();
+    if (!businessId || q.length < 2) {
+      setBest(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res: any = await apiFetch(
+          `/v1/businesses/${businessId}/vendors?q=${encodeURIComponent(q)}`,
+          { method: "GET" }
+        );
+        const vendors = Array.isArray(res?.vendors) ? res.vendors : [];
+        if (!vendors.length) return setBest(null);
+
+        const norm = (s: string) => String(s || "").trim().toLowerCase();
+        const exact = vendors.find((v: any) => norm(v.name) === norm(q));
+        const v = exact || vendors[0];
+
+        if (v?.id && v?.name) setBest({ id: v.id, name: v.name });
+        else setBest(null);
+      } catch {
+        setBest(null);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [businessId, payee]);
+
+  if (!best) return null;
+
+  return (
+    <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+      {/* vendor icon */}
+      <span className="inline-flex items-center justify-center">
+        <Info className="h-3.5 w-3.5 text-slate-600" />
+      </span>
+
+      {/* vendor name */}
+      <span className="font-medium text-slate-900">{best.name}</span>
+
+      {/* actions */}
+      <button
+        type="button"
+        className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-200"
+        title="Link to vendor"
+onClick={async () => {
+  try {
+    const res: any = await apiFetch(
+      `/v1/businesses/${businessId}/accounts/${accountId}/entries/${entryId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ vendor_id: best.id }),
+      }
+    );
+
+    if (!res?.ok) {
+      // keep pill visible if backend rejected
+      return;
+    }
+
+    onLinked({ id: best.id, name: best.name });
+  } catch {
+    // keep pill visible on error
+  }
+}}
+      >
+        <Check className="h-3.5 w-3.5 text-emerald-700" />
+      </button>
+
+      <button
+        type="button"
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-slate-200"
+        title="Dismiss"
+        onClick={onDismiss}
+      >
+        <X className="h-3.5 w-3.5 text-slate-600" />
+      </button>
+    </div>
+  );
+}
+
 // ================================
 // SECTION: Types
 // ================================
@@ -424,9 +519,11 @@ type UiMethod =
   | "TRANSFER"
   | "OTHER";
 
-function normalizeBackendType(uiType: UiType): "INCOME" | "EXPENSE" {
+function normalizeBackendType(uiType: UiType): "INCOME" | "EXPENSE" | "TRANSFER" | "ADJUSTMENT" {
   if (uiType === "INCOME") return "INCOME";
-  return "EXPENSE";
+  if (uiType === "EXPENSE") return "EXPENSE";
+  if (uiType === "TRANSFER") return "TRANSFER";
+  return "ADJUSTMENT";
 }
 
 function normalizeBackendMethod(uiMethod: UiMethod): string {
@@ -483,6 +580,18 @@ function uiMethodFromRaw(raw: string | null | undefined): UiMethod {
   return (allowed as string[]).includes(m) ? (m as UiMethod) : "OTHER";
 }
 
+function uiMethodLabel(m: UiMethod): string {
+  if (m === "CASH") return "Cash";
+  if (m === "CARD") return "Card";
+  if (m === "ACH") return "ACH";
+  if (m === "WIRE") return "Wire";
+  if (m === "CHECK") return "Check";
+  if (m === "DIRECT_DEPOSIT") return "Direct Deposit";
+  if (m === "ZELLE") return "Zelle";
+  if (m === "TRANSFER") return "Transfer";
+  return "Other";
+}
+
 // ================================
 // SECTION: Component
 // ================================
@@ -492,8 +601,15 @@ export default function LedgerPageClient() {
   const qc = useQueryClient();
   const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
 
+  // Vendor payment suggestion (deterministic, no AI)
+  // Vendor suggestion is shown post-save on the created row only.
+  const [uploadType] = useState<"RECEIPT">("RECEIPT");
   const [openUpload, setOpenUpload] = useState(false);
-  const [uploadType, setUploadType] = useState<"RECEIPT" | "INVOICE">("RECEIPT");
+  const [lastCreatedEntryId, setLastCreatedEntryId] = useState<string | null>(null);
+
+  // Optimistic vendor badge map (so linked indicator persists immediately, even before refetch)
+  const [linkedVendorByEntryId, setLinkedVendorByEntryId] = useState<Record<string, string>>({});
+  const [lastCreatedLinkedVendor, setLastCreatedLinkedVendor] = useState<{ id: string; name: string } | null>(null);
 
   // PERF logging toggle (default OFF)
   // Enable via localStorage: bynkbook.debug.perf = "1"
@@ -530,6 +646,10 @@ export default function LedgerPageClient() {
       entriesRefreshTimerRef.current = null;
       // One background refresh (never block UI)
       void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+
+      // Also refresh summary in the same coalesced cycle (prevents stale footer totals)
+      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+
       perfLog(`[PERF][entriesRefresh] fired (${reason})`);
     }, 15000); // 15s idle
   };
@@ -551,6 +671,13 @@ export default function LedgerPageClient() {
     return () => window.removeEventListener("focus", onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshScopeKey]);
+
+    // Uploads "create entries" triggers a lightweight ledger refresh (no storms)
+  useEffect(() => {
+    const fn = () => scheduleEntriesRefresh("uploadsCreateEntries");
+    window.addEventListener("bynk:ledger-refresh", fn as any);
+    return () => window.removeEventListener("bynk:ledger-refresh", fn as any);
+  }, [scheduleEntriesRefresh]);
 
   // Auth
   const [authReady, setAuthReady] = useState(false);
@@ -603,8 +730,7 @@ export default function LedgerPageClient() {
     return m;
   }, [accountsQ.data]);
 
-  // Session-only transfer metadata (frontend-only): transfer_id -> {from,to}
-  const transferMetaRef = useRef(new Map<string, { from: string; to: string }>());
+  // Transfer display is derived from backend fields on each entry (stable across refetch).
 
     // Filters + toggle
   const [searchPayee, setSearchPayee] = useState("");
@@ -741,7 +867,9 @@ export default function LedgerPageClient() {
     enabled: !!selectedBusinessId,
     queryFn: async () => {
       if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
-      return listCategories(selectedBusinessId, { includeArchived: false });
+      // IMPORTANT: include archived for DISPLAY so historical entries still show their category name.
+      // The picker will still hide archived categories.
+      return listCategories(selectedBusinessId, { includeArchived: true });
     },
   });
 
@@ -758,6 +886,16 @@ export default function LedgerPageClient() {
     for (const c of categoryRows) m.set(normKey(c.name), c.id);
     return m;
   }, [categoryRows]);
+
+  // Used by AutoInput to prevent showing "Create" when options lag behind fetched categories.
+  useEffect(() => {
+    (globalThis as any).__BYNK_CATEGORY_NORM_MAP_HAS = (k: string) => categoryIdByNormName.has(k);
+    return () => {
+      try {
+        delete (globalThis as any).__BYNK_CATEGORY_NORM_MAP_HAS;
+      } catch {}
+    };
+  }, [categoryIdByNormName]);
 
   // Autofill options
   const payeeOptions = useMemo(() => {
@@ -805,7 +943,13 @@ export default function LedgerPageClient() {
       const amt = toBigIntSafe(e.amount_cents);
       const rowBal = balById.get(e.id);
       const cid = ((e as any).category_id ?? (e as any).categoryId ?? null) as string | null;
+      const catName = ((e as any).category_name ?? (e as any).categoryName ?? null) as string | null;
+      const vid = ((e as any).vendor_id ?? (e as any).vendorId ?? null) as string | null;
+      const vname = ((e as any).vendor_name ?? (e as any).vendorName ?? null) as string | null;
+
       const tid = ((e as any).transfer_id ?? (e as any).transferId ?? null) as string | null;
+      const tOtherName = ((e as any).transfer_other_account_name ?? null) as string | null;
+      const tDir = ((e as any).transfer_direction ?? null) as ("IN" | "OUT" | null);
 
       return {
         id: e.id,
@@ -813,27 +957,18 @@ export default function LedgerPageClient() {
         ref: "",
         payee: e.payee ?? "",
         typeDisplay: titleCase(e.type ?? ""),
-        methodDisplay: titleCase(e.method ?? ""),
+        methodDisplay: uiMethodLabel(uiMethodFromRaw(e.method ?? "")),
         rawType: (e.type ?? "").toString(),
         rawMethod: (e.method ?? "").toString(),
 
         category: (() => {
           const t = (e.type ?? "").toString().toUpperCase();
 
-          // TRANSFER: show To/From account label in Category column (session-only)
+          // TRANSFER: use durable backend fields (stable across refetch/reload)
           if (t === "TRANSFER" && tid) {
-            const meta = transferMetaRef.current.get(tid);
-            if (meta) {
-              // if this row is the from leg => To: <to account>
-              if (e.account_id === meta.from) {
-                const nm = accountNameById.get(meta.to) ?? "Other account";
-                return `To: ${nm}`;
-              }
-              // if this row is the to leg => From: <from account>
-              if (e.account_id === meta.to) {
-                const nm = accountNameById.get(meta.from) ?? "Other account";
-                return `From: ${nm}`;
-              }
+            if (tDir && tOtherName) {
+              // Direction is relative to THIS account row
+              return tDir === "OUT" ? `To: ${tOtherName}` : `From: ${tOtherName}`;
             }
             return "Transfer";
           }
@@ -844,7 +979,8 @@ export default function LedgerPageClient() {
             return note ? note : "";
           }
 
-          // Default: real category label
+          // Default: prefer backend category_name (covers archived categories too), fallback to local map
+          if (catName) return catName;
           return cid ? (categoryNameById.get(cid) ?? "Unknown") : "";
         })(),
         categoryTooltip: (() => {
@@ -857,6 +993,8 @@ export default function LedgerPageClient() {
           return "";
         })(),
         categoryId: cid,
+        vendorId: vid,
+        vendorName: vname,
         transferId: tid,
         amountCents: amt.toString(),
         amountStr: formatUsdFromCents(amt),
@@ -932,9 +1070,15 @@ export default function LedgerPageClient() {
       }
 
       if (iss.issue_type === "MISSING_CATEGORY") {
-        cur.missing = true;
-        cur.missingIssueId = cur.missingIssueId ?? iss.id;
-        cur.missingTooltip = iss.details || "• Category missing";
+        // Guardrail: only show "missing category" if the entry truly has no category_id.
+        // (Prevents false positives if backend scan used legacy fields.)
+        const row = rowModels.find((r) => r.id === eid);
+        const hasCatId = !!row?.categoryId;
+        if (!hasCatId) {
+          cur.missing = true;
+          cur.missingIssueId = cur.missingIssueId ?? iss.id;
+          cur.missingTooltip = iss.details || "• Category missing";
+        }
       }
 
       if (iss.issue_type === "STALE_CHECK") {
@@ -947,7 +1091,7 @@ export default function LedgerPageClient() {
     }
 
     return map;
-  }, [openIssues]);
+  }, [openIssues, rowModels]);
 
   // Stage A attention counts (UI-only; not authoritative)
 const issuesAttentionCount = useMemo(() => {
@@ -1233,7 +1377,7 @@ const issuesAttentionCount = useMemo(() => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          includeMissingCategory: false,
+          includeMissingCategory: true,
           dryRun: false,
         }),
       });
@@ -1287,6 +1431,8 @@ const issuesAttentionCount = useMemo(() => {
     return { payee, amountStr, centsAbs };
   }
 
+  // Vendor payment suggestion is shown post-save on the created row only.
+
   // Edit state (ALL fields)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1323,6 +1469,9 @@ const issuesAttentionCount = useMemo(() => {
       if (centsAbs === 0) throw new Error("Amount is required");
 
       // TRANSFER: use transfer endpoint (double-entry)
+      // IMPORTANT: amount_cents must be SIGNED relative to the current account.
+      // negative => money leaves current account (OUT)
+      // positive => money enters current account (IN)
       if (vars.type === "TRANSFER") {
         if (!vars.toAccountId) throw new Error("To account is required");
         return createTransfer({
@@ -1331,7 +1480,7 @@ const issuesAttentionCount = useMemo(() => {
           input: {
             to_account_id: vars.toAccountId,
             date: vars.date,
-            amount_cents: centsAbs,
+            amount_cents: centsRaw, // <-- signed, not abs
             payee: vars.payee.trim(),
             memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : null,
             method: "TRANSFER",
@@ -1399,7 +1548,7 @@ const issuesAttentionCount = useMemo(() => {
 
   if (vars.type === "TRANSFER") {
     backendType = "TRANSFER";
-    signed = -Math.abs(cents); // from-leg is negative in current account
+    signed = cents; // IMPORTANT: keep the signed value user typed for current account
   } else if (vars.type === "ADJUSTMENT") {
     backendType = "ADJUSTMENT";
     signed = cents; // keep sign
@@ -1463,21 +1612,29 @@ const issuesAttentionCount = useMemo(() => {
       setErr(e?.message || "Create failed");
     },
     onSuccess: async (_data: any, vars: any, ctx: any) => {
+            // Track last created entry so we can show a post-save suggestion pill
+      const createdId =
+        (_data?.entry?.id as string | undefined) ||
+        (_data?.id as string | undefined) ||
+        (_data?.entry_id as string | undefined) ||
+        null;
+
+      if (createdId) {
+  setLastCreatedEntryId(createdId);
+  setLastCreatedLinkedVendor(null);
+}
       const mark = ctx?.__perf?.mark || `[PERF][create][${vars?.tempId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
       const tOk = performance.now();
       perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-      // If we created a transfer, remember the from/to accounts so we can render To/From labels
-      if (vars?.type === "TRANSFER" && vars?.toAccountId && selectedAccountId && _data?.transfer_id) {
-        transferMetaRef.current.set(String(_data.transfer_id), {
-          from: String(selectedAccountId),
-          to: String(vars.toAccountId),
-        });
-      }
+      // Transfer labels are derived from backend fields; no session-only maps.
 
       // Fast refresh (once): replace optimistic row with real server row
       void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+
+      // Footer totals should update promptly (cheap query)
+      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
 
       // Also refresh categories once (ensures new category names are available)
       void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
@@ -1562,8 +1719,8 @@ const issuesAttentionCount = useMemo(() => {
 
   scheduleEntriesRefresh("update");
 
-  // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
-  // Totals remain last-known until a later refresh policy is applied.
+  // Update footer totals promptly (cheap query; no entries refetch storm)
+  void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
 },
 
   });
@@ -1571,16 +1728,23 @@ const issuesAttentionCount = useMemo(() => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const deleteMut = useMutation({
-  mutationFn: async (entryId: string) => {
-    if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
-    return deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId });
-  },
-  onMutate: async (entryId: string) => {
+    mutationFn: async (p: { entryId: string; transferId?: string | null; isTransfer?: boolean }) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+
+      // CRITICAL: Transfer deletes must delete BOTH legs atomically
+      if (p.isTransfer && p.transferId) {
+        return deleteTransfer({ businessId: selectedBusinessId, scopeAccountId: selectedAccountId, transferId: p.transferId });
+      }
+
+      return deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: p.entryId });
+    },
+  onMutate: async (p) => {
+    const entryId = p.entryId;
   const t0 = performance.now();
   const mark = `[PERF][delete][${entryId || "noid"}]`;
   perfLog(`${mark} click→onMutate start`);
 
-  setShowDeleted(true);
+  // Do NOT auto-toggle Deleted view. User control must remain stable.
   setDeletingId(entryId);
   cancelEntriesRefresh();
   void qc.cancelQueries({ queryKey: entriesKey });
@@ -1602,7 +1766,8 @@ const issuesAttentionCount = useMemo(() => {
   return { previous, __perf: { t0, mark } };
 },
 
-  onError: (e: any, id: any, ctx: any) => {
+  onError: (e: any, p: any, ctx: any) => {
+    const id = p?.entryId;
     setDeletingId(null);
     const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
     const t0 = ctx?.__perf?.t0 ?? performance.now();
@@ -1621,7 +1786,8 @@ const issuesAttentionCount = useMemo(() => {
     if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
     setErr("Delete failed");
   },
-  onSuccess: async (_data: any, id: any, ctx: any) => {
+  onSuccess: async (_data: any, p: any, ctx: any) => {
+    const id = p?.entryId;
     setDeletingId(null);
   const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
   const t0 = ctx?.__perf?.t0 ?? performance.now();
@@ -1632,8 +1798,9 @@ const issuesAttentionCount = useMemo(() => {
   setTimeout(() => void scanIssues(), 1500);
 
   scheduleEntriesRefresh("delete");
-  // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
-  // Totals remain last-known until a later refresh policy is applied.
+
+  // Update footer totals promptly (cheap query)
+  void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
 },
 
 });
@@ -1687,8 +1854,9 @@ const issuesAttentionCount = useMemo(() => {
   void scanIssues();
 
   scheduleEntriesRefresh("restore");
-  // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
-  // Totals remain last-known until a later refresh policy is applied.
+
+  // Update footer totals promptly (cheap query)
+  void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
 },
 });
 
@@ -1772,17 +1940,69 @@ const issuesAttentionCount = useMemo(() => {
     if (centsAbs === 0) return setErr("Amount is required");
 
     const backendType = normalizeBackendType(editDraft.type);
-    const signed = backendType === "EXPENSE" ? -centsAbs : centsAbs;
+
+    // Category id (only meaningful for income/expense)
+    const catName = normalizeCategoryName(editDraft.category || "");
+    const catId = catName ? (categoryIdByNormName.get(normKey(catName)) ?? null) : null;
+
+    // TRANSFER edits must go through updateTransfer (atomic)
+    if (backendType === "TRANSFER") {
+      const row = rowModels.find((r) => r.id === entryId);
+      const transferId = row?.transferId ?? null;
+      if (!transferId) {
+        setErr("Transfer link missing. Cannot edit this transfer.");
+        setEditingId(null);
+        setEditDraft(null);
+        return;
+      }
+
+      const centsRaw = parseMoneyToCents(editDraft.amountStr);
+      if (centsRaw === 0) return setErr("Amount is required");
+
+      updateTransfer({
+        businessId: selectedBusinessId!,
+        scopeAccountId: selectedAccountId!,
+        transferId,
+        updates: {
+          date: editDraft.date,
+          payee: editDraft.payee.trim(),
+          memo: editDraft.ref?.trim() ? `Ref: ${editDraft.ref.trim()}` : null,
+          amount_cents: centsRaw, // signed relative to this account
+          method: "TRANSFER",
+          status: "EXPECTED",
+        },
+      })
+        .then(() => {
+          scheduleEntriesRefresh("transferEdit");
+          setEditingId(null);
+          setEditDraft(null);
+        })
+        .catch((e: any) => {
+          setErr(e?.message || "Transfer update failed");
+        });
+
+      return;
+    }
+
+    // ADJUSTMENT keeps raw sign exactly as entered
+    let signed: number;
+    if (backendType === "ADJUSTMENT") {
+      signed = parseMoneyToCents(editDraft.amountStr);
+    } else {
+      // INCOME/EXPENSE enforce sign
+      signed = backendType === "EXPENSE" ? -centsAbs : centsAbs;
+    }
 
     updateMut.mutate({
       entryId,
       updates: {
         date: editDraft.date,
         payee: editDraft.payee.trim(),
-        // Category is category_id now; do not write memo from edit
+        category_id: backendType === "INCOME" || backendType === "EXPENSE" ? catId : null,
+        memo: backendType === "ADJUSTMENT" ? catName || null : undefined,
         amount_cents: signed,
         type: backendType,
-        method: normalizeBackendMethod(editDraft.method),
+        method: backendType === "ADJUSTMENT" ? "OTHER" : normalizeBackendMethod(editDraft.method),
         ref: editDraft.ref ?? "",
       },
     } as any);
@@ -1796,16 +2016,40 @@ const issuesAttentionCount = useMemo(() => {
     setEditDraft(null);
   }
 
-  function submitInline() {
+  async function submitInline() {
     const { payee, amountStr, centsAbs } = readSubmitValues();
     if (!payee) return setErr("Payee is required");
     if (centsAbs === 0) return setErr("Amount is required");
 
+    setErr(null);
+
     const categoryName = normalizeCategoryName(categoryInputRef.current?.value ?? draftCategory);
-    const categoryId =
+
+    let categoryId =
       draftCategoryId ??
-      categoryIdByNormName.get(normKey(categoryName)) ??
-      null;
+      (categoryName ? categoryIdByNormName.get(normKey(categoryName)) ?? null : null);
+
+    // Only Income/Expense require categories here
+    const t = (draftType || "").toString().toUpperCase();
+    const needsCategory = t === "INCOME" || t === "EXPENSE";
+
+    // If typed category doesn't exist yet, create it before submitting the entry
+    if (needsCategory && categoryName && !categoryId && selectedBusinessId) {
+      try {
+        const res = await createCategory(selectedBusinessId, categoryName);
+        categoryId = res.row.id;
+
+        // Keep UI state aligned
+        setDraftCategory(res.row.name);
+        setDraftCategoryId(res.row.id);
+        if (categoryInputRef.current) categoryInputRef.current.value = res.row.name;
+
+        void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+      } catch (e: any) {
+        setErr(e?.message || "Failed to create category");
+        return;
+      }
+    }
 
     createMut.mutate({
       tempId: `temp_${Date.now()}`,
@@ -1842,7 +2086,7 @@ const issuesAttentionCount = useMemo(() => {
     <col key="c3" style={{ width: "auto", minWidth: "200px" }} />, // payee flex (bigger min)
     <col key="c4" style={{ width: "96px" }} />,   // type (tighter)
     <col key="c5" style={{ width: "104px" }} />,  // method (tighter)
-    <col key="c6" style={{ width: "120px" }} />,  // category (tighter)
+    <col key="c6" style={{ width: "120px" }} />,  // category (restore width so Actions stays visible)
     <col key="c7" style={{ width: "110px" }} />,  // amount (tighter)
     <col key="c8" style={{ width: "110px" }} />,  // balance (tighter)
     <col key="c9" style={{ width: "96px" }} />,   // status (tighter)
@@ -1905,15 +2149,20 @@ const issuesAttentionCount = useMemo(() => {
 
       {/* Payee */}
       <td className={td}>
-        <AutoInput
-          value={draftPayee}
-          onValueChange={(v) => setDraftPayee(v)}
-          options={payeeOptions}
-          placeholder="Payee"
-          inputRef={payeeInputRef}
-          inputClassName={inputH7}
-          onSubmit={submitInline}
-        />
+        <div className="min-w-0">
+          <AutoInput
+            value={draftPayee}
+            onValueChange={(v) => setDraftPayee(v)}
+            options={payeeOptions}
+            placeholder="Payee"
+            inputRef={payeeInputRef}
+            inputClassName={inputH7}
+            onSubmit={submitInline}
+          />
+
+          {/* Vendor suggestion is shown after save on the created row (not while typing). */}
+
+        </div>
       </td>
 
       {/* Type */}
@@ -1922,7 +2171,14 @@ const issuesAttentionCount = useMemo(() => {
           open={typeOpen}
           onOpenChange={setTypeOpen}
           value={draftType}
-          onValueChange={(v) => setDraftType(v as UiType)}
+          onValueChange={(v) => {
+            const next = v as UiType;
+            setDraftType(next);
+
+            // Auto-set method for special types
+            if (next === "TRANSFER") setDraftMethod("TRANSFER");
+            if (next === "ADJUSTMENT") setDraftMethod("OTHER");
+          }}
         >
           <SelectTrigger className={selectTriggerClass}>
             <SelectValue />
@@ -1987,12 +2243,16 @@ const issuesAttentionCount = useMemo(() => {
             onKeyDown={(e) => e.key === "Enter" && submitInline()}
           />
         ) : (
-          <AutoInput
-            value={draftCategory}
-            onValueChange={(v) => {
-              setDraftCategory(v);
-              setDraftCategoryId(null);
-            }}
+            <AutoInput
+              value={draftCategory}
+              onValueChange={(v) => {
+                setDraftCategory(v);
+
+                // Keep category_id aligned with what the user typed/selected
+                const n = normalizeCategoryName(v);
+                const hit = categoryIdByNormName.get(normKey(n)) ?? null;
+                setDraftCategoryId(hit);
+              }}
             options={categoryOptions}
             placeholder="Category"
             inputRef={categoryInputRef}
@@ -2127,11 +2387,13 @@ const filterLeft = useMemo(() => (
               <SelectItem value="__UNCATEGORIZED__">Uncategorized</SelectItem>
             ) : null}
 
-            {categoryRows.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
+            {categoryRows
+              .filter((c) => !c.archived_at)
+              .map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
 
@@ -2353,7 +2615,12 @@ const filterLeft = useMemo(() => (
 const filterRight = null;
 
   // Delete confirm dialog
-  const [deleteDialog, setDeleteDialog] = useState<{ id: string; mode: "soft" | "hard" } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{
+    id: string;
+    mode: "soft" | "hard";
+    isTransfer?: boolean;
+    transferId?: string | null;
+  } | null>(null);
 
   // Stage 2A: Close period dialog
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
@@ -2447,8 +2714,71 @@ const [fixDialog, setFixDialog] = useState<
                 onKeyDown={onEditKeyDown}
               />
             ) : (
-              <div className="flex items-center gap-1 min-w-0">
-                <span className={trunc + " font-medium " + deletedText}>{r.payee}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={trunc + " font-medium " + deletedText + " min-w-0"}>{r.payee}</span>
+
+                {/* Single-line vendor indicator (persisted) */}
+                {(r.vendorName || linkedVendorByEntryId[r.id]) ? (
+                  <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700 max-w-[180px] shrink-0">
+  {/* vendor icon */}
+  <BookOpen className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+
+  {/* vendor name (truncate with …) */}
+  <span
+    className="font-semibold truncate min-w-0"
+    title={r.vendorName ?? linkedVendorByEntryId[r.id]}
+  >
+    {(() => {
+  const full = (r.vendorName ?? linkedVendorByEntryId[r.id] ?? "").trim();
+  const first = full.split(/\s+/)[0] || "";
+  return first ? `${first}...` : "";
+})()}
+
+  </span>
+
+  {/* unlink */}
+  <button
+    type="button"
+    className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-100 shrink-0"
+    title="Unlink vendor"
+    onClick={async () => {
+      try {
+        await apiFetch(
+          `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
+          { method: "PATCH", body: JSON.stringify({ vendor_id: null }) }
+        );
+
+        setLinkedVendorByEntryId((m) => {
+          const next = { ...m };
+          delete next[r.id];
+          return next;
+        });
+
+        scheduleEntriesRefresh("vendorUnlink");
+      } catch {
+        // non-blocking
+      }
+    }}
+  >
+    <X className="h-3.5 w-3.5 text-emerald-700" />
+  </button>
+</span>
+
+                ) : r.id === lastCreatedEntryId && (r.rawType || "").toString().toUpperCase() === "EXPENSE" ? (
+                  <VendorSuggestPill
+                    businessId={selectedBusinessId ?? ""}
+                    accountId={selectedAccountId ?? ""}
+                    entryId={r.id}
+                    payee={r.payee}
+                    onLinked={(v) => {
+                      setLinkedVendorByEntryId((m) => ({ ...m, [r.id]: v.name }));
+                      scheduleEntriesRefresh("vendorLink");
+                      setLastCreatedEntryId(null);
+                    }}
+                    onDismiss={() => setLastCreatedEntryId(null)}
+                  />
+                ) : null}
+
                 {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
               </div>
             )}
@@ -2469,6 +2799,8 @@ const [fixDialog, setFixDialog] = useState<
                 <SelectContent side="bottom" align="start">
                   <SelectItem value="INCOME">Income</SelectItem>
                   <SelectItem value="EXPENSE">Expense</SelectItem>
+                  <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
+                  <SelectItem value="TRANSFER">Transfer</SelectItem>
                 </SelectContent>
               </Select>
             ) : (
@@ -2514,14 +2846,17 @@ const [fixDialog, setFixDialog] = useState<
                 onChange={(e) => setEditDraft({ ...editDraft, category: e.target.value })}
                 onKeyDown={onEditKeyDown}
               />
-            ) : r.categoryTooltip ? (
-              <HoverTooltip text={r.categoryTooltip}>
-                <span className="block max-w-full truncate">{r.category}</span>
-              </HoverTooltip>
             ) : (
-              <span className="block max-w-full truncate">{r.category}</span>
-            )}
 
+              // IMPORTANT: do NOT wrap long text in HoverTooltip (it forces h-5 w-5).
+              // Use native title tooltip so truncation/ellipsis uses the full column width.
+              <span
+                className="block max-w-full truncate"
+                title={r.categoryTooltip ? r.categoryTooltip : r.category}
+              >
+                {r.category}
+              </span>
+            )}
           </td>
 
           {/* Amount */}
@@ -2584,15 +2919,20 @@ setFixDialog({
 
           {/* CAT column (tight padding) */}
           <td className={td + " " + center + " px-0.5"}>
-            {!deletedRow && r.hasMissing ? (
+            {!deletedRow &&
+            r.hasMissing &&
+            (() => {
+              const t = (r.rawType || "").toString().toUpperCase();
+              return t !== "TRANSFER" && t !== "ADJUSTMENT" && t !== "OPENING";
+            })() ? (
               <HoverTooltip text={r.missingTooltip}>
                 <button
                   type="button"
                   className="inline-flex items-center justify-center"
-onClick={() => {
-  if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-  setFixDialog({ id: r.id, kind: "MISSING_CATEGORY" });
-}}
+                  onClick={() => {
+                    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+                    setFixDialog({ id: r.id, kind: "MISSING_CATEGORY" });
+                  }}
                   title="Fix category"
                 >
                   <Info className="h-4 w-4 text-violet-500" />
@@ -2685,10 +3025,18 @@ onClick={() => {
 
                           <button
                             type="button"
-                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2"
+                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 disabled:opacity-50"
+                            disabled={(r.rawType || "").toString().toUpperCase() === "TRANSFER"}
                             onMouseDown={(ev) => {
                               ev.preventDefault();
                               setMenuOpenId(null);
+
+                              // Transfers are linked double-entry pairs and require selecting the other account.
+                              if ((r.rawType || "").toString().toUpperCase() === "TRANSFER") {
+                                setErr("Duplicate is not available for transfers.");
+                                return;
+                              }
+
                               createMut.mutate({
                                 tempId: `dup_${Date.now()}`,
                                 date: r.date,
@@ -2696,7 +3044,8 @@ onClick={() => {
                                 payee: r.payee,
                                 type: uiTypeFromRaw(r.rawType),
                                 method: uiMethodFromRaw(r.rawMethod),
-                                category: r.category || "",
+                                categoryName: r.category || "",
+                                categoryId: r.categoryId ?? null,
                                 amountStr: stripMoneyDisplay(r.amountStr),
                                 afterCreateEdit: true,
                               });
@@ -2716,7 +3065,12 @@ onClick={() => {
   onClick={() => {
     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
     if (deletingId === r.id || deleteMut.isPending) return;
-    setDeleteDialog({ id: r.id, mode: "soft" });
+    setDeleteDialog({
+      id: r.id,
+      mode: "soft",
+      isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
+      transferId: r.transferId ?? null,
+    });
   }}
 >
                         {deletingId === r.id || deleteMut.isPending ? (
@@ -2787,23 +3141,13 @@ onClick={() => {
   type="button"
   className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
   onClick={() => {
-    setUploadType("RECEIPT");
     setOpenUpload(true);
   }}
 >
   Upload Receipt
 </button>
 
-<button
-  type="button"
-  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
-  onClick={() => {
-    setUploadType("INVOICE");
-    setOpenUpload(true);
-  }}
->
-  Upload Invoice
-</button>
+{/* Upload Invoice lives on Vendor page only */}
 
 <button
   type="button"
@@ -2840,18 +3184,42 @@ onClick={() => {
                 totalPages={totalPages}
                 canPrev={canPrev}
                 canNext={canNext}
-                incomeText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
-                expenseText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
-                netText={summaryQ.isLoading ? "…" : formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
+                incomeText={
+                  summaryQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className="text-emerald-700 font-semibold">
+                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
+                    </span>
+                  )
+                }
+                expenseText={
+                  summaryQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className={toBigIntSafe(summaryQ.data?.totals?.expense_cents) < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
+                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
+                    </span>
+                  )
+                }
+                netText={
+                  summaryQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className={toBigIntSafe(summaryQ.data?.totals?.net_cents) < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
+                    </span>
+                  )
+                }
                 balanceText={
-  summaryQ.isLoading ? (
-    "…"
-  ) : (
-    <span className={toBigIntSafe(summaryQ.data?.balance_cents) < ZERO ? "text-red-700 font-semibold" : ""}>
-      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
-    </span>
-  )
-}
+                  summaryQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className={toBigIntSafe(summaryQ.data?.balance_cents) < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
+                    </span>
+                  )
+                }
               />
             </td>
           </tr>
@@ -2924,8 +3292,15 @@ onClick={() => {
             return;
           }
 
-          if (deleteDialog.mode === "hard") hardDeleteMut.mutate(deleteDialog.id);
-          else deleteMut.mutate(deleteDialog.id);
+          if (deleteDialog.mode === "hard") {
+            hardDeleteMut.mutate(deleteDialog.id);
+          } else {
+            deleteMut.mutate({
+              entryId: deleteDialog.id,
+              isTransfer: !!deleteDialog.isTransfer,
+              transferId: deleteDialog.transferId ?? null,
+            });
+          }
 
           setDeleteDialog(null);
         }}

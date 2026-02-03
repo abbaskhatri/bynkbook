@@ -88,6 +88,8 @@ model Entry {
   method       String?
   category_id  String?  @db.Uuid
   vendor_id    String?  @db.Uuid
+  vendor    Vendor? @relation(fields: [vendor_id], references: [id])
+  
   transfer_id  String?  @db.Uuid
 
   // Transfers

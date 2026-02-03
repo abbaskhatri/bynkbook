@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getPrisma } from "./lib/db";
 import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { TextractClient, AnalyzeExpenseCommand } from "@aws-sdk/client-textract";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { streamToString } from "./lib/csv/streamToString";
 import { parseBankStatementCsv } from "./lib/csv/parseBankStatementCsv";
@@ -86,6 +87,32 @@ function validateContentType(uploadType: string, contentType: string) {
   return ct.startsWith("image/") || ct === "application/pdf";
 }
 
+function getParsedMeta(meta: any) {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const parsed = (meta as any).parsed;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  return parsed as Record<string, any>;
+}
+
+// Normalize date strings to YYYY-MM-DD for entry.date
+function toIsoDateStr(v: string) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  const d1 = new Date(s);
+  if (!isNaN(d1.getTime())) return d1.toISOString().slice(0, 10);
+
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    const mm = m[1].padStart(2, "0");
+    const dd = m[2].padStart(2, "0");
+    const yyyy = m[3];
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return "";
+}
+
 export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   const rawPath = event?.requestContext?.http?.path;
@@ -109,8 +136,12 @@ export async function handler(event: any) {
 
   const region = process.env.AWS_REGION || "us-east-1";
   const s3 = new S3Client({ region });
+  const textract = new TextractClient({ region });
 
   const uploadsBasePath = `/v1/businesses/${biz}/uploads`;
+
+  // -------------------------
+  // LIST is handled below in the existing GET /uploads block (single source of truth).
 
   // -------------------------
   // INIT (presign PUT)
@@ -275,12 +306,118 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
       const etag = (head.ETag ?? null) as string | null;
       const contentLength = head.ContentLength ?? Number(row.size_bytes);
 
+      // Merge meta safely
+      const baseMeta =
+        row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as Record<string, any>) : {};
+
+      let parsed: any = null;
+      let parseStatus: "SKIPPED" | "PARSED" | "NEEDS_REVIEW" | "FAILED" = "SKIPPED";
+
+      // Parse invoice/receipt via Textract AnalyzeExpense (deterministic, no AI)
+      if (row.upload_type === "INVOICE" || row.upload_type === "RECEIPT") {
+        try {
+          const resp = await textract.send(
+            new AnalyzeExpenseCommand({
+              Document: { S3Object: { Bucket: row.s3_bucket, Name: row.s3_key } },
+            })
+          );
+
+          // Extract best-effort summary fields
+          const docs = resp.ExpenseDocuments ?? [];
+          const doc = docs[0];
+          const fields = doc?.SummaryFields ?? [];
+
+          function pickField(type: string) {
+            const hit = fields.find((f: any) => String(f?.Type?.Text ?? "").toUpperCase() === type);
+            const val = hit?.ValueDetection?.Text ?? null;
+            const conf = hit?.ValueDetection?.Confidence ?? null;
+            return { val, conf };
+          }
+
+          const vendor = pickField("VENDOR_NAME");
+          const docId = pickField("INVOICE_RECEIPT_ID");
+          const docDate = pickField("INVOICE_RECEIPT_DATE");
+          const total = pickField("TOTAL");
+          const amountDue = pickField("AMOUNT_DUE");
+          const dueDate = pickField("DUE_DATE");
+
+          // Choose total: prefer AMOUNT_DUE if present, else TOTAL
+          const amountText = (amountDue.val || total.val || "").toString().trim();
+
+          // Parse money -> cents (simple, deterministic)
+          function moneyToCents(s: string) {
+            const cleaned = s.replace(/[^0-9.\-]/g, "");
+            if (!cleaned) return null;
+            const n = Number(cleaned);
+            if (!Number.isFinite(n)) return null;
+            return Math.round(n * 100);
+          }
+
+          const amountCents = moneyToCents(amountText);
+
+          parsed = {
+            vendor_name: vendor.val,
+            vendor_conf: vendor.conf,
+            doc_number: docId.val,
+            doc_number_conf: docId.conf,
+            doc_date: docDate.val,
+            doc_date_conf: docDate.conf,
+            due_date: dueDate.val,
+            due_date_conf: dueDate.conf,
+            amount_text: amountText || null,
+            amount_cents: amountCents,
+            amount_conf: amountDue.conf ?? total.conf ?? null,
+          };
+
+          // Confidence gating (deterministic)
+          const hasVendor = !!parsed.vendor_name && (parsed.vendor_conf ?? 0) >= 50;
+          const hasAmount = parsed.amount_cents !== null && (parsed.amount_conf ?? 0) >= 70;
+          const hasDate = !!parsed.doc_date && (parsed.doc_date_conf ?? 0) >= 50;
+
+          parseStatus = hasVendor && hasAmount && hasDate ? "PARSED" : "NEEDS_REVIEW";
+        } catch (e: any) {
+          console.error("textract.analyzeExpense failed", { uploadId: row.id, err: e?.message });
+          parseStatus = "FAILED";
+          parsed = { error: e?.message || "Parse failed" };
+        }
+      }
+
+      // If INVOICE and PARSED: link vendor (deterministic match → else create)
+      let vendorLinked: any = null;
+      if (row.upload_type === "INVOICE" && parseStatus === "PARSED" && parsed?.vendor_name) {
+        const vn = String(parsed.vendor_name).trim();
+        const existing = await prisma.vendor.findFirst({
+          where: { business_id: biz, name: { equals: vn, mode: "insensitive" } },
+          select: { id: true, name: true },
+        });
+
+        if (existing) {
+          vendorLinked = existing;
+        } else {
+          // Create vendor (safe, deterministic)
+          const created = await prisma.vendor.create({
+            data: { business_id: biz, name: vn, notes: null },
+            select: { id: true, name: true },
+          });
+          vendorLinked = created;
+        }
+      }
+
+      const mergedMeta = {
+        ...baseMeta,
+        etag: etag ?? baseMeta.etag,
+        parsed_status: parseStatus,
+        parsed,
+        ...(vendorLinked ? { vendor_id: vendorLinked.id, vendor_name: vendorLinked.name } : {}),
+      };
+
       const updated = await prisma.upload.update({
         where: { id: row.id },
         data: {
           status: "COMPLETED",
           completed_at: new Date(),
           size_bytes: BigInt(contentLength),
+          meta: mergedMeta,
         },
       });
 
@@ -300,25 +437,180 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
           etag,
           created_at: updated.created_at.toISOString(),
           completed_at: updated.completed_at?.toISOString() ?? null,
+          meta: mergedMeta,
         },
       });
     } catch (e: any) {
-      console.error("uploads.complete verify failed", {
-        uploadId: row.id,
-        bucket: row.s3_bucket,
-        key: row.s3_key,
-        errName: e?.name,
-        errMessage: e?.message,
-        errCode: e?.Code || e?.code,
-        $metadata: e?.$metadata,
+      console.error("uploads.complete failed", { uploadId: row.id, err: e?.message });
+      return json(500, { ok: false, error: "Complete failed" });
+    }
+  }
+
+    // -------------------------
+  // CREATE ENTRY FROM UPLOAD (POST /uploads/{uploadId}/create-entry)
+  // -------------------------
+  if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/create-entry`) {
+    const requestedUploadId = uploadId?.toString?.().trim();
+    if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
+
+    const row = await prisma.upload.findFirst({
+      where: { id: requestedUploadId, business_id: biz },
+      select: { id: true, account_id: true, upload_type: true, meta: true },
+    });
+    if (!row) return json(404, { ok: false, error: "Upload not found" });
+
+    // Must be account-scoped for ledger entries
+    if (!row.account_id) return json(400, { ok: false, error: "Upload missing account_id" });
+
+    const okAcct = await requireAccountInBusiness(prisma, biz, row.account_id);
+    if (!okAcct) return json(404, { ok: false, error: "Account not found in this business" });
+
+    const metaObj = row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as any) : {};
+    if (metaObj.entry_id) {
+      return json(200, { ok: true, entry_id: metaObj.entry_id, already: true });
+    }
+
+    const parsed = getParsedMeta(metaObj);
+    if (!parsed) return json(400, { ok: false, error: "No parsed data available" });
+
+    const amountCents = parsed.amount_cents;
+    if (typeof amountCents !== "number" || !Number.isFinite(amountCents) || amountCents === 0) {
+      return json(400, { ok: false, error: "Parsed amount missing" });
+    }
+
+    const docDate = toIsoDateStr(String(parsed.doc_date || "").trim());
+    const date = docDate || new Date().toISOString().slice(0, 10);
+
+    const vendorName = String(parsed.vendor_name || metaObj.vendor_name || "").trim();
+    const docNo = String(parsed.doc_number || "").trim();
+
+    const payee = vendorName ? (docNo ? `${vendorName} - ${docNo}` : vendorName) : "Vendor";
+    const memo = docNo ? `Invoice: ${docNo}` : row.upload_type === "RECEIPT" ? "Receipt upload" : "Invoice upload";
+
+    const entry = await prisma.entry.create({
+      data: {
+        id: randomUUID(),
+        business_id: biz,
+        account_id: row.account_id,
+        date: new Date(date + "T00:00:00Z"),
+        payee,
+        memo,
+        amount_cents: BigInt(-Math.abs(amountCents)),
+        type: "EXPENSE",
+        method: "OTHER",
+        status: "EXPECTED",
+        category_id: null,
+        deleted_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      select: { id: true },
+    });
+
+    const nextMeta = { ...metaObj, entry_id: entry.id, entry_created_at: new Date().toISOString() };
+
+    await prisma.upload.update({
+      where: { id: row.id },
+      data: { meta: nextMeta },
+    });
+
+    return json(200, { ok: true, entry_id: entry.id, already: false });
+  }
+
+  // -------------------------
+  // BULK CREATE ENTRIES (POST /uploads/create-entries)
+  // body: { upload_ids: string[] }
+  // -------------------------
+  if (method === "POST" && path === `${uploadsBasePath}/create-entries`) {
+    try {
+      let body: any = {};
+      try {
+        body = event?.body ? JSON.parse(event.body) : {};
+      } catch {
+        return json(400, { ok: false, error: "Invalid JSON body" });
+      }
+
+    const ids = Array.isArray(body?.upload_ids) ? body.upload_ids.map((x: any) => String(x)) : [];
+    const entryDates = body?.entry_dates && typeof body.entry_dates === "object" ? body.entry_dates : {};
+    if (ids.length === 0) return json(400, { ok: false, error: "upload_ids required" });
+
+    const rows = await prisma.upload.findMany({
+      where: { business_id: biz, id: { in: ids } },
+      select: { id: true, account_id: true, upload_type: true, meta: true },
+    });
+
+    const out: any[] = [];
+
+    for (const r of rows) {
+      if (!r.account_id) {
+        out.push({ upload_id: r.id, error: "Upload missing account_id" });
+        continue;
+      }
+
+      const okAcct = await requireAccountInBusiness(prisma, biz, r.account_id);
+      if (!okAcct) {
+        out.push({ upload_id: r.id, error: "Account not found" });
+        continue;
+      }
+
+      const metaObj = r.meta && typeof r.meta === "object" && !Array.isArray(r.meta) ? (r.meta as any) : {};
+      if (metaObj.entry_id) {
+        out.push({ upload_id: r.id, entry_id: metaObj.entry_id, already: true });
+        continue;
+      }
+
+      const parsed = getParsedMeta(metaObj);
+      if (!parsed) {
+        out.push({ upload_id: r.id, error: "No parsed data" });
+        continue;
+      }
+
+      const amountCents = parsed.amount_cents;
+      if (typeof amountCents !== "number" || !Number.isFinite(amountCents) || amountCents === 0) {
+        out.push({ upload_id: r.id, error: "Parsed amount missing" });
+        continue;
+      }
+
+      const override = toIsoDateStr(entryDates?.[r.id] ? String(entryDates[r.id]).trim() : "");
+      const docDate = toIsoDateStr(String(parsed.doc_date || "").trim());
+      const date = override || docDate || new Date().toISOString().slice(0, 10);
+
+      const vendorName = String(parsed.vendor_name || metaObj.vendor_name || "").trim();
+      const docNo = String(parsed.doc_number || "").trim();
+
+      const payee = vendorName ? (docNo ? `${vendorName} - ${docNo}` : vendorName) : "Vendor";
+      const memo = docNo ? `Invoice: ${docNo}` : r.upload_type === "RECEIPT" ? "Receipt upload" : "Invoice upload";
+
+      const entry = await prisma.entry.create({
+        data: {
+          id: randomUUID(),
+          business_id: biz,
+          account_id: r.account_id,
+          date: new Date(date + "T00:00:00Z"),
+          payee,
+          memo,
+          amount_cents: BigInt(-Math.abs(amountCents)),
+          type: "EXPENSE",
+          method: "OTHER",
+          status: "EXPECTED",
+          category_id: null,
+          deleted_at: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        select: { id: true },
       });
 
-      await prisma.upload.update({
-        where: { id: row.id },
-        data: { status: "FAILED" },
-      });
+      const nextMeta = { ...metaObj, entry_id: entry.id, entry_created_at: new Date().toISOString() };
+      await prisma.upload.update({ where: { id: r.id }, data: { meta: nextMeta } });
 
-      return json(500, { ok: false, error: "Failed to verify uploaded object" });
+      out.push({ upload_id: r.id, entry_id: entry.id, already: false });
+    }
+
+      return json(200, { ok: true, results: out });
+    } catch (e: any) {
+      console.error("uploads.create-entries failed", { err: e?.message, stack: e?.stack });
+      return json(500, { ok: false, error: `Create entries failed: ${e?.message || "unknown"}` });
     }
   }
 
@@ -494,6 +786,7 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
     const qs = event?.queryStringParameters ?? {};
     const typesRaw = qs.type;
     const accountId = qs.accountId ? qs.accountId.toString().trim() : null;
+    const vendorId = qs.vendorId ? qs.vendorId.toString().trim() : null;
 
     const types = parseTypeFilter(typesRaw);
     if (types) {
@@ -516,6 +809,11 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
 
     const where: any = { business_id: biz };
     if (accountId) where.account_id = accountId;
+
+    // Filter invoice uploads by vendor tag stored in meta.vendor_id
+    if (vendorId) {
+      where.meta = { path: ["vendor_id"], equals: vendorId };
+    }
 
     if (types && types.length === 1) where.upload_type = types[0];
     else if (types && types.length > 1) where.upload_type = { in: types };

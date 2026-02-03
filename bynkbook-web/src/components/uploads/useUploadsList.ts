@@ -21,9 +21,10 @@ export function useUploadsList(args: {
   businessId: string;
   accountId?: string;
   type?: string; // supports "RECEIPT,INVOICE" (comma-separated)
+  vendorId?: string;
   limit?: number;
 }) {
-  const { businessId, accountId, type, limit = 10 } = args;
+  const { businessId, accountId, type, vendorId, limit = 10 } = args;
 
   const [items, setItems] = useState<UploadListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -42,6 +43,7 @@ export function useUploadsList(args: {
         qs.set("limit", String(limit));
         if (type) qs.set("type", type);
         if (accountId) qs.set("accountId", accountId);
+        if (vendorId) qs.set("vendorId", vendorId);
 
         const res = await apiFetch(`/v1/businesses/${businessId}/uploads?${qs.toString()}`, { method: "GET" });
         if (!res?.ok) throw new Error(res?.error || "Failed to load uploads");
@@ -58,7 +60,7 @@ export function useUploadsList(args: {
     return () => {
       cancelled = true;
     };
-  }, [businessId, accountId, type, limit]);
+  }, [businessId, accountId, type, vendorId, limit]);
 
   return { items, loading, error };
 }

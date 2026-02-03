@@ -145,14 +145,7 @@ export function FixIssueDialog(props: {
 
             {kind === "MISSING_CATEGORY" ? (
               <>
-                <Button
-                  variant="outline"
-                  onClick={() => doResolve("LEGITIMIZE")}
-                  disabled={busy || relevant.issueIds.length === 0}
-                  title="Resolve issue only (no entry changes)"
-                >
-                  Legitimize
-                </Button>
+                {/* No "Legitimize" for missing category — must fix the data */}
                 <Button
                   onClick={() => doResolve("FIX_MISSING_CATEGORY")}
                   disabled={busy || relevant.issueIds.length === 0 || !pickedCategoryId}
@@ -164,13 +157,7 @@ export function FixIssueDialog(props: {
 
             {kind === "STALE_CHECK" ? (
               <>
-                <Button
-                  variant="outline"
-                  onClick={() => doResolve("LEGITIMIZE")}
-                  disabled={busy || relevant.issueIds.length === 0}
-                >
-                  Legitimize
-                </Button>
+                {/* No "Legitimize" for missing category — must actually fix data */}
                 <Button
                   onClick={() => doResolve("ACK_STALE")}
                   disabled={busy || relevant.issueIds.length === 0}

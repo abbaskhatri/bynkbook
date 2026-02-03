@@ -206,8 +206,11 @@ export default function CategoryReviewPageClient() {
       const ymd = String(e.date ?? "").slice(0, 10);
       if (!inRange(ymd)) return false;
 
-      if (applied.onlyUncategorized && e.category_id) return false;
+      // Exclude types that don't require categories
+      const t = String(e.type ?? "").toUpperCase();
+      if (t === "TRANSFER" || t === "ADJUSTMENT" || t === "OPENING") return false;
 
+      if (applied.onlyUncategorized && e.category_id) return false;
       if (s) {
         const p = String(e.payee ?? "").toLowerCase();
         const m = String(e.memo ?? "").toLowerCase();

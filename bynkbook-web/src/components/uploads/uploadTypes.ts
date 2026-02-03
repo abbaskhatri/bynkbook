@@ -24,7 +24,7 @@ export const uploadAllowMultiple: Record<UploadType, boolean> = {
 };
 
 export const uploadHelperText: Record<UploadType, string> = {
-  RECEIPT: "Upload images or PDFs. Extraction is coming soon.",
-  INVOICE: "Upload PDFs or images. Invoice parsing is coming soon.",
-  BANK_STATEMENT: "Upload a CSV bank statement (PDF supported; parsing coming soon).",
+  RECEIPT: "Upload images or PDFs. We’ll extract vendor, date, and amount to create an expense entry.",
+  INVOICE: "Upload PDFs or images. We’ll extract vendor, invoice number, date, amount, and due date.",
+  BANK_STATEMENT: "Upload a bank statement (CSV preferred; PDF supported).",
 };

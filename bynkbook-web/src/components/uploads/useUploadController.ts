@@ -19,6 +19,11 @@ export type UploadItem = {
   bucket?: string;
   etag?: string;
 
+  // server results (from /complete)
+  completedMeta?: Record<string, any>;
+  parsedStatus?: string | null;
+  parsed?: Record<string, any> | null;
+
   createdAt: number;
 };
 
@@ -39,7 +44,7 @@ type InitResponse = {
   };
 };
 
-export function useUploadController(args: { type: UploadType; ctx?: UploadContext }) {
+export function useUploadController(args: { type: UploadType; ctx?: UploadContext; meta?: Record<string, any> }) {
   const { type, ctx } = args;
 
   const [items, setItems] = useState<UploadItem[]>([]);
@@ -66,7 +71,7 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
         filename: file.name,
         contentType: file.type || "application/octet-stream",
         sizeBytes: file.size,
-        meta: {},
+        meta: args?.meta ?? {},
       };
 
       const res = (await apiFetch(`/v1/businesses/${businessId}/uploads/init`, {
@@ -170,11 +175,20 @@ try {
   // Non-fatal; continue to complete
 }
 
-await completeOne(init.id);
+const completeRes: any = await completeOne(init.id);
 
         setItems((prev) =>
           prev.map((i) =>
-            i.id === localId ? { ...i, status: "COMPLETED", progress: 100 } : i,
+            i.id === localId
+              ? {
+                  ...i,
+                  status: "COMPLETED",
+                  progress: 100,
+                  completedMeta: completeRes?.upload?.meta ?? null,
+                  parsedStatus: completeRes?.upload?.meta?.parsed_status ?? null,
+                  parsed: completeRes?.upload?.meta?.parsed ?? null,
+                }
+              : i,
           ),
         );
 

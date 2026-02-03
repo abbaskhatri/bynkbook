@@ -51,6 +51,8 @@ function canWrite(role: string | null) {
 }
 
 export async function handler(event: any) {
+  console.log("ENTRIES_HANDLER_VERSION", "v-transfer-fields-1");
+  console.log("ENTRIES_HANDLER_VERSION", "v3-transfer-display");
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
 
@@ -89,26 +91,151 @@ export async function handler(event: any) {
       take: limit,
     });
 
+    // Durable transfer display fields (no frontend session maps):
+    // IMPORTANT: derive other account from the transfer record (not from entry legs),
+    // so display remains correct even if one leg is missing in legacy data.
+    const transferIds = Array.from(
+      new Set(
+        rows
+          .map((r: any) => r.transfer_id)
+          .filter((x: any) => !!x)
+          .map((x: any) => String(x))
+      )
+    );
+
+    const transferDisplayById = new Map<
+      string,
+      { other_account_id: string; other_account_name: string; direction: "IN" | "OUT" }
+    >();
+
+    if (transferIds.length > 0) {
+      const transfers = await prisma.transfer.findMany({
+        where: { business_id: biz, id: { in: transferIds } },
+        select: { id: true, from_account_id: true, to_account_id: true },
+      });
+
+      const transferById = new Map<string, { from: string; to: string }>();
+      for (const t of transfers) {
+        transferById.set(String(t.id), { from: String(t.from_account_id), to: String(t.to_account_id) });
+      }
+
+      const accountIds = Array.from(
+        new Set(
+          transfers.flatMap((t) => [String(t.from_account_id), String(t.to_account_id)])
+        )
+      );
+
+      const acctRows = await prisma.account.findMany({
+        where: { business_id: biz, id: { in: accountIds } },
+        select: { id: true, name: true },
+      });
+
+      const acctNameById = new Map<string, string>();
+      for (const a of acctRows) acctNameById.set(String(a.id), String(a.name));
+
+      for (const tid of transferIds) {
+        const tr = transferById.get(tid);
+        if (!tr) continue;
+
+        // other account is based on transfer endpoints
+        const otherId = tr.from === acct ? tr.to : tr.from;
+
+        // direction is relative to THIS account row (sign of amount in this account)
+        const row = rows.find((r: any) => String(r.transfer_id) === tid);
+        // If multiple rows share same transfer_id in this account list, direction is still correct for the row itself.
+        // We'll compute direction per-row in response mapping too, but this gives a safe default.
+        const amt = row ? BigInt(String(row.amount_cents)) : 0n;
+        const direction: "IN" | "OUT" = amt < 0n ? "OUT" : "IN";
+
+        transferDisplayById.set(tid, {
+          other_account_id: otherId,
+          other_account_name: acctNameById.get(otherId) ?? "Other account",
+          direction,
+        });
+      }
+    }
+
+    // Category name map (include archived): map ids -> names
+    const catIds = Array.from(
+      new Set(
+        rows
+          .map((r: any) => r.category_id)
+          .filter((x: any) => !!x)
+          .map((x: any) => String(x))
+      )
+    );
+
+    const categoryNameById = new Map<string, string>();
+    if (catIds.length > 0) {
+      const cats = await prisma.category.findMany({
+        where: { business_id: biz, id: { in: catIds } },
+        select: { id: true, name: true },
+      });
+      for (const c of cats) categoryNameById.set(String(c.id), String(c.name));
+    }
+
+    // Vendor name map: map vendor_ids -> names
+    const vendorIds = Array.from(
+      new Set(
+        rows
+          .map((r: any) => r.vendor_id)
+          .filter((x: any) => !!x)
+          .map((x: any) => String(x))
+      )
+    );
+
+    const vendorNameById = new Map<string, string>();
+    if (vendorIds.length > 0) {
+      const vendors = await prisma.vendor.findMany({
+        where: { business_id: biz, id: { in: vendorIds } },
+        select: { id: true, name: true },
+      });
+      for (const v of vendors) vendorNameById.set(String(v.id), String(v.name));
+    }
+
     return json(200, {
       ok: true,
-      entries: rows.map((e: any) => ({
-        id: e.id,
-        business_id: e.business_id,
-        account_id: e.account_id,
-        date: e.date.toISOString().slice(0, 10),
-        payee: e.payee,
-        memo: e.memo,
-        amount_cents: e.amount_cents.toString(),
-        type: e.type,
-        method: e.method,
-        category_id: e.category_id,
-        transfer_id: e.transfer_id,
-        is_adjustment: !!e.is_adjustment,
-        status: e.status,
-        deleted_at: e.deleted_at ? e.deleted_at.toISOString() : null,
-        created_at: e.created_at.toISOString(),
-        updated_at: e.updated_at.toISOString(),
-      })),
+      entries: rows.map((e) => {
+  const tid = e.transfer_id ? String(e.transfer_id) : null;
+  const transferDisplay = tid ? transferDisplayById.get(tid) : null;
+
+  return {
+    id: e.id,
+    business_id: e.business_id,
+    account_id: e.account_id,
+    date: e.date,
+    payee: e.payee,
+    memo: e.memo,
+    amount_cents: String(e.amount_cents),
+    type: e.type,
+    method: e.method,
+    status: e.status,
+
+    // Categories
+    category_id: e.category_id,
+    category_name: e.category_id
+      ? categoryNameById.get(String(e.category_id)) ?? null
+      : null,
+
+    // Vendor link (persisted)
+    vendor_id: (e as any).vendor_id ?? null,
+    vendor_name: (e as any).vendor_id ? (vendorNameById.get(String((e as any).vendor_id)) ?? null) : null,
+
+    // Transfers (DURABLE, BACKEND-DERIVED)
+    transfer_id: e.transfer_id,
+    transfer_other_account_name: transferDisplay?.other_account_name ?? null,
+    transfer_other_account_id: transferDisplay?.other_account_id ?? null,
+    transfer_direction:
+      e.transfer_id
+        ? (BigInt(String(e.amount_cents)) < 0n ? "OUT" : "IN")
+        : null,
+
+    is_adjustment: e.is_adjustment,
+    created_at: e.created_at,
+    updated_at: e.updated_at,
+    deleted_at: e.deleted_at,
+  };
+})
     });
   }
 

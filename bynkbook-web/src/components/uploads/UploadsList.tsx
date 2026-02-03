@@ -28,11 +28,12 @@ export function UploadsList(props: {
   businessId: string;
   accountId?: string;
   type?: string; // supports comma-separated, e.g. "RECEIPT,INVOICE"
+  vendorId?: string;
   limit?: number;
   showStatementPeriod?: boolean;
 }) {
-  const { title, businessId, accountId, type, limit = 10, showStatementPeriod } = props;
-  const { items, loading, error } = useUploadsList({ businessId, accountId, type, limit });
+  const { title, businessId, accountId, type, vendorId, limit = 10, showStatementPeriod } = props;
+  const { items, loading, error } = useUploadsList({ businessId, accountId, type, vendorId, limit });
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
