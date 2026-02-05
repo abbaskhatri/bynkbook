@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getPrisma } from "./lib/db";
+import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { S3Client, PutObjectCommand, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { TextractClient, AnalyzeExpenseCommand } from "@aws-sdk/client-textract";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -49,6 +50,18 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
 function sanitizeFilename(name: string) {
   const base = name.split("/").pop()?.split("\\").pop() ?? "file";
   return base.replace(/[^\w.\-]+/g, "_").slice(0, 180);
+}
+
+function filenameStem(name: string) {
+  const base = (name || "").split("/").pop()?.split("\\").pop() ?? "";
+  const noExt = base.replace(/\.[^/.\\]+$/, "");
+  return noExt.replace(/\s+/g, " ").trim();
+}
+
+function normalizeVendorName(name: string) {
+  return String(name || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function todayParts() {
@@ -184,6 +197,32 @@ export async function handler(event: any) {
     // Size caps
     const maxBytes = uploadType === "BANK_STATEMENT" ? 50 * 1024 * 1024 : 25 * 1024 * 1024;
     if (sizeBytes > maxBytes) return json(400, { ok: false, error: `File too large (max ${maxBytes} bytes)` });
+
+    // Duplicate upload guard (best-effort): if a recent COMPLETED upload matches filename+size+type+account+upload_type, block
+    const recentWindowMs = 7 * 24 * 60 * 60 * 1000;
+    const since = new Date(Date.now() - recentWindowMs);
+    const existingDup = await prisma.upload.findFirst({
+      where: {
+        business_id: biz,
+        upload_type: uploadType,
+        status: "COMPLETED",
+        content_type: contentType,
+        size_bytes: BigInt(sizeBytes),
+        ...(accountId ? { account_id: accountId } : {}),
+        original_filename: { equals: filename, mode: "insensitive" },
+        completed_at: { gte: since },
+      },
+      select: { id: true },
+    });
+
+    if (existingDup) {
+      return json(409, {
+        ok: false,
+        code: "DUPLICATE_UPLOAD",
+        upload_id: existingDup.id,
+        error: "A matching upload already exists.",
+      });
+    }
 
     const newUploadId = randomUUID();
     const safeName = sanitizeFilename(filename);
@@ -382,24 +421,30 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
         }
       }
 
-      // If INVOICE and PARSED: link vendor (deterministic match → else create)
+      // If INVOICE: derive/link vendor deterministically (no user pick required)
       let vendorLinked: any = null;
-      if (row.upload_type === "INVOICE" && parseStatus === "PARSED" && parsed?.vendor_name) {
-        const vn = String(parsed.vendor_name).trim();
-        const existing = await prisma.vendor.findFirst({
-          where: { business_id: biz, name: { equals: vn, mode: "insensitive" } },
-          select: { id: true, name: true },
-        });
+      if (row.upload_type === "INVOICE") {
+        const parsedName = parsed?.vendor_name ? String(parsed.vendor_name).trim() : "";
+        const fallbackName = filenameStem(row.original_filename);
+        const vnRaw = parsedName || fallbackName;
+        const vn = normalizeVendorName(vnRaw);
 
-        if (existing) {
-          vendorLinked = existing;
-        } else {
-          // Create vendor (safe, deterministic)
-          const created = await prisma.vendor.create({
-            data: { business_id: biz, name: vn, notes: null },
+        if (vn) {
+          const existing = await prisma.vendor.findFirst({
+            where: { business_id: biz, name: { equals: vn, mode: "insensitive" } },
             select: { id: true, name: true },
           });
-          vendorLinked = created;
+
+          if (existing) {
+            vendorLinked = existing;
+          } else {
+            // Create vendor (safe, deterministic)
+            const created = await prisma.vendor.create({
+              data: { business_id: biz, name: vn, notes: null },
+              select: { id: true, name: true },
+            });
+            vendorLinked = created;
+          }
         }
       }
 
@@ -455,12 +500,17 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
 
     const row = await prisma.upload.findFirst({
       where: { id: requestedUploadId, business_id: biz },
-      select: { id: true, account_id: true, upload_type: true, meta: true },
+      select: { id: true, account_id: true, upload_type: true, original_filename: true, status: true, meta: true },
     });
     if (!row) return json(404, { ok: false, error: "Upload not found" });
 
     // Must be account-scoped for ledger entries
     if (!row.account_id) return json(400, { ok: false, error: "Upload missing account_id" });
+
+    // Receipt/Invoice create-entry is only valid after COMPLETE finishes extraction
+    if (row.status !== "COMPLETED") {
+      return json(409, { ok: false, code: "RETRIEVING", error: "Still retrieving…" });
+    }
 
     const okAcct = await requireAccountInBusiness(prisma, biz, row.account_id);
     if (!okAcct) return json(404, { ok: false, error: "Account not found in this business" });
@@ -468,6 +518,15 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
     const metaObj = row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as any) : {};
     if (metaObj.entry_id) {
       return json(200, { ok: true, entry_id: metaObj.entry_id, already: true });
+    }
+
+    // Durable guard: if an entry already exists for this upload, return it (DB-backed)
+    const existingBySource = await prisma.entry.findFirst({
+      where: { business_id: biz, sourceUploadId: row.id },
+      select: { id: true },
+    });
+    if (existingBySource) {
+      return json(200, { ok: true, entry_id: existingBySource.id, already: true });
     }
 
     const parsed = getParsedMeta(metaObj);
@@ -481,13 +540,22 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
     const docDate = toIsoDateStr(String(parsed.doc_date || "").trim());
     const date = docDate || new Date().toISOString().slice(0, 10);
 
+    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: date });
+    if (!cp.ok) return cp.response;
+
     const vendorName = String(parsed.vendor_name || metaObj.vendor_name || "").trim();
     const docNo = String(parsed.doc_number || "").trim();
 
-    const payee = vendorName ? (docNo ? `${vendorName} - ${docNo}` : vendorName) : "Vendor";
-    const memo = docNo ? `Invoice: ${docNo}` : row.upload_type === "RECEIPT" ? "Receipt upload" : "Invoice upload";
+    const fallbackPayee = filenameStem(row.original_filename) || "Vendor";
+    const storeName = vendorName || fallbackPayee;
 
-    const entry = await prisma.entry.create({
+    // Receipt requirements:
+    // payee = store/merchant (fallback filename stem)
+    // memo = "Receipt <receiptNo>" optional
+    const payee = storeName;
+    const memo = row.upload_type === "RECEIPT" ? (docNo ? `Receipt ${docNo}` : "Receipt") : docNo ? `Invoice ${docNo}` : "Invoice";
+const entry = await prisma.entry.create({
       data: {
         id: randomUUID(),
         business_id: biz,
@@ -500,6 +568,8 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
         method: "OTHER",
         status: "EXPECTED",
         category_id: null,
+        vendor_id: row.upload_type === "INVOICE" ? (metaObj.vendor_id ?? null) : null,
+        sourceUploadId: row.id,
         deleted_at: null,
         created_at: new Date(),
         updated_at: new Date(),
@@ -536,7 +606,7 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
 
     const rows = await prisma.upload.findMany({
       where: { business_id: biz, id: { in: ids } },
-      select: { id: true, account_id: true, upload_type: true, meta: true },
+      select: { id: true, account_id: true, upload_type: true, original_filename: true, status: true, meta: true },
     });
 
     const out: any[] = [];
@@ -559,6 +629,20 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
         continue;
       }
 
+      if (r.status !== "COMPLETED") {
+        out.push({ upload_id: r.id, error: "Still retrieving…", code: "RETRIEVING" });
+        continue;
+      }
+
+      const existingBySource = await prisma.entry.findFirst({
+        where: { business_id: biz, sourceUploadId: r.id },
+        select: { id: true },
+      });
+      if (existingBySource) {
+        out.push({ upload_id: r.id, entry_id: existingBySource.id, already: true });
+        continue;
+      }
+
       const parsed = getParsedMeta(metaObj);
       if (!parsed) {
         out.push({ upload_id: r.id, error: "No parsed data" });
@@ -575,12 +659,21 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
       const docDate = toIsoDateStr(String(parsed.doc_date || "").trim());
       const date = override || docDate || new Date().toISOString().slice(0, 10);
 
+      // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+      const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: date });
+      if (!cp.ok) {
+        out.push({ upload_id: r.id, error: "This period is closed.", code: "CLOSED_PERIOD" });
+        continue;
+      }
+
       const vendorName = String(parsed.vendor_name || metaObj.vendor_name || "").trim();
       const docNo = String(parsed.doc_number || "").trim();
 
-      const payee = vendorName ? (docNo ? `${vendorName} - ${docNo}` : vendorName) : "Vendor";
-      const memo = docNo ? `Invoice: ${docNo}` : r.upload_type === "RECEIPT" ? "Receipt upload" : "Invoice upload";
+      const fallbackPayee = filenameStem(r.original_filename) || "Vendor";
+      const storeName = vendorName || fallbackPayee;
 
+      const payee = storeName;
+      const memo = r.upload_type === "RECEIPT" ? (docNo ? `Receipt ${docNo}` : "Receipt") : docNo ? `Invoice ${docNo}` : "Invoice";
       const entry = await prisma.entry.create({
         data: {
           id: randomUUID(),
@@ -594,6 +687,8 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
           method: "OTHER",
           status: "EXPECTED",
           category_id: null,
+          vendor_id: r.upload_type === "INVOICE" ? (metaObj.vendor_id ?? null) : null,
+          sourceUploadId: r.id,
           deleted_at: null,
           created_at: new Date(),
           updated_at: new Date(),

@@ -190,15 +190,16 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Dev-only
-  const [disableOverlayClose, setDisableOverlayClose] = useState(false);
-
   // UX
   const [showSummary, setShowSummary] = useState(false);
 
   // Summary selection + per-row entry date overrides
   const [selectedForEntry, setSelectedForEntry] = useState<Record<string, boolean>>({});
   const [entryDateByUploadId, setEntryDateByUploadId] = useState<Record<string, string>>({});
+
+  const [entryCreateStatus, setEntryCreateStatus] = useState<
+    Record<string, { state: "idle" | "creating" | "created" | "already" | "failed"; entryId?: string; error?: string }>
+  >({});
 
   // Metadata
   const [notes, setNotes] = useState("");
@@ -241,12 +242,18 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
     if (allDone) {
       setShowSummary(true);
 
-      // Default selection: all PARSED items
+      // Default selection: all items that have a parsed amount (deterministic, no stubs)
       setSelectedForEntry((prev) => {
         const next = { ...prev };
         for (const it of controller.items) {
           if (!it.uploadId) continue;
-          if (it.parsedStatus === "PARSED") next[it.uploadId] = true;
+
+          const cents =
+            (it.parsed as any)?.amount_cents ??
+            (it.completedMeta as any)?.parsed?.amount_cents ??
+            null;
+
+          if (typeof cents === "number" && Number.isFinite(cents) && cents !== 0) next[it.uploadId] = true;
         }
         return next;
       });
@@ -266,7 +273,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
   }, [open, controller.items, controller.hasActiveUploads]);
 
   const canClose = !controller.hasActiveUploads;
-  const overlayCloseDisabled = disableOverlayClose || controller.hasActiveUploads;
+  const overlayCloseDisabled = controller.hasActiveUploads;
 
   const title = `Upload ${uploadTypeLabel[type]}`;
 
@@ -348,15 +355,6 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
         <div className="text-sm text-slate-700">{uploadHelperText[type]}</div>
 
         {/* Dev-only toggle for overlay close behavior */}
-        <label className="flex items-center gap-2 text-xs text-slate-700 select-none">
-          <input
-            type="checkbox"
-            className="h-4 w-4"
-            checked={disableOverlayClose}
-            onChange={(e) => setDisableOverlayClose(e.target.checked)}
-          />
-          disableOverlayClose (for testing)
-        </label>
 
         {/* Drop zone */}
         <div
@@ -470,12 +468,26 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
   <input
     type="checkbox"
     className="h-4 w-4 rounded border border-slate-300"
-    checked={
-      controller.items
-        .filter((it) => it.uploadId && it.parsedStatus === "PARSED")
-        .every((it) => !!selectedForEntry[it.uploadId as string]) &&
-      controller.items.some((it) => it.uploadId && it.parsedStatus === "PARSED")
-    }
+      checked={
+        controller.items
+          .filter((it) => {
+            if (!it.uploadId) return false;
+            const cents =
+              (it.parsed as any)?.amount_cents ??
+              (it.completedMeta as any)?.parsed?.amount_cents ??
+              null;
+            return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+          })
+          .every((it) => !!selectedForEntry[it.uploadId as string]) &&
+        controller.items.some((it) => {
+          if (!it.uploadId) return false;
+          const cents =
+            (it.parsed as any)?.amount_cents ??
+            (it.completedMeta as any)?.parsed?.amount_cents ??
+            null;
+          return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+        })
+      }
     onChange={(e) => {
       const checked = e.target.checked;
       setSelectedForEntry((prev) => {
@@ -495,7 +507,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
           const next = { ...prev };
           for (const it of controller.items) {
             if (!it.uploadId) continue;
-            if (it.parsedStatus !== "PARSED") continue;
+            const cents =
+              (it.parsed as any)?.amount_cents ??
+              (it.completedMeta as any)?.parsed?.amount_cents ??
+              null;
+            const eligible = it.status === "COMPLETED" && typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+            if (!eligible) continue;
             if (!next[it.uploadId]) next[it.uploadId] = today;
           }
           return next;
@@ -517,6 +534,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                     </tr>
                   ) : type === "RECEIPT" ? (
                     <tr className="border-b border-slate-200">
+                      <th className="px-3 py-2 text-center font-semibold"></th>
                       <th className="px-3 py-2 text-left font-semibold">File</th>
                       <th className="px-3 py-2 text-left font-semibold">Vendor</th>
                       <th className="px-3 py-2 text-left font-semibold">Date</th>
@@ -568,40 +586,43 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                     return (
                       <tr key={it.id}>
                         <td className="px-3 py-2 text-center">
-  {it.uploadId ? (
-    <input
-      type="checkbox"
-      className="h-4 w-4 rounded border border-slate-300"
-      checked={!!selectedForEntry[it.uploadId]}
-      disabled={it.parsedStatus !== "PARSED"}
-      onChange={(e) => {
-  const id = it.uploadId!;
-  const checked = e.target.checked;
-
-  setSelectedForEntry((m) => ({ ...m, [id]: checked }));
-
-  if (checked) {
-    const today = new Date().toISOString().slice(0, 10);
-    setEntryDateByUploadId((m) => ({ ...m, [id]: (m[id] || "").trim() ? m[id] : today }));
-  } else {
-    // keep date value; user might toggle accidentally
-  }
-}}
-
-      title={it.parsedStatus !== "PARSED" ? "Only parsed invoices can create entries" : "Create entry for this invoice"}
-    />
-  ) : null}
-</td>
-                        <td className="px-3 py-2 text-slate-700">
-  <div className="text-slate-900 font-medium">{vendor || "—"}</div>
-  <div className="text-[11px] text-slate-500 truncate max-w-[260px]" title={it.file.name}>
-    ({it.file.name})
-  </div>
-</td>
+                          {it.uploadId ? (() => {
+                            const cents =
+                              (it.parsed as any)?.amount_cents ??
+                              (it.completedMeta as any)?.parsed?.amount_cents ??
+                              null;
+                            const eligible = it.status === "COMPLETED" && typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+                            const title =
+                              !eligible && it.status !== "COMPLETED"
+                                ? "Still retrieving…"
+                                : !eligible
+                                ? "Missing extracted total"
+                                : "Create entry for this receipt";
+                            return (
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border border-slate-300"
+                                checked={!!selectedForEntry[it.uploadId!]}
+                                disabled={!eligible}
+                                onChange={(e) => {
+                                  const id = it.uploadId!;
+                                  setSelectedForEntry((m) => ({ ...m, [id]: e.target.checked }));
+                                }}
+                                title={title}
+                              />
+                            );
+                          })() : null}
+                        </td>
 
                         {type === "INVOICE" ? (
                           <>
-                            {/* Vendor shown with filename under it */}
+                            <td className="px-3 py-2 text-slate-700">
+                              <div className="text-slate-900 font-medium">{vendor || "—"}</div>
+                              <div className="text-[11px] text-slate-500 truncate max-w-[260px]" title={it.file.name}>
+                                ({it.file.name})
+                              </div>
+                            </td>
+
                             <td className="px-3 py-2 text-slate-700">{invoiceNo || "—"}</td>
                             <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
 
@@ -640,18 +661,36 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 }
                               >
                                 {statusLabel}
+                                {it.uploadId ? (
+                                  entryCreateStatus[it.uploadId]?.state === "creating" ? (
+                                    <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
+                                  ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
+                                    <span className="ml-2 text-[11px] text-emerald-700">Created</span>
+                                  ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
+                                    <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
+                                  ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
+                                    <span className="ml-2 text-[11px] text-red-700">Failed</span>
+                                  ) : null
+                                ) : null}
                               </span>
                             </td>
                           </>
                         ) : type === "RECEIPT" ? (
                           <>
+                            <td className="px-3 py-2 text-slate-700">
+                              <div className="text-slate-900 font-medium">{it.file?.name || "—"}</div>
+                            </td>
+
                             <td className="px-3 py-2 text-slate-700">{vendor || "—"}</td>
                             <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
                             <td className="px-3 py-2 text-right text-slate-900">{total || "—"}</td>
+
                             <td className="px-3 py-2">
                               <span
                                 className={
-                                  status === "PARSED"
+                                  it.status !== "COMPLETED"
+                                    ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                    : status === "PARSED"
                                     ? "inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5"
                                     : status === "NEEDS_REVIEW"
                                     ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
@@ -660,7 +699,26 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                     : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                 }
                               >
-                                {statusLabel}
+                                {it.status !== "COMPLETED" ? (
+                                  <>
+                                    <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />
+                                    Still retrieving…
+                                  </>
+                                ) : (
+                                  statusLabel
+                                )}
+
+                                {it.uploadId ? (
+                                  entryCreateStatus[it.uploadId]?.state === "creating" ? (
+                                    <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
+                                  ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
+                                    <span className="ml-2 text-[11px] text-emerald-700">Created</span>
+                                  ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
+                                    <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
+                                  ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
+                                    <span className="ml-2 text-[11px] text-red-700">Failed</span>
+                                  ) : null
+                                ) : null}
                               </span>
                             </td>
                           </>
@@ -737,34 +795,73 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                   {controller.items.filter((it) => it.uploadId && selectedForEntry[it.uploadId]).length} selected
                 </div>
 
-                <Button
-                  type="button"
-                  className="h-8 px-3 text-xs"
-                  disabled={Object.values(selectedForEntry).filter(Boolean).length === 0}
-                  onClick={async () => {
-                    const ids = controller.items
-                      .map((i) => i.uploadId)
-                      .filter(Boolean)
-                      .filter((id) => !!selectedForEntry[id as string]) as string[];
+                {(() => {
+                  const selectedIds = controller.items
+                    .map((i) => i.uploadId)
+                    .filter(Boolean)
+                    .filter((id) => !!selectedForEntry[id as string]) as string[];
 
-                    if (!ids.length) return;
+                  const selectedEligibleIds = selectedIds.filter((id) => {
+                    const it = controller.items.find((x) => x.uploadId === id);
+                    if (!it) return false;
+                    const cents =
+                      (it.parsed as any)?.amount_cents ??
+                      (it.completedMeta as any)?.parsed?.amount_cents ??
+                      null;
+                    return it.status === "COMPLETED" && typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+                  });
 
-                    const entry_dates: Record<string, string> = {};
-                    for (const id of ids) {
-                      const v = (entryDateByUploadId[id] || "").trim();
-                      if (v) entry_dates[id] = v;
-                    }
+                  const blockedCount = selectedIds.length - selectedEligibleIds.length;
+                  const disabled = selectedEligibleIds.length === 0 || blockedCount > 0;
 
-                    await apiFetch(`/v1/businesses/${ctx.businessId}/uploads/create-entries`, {
-                      method: "POST",
-                      body: JSON.stringify({ upload_ids: ids, entry_dates }),
-                    });
+                  return (
+                    <Button
+                      type="button"
+                      className="h-8 px-3 text-xs"
+                      disabled={disabled}
+                      title={blockedCount > 0 ? "Some selected rows are still retrieving or missing a total" : undefined}
+                      onClick={async () => {
+                        const ids = selectedEligibleIds;
+                        if (!ids.length) return;
 
-                    window.dispatchEvent(new CustomEvent("bynk:ledger-refresh"));
-                  }}
-                >
-                  Create entries
-                </Button>
+                        // Mark as creating (non-blocking)
+                        setEntryCreateStatus((m) => {
+                          const next = { ...m };
+                          for (const id of ids) next[id] = { state: "creating" };
+                          return next;
+                        });
+
+                        const entry_dates: Record<string, string> = {};
+                        for (const id of ids) {
+                          const v = (entryDateByUploadId[id] || "").trim();
+                          if (v) entry_dates[id] = v;
+                        }
+
+                        const res: any = await apiFetch(`/v1/businesses/${ctx.businessId}/uploads/create-entries`, {
+                          method: "POST",
+                          body: JSON.stringify({ upload_ids: ids, entry_dates }),
+                        });
+
+                        const results = Array.isArray(res?.results) ? res.results : [];
+                        setEntryCreateStatus((m) => {
+                          const next = { ...m };
+                          for (const r of results) {
+                            const uid = String(r.upload_id || "");
+                            if (!uid) continue;
+                            if (r.entry_id && r.already) next[uid] = { state: "already", entryId: r.entry_id };
+                            else if (r.entry_id) next[uid] = { state: "created", entryId: r.entry_id };
+                            else next[uid] = { state: "failed", error: r.error || "Failed" };
+                          }
+                          return next;
+                        });
+
+                        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh"));
+                      }}
+                    >
+                      Create entries
+                    </Button>
+                  );
+                })()}
               </div>
             ) : null}
 

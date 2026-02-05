@@ -29,7 +29,6 @@ import { UploadsList } from "@/components/uploads/UploadsList";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
-import { useLedgerSummary } from "@/lib/queries/useLedgerSummary";
 
 import {
   createEntry,
@@ -813,12 +812,7 @@ export default function LedgerPageClient() {
   const to = todayYmd();
   const summaryKey = ["ledgerSummary", selectedBusinessId, selectedAccountId, from, to] as const;
 
-  const summaryQ = useLedgerSummary({
-    businessId: selectedBusinessId,
-    accountId: selectedAccountId,
-    from,
-    to,
-  });
+  // Totals footer is computed from visible rows (WYSIWYG). No ledger-summary query needed.
 
   // Opening entry
   const openingBalanceCents = useMemo(
@@ -1214,6 +1208,38 @@ const issuesAttentionCount = useMemo(() => {
   const endIdx = page * rowsPerPage;
   const pageRows = filteredRowsAll.slice(startIdx, endIdx);
 
+  // ================================
+  // WYSIWYG footer totals (current visible rows only)
+  // - exclude deleted
+  // - exclude opening_balance
+  // - exclude TRANSFER (so totals aren't distorted)
+  // - balance = top visible running balance (first non-deleted row), not a sum
+  // ================================
+  const footerTotals = useMemo(() => {
+    let income = ZERO;
+    let expense = ZERO; // will remain negative (signed)
+    for (const r of pageRows) {
+      if (r.isDeleted) continue;
+      if (r.id === "opening_balance") continue;
+
+      const t = (r.rawType || "").toString().toUpperCase();
+      if (t === "TRANSFER") continue;
+
+      const amt = toBigIntSafe(r.amountCents);
+      if (amt > ZERO) income += amt;
+      else if (amt < ZERO) expense += amt;
+    }
+
+    const net = income + expense;
+
+    // Balance: first visible non-deleted row's running balance
+    const top = pageRows.find((r) => !r.isDeleted && r.id !== "opening_balance" && r.balanceStr && r.balanceStr !== "—") ?? null;
+    const balCents = top ? BigInt(parseMoneyToCents(top.balanceStr)) : ZERO;
+    const balStr = top ? top.balanceStr : "—";
+
+    return { income, expense, net, balanceCents: balCents, balanceStr: balStr };
+  }, [pageRows]);
+
   const hasMoreOnServer = (entriesQ.data?.length ?? 0) === fetchLimit && fetchLimit < maxFetch;
   const canNext = endIdx < filteredRowsAll.length || hasMoreOnServer;
   const canPrev = page > 1;
@@ -1262,13 +1288,44 @@ const issuesAttentionCount = useMemo(() => {
   const bulkDeleteMut = useMutation({
     mutationFn: async (entryIds: string[]) => {
       if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
-      const results = await Promise.allSettled(
-        entryIds.map((id) =>
-          deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: id })
-        )
-      );
+
+      const cached = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const byId = new Map(cached.map((e) => [e.id, e] as const));
+
+      // Transfers: must delete atomically (both legs selected) via deleteTransfer(transfer_id)
+      const transferIds = new Set<string>();
+      for (const id of entryIds) {
+        const e = byId.get(id);
+        if (!e) continue;
+        if ((e.type || "").toUpperCase() === "TRANSFER" && e.transfer_id) transferIds.add(e.transfer_id);
+      }
+
+      for (const tid of transferIds) {
+        const legs = cached.filter((e) => e.transfer_id === tid && (e.type || "").toUpperCase() === "TRANSFER");
+        const selectedLegs = legs.filter((e) => entryIds.includes(e.id));
+        if (legs.length > 0 && selectedLegs.length !== legs.length) {
+          throw new Error("Cannot bulk delete a transfer unless both legs are selected.");
+        }
+      }
+
+      const tasks: Promise<any>[] = [];
+
+      // One call per transfer_id
+      for (const tid of transferIds) {
+        tasks.push(deleteTransfer({ businessId: selectedBusinessId, scopeAccountId: selectedAccountId, transferId: tid }));
+      }
+
+      // Non-transfer entries: normal soft delete
+      for (const id of entryIds) {
+        const e = byId.get(id);
+        const isTransfer = !!e && (e.type || "").toUpperCase() === "TRANSFER" && !!e.transfer_id;
+        if (isTransfer) continue;
+        tasks.push(deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: id }));
+      }
+
+      const results = await Promise.allSettled(tasks);
       const failed = results.filter((r) => r.status === "rejected").length;
-      return { failed, total: entryIds.length };
+      return { failed, total: tasks.length };
     },
     onMutate: async (entryIds) => {
       setErr(null);
@@ -1799,6 +1856,13 @@ const issuesAttentionCount = useMemo(() => {
 
   scheduleEntriesRefresh("delete");
 
+  // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
+  if (p?.isTransfer && p?.transferId && selectedBusinessId) {
+    void qc.invalidateQueries({
+      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "entries" && q.queryKey[1] === selectedBusinessId,
+    });
+  }
+
   // Update footer totals promptly (cheap query)
   void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
 },
@@ -1806,11 +1870,18 @@ const issuesAttentionCount = useMemo(() => {
 });
 
   const restoreMut = useMutation({
-  mutationFn: async (entryId: string) => {
+  mutationFn: async (p: { entryId: string; transferId?: string | null; isTransfer?: boolean }) => {
     if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
-    return restoreEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId });
+
+    // CRITICAL: Transfer restores must restore BOTH legs atomically
+    if (p.isTransfer && p.transferId) {
+      return restoreTransfer({ businessId: selectedBusinessId, scopeAccountId: selectedAccountId, transferId: p.transferId });
+    }
+
+    return restoreEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: p.entryId });
   },
-  onMutate: async (entryId: string) => {
+  onMutate: async (p) => {
+    const entryId = p.entryId;
   const t0 = performance.now();
   const mark = `[PERF][restore][${entryId || "noid"}]`;
   perfLog(`${mark} click→onMutate start`);
@@ -1836,7 +1907,8 @@ const issuesAttentionCount = useMemo(() => {
   return { previous, __perf: { t0, mark } };
 },
 
-  onError: (e: any, entryId: any, ctx: any) => {
+  onError: (e: any, p: any, ctx: any) => {
+    const entryId = p?.entryId;
     const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
     const t0 = ctx?.__perf?.t0 ?? performance.now();
     const tErr = performance.now();
@@ -1845,7 +1917,8 @@ const issuesAttentionCount = useMemo(() => {
     if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
     setErr("Restore failed");
   },
-  onSuccess: async (_data: any, entryId: any, ctx: any) => {
+  onSuccess: async (_data: any, p: any, ctx: any) => {
+  const entryId = p?.entryId;
   const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
   const t0 = ctx?.__perf?.t0 ?? performance.now();
   const tOk = performance.now();
@@ -1854,6 +1927,13 @@ const issuesAttentionCount = useMemo(() => {
   void scanIssues();
 
   scheduleEntriesRefresh("restore");
+
+  // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
+  if (p?.isTransfer && p?.transferId && selectedBusinessId) {
+    void qc.invalidateQueries({
+      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "entries" && q.queryKey[1] === selectedBusinessId,
+    });
+  }
 
   // Update footer totals promptly (cheap query)
   void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
@@ -2952,7 +3032,11 @@ setFixDialog({
                     title="Restore"
                     onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                      restoreMut.mutate(r.id);
+                      restoreMut.mutate({
+  entryId: r.id,
+  isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
+  transferId: r.transferId ?? null,
+});
                     }}
                   >
                     <RotateCcw className="h-4 w-4" />
@@ -3185,38 +3269,40 @@ setFixDialog({
                 canPrev={canPrev}
                 canNext={canNext}
                 incomeText={
-                  summaryQ.isLoading ? (
+                  entriesQ.isLoading ? (
                     "…"
                   ) : (
                     <span className="text-emerald-700 font-semibold">
-                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.income_cents))}
+                      {formatUsdFromCents(footerTotals.income)}
                     </span>
                   )
                 }
                 expenseText={
-                  summaryQ.isLoading ? (
+                  entriesQ.isLoading ? (
                     "…"
                   ) : (
-                    <span className={toBigIntSafe(summaryQ.data?.totals?.expense_cents) < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
-                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.expense_cents))}
+                    <span className={footerTotals.expense < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
+                      {formatUsdFromCents(footerTotals.expense)}
                     </span>
                   )
                 }
                 netText={
-                  summaryQ.isLoading ? (
+                  entriesQ.isLoading ? (
                     "…"
                   ) : (
-                    <span className={toBigIntSafe(summaryQ.data?.totals?.net_cents) < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
-                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.totals?.net_cents))}
+                    <span className={footerTotals.net < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                      {formatUsdFromCents(footerTotals.net)}
                     </span>
                   )
                 }
                 balanceText={
-                  summaryQ.isLoading ? (
+                  entriesQ.isLoading ? (
                     "…"
+                  ) : footerTotals.balanceStr === "—" ? (
+                    "—"
                   ) : (
-                    <span className={toBigIntSafe(summaryQ.data?.balance_cents) < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
-                      {formatUsdFromCents(toBigIntSafe(summaryQ.data?.balance_cents))}
+                    <span className={footerTotals.balanceCents < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                      {footerTotals.balanceStr}
                     </span>
                   )
                 }

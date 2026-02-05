@@ -35,12 +35,12 @@ type InitResponse = {
   ok: boolean;
   upload: {
     id: string;
-    bucket: string;
-    key: string;
-    method: "PUT";
-    url: string;
+    bucket?: string;
+    key?: string;
+    method: "PUT" | "DUPLICATE";
+    url?: string;
     headers?: Record<string, string>;
-    expiresInSeconds: number;
+    expiresInSeconds?: number;
   };
 };
 
@@ -74,13 +74,30 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
         meta: args?.meta ?? {},
       };
 
-      const res = (await apiFetch(`/v1/businesses/${businessId}/uploads/init`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      })) as InitResponse;
+      try {
+        const res = (await apiFetch(`/v1/businesses/${businessId}/uploads/init`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        })) as InitResponse;
 
-      if (!res?.ok) throw new Error("Init failed");
-      return res.upload;
+        if (!res?.ok) throw new Error("Init failed");
+        return res.upload;
+      } catch (e: any) {
+        // apiFetch throws: "API 409: { ...json... }"
+        const msg = String(e?.message ?? "");
+        if (msg.startsWith("API 409:")) {
+          const raw = msg.replace(/^API 409:\s*/, "").trim();
+          const payload = (() => {
+            try { return JSON.parse(raw); } catch { return null; }
+          })();
+
+          if (payload?.code === "DUPLICATE_UPLOAD" && payload?.upload_id) {
+            return { id: String(payload.upload_id), method: "DUPLICATE" as const };
+          }
+        }
+
+        throw e;
+      }
     },
     [ctx?.accountId, ctx?.businessId, type],
   );
@@ -146,7 +163,42 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
       setItems((prev) => prev.map((i) => (i.id === localId ? { ...i, status: "UPLOADING", progress: 1 } : i)));
 
       try {
-                const init = await initOne(file);
+        const init = await initOne(file);
+
+        // Duplicate upload guard: reuse the existing upload record instead of failing
+        if ((init as any).method === "DUPLICATE") {
+          const businessId = requireBusinessId();
+          const accountId = ctx?.accountId?.trim() || null;
+
+          // Fetch recent uploads for this type and pick the matching id
+          const qs = new URLSearchParams();
+          qs.set("type", type);
+          if (accountId) qs.set("accountId", accountId);
+          qs.set("limit", "50");
+
+          const listRes: any = await apiFetch(`/v1/businesses/${businessId}/uploads?${qs.toString()}`, { method: "GET" });
+          const items = Array.isArray(listRes?.items) ? listRes.items : [];
+          const hit = items.find((u: any) => String(u?.id) === String(init.id)) ?? null;
+
+          setItems((prev) =>
+            prev.map((i) =>
+              i.id === localId
+                ? {
+                    ...i,
+                    uploadId: String(init.id),
+                    status: "COMPLETED",
+                    progress: 100,
+                    completedMeta: hit?.meta ?? null,
+                    parsedStatus: hit?.meta?.parsed_status ?? null,
+                    parsed: hit?.meta?.parsed ?? null,
+                  }
+                : i
+            )
+          );
+
+          delete xhrs.current[localId];
+          return;
+        }
 
         setItems((prev) =>
           prev.map((i) =>
@@ -156,7 +208,7 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
           ),
         );
 
-        const putRes = await uploadPutWithProgress(localId, init.url, file, init.headers);
+        const putRes = await uploadPutWithProgress(localId, init.url as string, file, init.headers);
 
         setItems((prev) =>
   prev.map((i) =>

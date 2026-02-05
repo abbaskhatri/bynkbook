@@ -13,7 +13,10 @@ export default $config({
       cors: {
         allowHeaders: ["authorization", "content-type"],
         allowMethods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
-        allowOrigins: ["http://localhost:3000"],
+        allowOrigins:
+  $app.stage === "prod"
+    ? ["https://app.bynkbook.com", "https://bynkbook.com"]
+    : ["http://localhost:3000"],
       },
     });
 
@@ -145,9 +148,9 @@ const plaidHandler = {
   handler: "packages/functions/src/plaidLinkToken.handler",
   environment: {
     ...bizHandler.environment,
-    PLAID_ENV: "sandbox",
-    PLAID_CLIENT_ID_SECRET_ID: "ledrigo-dev/plaid/client_id",
-    PLAID_SECRET_SECRET_ID: "ledrigo-dev/plaid/secret",
+    PLAID_ENV: $app.stage === "prod" ? "production" : "sandbox",
+    PLAID_CLIENT_ID_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/client_id" : "ledrigo-dev/plaid/client_id",
+    PLAID_SECRET_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/secret" : "ledrigo-dev/plaid/secret",
     PLAID_TOKEN_KMS_KEY_ARN: "arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36",
   },
   permissions: [
@@ -219,8 +222,26 @@ const plaidWebhookHandler = {
   handler: "packages/functions/src/plaidWebhook.handler",
   environment: {
     ...bizHandler.environment,
-    PLAID_ENV: "sandbox",
+    PLAID_ENV: $app.stage === "prod" ? "production" : "sandbox",
+    PLAID_CLIENT_ID_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/client_id" : "ledrigo-dev/plaid/client_id",
+    PLAID_SECRET_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/secret" : "ledrigo-dev/plaid/secret",
+    PLAID_TOKEN_KMS_KEY_ARN: "arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36",
   },
+  permissions: [
+    ...(bizHandler as any).permissions,
+
+    // Read Plaid creds from Secrets Manager
+    {
+      actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+      resources: ["*"],
+    },
+
+    // Encrypt/decrypt Plaid access tokens if webhook needs it (safe, broad)
+    {
+      actions: ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
+      resources: ["*"],
+    },
+  ],
 } satisfies ApiHandler;
 
 api.route("POST /v1/plaid/webhook", plaidWebhookHandler);
@@ -419,6 +440,8 @@ api.route(
 
 // Phase 4D v1: VOID matches for a bank transaction (audit safe)
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/{bankTransactionId}/unmatch", bankTxHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/{bankTransactionId}/create-entry", bankTxHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 
 // Phase 4D v1: Mark entry as adjustment (ledger-only)
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/mark-adjustment", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });

@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
+import { apiFetch } from "@/lib/api/client";
+import { listCategories } from "@/lib/api/categories";
 
 import { PlaidConnectButton } from "@/components/plaid/PlaidConnectButton";
 
@@ -20,7 +23,7 @@ import { UploadsList } from "@/components/uploads/UploadsList";
 import { AppDialog } from "@/components/primitives/AppDialog";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
-import { listBankTransactions } from "@/lib/api/bankTransactions";
+import { listBankTransactions, createEntryFromBankTransaction } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
 import { getRolePolicies, type RolePolicyRow } from "@/lib/api/rolePolicies";
 import { canWriteByRolePolicy } from "@/lib/auth/permissionHints";
@@ -36,6 +39,46 @@ import {
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
 import { AutoReconcileDialog } from "@/components/reconcile/auto-reconcile-dialog";
+
+function TinySpinner() {
+  return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />;
+}
+
+function getApiBaseFromEnv(): string {
+  const v =
+    (process.env.NEXT_PUBLIC_API_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      process.env.NEXT_PUBLIC_API_BASE ||
+      "") as string;
+  return String(v || "").trim();
+}
+
+function safeHost(u: string): string {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  try {
+    return new URL(s).host;
+  } catch {
+    // allow raw host strings
+    return s.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  }
+}
+
+function EnvBadge({ label, tooltip }: { label: "DEV" | "PROD"; tooltip: string }) {
+  const cls =
+    label === "PROD"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : "bg-amber-50 text-amber-800 border-amber-200";
+
+  return (
+    <span
+      title={tooltip}
+      className={`inline-flex items-center h-6 px-2 rounded-full border text-[11px] font-semibold tracking-wide select-none ${cls}`}
+    >
+      {label}
+    </span>
+  );
+}
 
 function toBigIntSafe(v: unknown): bigint {
   try {
@@ -105,6 +148,30 @@ function tokenOverlap(a: string, b: string): number {
 export default function ReconcilePageClient() {
   const router = useRouter();
   const sp = useSearchParams();
+  const qc = useQueryClient();
+
+  // ENV badge + API host tooltip (prevents “wrong backend” confusion)
+  const apiBase = useMemo(() => getApiBaseFromEnv(), []);
+  const apiHost = useMemo(() => safeHost(apiBase), [apiBase]);
+
+  const envLabel = useMemo<"DEV" | "PROD">(() => {
+    // Stable domains
+    if (apiHost === "api.bynkbook.com") return "PROD";
+    if (apiHost === "api-dev.bynkbook.com") return "DEV";
+
+    // Known execute-api ids (your current stacks)
+    if (apiHost.includes("actwy6st05")) return "PROD";
+    if (apiHost.includes("1ozvddx28a")) return "DEV";
+    if (apiHost.includes("lmvoixj337")) return "DEV";
+
+    // If it’s an execute-api host and we don't recognize it, treat as DEV (safer)
+    if (apiHost.includes("execute-api")) return "DEV";
+    return "DEV";
+  }, [apiHost]);
+
+  const envTooltip = useMemo(() => {
+    return `ENV: ${envLabel}\nAPI host: ${apiHost || "(unset)"}\nAPI base: ${apiBase || "(unset)"}`;
+  }, [envLabel, apiHost, apiBase]);
 
   // Layout: keep only table bodies scrolling
   const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
@@ -448,44 +515,96 @@ export default function ReconcilePageClient() {
     }
   }
 
-  // Load bank txns + matches
+  // One debounced refresh after any mutation (no storms)
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const refreshTimerRef = useRef<any>(null);
+
+  function refreshAllDebounced() {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(async () => {
+      setRefreshBusy(true);
+      try {
+        await refreshBankAndMatches();
+        await entriesQ.refetch?.();
+
+        // Critical: ensure Ledger page refetches without manual refresh.
+        // Ledger uses react-query cache keyed by ["entries", businessId, accountId, ...]
+        if (selectedBusinessId && selectedAccountId) {
+          void qc.invalidateQueries({
+            predicate: (q) =>
+              Array.isArray(q.queryKey) &&
+              q.queryKey[0] === "entries" &&
+              q.queryKey[1] === selectedBusinessId &&
+              q.queryKey[2] === selectedAccountId,
+          });
+        }
+      } finally {
+        setRefreshBusy(false);
+      }
+    }, 150);
+  }
+
+  // Create-entry busy state per bank txn (instant UX)
+  const [createEntryBusyByBankId, setCreateEntryBusyByBankId] = useState<Record<string, boolean>>({});
+  const [createEntryErr, setCreateEntryErr] = useState<string | null>(null);
+
+  // Create-entry confirmation dialog
+  const [openCreateEntry, setOpenCreateEntry] = useState(false);
+  const [createEntryBankTxnId, setCreateEntryBankTxnId] = useState<string | null>(null);
+  const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(true);
+
+  // Overrides
+  const [createEntryMemo, setCreateEntryMemo] = useState("");
+  const [createEntryMethod, setCreateEntryMethod] = useState("OTHER");
+  const [createEntryCategoryId, setCreateEntryCategoryId] = useState<string>("");
+  const [createEntryCategoryName, setCreateEntryCategoryName] = useState<string>("");
+
+  // Categories (for dropdown suggestions)
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [categoryQuery, setCategoryQuery] = useState("");
+
+  // Load categories once per business (used by create-entry dialog)
   useEffect(() => {
     if (!authReady) return;
     if (!selectedBusinessId) return;
-    if (!selectedAccountId) return;
 
     let cancelled = false;
     (async () => {
-      setBankTxLoading(true);
+      setCategoriesLoading(true);
       try {
-        const res = await listBankTransactions({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          from: from || undefined,
-          to: to || undefined,
-          limit: 500,
-        });
-        if (!cancelled) setBankTx(res?.items ?? []);
-      } catch {
-        if (!cancelled) setBankTx([]);
-      } finally {
-        if (!cancelled) setBankTxLoading(false);
-      }
+        const res: any = await listCategories(selectedBusinessId, { includeArchived: false });
+        const raw = Array.isArray(res?.rows) ? res.rows : [];
 
-      setMatchesLoading(true);
-      try {
-        const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-        if (!cancelled) setMatches(m?.items ?? []);
+        const items = raw
+          .map((c: any) => {
+            const id = String(c?.id ?? "");
+            const name = String(c?.name ?? "").trim();
+            const normalized_name = String(c?.normalized_name ?? c?.normalizedName ?? "").trim();
+            return id && name ? { id, name, normalized_name } : null;
+          })
+          .filter(Boolean) as any[];
+
+        if (!cancelled) setCategories(items);
       } catch {
-        if (!cancelled) setMatches([]);
+        if (!cancelled) setCategories([]);
       } finally {
-        if (!cancelled) setMatchesLoading(false);
+        if (!cancelled) setCategoriesLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
+  }, [authReady, selectedBusinessId]);
+
+  // Load bank txns + matches (single source of truth; no duplicate fetch)
+  useEffect(() => {
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+    if (!selectedAccountId) return;
+
+    refreshBankAndMatches();
   }, [authReady, selectedBusinessId, selectedAccountId, from, to]);
 
     // Phase 6B: Load snapshot list when dialog opens
@@ -575,6 +694,18 @@ export default function ReconcilePageClient() {
     });
     return arr;
   }, [bankTx]);
+
+  const entryByIdFast = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const e of allEntriesSorted ?? []) m.set(String(e.id), e);
+    return m;
+  }, [allEntriesSorted]);
+
+  const bankByIdFast = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const t of bankTxSorted ?? []) m.set(String(t.id), t);
+    return m;
+  }, [bankTxSorted]);
 
   // Treat voided matches as inactive (UI-only safety; listMatches may already exclude them)
   const isActiveMatch = (x: any) => {
@@ -1243,6 +1374,7 @@ export default function ReconcilePageClient() {
 
   const headerRight = (
     <div className="flex items-center gap-2">
+      <EnvBadge label={envLabel} tooltip={envTooltip} />
       <button
         type="button"
         className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
@@ -1322,6 +1454,12 @@ export default function ReconcilePageClient() {
   const inputClass =
     "h-7 w-full px-2 py-0 text-xs leading-none bg-white border border-slate-200 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 focus-visible:ring-offset-0";
 
+  // Plaid balance display (must be declared before differenceBar usage)
+  const balanceText = useMemo(() => {
+    const bal = plaid?.lastKnownBalanceCents ? toBigIntSafe(plaid.lastKnownBalanceCents) : null;
+    return bal !== null ? formatUsdFromCents(bal) : "—";
+  }, [plaid?.lastKnownBalanceCents]);
+
   const filterLeft = (
     <div className="flex items-center gap-2 flex-wrap">
       <div className="w-[120px]">
@@ -1352,29 +1490,45 @@ export default function ReconcilePageClient() {
       <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-x-6 gap-y-2 text-xs">
           <div className="leading-tight">
-            <div className="text-slate-500">Begin balance</div>
-            <div className="font-semibold text-slate-900">$0.00</div>
+            <div className="text-slate-500">Remaining to reconcile</div>
+            <div className="font-semibold text-slate-900 tabular-nums inline-flex items-center gap-2">
+              {formatUsdFromCents(bankStateSummary.remainingAbsTotal)}
+              {refreshBusy ? <TinySpinner /> : null}
+            </div>
           </div>
+
           <div className="leading-tight">
-            <div className="text-slate-500">Cleared</div>
-            <div className="font-semibold text-slate-900">$0.00</div>
+            <div className="text-slate-500">Bank status</div>
+            <div className="font-semibold text-slate-900">
+              U {bankStateSummary.unmatchedN} • P {bankStateSummary.partialN} • M {bankStateSummary.matchedN}
+            </div>
           </div>
+
           <div className="leading-tight">
-            <div className="text-slate-500">Difference</div>
-            <div className="font-semibold text-emerald-700">$0.00</div>
+            <div className="text-slate-500">Entries</div>
+            <div className="font-semibold text-slate-900">
+              Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}
+            </div>
           </div>
+
           <div className="leading-tight">
-            <div className="text-slate-500">Ending balance</div>
-            <div className="font-semibold text-slate-900">Coming soon</div>
+            <div className="text-slate-500">Reverts</div>
+            <div className="font-semibold text-slate-900">{revertsInScope}</div>
           </div>
-          <div className="leading-tight">
-            <div className="text-slate-500">Outstanding</div>
-            <div className="font-semibold text-slate-900">Coming soon</div>
-          </div>
-          <div className="leading-tight">
-            <div className="text-slate-500">Last sync</div>
-            <div className="font-semibold text-slate-900">Coming soon</div>
-          </div>
+
+          {plaid?.connected ? (
+            <div className="leading-tight">
+              <div className="text-slate-500">Current balance</div>
+              <div className="font-semibold text-slate-900 tabular-nums">{balanceText}</div>
+            </div>
+          ) : null}
+
+          {plaid?.connected && plaid?.lastSyncAt ? (
+            <div className="leading-tight">
+              <div className="text-slate-500">Last sync</div>
+              <div className="font-semibold text-slate-900">{new Date(plaid.lastSyncAt).toLocaleString()}</div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1407,12 +1561,6 @@ export default function ReconcilePageClient() {
     </span>
   );
 
-  const balanceSpan = (() => {
-    const bal = plaid?.lastKnownBalanceCents ? toBigIntSafe(plaid.lastKnownBalanceCents) : null;
-    const neg = bal !== null && bal < 0n;
-    return <span className={`font-semibold ${neg ? "!text-red-700" : "text-slate-900"}`}>{bal !== null ? formatUsdFromCents(bal) : "—"}</span>;
-  })();
-
   if (!authReady) return null;
 
   return (
@@ -1430,49 +1578,243 @@ export default function ReconcilePageClient() {
 
         <div className="h-px bg-slate-200" />
 
-        {/* Phase 5E: State summary bar (read-only) */}
-        <div className="px-3 py-2">
-          <div className="rounded-xl border border-slate-200 bg-white px-3 h-10 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Bank</span>
-              <span className="text-xs text-slate-700 whitespace-nowrap">
-                Unmatched <span className="font-semibold text-slate-900">{bankStateSummary.unmatchedN}</span>
-              </span>
-              <span className="text-slate-300">•</span>
-              <span className="text-xs text-slate-700 whitespace-nowrap">
-                Partial <span className="font-semibold text-slate-900">{bankStateSummary.partialN}</span>
-              </span>
-              <span className="text-slate-300">•</span>
-              <span className="text-xs text-slate-700 whitespace-nowrap">
-                Matched <span className="font-semibold text-slate-900">{bankStateSummary.matchedN}</span>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Entries</span>
-              <span className="text-xs text-slate-700 whitespace-nowrap">
-                Expected <span className="font-semibold text-slate-900">{entryStateSummary.expectedN}</span>
-              </span>
-              <span className="text-slate-300">•</span>
-              <span className="text-xs text-slate-700 whitespace-nowrap">
-                Matched <span className="font-semibold text-slate-900">{entryStateSummary.matchedN}</span>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="text-xs text-slate-700 whitespace-nowrap">
-                Reverts <span className="font-semibold text-slate-900">{revertsInScope}</span>
-              </span>
-              <div className="h-5 w-px bg-slate-200" />
-              <span className="text-xs text-slate-500 whitespace-nowrap">Remaining to reconcile</span>
-              <span className="text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                ${formatUsdFromCents(bankStateSummary.remainingAbsTotal)}
-              </span>
-            </div>
-          </div>
-        </div>
-
         {differenceBar}
+        {createEntryErr ? (
+          <div className="px-3 pb-2">
+            <div className="text-xs text-red-700">{createEntryErr}</div>
+          </div>
+        ) : null}
+
+        {/* Create entry confirmation dialog */}
+        <AppDialog
+          open={openCreateEntry}
+          onClose={() => {
+            setOpenCreateEntry(false);
+            setCreateEntryBankTxnId(null);
+            setCreateEntryAutoMatch(true);
+          }}
+          title="Create entry"
+          size="md"
+        >
+          {(() => {
+            const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
+            const t = bankId ? bankTxSorted.find((x: any) => String(x.id) === bankId) : null;
+
+            const amt = t ? toBigIntSafe(t.amount_cents) : 0n;
+            const dateStr = t?.posted_date ? isoToYmd(String(t.posted_date)) : "—";
+            const desc = (t?.name ?? "").toString().trim() || "—";
+
+            const busy = bankId ? !!createEntryBusyByBankId[bankId] : false;
+
+            return (
+              <div className="flex flex-col max-h-[55vh]">
+                <div className="flex-1 overflow-y-auto overflow-x-visible">
+<div className="text-xs text-slate-600">
+  This will create an entry from the selected bank transaction. Review method, category, and memo before creating.
+</div>
+
+                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-slate-500">Date</div>
+                      <div className="font-semibold text-slate-900">{dateStr}</div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <div className="text-slate-500">Description</div>
+                      <div className="font-semibold text-slate-900 truncate max-w-[260px]" title={desc}>
+                        {desc}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <div className="text-slate-500">Amount</div>
+                      <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-900"}`}>
+                        {formatUsdFromCents(amt)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Method</div>
+                      <select
+                        className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                        value={createEntryMethod}
+                        onChange={(e) => setCreateEntryMethod(e.target.value)}
+                      >
+                        <option value="OTHER">Other</option>
+                        <option value="CASH">Cash</option>
+                        <option value="CARD">Card</option>
+                        <option value="ACH">ACH</option>
+                        <option value="WIRE">Wire</option>
+                        <option value="CHECK">Check</option>
+                        <option value="DIRECT_DEPOSIT">Direct Deposit</option>
+                        <option value="ZELLE">Zelle</option>
+                        <option value="TRANSFER">Transfer</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Category</div>
+                      <div className="text-[11px] text-slate-500 mb-1">
+                        {categoriesLoading ? "Loading…" : `${(categories ?? []).length} categories`}
+                      </div>
+                      <div className="relative overflow-visible">
+                        <input
+                          className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                          placeholder={categoriesLoading ? "Loading categories…" : "Search categories…"}
+                          value={categoryQuery || createEntryCategoryName}
+                          onChange={(e) => {
+                            // typing starts a new search
+                            if (!categoryQuery && createEntryCategoryName) setCreateEntryCategoryName("");
+                            setCategoryQuery(e.target.value);
+                          }}
+                        />
+
+                        {/* Dropdown */}
+                        {categoryQuery.trim() ? (
+                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-sm">
+                            {(() => {
+                              const q = categoryQuery.trim().toLowerCase();
+                              const base = categories ?? [];
+                              if (base.length === 0) {
+                                return <div className="px-2 py-2 text-xs text-slate-500">No categories loaded</div>;
+                              }
+
+                              const filtered = base
+                                .filter((c: any) => {
+                                  const name = String(c?.name ?? "").toLowerCase();
+                                  const norm = String(c?.normalized_name ?? "").toLowerCase();
+                                  return name.includes(q) || norm.includes(q);
+                                })
+                                .slice(0, 20);
+
+                              if (filtered.length === 0) {
+                                return <div className="px-2 py-2 text-xs text-slate-500">No matches</div>;
+                              }
+
+                              return filtered.map((c: any) => {
+                                const id = String(c?.id ?? "");
+                                const name = String(c?.name ?? "—");
+                                return (
+                                  <button
+                                    key={id}
+                                    type="button"
+                                    className="w-full text-left px-2 py-2 hover:bg-slate-50 text-xs"
+                                    onClick={() => {
+                                      setCreateEntryCategoryId(id);
+                                      setCreateEntryCategoryName(name);
+                                      setCategoryQuery(""); // close dropdown
+                                    }}
+                                  >
+                                    <div className="font-medium text-slate-900 truncate">{name}</div>
+                                    <div className="text-[11px] text-slate-500 truncate">{id}</div>
+                                  </button>
+                                );
+                              });
+                            })()}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Selected pill */}
+                      {createEntryCategoryId ? (
+                        <div className="mt-1 text-[11px] text-slate-600">
+                          Selected: <span className="font-mono">{createEntryCategoryId}</span>{" "}
+                          <button
+                            type="button"
+                            className="ml-2 text-emerald-700 hover:text-emerald-800"
+                            onClick={() => {
+                              setCreateEntryCategoryId("");
+                              setCreateEntryCategoryName("");
+                              setCategoryQuery("");
+                            }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="text-[11px] font-semibold text-slate-600 mb-1">Memo</div>
+                    <textarea
+                      className="min-h-[70px] w-full px-2 py-1 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                      value={createEntryMemo}
+                      onChange={(e) => setCreateEntryMemo(e.target.value)}
+                    />
+                  </div>
+
+                </div>
+
+                <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
+                  <label className="flex items-center gap-2 text-xs text-slate-700 select-none">
+                    <input
+                      type="checkbox"
+                      checked={createEntryAutoMatch}
+                      onChange={(e) => setCreateEntryAutoMatch(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Auto-match (FULL only)
+                  </label>
+
+                  <button
+                    type="button"
+                    className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                    onClick={() => setOpenCreateEntry(false)}
+                    disabled={busy}
+                  >
+                    Cancel
+                  </button>
+
+                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
+                    <button
+                      type="button"
+                      className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 inline-flex items-center gap-2"
+                      disabled={!canWriteReconcileEffective || !bankId || busy}
+                      onClick={async () => {
+                        if (!selectedBusinessId || !selectedAccountId) return;
+                        if (!canWriteReconcileEffective) return;
+                        if (!bankId) return;
+
+                        setCreateEntryErr(null);
+                        setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: true }));
+
+                        try {
+                          await createEntryFromBankTransaction({
+                          businessId: selectedBusinessId,
+                          accountId: selectedAccountId,
+                          bankTransactionId: bankId,
+                          autoMatch: !!createEntryAutoMatch,
+                          memo: createEntryMemo,
+                          method: createEntryMethod,
+                          category_id: createEntryCategoryId.trim() || "",
+                        });
+
+
+                          setOpenCreateEntry(false);
+                          setCreateEntryBankTxnId(null);
+                          refreshAllDebounced();
+                        } catch (e: any) {
+                          setCreateEntryErr(e?.message ?? "Failed to create entry");
+                        } finally {
+                          setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: false }));
+                        }
+                      }}
+                    >
+                      {busy ? (
+                        <>
+                          <TinySpinner /> Creating…
+                        </>
+                      ) : (
+                        "Create entry"
+                      )}
+                    </button>
+                  </HintWrap>
+                </div>
+              </div>
+            );
+          })()}
+        </AppDialog>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
@@ -1685,7 +2027,7 @@ export default function ReconcilePageClient() {
                     <>
                       {plaid?.institutionName ? <span className="text-slate-700">{plaid.institutionName}</span> : <span>—</span>}
                       <span className="text-slate-400"> • </span>
-                      <span className="tabular-nums">Balance: {balanceSpan}</span>
+                      <span className="tabular-nums">Balance: {balanceText}</span>
                       {plaid?.lastSyncAt ? <span className="text-slate-400"> • </span> : null}
                       {plaid?.lastSyncAt ? <span>Last sync: {new Date(plaid.lastSyncAt).toLocaleString()}</span> : null}
                       {syncMsg ? <span className="text-slate-400"> • </span> : null}
@@ -1990,15 +2332,55 @@ export default function ReconcilePageClient() {
 </HintWrap>
                               )}
 
-                              <button
-                                type="button"
-                                className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white opacity-50 cursor-not-allowed focus-visible:outline-none"
-                                disabled
-                                title="Create entry (Coming soon)"
-                                aria-label="Create entry (coming soon)"
-                              >
-                                <Plus className="h-4 w-4 text-slate-700" />
-                              </button>
+                              <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                <button
+                                  type="button"
+                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+                                    canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                  }`}
+                                  disabled={
+                                    !canWriteReconcileEffective ||
+                                    !!createEntryBusyByBankId[String(t.id)] ||
+                                    (remainingAbsByBankTxnId.get(t.id) ?? 0n) === 0n
+                                  }
+                                  title={
+                                    !canWriteReconcileEffective
+                                      ? (reconcileWriteReason ?? noPermTitle)
+                                      : (remainingAbsByBankTxnId.get(t.id) ?? 0n) === 0n
+                                        ? "Already fully matched"
+                                        : "Create entry from this bank transaction"
+                                  }
+                                  aria-label="Create entry"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    if (!canWriteReconcileEffective) return;
+
+                                    const bankId = String(t.id);
+                                    const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+                                    if (remaining === 0n) return;
+
+                                    setCreateEntryErr(null);
+                                    setCreateEntryBankTxnId(bankId);
+                                    setCreateEntryAutoMatch(true);
+
+                                    // Prefill overrides
+                                    const defaultDesc = (t?.name ?? "").toString().trim() || "—";
+                                    setCreateEntryMemo(`Bank txn: ${defaultDesc} • ${bankId}`);
+                                    setCreateEntryMethod("OTHER");
+                                    setCreateEntryCategoryId("");
+                                    setCreateEntryCategoryName("");
+                                    setCategoryQuery("");
+
+                                    setOpenCreateEntry(true);
+                                  }}
+                                >
+                                  {createEntryBusyByBankId[String(t.id)] ? (
+                                    <TinySpinner />
+                                  ) : (
+                                    <Plus className="h-4 w-4 text-slate-700" />
+                                  )}
+                                </button>
+                              </HintWrap>
 
                               {bankTab !== "matched"
                                 ? (() => {
@@ -2332,13 +2714,13 @@ return (
             </div>
 
             {(() => {
-              const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+              const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
               const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
               const bankAbs = absBig(bankAmt);
 
               let selectedAbs = 0n;
               for (const id of matchSelectedEntryIds) {
-                const e = allEntriesSorted.find((x: any) => x.id === id);
+                const e = entryByIdFast.get(String(id)) ?? null;
                 if (!e) continue;
                 selectedAbs += absBig(toBigIntSafe(e.amount_cents));
               }
@@ -2378,7 +2760,7 @@ return (
 
             {/* Suggested (top candidates) */}
             {(() => {
-              const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+              const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
               if (!bank) return null;
 
               const bankAmt = toBigIntSafe(bank.amount_cents);
@@ -2405,15 +2787,33 @@ return (
                   const entryAbs = absBig(entryAmt);
                   const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
                   const dt = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
-                  const overlap = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
-                  const score = Number(diff) * 1_000_000 + dt - overlap * 50_000;
+                  const overlapRaw = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
+                  const overlap = Math.min(overlapRaw, 3); // cap token influence
+
+                  const dtDays = bankTime ? Math.floor(dt / 86_400_000) : 9999;
+                  const diffN = Number(diff); // cents; safe here
+
+                  // Deterministic scoring (tolerance=0):
+                  // 1) Amount diff dominates always
+                  // 2) Date dominates token overlap
+                  // 3) Token overlap only helps when amount is exact AND date is close (<=3 days)
+                  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
+                  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+
                   return { e, score };
                 })
                 .sort((a: any, b: any) => a.score - b.score)
                 .map((x: any) => x.e);
 
-              const suggested = ranked.slice(0, 3);
-              if (suggested.length === 0) return null;
+               // Suggested = exact amount matches only (tolerance=0)
+               const suggested = ranked
+                 .filter((e: any) => {
+                   const entryAbs = absBig(toBigIntSafe(e.amount_cents));
+                   return entryAbs === bankAbs;
+                 })
+                 .slice(0, 3);
+
+               if (suggested.length === 0) return null;
 
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
@@ -2446,8 +2846,9 @@ return (
                                 const bankAbs = absBig(toBigIntSafe(bank.amount_cents));
                                 const entryAbs = absBig(toBigIntSafe(e.amount_cents));
                                 const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                                const overlap = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
-                                return `Amount Δ ${formatUsdFromCents(diff)} • Text similarity ${overlap}`;
+                                 const overlap = Math.min(tokenOverlap(String(bank.name ?? ""), String(e.payee ?? "")), 3);
+                                 const dtDays = bank?.posted_date ? Math.abs(Math.round((new Date(`${e.date}T00:00:00Z`).getTime() - new Date(bank.posted_date).getTime()) / 86_400_000)) : 0;
+                                 return `Amount Δ ${formatUsdFromCents(diff)} • Δdays ${dtDays} • Text similarity ${overlap}`;
                               })()}
                             </span>
                           </span>
@@ -2482,11 +2883,13 @@ return (
                   </thead>
                   <tbody>
                     {(() => {
-                      const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
-                      const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
+                      const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
+                      if (!bank) return null;
+
+                      const bankAmt = toBigIntSafe(bank.amount_cents);
                       const bankAbs = absBig(bankAmt);
                       const bankSign = bankAmt < 0n ? -1n : 1n;
-                      const bankTime = bank?.posted_date ? new Date(bank.posted_date).getTime() : 0;
+                      const bankTime = bank.posted_date ? new Date(bank.posted_date).getTime() : 0;
 
                       const q = matchSearch.trim().toLowerCase();
 
@@ -2506,8 +2909,22 @@ return (
                           const entryAmt = toBigIntSafe(e.amount_cents);
                           const entryAbs = absBig(entryAmt);
                           const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                          const dt = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
-                          const score = Number(diff) * 1_000_000 + dt;
+
+                          const dtMs = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
+                          const dtDays = bankTime ? Math.floor(dtMs / 86_400_000) : 9999;
+
+                          const overlapRaw = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
+                          const overlap = Math.min(overlapRaw, 3);
+
+                          const diffN = Number(diff); // cents
+
+                          // Deterministic scoring (tolerance=0):
+                          // - Amount diff dominates always
+                          // - Date dominates token overlap
+                          // - Token overlap only helps when amount is exact AND date is close (<=3 days)
+                          const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
+                          const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+
                           return { e, score };
                         })
                         .sort((a: any, b: any) => a.score - b.score)
@@ -2631,8 +3048,7 @@ return (
                     });
                   }
 
-                  await refreshBankAndMatches();
-                  await entriesQ.refetch?.();
+                  refreshAllDebounced();
 
                   setOpenMatch(false);
                 } catch (e: any) {
@@ -2718,8 +3134,7 @@ return (
                     return next;
                   });
 
-                  await entriesQ.refetch?.();
-                  await refreshBankAndMatches();
+                  refreshAllDebounced();
 
                   setOpenAdjust(false);
                 } catch (e: any) {
@@ -2797,15 +3212,31 @@ return (
                 .map((t: any) => {
                   const bankAbs = absBig(toBigIntSafe(t.amount_cents));
                   const diff = bankAbs > entryAbs ? bankAbs - entryAbs : entryAbs - bankAbs;
-                  const dt = Math.abs(new Date(t.posted_date).getTime() - new Date(`${entry.date}T00:00:00Z`).getTime());
-                  const score = Number(diff) * 1_000_000 + dt;
+
+                  const dtMs = Math.abs(new Date(t.posted_date).getTime() - new Date(`${entry.date}T00:00:00Z`).getTime());
+                  const dtDays = Math.floor(dtMs / 86_400_000);
+
+                  const overlapRaw = tokenOverlap(String(entry.payee ?? ""), String(t.name ?? ""));
+                  const overlap = Math.min(overlapRaw, 3);
+
+                  const diffN = Number(diff);
+
+                  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
+                  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+
                   return { t, score };
                 })
                 .sort((a: any, b: any) => a.score - b.score)
                 .map((x: any) => x.t);
 
-              const suggested = ranked.slice(0, 3);
-              if (suggested.length === 0) return null;
+               const suggested = ranked
+                 .filter((t: any) => {
+                   const bankAbs = absBig(toBigIntSafe(t.amount_cents));
+                   return bankAbs === entryAbs;
+                 })
+                 .slice(0, 3);
+
+               if (suggested.length === 0) return null;
 
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
@@ -3200,8 +3631,7 @@ return (
                         bankTransactionId: bankTxnId,
                       });
 
-                      await refreshBankAndMatches();
-                      await entriesQ.refetch?.();
+                      refreshAllDebounced();
 
                       // Close detail after success (clean, consistent)
                       setOpenReconAuditDetail(false);
@@ -3699,8 +4129,7 @@ return (
         canWrite={canWriteReconcileEffective}
         canWriteReason={reconcileWriteReason ?? noPermTitle}
         onApplied={async () => {
-          await refreshBankAndMatches();
-          await entriesQ.refetch?.();
+          refreshAllDebounced();
         }}
       />
 

@@ -340,7 +340,7 @@ export async function handler(event: any) {
       select: { date: true },
     });
 
-    // Idempotent delete: if already deleted, return ok:true (prevents double-click confusion).
+    // Idempotent delete
     if (!existing) {
       const already = await prisma.entry.findFirst({
         where: { id: ent, business_id: biz, account_id: acct, deleted_at: { not: null } },
@@ -350,21 +350,37 @@ export async function handler(event: any) {
       return json(404, { ok: false, error: "Entry not found" });
     }
 
-    // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+    // Closed period enforcement
     const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
     if (!cp.ok) return cp.response;
 
-    await prisma.entry.updateMany({
-      where: {
-        id: ent,
-        business_id: biz,
-        account_id: acct,
-        deleted_at: null,
-      },
-      data: {
-        deleted_at: new Date(),
-        updated_at: new Date(),
-      },
+    await prisma.$transaction(async (tx) => {
+      // 1) Void any ACTIVE matches for this entry (brings bank txn back to Unmatched)
+      await tx.bankMatch.updateMany({
+        where: {
+          business_id: biz,
+          entry_id: ent,
+          voided_at: null,
+        },
+        data: {
+          voided_at: new Date(),
+          voided_by_user_id: sub,
+        },
+      });
+
+      // 2) Soft-delete the entry
+      await tx.entry.updateMany({
+        where: {
+          id: ent,
+          business_id: biz,
+          account_id: acct,
+          deleted_at: null,
+        },
+        data: {
+          deleted_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
     });
 
     return json(200, { ok: true, deleted: true, entry_id: ent });
