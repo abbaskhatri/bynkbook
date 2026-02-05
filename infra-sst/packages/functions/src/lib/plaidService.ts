@@ -73,6 +73,7 @@ export async function exchangePublicToken(params: {
   userId: string;
   publicToken: string;
   effectiveStartDate: string;
+  endDate?: string; // optional YYYY-MM-DD (end defaults to today)
   institution?: { name?: string; institution_id?: string };
   plaidAccountId: string;
 }) {
@@ -194,26 +195,68 @@ export async function syncTransactions(params: { businessId: string; accountId: 
       business_id: businessId,
       account_id: accountId,
       posted_date: { lt: conn.effective_start_date },
+
+      // Critical: do NOT delete CSV-imported history.
+      // Only delete Plaid-sourced rows (source="PLAID" or null legacy Plaid rows) that have plaid_transaction_id.
+      plaid_transaction_id: { not: null },
+      OR: [{ source: "PLAID" }, { source: null }],
     },
   });
 
   let cursor = conn.sync_cursor ?? null;
   let hasMore = true;
 
+  // Drain safety (production hardening)
+  const MAX_PAGES = 20;          // safety cap
+  const MAX_TOTAL = 5000;        // safety cap
+  const RETRY_MAX = 3;
+  const BACKOFF_BASE_MS = 350;
+
+  let pageN = 0;
+  let totalSeen = 0;
+
   let newCount = 0;
   let duplicateCount = 0;
+
+  // pendingCount will be computed from DB at end (accurate), not guessed during loop
   let pendingCount = 0;
 
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  async function syncPage() {
+    for (let attempt = 0; attempt < RETRY_MAX; attempt++) {
+      try {
+        return await plaid.transactionsSync({
+          access_token: accessToken,
+          cursor: cursor ?? undefined,
+          count: 500,
+        });
+      } catch (e: any) {
+        const msg = String(e?.message ?? "");
+        // light backoff for transient errors / rate limiting
+        const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt);
+        if (attempt < RETRY_MAX - 1) await sleep(backoff);
+        else throw new Error(`Plaid transactions/sync failed: ${msg}`);
+      }
+    }
+    throw new Error("Plaid transactions/sync failed");
+  }
+
   while (hasMore) {
-    const r = await plaid.transactionsSync({
-      access_token: accessToken,
-      cursor: cursor ?? undefined,
-      count: 500,
-    });
+    if (pageN >= MAX_PAGES) break;
+    if (totalSeen >= MAX_TOTAL) break;
+
+    const r = await syncPage();
+    pageN += 1;
 
     const data = r.data;
     cursor = data.next_cursor;
     hasMore = data.has_more;
+
+    // Count seen for safety caps
+    const pageSeen = (data.added?.length ?? 0) + (data.modified?.length ?? 0) + (data.removed?.length ?? 0);
+    totalSeen += pageSeen;
+    if (totalSeen >= MAX_TOTAL) hasMore = false;
 
     // Upsert added + modified
     const upserts = [...data.added, ...data.modified];
@@ -224,18 +267,46 @@ export async function syncTransactions(params: { businessId: string; accountId: 
       if (posted < conn.effective_start_date) continue;
 
       const cents = BigInt(Math.round(Number(t.amount) * 100));
-
       const isPending = !!t.pending;
-      if (isPending) pendingCount += 1;
+
+      // Pending → posted upgrade:
+      // If Plaid provides pending_transaction_id, update that existing row to become this posted txn.
+      if (!isPending && t.pending_transaction_id) {
+        const pendingId = String(t.pending_transaction_id);
+        if (pendingId) {
+          await prisma.bankTransaction.updateMany({
+            where: {
+              business_id: businessId,
+              account_id: accountId,
+              plaid_transaction_id: pendingId,
+            },
+            data: {
+              plaid_transaction_id: t.transaction_id,
+              posted_date: posted,
+              authorized_date: t.authorized_date ? new Date(`${t.authorized_date}T00:00:00Z`) : null,
+              amount_cents: cents,
+              name: (t.name ?? t.merchant_name ?? "Transaction").toString(),
+              is_pending: false,
+              iso_currency_code: t.iso_currency_code ?? null,
+              is_removed: false,
+              removed_at: null,
+              source: "PLAID",
+              plaid_account_id: conn.plaid_account_id,
+              raw: t as any,
+              updated_at: new Date(),
+            },
+          });
+        }
+      }
 
       try {
-        // Create, else update on unique constraint
         await prisma.bankTransaction.create({
           data: {
             business_id: businessId,
             account_id: accountId,
             plaid_transaction_id: t.transaction_id,
             plaid_account_id: conn.plaid_account_id,
+            source: "PLAID",
             posted_date: posted,
             authorized_date: t.authorized_date ? new Date(`${t.authorized_date}T00:00:00Z`) : null,
             amount_cents: cents,
@@ -249,10 +320,10 @@ export async function syncTransactions(params: { businessId: string; accountId: 
         newCount += 1;
       } catch {
         duplicateCount += 1;
-        // Update existing row (idempotent)
         await prisma.bankTransaction.updateMany({
           where: {
             business_id: businessId,
+            account_id: accountId,
             plaid_transaction_id: t.transaction_id,
           },
           data: {
@@ -264,6 +335,8 @@ export async function syncTransactions(params: { businessId: string; accountId: 
             iso_currency_code: t.iso_currency_code ?? null,
             is_removed: false,
             removed_at: null,
+            source: "PLAID",
+            plaid_account_id: conn.plaid_account_id,
             raw: t as any,
             updated_at: new Date(),
           },
@@ -274,13 +347,28 @@ export async function syncTransactions(params: { businessId: string; accountId: 
     // Apply removed
     for (const removed of data.removed) {
       await prisma.bankTransaction.updateMany({
-        where: { business_id: businessId, plaid_transaction_id: removed.transaction_id },
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          plaid_transaction_id: removed.transaction_id,
+        },
         data: { is_removed: true, removed_at: new Date(), updated_at: new Date() },
       });
     }
   }
 
   const now = new Date();
+
+  // Accurate pending count after sync (not guesswork)
+  pendingCount = await prisma.bankTransaction.count({
+    where: {
+      business_id: businessId,
+      account_id: accountId,
+      is_removed: false,
+      is_pending: true,
+      posted_date: { gte: conn.effective_start_date },
+    },
+  });
 
   // Opening adjustment rule (create exactly once per account on initial connect/backfill)
   // opening_adjustment = current_bank_balance − sum(posted_transactions_in_retained_window)
@@ -310,8 +398,8 @@ export async function syncTransactions(params: { businessId: string; accountId: 
         business_id: businessId,
         account_id: accountId,
         date: conn.effective_start_date,
-        payee: "Opening balance adjustment",
-        memo: "Auto-created on initial Plaid backfill (Phase 4B)",
+        payee: "Opening balance (estimated)",
+        memo: "Estimated from current balance and synced transactions (Plaid).",
         amount_cents: signed,
         type: entryType,
         method: null,
@@ -349,6 +437,12 @@ export async function syncTransactions(params: { businessId: string; accountId: 
     duplicateCount,
     pendingCount,
     lastSyncAt: now.toISOString(),
+
+    // Progress metadata (useful for UI)
+    pages: pageN,
+    totalSeen,
+    capped: pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL,
+    hasMore: hasMore,
   });
 }
 

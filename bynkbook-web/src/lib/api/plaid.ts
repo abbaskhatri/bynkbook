@@ -14,6 +14,7 @@ export async function plaidExchange(
     public_token: string;
     plaidAccountId: string;
     effectiveStartDate: string;
+    endDate?: string; // optional YYYY-MM-DD
     institution?: { name?: string; institution_id?: string };
   }
 ) {

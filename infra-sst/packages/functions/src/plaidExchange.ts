@@ -19,6 +19,7 @@ export async function handler(event: any) {
 
   const publicToken = (body?.public_token ?? "").toString().trim();
   const effectiveStartDate = (body?.effectiveStartDate ?? "").toString().trim(); // YYYY-MM-DD
+  const endDate = (body?.endDate ?? "").toString().trim(); // optional YYYY-MM-DD (end defaults to today)
   const plaidAccountId = (body?.plaidAccountId ?? "").toString().trim();
   const institution = body?.institution ?? undefined;
 
@@ -32,7 +33,8 @@ export async function handler(event: any) {
     userId: sub,
     publicToken,
     effectiveStartDate,
+    endDate, // service may ignore until implemented
     institution,
     plaidAccountId,
-  });
+  } as any);
 }
