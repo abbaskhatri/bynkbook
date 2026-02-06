@@ -74,14 +74,14 @@ export function AppDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50 overflow-x-hidden">
       <div
         className="absolute inset-0 bg-black/40"
         onClick={handleOverlayClick}
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div className="absolute inset-0 flex items-center justify-center p-4 overflow-x-hidden">
         <div
           ref={containerRef}
           tabIndex={-1}
@@ -89,9 +89,9 @@ export function AppDialog({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "w-full",
+            "w-full max-w-full",
             widthClass,
-            "max-h-[85vh] flex flex-col",
+            "max-h-[85vh] flex flex-col overflow-x-hidden",
           ].join(" ")}
         >
           {/* Header (fixed) */}
@@ -116,7 +116,7 @@ export function AppDialog({
           </div>
 
           {/* Body (scroll only here) */}
-          <div className="flex-1 overflow-auto px-4 py-3">{children}</div>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">{children}</div>
 
           {/* Footer (fixed) */}
           {footer ? (

@@ -58,6 +58,9 @@ export async function createLinkToken(params: {
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
+
+    // Production-grade: request up to 24 months instead of Plaid's default (~90 days)
+    transactions: { days_requested: 730 },
   });
 
   return json(200, { ok: true, link_token: res.data.link_token });
@@ -266,7 +269,8 @@ export async function syncTransactions(params: { businessId: string; accountId: 
       if (!posted) continue;
       if (posted < conn.effective_start_date) continue;
 
-      const cents = BigInt(Math.round(Number(t.amount) * 100));
+      // Plaid: amount is positive for outflows (debits). Our BankTransaction uses negative for outflows.
+      const cents = -BigInt(Math.round(Number(t.amount) * 100));
       const isPending = !!t.pending;
 
       // Pending → posted upgrade:
@@ -392,22 +396,67 @@ export async function syncTransactions(params: { businessId: string; accountId: 
     const entryType = openingAdjustment >= 0n ? "INCOME" : "EXPENSE";
     const signed = entryType === "INCOME" ? abs : -abs;
 
-    await prisma.entry.create({
-      data: {
-        id: (await import("node:crypto")).randomUUID(),
+    // Professional rule:
+    // - If the account already has user-entered entries, DO NOT create a synthetic opening.
+    // - If the only entry is an auto-created zero "Opening Balance", UPDATE it instead of creating a second one.
+    const existing = await prisma.entry.findMany({
+      where: {
         business_id: businessId,
         account_id: accountId,
-        date: conn.effective_start_date,
-        payee: "Opening balance (estimated)",
-        memo: "Estimated from current balance and synced transactions (Plaid).",
-        amount_cents: signed,
-        type: entryType,
-        method: null,
-        category_id: null,
-        vendor_id: null,
-        status: "EXPECTED",
+        deleted_at: null,
       },
+      select: { id: true, payee: true, amount_cents: true },
+      orderBy: { created_at: "asc" as any },
+      take: 20,
     });
+
+    const lower = (s: any) => String(s ?? "").trim().toLowerCase();
+    const isOpeningLike = (p: any) => {
+      const x = lower(p);
+      return x === "opening balance" || x === "opening balance (estimated)" || x.startsWith("opening balance");
+    };
+
+    const hasNonOpeningEntries = existing.some((e) => !isOpeningLike(e.payee));
+    const zeroOpening = existing.find((e) => isOpeningLike(e.payee) && BigInt(e.amount_cents ?? 0) === 0n);
+
+    if (!hasNonOpeningEntries) {
+      if (zeroOpening) {
+        // Replace the placeholder opening with the Plaid-estimated opening (no duplicates)
+        await prisma.entry.update({
+          where: { id: zeroOpening.id },
+          data: {
+            payee: "Opening balance (estimated)",
+            memo: "Estimated from current balance and synced transactions (Plaid).",
+            amount_cents: signed,
+            type: entryType,
+            method: null,
+            category_id: null,
+            vendor_id: null,
+            status: "EXPECTED",
+            date: conn.effective_start_date,
+            updated_at: now,
+          } as any,
+        });
+      } else if (existing.length === 0) {
+        // Truly empty account => create the estimated opening once
+        await prisma.entry.create({
+          data: {
+            id: (await import("node:crypto")).randomUUID(),
+            business_id: businessId,
+            account_id: accountId,
+            date: conn.effective_start_date,
+            payee: "Opening balance (estimated)",
+            memo: "Estimated from current balance and synced transactions (Plaid).",
+            amount_cents: signed,
+            type: entryType,
+            method: null,
+            category_id: null,
+            vendor_id: null,
+            status: "EXPECTED",
+          },
+        });
+      }
+    }
 
     await prisma.bankConnection.updateMany({
       where: { business_id: businessId, account_id: accountId },

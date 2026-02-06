@@ -64,7 +64,7 @@ type Props = {
   disabledClassName: string;
   buttonClassName: string;
   disabled?: boolean;
-  onConnected: () => void;
+  onConnected: (syncResult?: any) => void;
 };
 
 type PlaidAccountMeta = {
@@ -97,6 +97,7 @@ export function PlaidConnectButton(props: Props) {
   } = props;
 
   const [busy, setBusy] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Step 1: consent gate
@@ -137,6 +138,7 @@ export function PlaidConnectButton(props: Props) {
 
     openingRef.current = true;
     setBusy(true);
+    setConnecting(true);
     setErrorMsg(null);
 
     try {
@@ -232,15 +234,14 @@ export function PlaidConnectButton(props: Props) {
 
       {errorMsg ? <div className="mt-1 text-[11px] text-red-700">{errorMsg}</div> : null}
 
-      {/* Step 1: consent */}
       <AppDialog
         open={openConsent}
         onClose={() => setOpenConsent(false)}
         title="Connect your bank securely"
         size="md"
       >
-        <div className="p-3">
-          <div className="text-xs text-slate-700 leading-relaxed">
+        <div className="p-3 max-h-[70vh] overflow-y-auto overflow-x-hidden">
+          <div className="text-xs text-slate-700 leading-relaxed break-words">
             BynkBook uses Plaid to connect securely to your bank. We do not store your bank password.
           </div>
 
@@ -257,14 +258,16 @@ export function PlaidConnectButton(props: Props) {
             </ul>
           </div>
 
-          <label className="mt-4 flex items-start gap-2 text-xs text-slate-700">
+          <label className="mt-4 flex items-start gap-2 text-xs text-slate-700 min-w-0">
             <input
               type="checkbox"
-              className="h-4 w-4 mt-0.5"
+              className="h-4 w-4 mt-0.5 shrink-0"
               checked={consented}
               onChange={(e) => setConsented(e.target.checked)}
             />
-            <span>I agree to share my financial data via Plaid as described above.</span>
+            <span className="min-w-0 break-words">
+              I agree to share my financial data via Plaid as described above.
+            </span>
           </label>
 
           <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
@@ -278,14 +281,20 @@ export function PlaidConnectButton(props: Props) {
 
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-              disabled={!consented}
+              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 inline-flex items-center gap-2"
+              disabled={!consented || busy || connecting}
               onClick={async () => {
                 setOpenConsent(false);
                 await openPlaid();
               }}
             >
-              Continue
+              {connecting ? (
+                <>
+                  <TinySpinner /> Connecting…
+                </>
+              ) : (
+                "Continue"
+              )}
             </button>
           </div>
         </div>
@@ -305,7 +314,7 @@ export function PlaidConnectButton(props: Props) {
         title="Choose account and history"
         size="md"
       >
-        <div className="p-3">
+        <div className="p-3 overflow-hidden max-h-[70vh]">
           <div className="text-xs text-slate-600">
             Select exactly one bank account to link to this BynkBook account.
           </div>
@@ -406,8 +415,10 @@ export function PlaidConnectButton(props: Props) {
                   setOpenSyncing(true);
                   setSyncInfo(null);
 
+                  let syncRes: any = null;
                   try {
                     const s: any = await plaidSync(businessId, accountId);
+                    syncRes = s;
                     setSyncInfo({
                       newCount: Number(s?.newCount ?? 0),
                       pendingCount: Number(s?.pendingCount ?? 0),
@@ -418,7 +429,7 @@ export function PlaidConnectButton(props: Props) {
                     setOpenSyncing(false);
                   }
 
-                  onConnected();
+                  onConnected(syncRes);
                 } catch (e: any) {
                   setErrorMsg(e?.message ?? "Plaid connection failed");
                 } finally {
@@ -439,7 +450,7 @@ export function PlaidConnectButton(props: Props) {
         title="Initial sync"
         size="sm"
       >
-        <div className="p-3">
+        <div className="p-3 overflow-hidden max-h-[70vh]">
           <div className="text-xs text-slate-700 flex items-center gap-2">
             <TinySpinner /> Syncing transactions…
           </div>

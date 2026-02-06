@@ -225,8 +225,11 @@ export default function ReconcilePageClient() {
 
   const selectedAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
-    if (accountIdFromUrl) return accountIdFromUrl;
-    return list.find((a) => !a.archived_at)?.id ?? "";
+    if (accountIdFromUrl && !String(accountIdFromUrl).startsWith("temp_")) return accountIdFromUrl;
+
+    // Never select temp_ accounts (optimistic UI ids) in reconcile.
+    const real = list.find((a: any) => !a.archived_at && !String(a.id ?? "").startsWith("temp_"));
+    return real?.id ?? "";
   }, [accountsQ.data, accountIdFromUrl]);
 
   const selectedBusinessRole = useMemo(() => {
@@ -342,6 +345,12 @@ export default function ReconcilePageClient() {
 
   const [bankTxLoading, setBankTxLoading] = useState(false);
   const [bankTx, setBankTx] = useState<any[]>([]);
+
+  // Helps delayed refresh decide whether another confirm pull is needed (max 2 tries)
+  const bankTxLenRef = useRef(0);
+  useEffect(() => {
+    bankTxLenRef.current = bankTx.length;
+  }, [bankTx.length]);
 
   const [matchesLoading, setMatchesLoading] = useState(false);
   const [matches, setMatches] = useState<any[]>([]);
@@ -485,7 +494,7 @@ export default function ReconcilePageClient() {
     };
   }, [authReady, selectedBusinessId, selectedAccountId]);
 
-  async function refreshBankAndMatches() {
+  async function refreshBankAndMatches(opts?: { preserveOnEmpty?: boolean }) {
     if (!selectedBusinessId || !selectedAccountId) return;
 
     setBankTxLoading(true);
@@ -497,9 +506,14 @@ export default function ReconcilePageClient() {
         to: to || undefined,
         limit: 500,
       });
-      setBankTx(res?.items ?? []);
+
+      const next = res?.items ?? [];
+      setBankTx((prev) => {
+        if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
+        return next;
+      });
     } catch {
-      setBankTx([]);
+      setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
     } finally {
       setBankTxLoading(false);
     }
@@ -518,6 +532,15 @@ export default function ReconcilePageClient() {
   // One debounced refresh after any mutation (no storms)
   const [refreshBusy, setRefreshBusy] = useState(false);
   const refreshTimerRef = useRef<any>(null);
+
+  // Post-connect confirmation refresh (single shot; avoids "empty until hard refresh")
+  const postConnectRefreshTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
+    };
+  }, []);
 
   function refreshAllDebounced() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -1608,7 +1631,7 @@ export default function ReconcilePageClient() {
 
             return (
               <div className="flex flex-col max-h-[55vh]">
-                <div className="flex-1 overflow-y-auto overflow-x-visible">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden">
 <div className="text-xs text-slate-600">
   This will create an entry from the selected bank transaction. Review method, category, and memo before creating.
 </div>
@@ -2052,24 +2075,73 @@ export default function ReconcilePageClient() {
                       <Download className="h-3.5 w-3.5" /> Upload CSV
                     </button>
 
-                    <PlaidConnectButton
-                      businessId={selectedBusinessId ?? ""}
-                      accountId={selectedAccountId ?? ""}
-                      effectiveStartDate="2025-11-01"
-                      disabledClassName={disabledBtn}
-                      buttonClassName="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
-                      onConnected={async () => {
-                        setSyncMsg(null);
-                        setPendingMsg(null);
-                        setPlaidLoading(true);
-                        try {
-                          const res = await plaidStatus(selectedBusinessId ?? "", selectedAccountId ?? "");
-                          setPlaid(res);
-                        } finally {
-                          setPlaidLoading(false);
-                        }
-                      }}
-                    />
+<PlaidConnectButton
+  businessId={selectedBusinessId ?? ""}
+  accountId={selectedAccountId ?? ""}
+  effectiveStartDate="2025-11-01"
+  disabledClassName={disabledBtn}
+  buttonClassName="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+  onConnected={async () => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    setSyncMsg(null);
+    setPendingMsg(null);
+    setPlaidLoading(true);
+    try {
+      const res = await plaidStatus(selectedBusinessId, selectedAccountId);
+      setPlaid(res);
+
+      // Immediate pull (but do NOT clobber populated table to empty while Plaid sync is catching up)
+      await refreshBankAndMatches({ preserveOnEmpty: true });
+      await entriesQ.refetch?.();
+
+      // Ensure Ledger page sees new entries without manual refresh
+      void qc.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          q.queryKey[0] === "entries" &&
+          q.queryKey[1] === selectedBusinessId &&
+          q.queryKey[2] === selectedAccountId,
+      });
+
+      // Delayed confirmation refresh (best-effort, max 2 tries; avoids storms)
+      if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
+
+      const confirmPull = async () => {
+        await refreshBankAndMatches({ preserveOnEmpty: true });
+        await entriesQ.refetch?.();
+
+        void qc.invalidateQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) &&
+            q.queryKey[0] === "entries" &&
+            q.queryKey[1] === selectedBusinessId &&
+            q.queryKey[2] === selectedAccountId,
+        });
+      };
+
+      // Try once shortly after connect…
+      postConnectRefreshTimerRef.current = setTimeout(async () => {
+        try {
+          await confirmPull();
+
+          // …and if still empty, try one more time later (Plaid may still be posting)
+          if (bankTxLenRef.current === 0) {
+            postConnectRefreshTimerRef.current = setTimeout(async () => {
+              try {
+                await confirmPull();
+              } catch {}
+            }, 2500);
+          }
+        } catch {
+          // no-op
+        }
+      }, 1500);
+    } finally {
+      setPlaidLoading(false);
+    }
+  }}
+/>
                   </>
                 ) : (
                   <>
@@ -2087,17 +2159,46 @@ export default function ReconcilePageClient() {
                       disabled={plaidSyncing}
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId) return;
+
                         setPlaidSyncing(true);
                         setSyncMsg(null);
                         setPendingMsg(null);
+
                         try {
                           const res = await plaidSync(selectedBusinessId, selectedAccountId);
                           const newCount = Number(res?.newCount ?? 0);
                           const pendingCount = Number(res?.pendingCount ?? 0);
+
                           setSyncMsg(`Synced: ${newCount} new`);
                           if (pendingCount > 0) setPendingMsg("Pending will appear once posted.");
+
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
+
+                          // IMPORTANT: refresh the tables (not just balance/status)
+                          await refreshBankAndMatches({ preserveOnEmpty: true });
+                          await entriesQ.refetch?.();
+
+                          // One confirmation refresh (max 2 tries total)
+                          if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
+
+                          const confirmPull = async () => {
+                            await refreshBankAndMatches({ preserveOnEmpty: true });
+                            await entriesQ.refetch?.();
+                          };
+
+                          postConnectRefreshTimerRef.current = setTimeout(async () => {
+                            try {
+                              await confirmPull();
+                              if (bankTxLenRef.current === 0) {
+                                postConnectRefreshTimerRef.current = setTimeout(async () => {
+                                  try {
+                                    await confirmPull();
+                                  } catch {}
+                                }, 2500);
+                              }
+                            } catch {}
+                          }, 1500);
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Sync failed");
                         } finally {
