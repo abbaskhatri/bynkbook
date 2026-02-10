@@ -10,6 +10,7 @@ export type Business = {
   address?: string | null;
   phone?: string | null;
   logo_url?: string | null;
+  logo_upload_id?: string | null;
   industry?: string | null;
   currency?: string;
   timezone?: string;
@@ -42,7 +43,7 @@ export async function patchBusiness(
   businessId: string,
   patch: Partial<Pick<
     Business,
-    "address" | "phone" | "logo_url" | "industry" | "currency" | "timezone" | "fiscal_year_start_month"
+    "address" | "phone" | "logo_url" | "logo_upload_id" | "industry" | "currency" | "timezone" | "fiscal_year_start_month"
   >>
 ): Promise<Business> {
   const res: any = await apiFetch(`/v1/businesses/${businessId}`, {
@@ -50,4 +51,8 @@ export async function patchBusiness(
     body: JSON.stringify(patch),
   });
   return res?.business;
+}
+
+export async function deleteBusiness(businessId: string): Promise<void> {
+  await apiFetch(`/v1/businesses/${businessId}`, { method: "DELETE" });
 }

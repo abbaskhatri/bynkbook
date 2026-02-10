@@ -2,6 +2,7 @@ import { apiFetch } from "@/lib/api/client";
 
 export type TeamMember = {
   user_id: string;
+  email?: string | null;
   role: string;
   created_at: string;
 };

@@ -88,14 +88,21 @@ function contentDisposition(filename: string) {
   return `attachment; filename="${safe}"; filename*=UTF-8''${encoded}`;
 }
 
-const ALLOWED_TYPES = new Set(["RECEIPT", "INVOICE", "BANK_STATEMENT"]);
+const ALLOWED_TYPES = new Set(["RECEIPT", "INVOICE", "BANK_STATEMENT", "BUSINESS_LOGO"]);
 
 function validateContentType(uploadType: string, contentType: string) {
   const ct = (contentType || "").toLowerCase();
+
+  if (uploadType === "BUSINESS_LOGO") {
+    // Logo: image only (no PDF)
+    return ct.startsWith("image/");
+  }
+
   if (uploadType === "BANK_STATEMENT") {
     // CSV preferred; PDF allowed (parsing later)
     return ct.includes("csv") || ct === "application/pdf" || ct.startsWith("text/");
   }
+
   // Receipt/Invoice: image/* or PDF
   return ct.startsWith("image/") || ct === "application/pdf";
 }
@@ -195,7 +202,12 @@ export async function handler(event: any) {
     }
 
     // Size caps
-    const maxBytes = uploadType === "BANK_STATEMENT" ? 50 * 1024 * 1024 : 25 * 1024 * 1024;
+    const maxBytes =
+      uploadType === "BUSINESS_LOGO"
+        ? 5 * 1024 * 1024
+        : uploadType === "BANK_STATEMENT"
+          ? 50 * 1024 * 1024
+          : 25 * 1024 * 1024;
     if (sizeBytes > maxBytes) return json(400, { ok: false, error: `File too large (max ${maxBytes} bytes)` });
 
     // Duplicate upload guard (best-effort): if a recent COMPLETED upload matches filename+size+type+account+upload_type, block

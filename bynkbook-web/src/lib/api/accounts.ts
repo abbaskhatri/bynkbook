@@ -16,7 +16,14 @@ export type Account = {
 
 export async function listAccounts(businessId: string): Promise<Account[]> {
   const res: any = await apiFetch(`/v1/businesses/${businessId}/accounts`);
-  return res?.accounts ?? [];
+  const rows = (res?.accounts ?? []) as any[];
+
+  return rows.map((a) => ({
+    ...a,
+    opening_balance_cents: Number(a.opening_balance_cents ?? 0),
+    opening_balance_date: String(a.opening_balance_date ?? ""),
+    archived_at: a.archived_at ?? null,
+  })) as Account[];
 }
 
 export async function createAccount(
@@ -32,7 +39,14 @@ export async function createAccount(
     method: "POST",
     body: JSON.stringify(input),
   });
-  return res?.account;
+  const a: any = res?.account;
+  if (!a) return a;
+  return {
+    ...a,
+    opening_balance_cents: Number(a.opening_balance_cents ?? 0),
+    opening_balance_date: String(a.opening_balance_date ?? ""),
+    archived_at: a.archived_at ?? null,
+  } as Account;
 }
 
 export async function patchAccountName(businessId: string, accountId: string, name: string): Promise<{ id: string; name: string }> {
@@ -40,7 +54,40 @@ export async function patchAccountName(businessId: string, accountId: string, na
     method: "PATCH",
     body: JSON.stringify({ name }),
   });
-  return res?.account;
+  const a: any = res?.account;
+  if (!a) return a;
+  return {
+    ...a,
+    opening_balance_cents: Number(a.opening_balance_cents ?? 0),
+    opening_balance_date: String(a.opening_balance_date ?? ""),
+    archived_at: a.archived_at ?? null,
+  } as Account;
+}
+
+export async function patchAccount(
+  businessId: string,
+  accountId: string,
+  patch: Partial<{
+    name: string;
+    type: AccountType;
+    opening_balance_cents: number;
+    opening_balance_date: string;
+  }>,
+): Promise<Account> {
+  const res: any = await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+  const a: any = res?.account;
+  if (!a) return a;
+
+  return {
+    ...a,
+    opening_balance_cents: Number(a.opening_balance_cents ?? 0),
+    opening_balance_date: String(a.opening_balance_date ?? ""),
+    archived_at: a.archived_at ?? null,
+  } as Account;
 }
 
 export async function archiveAccount(businessId: string, accountId: string): Promise<void> {

@@ -45,6 +45,7 @@ export async function handler(event: any) {
         address: r.business.address,
         phone: r.business.phone,
         logo_url: r.business.logo_url,
+        logo_upload_id: (r.business as any).logo_upload_id ?? null,
         industry: r.business.industry,
         currency: r.business.currency,
         timezone: r.business.timezone,
@@ -146,6 +147,7 @@ export async function handler(event: any) {
         address: row.business.address,
         phone: row.business.phone,
         logo_url: row.business.logo_url,
+        logo_upload_id: (row.business as any).logo_upload_id ?? null,
         industry: row.business.industry,
         currency: row.business.currency,
         timezone: row.business.timezone,
@@ -154,7 +156,29 @@ export async function handler(event: any) {
     });
   }
 
-  // PATCH /v1/businesses/{businessId} (OWNER/ADMIN only)
+  // DELETE /v1/businesses/{businessId} (OWNER only)
+  if (method === "DELETE" && businessId && path.includes("/v1/businesses/")) {
+    const membership = await prisma.userBusinessRole.findFirst({
+      where: { user_id: sub, business_id: businessId },
+      select: { role: true },
+    });
+    const role = String(membership?.role ?? "").toUpperCase();
+    if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+    if (role !== "OWNER") return json(403, { ok: false, error: "Forbidden (requires OWNER)" });
+
+    // Extra guard: must match owner_user_id
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { id: true, owner_user_id: true },
+    });
+    if (!biz) return json(404, { ok: false, error: "Business not found" });
+    if (String(biz.owner_user_id) !== String(sub)) {
+      return json(403, { ok: false, error: "Forbidden (only business owner can delete)" });
+    }
+
+    await prisma.business.delete({ where: { id: businessId } });
+    return json(200, { ok: true });
+  }
   if (method === "PATCH" && businessId && path.includes("/v1/businesses/")) {
     const membership = await prisma.userBusinessRole.findFirst({
       where: { user_id: sub, business_id: businessId },
@@ -175,6 +199,7 @@ export async function handler(event: any) {
     if ("address" in body) patch.address = body.address == null ? null : String(body.address);
     if ("phone" in body) patch.phone = body.phone == null ? null : String(body.phone);
     if ("logo_url" in body) patch.logo_url = body.logo_url == null ? null : String(body.logo_url);
+    if ("logo_upload_id" in body) patch.logo_upload_id = body.logo_upload_id == null ? null : String(body.logo_upload_id);
     if ("industry" in body) patch.industry = body.industry == null ? null : String(body.industry);
     if ("currency" in body) {
       const v = body.currency == null ? null : String(body.currency).toUpperCase();
@@ -203,6 +228,7 @@ export async function handler(event: any) {
         address: updated.address,
         phone: updated.phone,
         logo_url: updated.logo_url,
+        logo_upload_id: (updated as any).logo_upload_id ?? null,
         industry: updated.industry,
         currency: updated.currency,
         timezone: updated.timezone,

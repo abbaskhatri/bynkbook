@@ -16,6 +16,7 @@ model Business {
   address                  String?
   phone                    String?
   logo_url                 String?
+  logo_upload_id           String?              @db.Uuid
   industry                 String?
   currency                 String               @default("USD")
   timezone                 String               @default("America/Chicago")
@@ -53,6 +54,10 @@ model UserBusinessRole {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   business_id String   @db.Uuid
   user_id     String
+
+  // Best-effort email for display. Filled on invite accept and backfilled for the current user on team fetch.
+  email       String?
+
   role        String
   created_at  DateTime @default(now()) @db.Timestamptz(6)
   business    Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)

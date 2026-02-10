@@ -76,10 +76,15 @@ export async function handler(event: any) {
     });
   }
 
-  // PATCH /v1/businesses/{businessId}/accounts/{accountId} (rename)
+  // PATCH /v1/businesses/{businessId}/accounts/{accountId}
+  // - name/type always editable by write roles
+  // - opening fields editable ONLY if no related rows exist (same guardrail as delete eligibility)
   if (method === "PATCH") {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
-    if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+
+    const r = String(role ?? "").toUpperCase();
+    const canWrite = r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+    if (!canWrite) return json(403, { ok: false, error: "Forbidden (requires write role)" });
 
     let body: any = {};
     try {
@@ -88,15 +93,92 @@ export async function handler(event: any) {
       return json(400, { ok: false, error: "Invalid JSON body" });
     }
 
-    const name = (body?.name ?? "").toString().trim();
-    if (name.length < 2) return json(400, { ok: false, error: "Account name is required (min 2 chars)" });
+    const patch: any = {};
+
+    if ("name" in body) {
+      const name = (body?.name ?? "").toString().trim();
+      if (name.length < 2) return json(400, { ok: false, error: "Account name is required (min 2 chars)" });
+      patch.name = name;
+    }
+
+    if ("type" in body) {
+      const type = (body?.type ?? "").toString().trim().toUpperCase();
+      if (!ACCOUNT_TYPES.includes(type as any)) return json(400, { ok: false, error: "Invalid account type" });
+      patch.type = type;
+    }
+
+    const wantsOpening = "opening_balance_cents" in body || "opening_balance_date" in body;
+    if (wantsOpening) {
+      const counts = await prisma.$transaction([
+        prisma.entry.count({ where: { business_id: businessId, account_id: accountId } }),
+        prisma.bankTransaction.count({ where: { business_id: businessId, account_id: accountId } }),
+        prisma.bankMatch.count({ where: { business_id: businessId, account_id: accountId } }),
+        prisma.bankConnection.count({ where: { business_id: businessId, account_id: accountId } }),
+        prisma.upload.count({ where: { business_id: businessId, account_id: accountId } }),
+        prisma.reconcileSnapshot.count({ where: { business_id: businessId, account_id: accountId } }),
+        prisma.transfer.count({
+          where: { business_id: businessId, OR: [{ from_account_id: accountId }, { to_account_id: accountId }] },
+        }),
+      ]);
+
+      const total =
+        (counts[0] ?? 0) +
+        (counts[1] ?? 0) +
+        (counts[2] ?? 0) +
+        (counts[3] ?? 0) +
+        (counts[4] ?? 0) +
+        (counts[5] ?? 0) +
+        (counts[6] ?? 0);
+
+      if (total > 0) {
+        return json(409, { ok: false, error: "Opening fields can only be edited before any related data exists.", related_total: total });
+      }
+
+      if ("opening_balance_cents" in body) {
+        const n = Number(body.opening_balance_cents);
+        if (!Number.isFinite(n)) return json(400, { ok: false, error: "opening_balance_cents must be a number" });
+        patch.opening_balance_cents = BigInt(Math.trunc(n));
+      }
+
+      if ("opening_balance_date" in body) {
+        const d = new Date(String(body.opening_balance_date));
+        if (Number.isNaN(d.getTime())) return json(400, { ok: false, error: "opening_balance_date must be a valid ISO date/time" });
+        patch.opening_balance_date = d;
+      }
+    }
+
+    if (Object.keys(patch).length === 0) return json(400, { ok: false, error: "No fields to update" });
 
     const updated = await prisma.account.update({
       where: { id: accountId },
-      data: { name },
+      data: patch,
+      select: {
+        id: true,
+        business_id: true,
+        name: true,
+        type: true,
+        opening_balance_cents: true,
+        opening_balance_date: true,
+        archived_at: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
 
-    return json(200, { ok: true, account: { id: updated.id, name: updated.name } });
+    return json(200, {
+      ok: true,
+      account: {
+        id: updated.id,
+        business_id: updated.business_id,
+        name: updated.name,
+        type: updated.type,
+        opening_balance_cents: updated.opening_balance_cents?.toString?.() ?? String(updated.opening_balance_cents),
+        opening_balance_date: updated.opening_balance_date?.toISOString?.() ?? updated.opening_balance_date,
+        archived_at: updated.archived_at ? updated.archived_at.toISOString() : null,
+        created_at: updated.created_at?.toISOString?.() ?? updated.created_at,
+        updated_at: updated.updated_at?.toISOString?.() ?? updated.updated_at,
+      },
+    });
   }
 
   // POST /v1/businesses/{businessId}/accounts/{accountId}/archive

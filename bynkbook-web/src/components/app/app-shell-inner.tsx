@@ -8,7 +8,6 @@ import {
   Bell,
   HelpCircle,
   UserCircle,
-  Search,
   LayoutDashboard,
   BookOpen,
   GitMerge,
@@ -27,7 +26,6 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/app/pill";
 
 function navVariant(active: boolean) {
@@ -62,7 +60,17 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
-    if (pathname.startsWith("/login") || pathname.startsWith("/signup") || pathname.startsWith("/confirm-signup") || pathname.startsWith("/forgot-password") || pathname.startsWith("/reset-password") || pathname.startsWith("/accept-invite") || pathname.startsWith("/oauth-callback")) {
+    if (
+      pathname.startsWith("/login") ||
+      pathname.startsWith("/signup") ||
+      pathname.startsWith("/confirm-signup") ||
+      pathname.startsWith("/forgot-password") ||
+      pathname.startsWith("/reset-password") ||
+      pathname.startsWith("/accept-invite") ||
+      pathname.startsWith("/oauth-callback") ||
+      pathname.startsWith("/privacy") ||
+      pathname.startsWith("/terms")
+    ) {
       setAuthChecked(true);
       setIsAuthed(false);
       return;
@@ -89,7 +97,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     pathname.startsWith("/reset-password") ||
     pathname.startsWith("/accept-invite") ||
     pathname.startsWith("/oauth-callback") ||
-    pathname.startsWith("/create-business");
+    pathname.startsWith("/create-business") ||
+    pathname.startsWith("/privacy") ||
+    pathname.startsWith("/terms");
 
   const showChrome = !isAuthRoute;
   const noPageScroll = pathname.startsWith("/ledger"); // ledger should not page-scroll

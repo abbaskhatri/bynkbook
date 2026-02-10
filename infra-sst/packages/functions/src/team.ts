@@ -154,11 +154,14 @@ export async function handler(event: any) {
     }
 
     // Create membership with invite role (validated at creation time)
+    const emailClaim = normalizeEmail((claims as any)?.email ?? "");
+
     await prisma.userBusinessRole.create({
       data: {
-        id: undefined, // DB-generated if configured; if not, prisma will require. Your schema uses @db.Uuid without default on this model.
+        id: undefined, // DB-generated if configured; if not, prisma will require.
         business_id: invite.business_id,
         user_id: sub,
+        email: emailClaim || null,
         role: invite.role,
       },
     });
@@ -188,11 +191,29 @@ export async function handler(event: any) {
 
   // GET /v1/businesses/{businessId}/team
   if (method === "GET" && path === `/v1/businesses/${biz}/team`) {
+    // Best-effort: return stored membership email (filled on invite accept; backfilled for current user below)
     const members = await prisma.userBusinessRole.findMany({
       where: { business_id: biz },
       orderBy: [{ created_at: "asc" }],
-      select: { user_id: true, role: true, created_at: true },
+      select: { user_id: true, email: true, role: true, created_at: true },
     });
+
+    // Backfill the *current* user's email if missing (we can’t look up everyone without a User table)
+    try {
+      const emailClaim = normalizeEmail((claims as any)?.email ?? "");
+      if (emailClaim) {
+        const mine = members.find((m: any) => String(m.user_id) === String(sub));
+        if (mine && !mine.email) {
+          await prisma.userBusinessRole.updateMany({
+            where: { business_id: biz, user_id: sub, email: null },
+            data: { email: emailClaim },
+          });
+          mine.email = emailClaim;
+        }
+      }
+    } catch {
+      // ignore
+    }
 
     const now = new Date();
     const invites = await prisma.businessInvite.findMany({
