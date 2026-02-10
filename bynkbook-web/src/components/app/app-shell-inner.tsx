@@ -20,6 +20,7 @@ import {
   PieChart,
   Target,
   Settings,
+  FileText,
 } from "lucide-react";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -553,19 +554,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             </Pill>
           </div>
 
-          {/* Center: Search bar (visible; not wired yet) */}
-          <div className="flex-1 px-6 max-w-2xl">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                className="h-9 pl-9 pr-3"
-                placeholder="Search…"
-                value={""}
-                onChange={() => {}}
-                aria-label="Search"
-              />
-            </div>
-          </div>
+          {/* Center: Search bar is intentionally hidden until Step I (AI/search is real). */}
+          <div className="flex-1" />
 
           {/* Right: Icon buttons + user menu */}
           <div className="flex items-center gap-2">
@@ -598,12 +588,30 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               {userMenuOpen ? (
                 <div className="absolute right-0 mt-2 w-44 rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
                   <Link
-                    href={href("/settings", false)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    href="/settings"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                     onClick={() => setUserMenuOpen(false)}
                   >
                     <Settings className="h-4 w-4 text-slate-500" />
                     Settings
+                  </Link>
+
+                  <Link
+                    href="/privacy"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <HelpCircle className="h-4 w-4 text-slate-500" />
+                    Privacy
+                  </Link>
+
+                  <Link
+                    href="/terms"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <FileText className="h-4 w-4 text-slate-500" />
+                    Terms
                   </Link>
 
                   <button
