@@ -1,0 +1,15 @@
+{
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "routeKey": "GET /v1/businesses/{businessId}/accounts",
+      "path": "/v1/businesses//accounts"
+    }
+  },
+  "pathParameters": {
+    "businessId": null
+  },
+  "headers": {
+    "Authorization": "Bearer eyJraWQiOiJBSE5FR0lDd1lYSXkwTDNyZmh6RHJtcnp3T0Z4NDYzTklaRnluQUpVYWhVPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiI0NGY4ZjRhOC00MGMxLTcwMGUtNGM3NC1kMGFhZmU4NWI5NGUiLCJjb2duaXRvOmdyb3VwcyI6WyJ1cy1lYXN0LTFfdG15UEp3c0piX0dvb2dsZSJdLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAudXMtZWFzdC0xLmFtYXpvbmF3cy5jb21cL3VzLWVhc3QtMV90bXlQSndzSmIiLCJ2ZXJzaW9uIjoyLCJjbGllbnRfaWQiOiIzOGd1czQ5cG5maWxiYzR1MmY3YjY4aXN0NyIsIm9yaWdpbl9qdGkiOiJiODg0MzkwOC1hNDVhLTQyOTItYmEzZC02ZjI5MmYxYmZlMDMiLCJ0b2tlbl91c2UiOiJhY2Nlc3MiLCJzY29wZSI6Im9wZW5pZCBwcm9maWxlIGVtYWlsIiwiYXV0aF90aW1lIjoxNzcwMzE5NTc4LCJleHAiOjE3NzA0ODMxMzcsImlhdCI6MTc3MDQ3OTUzNywianRpIjoiYTVkN2RjNjEtMmI4MS00MjkzLTgxYmEtYzRhMzg1NDllNWE5IiwidXNlcm5hbWUiOiJHb29nbGVfMTE4MjMzMzk5MTIxNjU0MDI4MzkyIn0.T6pfqdDzGWFdj75iRMlkTX1r4NUPQDxc8L2iiB_iTvnT_Pw6RagiKHp5Plr_GmyNAkZQXdl8prNv5pwGNUtrTDZNQM1OEycE5erTlDfP3NYOS_yeKbE7l5MOv8cKVmFDRtTILbGpOFAIkAiriObx7khSkDAD0N-IOkTSB6XSROUYulngIpkZLBuFllB0glO6HljM_dv2VkpORVW4jfGOUBLhzL1VZ62idRRIAD4WApqB-KoSNkfwjdRzSxxtPLzd0u5y3DPQ0n1RoY0hZn2kPb8hheZjs6CKybBjYOeJ44TJl3LglAZsv0V9d0rLl2avLfXh90gS-HW9q0pMlYJmWg"
+  }
+}

@@ -65,7 +65,7 @@ export default $config({
       environment: {
         DB_URL_SECRET_ID: "ledrigo-dev/rds/database_url",
         NODE_TLS_REJECT_UNAUTHORIZED: "0",
-        CACHE_BUSTER: "20251224095558",
+        CACHE_BUSTER: "20260207171000",
       },
       permissions: [
         // CloudWatch Logs (required for any console.log / error logging)
@@ -90,14 +90,25 @@ export default $config({
     api.route("GET /v1/businesses", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("POST /v1/businesses", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
-    // ---------- Accounts ----------
-    const acctHandler = {
-      ...bizHandler,
-      handler: "packages/functions/src/accounts.handler",
-    } satisfies ApiHandler;
+    // Single business (profile)
+    api.route("GET /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("PATCH /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
-    api.route("GET /v1/businesses/{businessId}/accounts", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-    api.route("POST /v1/businesses/{businessId}/accounts", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+// ---------- Accounts ----------
+const acctHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/accounts.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/accounts", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// Account management (Settings)
+api.route("PATCH /v1/businesses/{businessId}/accounts/{accountId}", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/archive", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/unarchive", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/delete-eligibility", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}", acctHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
     // ---------- Uploads (Phase 4A-2 + 4A-3) ----------
     const uploadsHandler = {
@@ -185,6 +196,11 @@ const plaidStatusHandler = {
   handler: "packages/functions/src/plaidStatus.handler",
 } satisfies ApiHandler;
 
+const plaidDisconnectHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidDisconnect.handler",
+} satisfies ApiHandler;
+
 const plaidSyncHandler = {
   ...plaidHandler,
   handler: "packages/functions/src/plaidSync.handler",
@@ -207,6 +223,12 @@ api.route(
 api.route(
   "GET /v1/businesses/{businessId}/accounts/{accountId}/plaid/status",
   plaidStatusHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "DELETE /v1/businesses/{businessId}/accounts/{accountId}/plaid/disconnect",
+  plaidDisconnectHandler,
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
 

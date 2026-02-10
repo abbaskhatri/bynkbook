@@ -11,6 +11,16 @@ model Business {
   id                 String               @id @db.Uuid
   name               String
   owner_user_id      String
+
+  // Optional Business Profile metadata (Settings)
+  address                  String?
+  phone                    String?
+  logo_url                 String?
+  industry                 String?
+  currency                 String               @default("USD")
+  timezone                 String               @default("America/Chicago")
+  fiscal_year_start_month  Int                  @default(1)
+
   // Phase 7.1: per-business authz mode flag (default OFF)
   authz_mode         String               @default("OFF")
   // Phase 7.2: enforcement wave gate (0=none, 1=Team+RolePolicy, 2=Reconcile, 3=Snapshots/Exports)

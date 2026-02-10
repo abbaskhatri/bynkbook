@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { getCurrentUser } from "aws-amplify/auth";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentUser, signOut } from "aws-amplify/auth";
 import {
   Bell,
   HelpCircle,
@@ -24,6 +24,7 @@ import {
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/app/pill";
@@ -36,6 +37,19 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const pathname = usePathname();
   const sp = useSearchParams();
   const router = useRouter();
+  const qc = useQueryClient();
+
+  const apiBase =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "";
+
+  const envLabel = useMemo(() => {
+    const host = apiBase.toLowerCase();
+    // DEV heuristics: execute-api host or explicit dev subdomain
+    if (host.includes("execute-api") || host.includes("api-dev") || host.includes("-dev")) return "DEV";
+    return "PROD";
+  }, [apiBase]);
 
   const currentUrl = useMemo(() => {
     const qs = sp.toString();
@@ -79,7 +93,31 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const showChrome = !isAuthRoute;
   const noPageScroll = pathname.startsWith("/ledger"); // ledger should not page-scroll
 
+  async function onSignOut() {
+    try {
+      await signOut();
+    } finally {
+      // Local-first: clear cached app state and return to login
+      qc.clear();
+      router.replace("/login");
+    }
+  }
+
   const [collapsed, setCollapsed] = useState(false);
+
+  // Topbar user menu (Settings + Sign out)
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onDocMouseDown(ev: MouseEvent) {
+      const el = userMenuRef.current;
+      if (!el) return;
+      if (ev.target instanceof Node && !el.contains(ev.target)) setUserMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
 
   useEffect(() => {
     try {
@@ -123,12 +161,158 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const businessId = business?.id ?? bizIdFromUrl ?? "";
 
   const accountsQ = useAccounts(businessId || null);
+
   const firstActiveAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
     return list.find((a) => !a.archived_at)?.id ?? null;
   }, [accountsQ.data]);
 
-  const currentAccountId = sp.get("accountId") ?? firstActiveAccountId ?? "";
+  // Global rule: some routes REQUIRE a single account (cannot accept accountId=all)
+  const routeRequiresSingleAccount = useMemo(() => {
+    return (
+      pathname.startsWith("/ledger") ||
+      pathname.startsWith("/reconcile") ||
+      pathname.startsWith("/issues") ||
+      pathname.startsWith("/category-review") ||
+      pathname.startsWith("/closed-periods")
+    );
+  }, [pathname]);
+
+  // URL is the source of truth; we may temporarily *display/use* the first active account,
+  // but we only write it into the URL once accounts have loaded (debounced) to avoid loops.
+  const accountIdFromUrl = sp.get("accountId") ?? null;
+
+  // Persist last real accountId ONLY when accountId !== "all"
+  useEffect(() => {
+    if (!businessId) return;
+    if (!accountIdFromUrl) return;
+    if (accountIdFromUrl === "all") return;
+
+    try {
+      const key = `bynkbook:lastAccountId:${businessId}`;
+      localStorage.setItem(key, accountIdFromUrl);
+    } catch {}
+  }, [businessId, accountIdFromUrl]);
+
+  // If URL has accountId=all and route requires a single account:
+  // fallback to last real account for that business (localStorage) or first active account.
+  useEffect(() => {
+    if (!businessId) return;
+    if (accountIdFromUrl !== "all") return;
+    if (!routeRequiresSingleAccount) return;
+    if (accountsQ.isLoading) return;
+
+    const accounts = accountsQ.data ?? [];
+    let fallback: string | null = null;
+
+    try {
+      const key = `bynkbook:lastAccountId:${businessId}`;
+      const stored = localStorage.getItem(key);
+      if (stored && stored !== "all") {
+        const ok = accounts.some((a) => a.id === stored && !a.archived_at);
+        if (ok) fallback = stored;
+      }
+    } catch {}
+
+    if (!fallback) fallback = firstActiveAccountId ?? null;
+    if (!fallback) return;
+
+    const params = new URLSearchParams(sp.toString());
+    params.set("businessId", businessId);
+    params.delete("businessesId");
+    params.set("accountId", fallback);
+
+    router.replace(`${pathname}?${params.toString()}`);
+  }, [
+    businessId,
+    accountIdFromUrl,
+    routeRequiresSingleAccount,
+    accountsQ.isLoading,
+    accountsQ.data,
+    firstActiveAccountId,
+    pathname,
+    router,
+    sp,
+  ]);
+
+  const effectiveAccountId = accountIdFromUrl ?? firstActiveAccountId ?? null;
+  const currentAccountId = effectiveAccountId ?? "";
+
+  const account = useMemo(() => {
+    const list = accountsQ.data ?? [];
+    const id = effectiveAccountId ?? "";
+    return list.find((a) => a.id === id) ?? list[0] ?? null;
+  }, [accountsQ.data, effectiveAccountId]);
+
+  const autopickRef = useRef<{ bizId: string | null; timer: any }>({ bizId: null, timer: null });
+
+  // Auto-pick first account after accounts load (single debounced URL write)
+  useEffect(() => {
+    if (!businessId) return;
+
+    // If URL already has accountId, mark this business as handled.
+    if (accountIdFromUrl) {
+      autopickRef.current.bizId = businessId;
+      if (autopickRef.current.timer) {
+        clearTimeout(autopickRef.current.timer);
+        autopickRef.current.timer = null;
+      }
+      return;
+    }
+
+    if (accountsQ.isLoading) return;
+    if (!firstActiveAccountId) return;
+
+    // One-shot per business selection
+    if (autopickRef.current.bizId === businessId) return;
+
+    if (autopickRef.current.timer) clearTimeout(autopickRef.current.timer);
+
+    autopickRef.current.timer = setTimeout(() => {
+      const params = new URLSearchParams(sp.toString());
+      params.set("businessId", businessId);
+      params.delete("businessesId");
+      params.set("accountId", firstActiveAccountId);
+
+      router.replace(`${pathname}?${params.toString()}`);
+      autopickRef.current.bizId = businessId;
+      autopickRef.current.timer = null;
+    }, 200);
+
+    return () => {
+      if (autopickRef.current.timer) {
+        clearTimeout(autopickRef.current.timer);
+        autopickRef.current.timer = null;
+      }
+    };
+  }, [accountsQ.isLoading, accountIdFromUrl, businessId, firstActiveAccountId, pathname, router, sp]);
+
+  function onBusinessChange(nextBusinessId: string) {
+    const params = new URLSearchParams(sp.toString());
+    params.set("businessId", nextBusinessId);
+    params.delete("businessesId");
+    params.delete("accountId"); // LOCK: clear accountId immediately on business change
+
+    // Allow autopick for the new business after accounts load
+    autopickRef.current.bizId = null;
+    if (autopickRef.current.timer) {
+      clearTimeout(autopickRef.current.timer);
+      autopickRef.current.timer = null;
+    }
+
+    router.replace(`${pathname}?${params.toString()}`);
+  }
+
+  function onAccountChange(nextAccountId: string) {
+    if (!businessId) return;
+    const params = new URLSearchParams(sp.toString());
+    params.set("businessId", businessId);
+    params.delete("businessesId");
+    params.set("accountId", nextAccountId);
+
+    autopickRef.current.bizId = businessId;
+    router.replace(`${pathname}?${params.toString()}`);
+  }
 
   // Sidebar attention counts (UI-only; not authoritative)
   const [attnIssues, setAttnIssues] = useState(0);
@@ -362,25 +546,79 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
         <header className="h-14 border-b flex items-center justify-between px-4 sticky top-0 z-40 bg-background">
-          <Pill title="Business">{businessesQ.isLoading ? "Loading…" : (business?.name ?? "Business")}</Pill>
+          {/* Left: Business pill (display-only; we expect 1 business) */}
+          <div className="flex items-center gap-3 min-w-0">
+            <Pill title="Business">
+              {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
+            </Pill>
+          </div>
 
-          <div className="flex items-center gap-3">
-            <div className="relative w-[300px]">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input className="h-8 pl-8" placeholder="Search…" />
+          {/* Center: Search bar (visible; not wired yet) */}
+          <div className="flex-1 px-6 max-w-2xl">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                className="h-9 pl-9 pr-3"
+                placeholder="Search…"
+                value={""}
+                onChange={() => {}}
+                aria-label="Search"
+              />
             </div>
+          </div>
 
-            <Button variant="outline" className="h-8 w-8 p-0" title="Notifications">
+          {/* Right: Icon buttons + user menu */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+              title="Notifications"
+            >
               <Bell className="h-4 w-4" />
-            </Button>
+            </button>
 
-            <Button variant="outline" className="h-8 w-8 p-0" title="Help">
+            <button
+              type="button"
+              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+              title="Help"
+            >
               <HelpCircle className="h-4 w-4" />
-            </Button>
+            </button>
 
-            <Button variant="outline" className="h-9 w-9 p-0" title="Account">
-              <UserCircle className="h-6 w-6" />
-            </Button>
+            <div className="relative" ref={userMenuRef}>
+              <button
+                type="button"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                title="Account"
+                onClick={() => setUserMenuOpen((v) => !v)}
+              >
+                <UserCircle className="h-4 w-4" />
+              </button>
+
+              {userMenuOpen ? (
+                <div className="absolute right-0 mt-2 w-44 rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
+                  <Link
+                    href={href("/settings", false)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <Settings className="h-4 w-4 text-slate-500" />
+                    Settings
+                  </Link>
+
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                    onClick={async () => {
+                      setUserMenuOpen(false);
+                      await onSignOut();
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
 

@@ -1,15 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser, signOut } from "aws-amplify/auth";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { patchBusiness, type Business } from "@/lib/api/businesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { createAccount, type Account, type AccountType } from "@/lib/api/accounts";
+import {
+  createAccount,
+  patchAccountName,
+  archiveAccount,
+  unarchiveAccount,
+  getAccountDeleteEligibility,
+  deleteAccount,
+  type Account,
+  type AccountType,
+} from "@/lib/api/accounts";
+import { plaidStatus, plaidDisconnect } from "@/lib/api/plaid";
+import { PlaidConnectButton } from "@/components/plaid/PlaidConnectButton";
 import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
-import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
+import { getRolePolicies, type RolePolicyRow } from "@/lib/api/rolePolicies";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 
 import { HintWrap } from "@/components/primitives/HintWrap";
@@ -106,11 +119,48 @@ export default function SettingsPageClient() {
     return list[0]?.id ?? null;
   }, [bizIdFromUrl, businessesQ.data]);
 
+  // Keep Settings URL consistent with the selected business (one-shot sync; no loops)
+  const didSyncBizRef = useRef(false);
+  useEffect(() => {
+    if (didSyncBizRef.current) return;
+    if (businessesQ.isLoading) return;
+
+    const list = businessesQ.data ?? [];
+    const firstId = list[0]?.id ?? null;
+    if (!firstId) return;
+
+    if (bizIdFromUrl) {
+      didSyncBizRef.current = true;
+      return;
+    }
+
+    const params = new URLSearchParams(String(sp));
+    params.set("businessId", firstId);
+    params.delete("businessesId");
+    router.replace(`?${params.toString()}`);
+    didSyncBizRef.current = true;
+  }, [bizIdFromUrl, businessesQ.isLoading, businessesQ.data, router, sp]);
+
   const accountsQ = useAccounts(selectedBusinessId);
+
+  // Plaid status cache (loaded only when Accounts tab is active)
+  const [plaidByAccount, setPlaidByAccount] = useState<Record<string, { connected: boolean; institutionName?: string }>>({});
+  const [plaidLoading, setPlaidLoading] = useState<Record<string, boolean>>({});
+
+  // Delete eligibility cache (LOCK: only show Delete if eligible === true)
+  const [deleteEligByAccount, setDeleteEligByAccount] = useState<Record<string, { eligible: boolean; related_total: number }>>({});
+  const [deleteEligLoading, setDeleteEligLoading] = useState<Record<string, boolean>>({});
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Rename account dialog
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameAccountId, setRenameAccountId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameErr, setRenameErr] = useState<string | null>(null);
 
   // Team (Phase 6C)
   const selectedBusinessRole = useMemo(() => {
@@ -118,6 +168,36 @@ export default function SettingsPageClient() {
     const row = list.find((b) => b.id === selectedBusinessId);
     return String(row?.role ?? "").toUpperCase();
   }, [businessesQ.data, selectedBusinessId]);
+
+    const selectedBusiness = useMemo(() => {
+    const list = (businessesQ.data ?? []) as Business[];
+    return list.find((b) => b.id === selectedBusinessId) ?? null;
+  }, [businessesQ.data, selectedBusinessId]);
+
+  // (moved) canEditBusinessProfile is declared later, after selectedBusinessRole
+
+  const [bpAddress, setBpAddress] = useState("");
+  const [bpPhone, setBpPhone] = useState("");
+  const [bpLogoUrl, setBpLogoUrl] = useState("");
+  const [bpIndustry, setBpIndustry] = useState("");
+  const [bpCurrency, setBpCurrency] = useState("USD");
+  const [bpTimezone, setBpTimezone] = useState("America/Chicago");
+  const [bpFiscalMonth, setBpFiscalMonth] = useState("1");
+  const [bpSaving, setBpSaving] = useState(false);
+  const [bpMsg, setBpMsg] = useState<string | null>(null);
+
+  // Hydrate form when business changes/loads
+  useEffect(() => {
+    const b = selectedBusiness as any;
+    if (!b) return;
+    setBpAddress(String(b.address ?? ""));
+    setBpPhone(String(b.phone ?? ""));
+    setBpLogoUrl(String(b.logo_url ?? ""));
+    setBpIndustry(String(b.industry ?? ""));
+    setBpCurrency(String(b.currency ?? "USD"));
+    setBpTimezone(String(b.timezone ?? "America/Chicago"));
+    setBpFiscalMonth(String(b.fiscal_year_start_month ?? 1));
+  }, [selectedBusinessId, selectedBusiness]);
 
   const noPermTitle = "Insufficient permissions";
   const policyDeniedTitle = "Not allowed by role policy";
@@ -134,6 +214,10 @@ const canManageMemberRolesAllowlist = useMemo(
 );
 
 const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBusinessRole]);
+const canEditBusinessProfile = useMemo(
+  () => ["OWNER", "ADMIN"].includes(selectedBusinessRole),
+  [selectedBusinessRole]
+);
 
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
@@ -151,13 +235,11 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
   // Team sub-tab
   const [teamSubTab, setTeamSubTab] = useState<"members" | "roles">("members");
 
-  // Role Policies (store-only, not enforced yet)
+// Role Policies (store-only, not enforced yet) — view-only in S1
   const [polLoading, setPolLoading] = useState(false);
   const [polError, setPolError] = useState<string | null>(null);
   const [polMsg, setPolMsg] = useState<string | null>(null);
   const [polRows, setPolRows] = useState<RolePolicyRow[]>([]);
-  const [polDraft, setPolDraft] = useState<Record<string, Record<string, string>>>({});
-  const [polSaving, setPolSaving] = useState(false);
 
   // Activity Log (Phase 6D)
   const [actLoading, setActLoading] = useState(false);
@@ -369,6 +451,133 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
     };
   }, [sp, authReady, selectedBusinessId]);
 
+  // Load plaid status when Accounts tab is active (instant-fast; cached)
+  useEffect(() => {
+    const tab = sp.get("tab") || "business";
+    if (tab !== "accounts") return;
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+    if (accountsQ.isLoading) return;
+
+    const list = accountsQ.data ?? [];
+    if (list.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      // Only fetch for accounts we haven't cached yet
+      const toFetch = list.filter((a) => plaidByAccount[a.id] == null && !plaidLoading[a.id]);
+      if (toFetch.length === 0) return;
+
+      // mark loading
+      setPlaidLoading((cur) => {
+        const next = { ...cur };
+        for (const a of toFetch) next[a.id] = true;
+        return next;
+      });
+
+      try {
+        const results = await Promise.all(
+          toFetch.map(async (a) => {
+            try {
+              const res: any = await plaidStatus(selectedBusinessId, a.id);
+              const connected = !!res?.connected;
+              const institutionName = res?.institution?.name ?? res?.institution_name ?? undefined;
+              return { id: a.id, connected, institutionName };
+            } catch (e: any) {
+              // If status fails, mark unknown but ensure we *finish* and render something
+              return { id: a.id, connected: false as const, institutionName: undefined, _error: true as const };
+            }
+          })
+        );
+
+        if (cancelled) return;
+
+        setPlaidByAccount((cur) => {
+          const next = { ...cur };
+          for (const r of results as any[]) {
+            next[r.id] = {
+              connected: !!r.connected,
+              institutionName: r.institutionName,
+              // keep an error hint so UI can show "Unknown" instead of infinite loading
+              _error: !!r._error,
+            } as any;
+          }
+          return next;
+        });
+      } finally {
+        if (!cancelled) {
+          setPlaidLoading((cur) => {
+            const next = { ...cur };
+            for (const a of toFetch) delete next[a.id];
+            return next;
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sp, authReady, selectedBusinessId, accountsQ.isLoading, accountsQ.data, plaidByAccount, plaidLoading]);
+
+  // Load delete eligibility when Accounts tab is active (cached)
+  useEffect(() => {
+    const tab = sp.get("tab") || "business";
+    if (tab !== "accounts") return;
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+    if (accountsQ.isLoading) return;
+
+    const list = accountsQ.data ?? [];
+    if (list.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const toFetch = list.filter((a) => deleteEligByAccount[a.id] == null && !deleteEligLoading[a.id]);
+      if (toFetch.length === 0) return;
+
+      setDeleteEligLoading((cur) => {
+        const next = { ...cur };
+        for (const a of toFetch) next[a.id] = true;
+        return next;
+      });
+
+      try {
+        const results = await Promise.all(
+          toFetch.map(async (a) => {
+            try {
+              const res = await getAccountDeleteEligibility(selectedBusinessId, a.id);
+              return { id: a.id, ...res };
+            } catch {
+              // If the check fails, treat as not eligible and keep delete hidden
+              return { id: a.id, eligible: false, related_total: 1 };
+            }
+          })
+        );
+
+        if (cancelled) return;
+        setDeleteEligByAccount((cur) => {
+          const next = { ...cur };
+          for (const r of results) next[r.id] = { eligible: r.eligible, related_total: r.related_total };
+          return next;
+        });
+      } finally {
+        if (!cancelled) {
+          setDeleteEligLoading((cur) => {
+            const next = { ...cur };
+            for (const a of toFetch) delete next[a.id];
+            return next;
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sp, authReady, selectedBusinessId, accountsQ.isLoading, accountsQ.data, deleteEligByAccount, deleteEligLoading]);
+
   // Load role policies when Team tab is active (members or roles)
   // - Needed for Phase 7.2B permission hints
   // - Also reused for Roles & Permissions editor when teamSubTab === "roles"
@@ -389,34 +598,8 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
         if (!cancelled) {
           setPolRows(items);
 
-          // Only build the editable draft when in Roles & Permissions subtab
-          if (teamSubTab === "roles") {
-            const roles = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"];
-            const keys = [
-              "dashboard",
-              "ledger",
-              "reconcile",
-              "issues",
-              "vendors",
-              "invoices",
-              "reports",
-              "settings",
-              "bank_connections",
-              "team_management",
-              "billing",
-              "ai_automation",
-            ];
+          // S1 LOCK: view-only (store-only). No draft/edit state, no upserts.
 
-            const byRole: Record<string, Record<string, string>> = {};
-            for (const r of roles) {
-              const row = items.find((x) => String(x.role).toUpperCase() === r);
-              const cur = (row?.policy_json ?? {}) as Record<string, string>;
-              const filled: Record<string, string> = {};
-              for (const k of keys) filled[k] = String(cur[k] ?? "NONE").toUpperCase();
-              byRole[r] = filled;
-            }
-            setPolDraft(byRole);
-          }
         }
       } catch (e: any) {
         if (!cancelled) setPolError(e?.message ?? "Failed to load role policies");
@@ -456,7 +639,7 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
         {/* Tabs (inside header box) */}
         <div className="px-3 py-3">
           <div className="flex gap-2 text-sm">
-            {[
+         {[
               { key: "business", label: "Business Profile" },
               { key: "team", label: "Team" },
               { key: "activity", label: "Activity Log" },
@@ -857,7 +1040,14 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
 
                             return (
                               <TableRow key={m.user_id} className="hover:bg-slate-50">
-                                <TableCell className="py-2 font-medium text-slate-900">{m.user_id}</TableCell>
+                                <TableCell className="py-2 font-medium text-slate-900">
+                                  <span
+                                    title={(m as any).email ? String((m as any).email) : String(m.user_id)}
+                                    className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-800"
+                                  >
+                                    {(m as any).email ? String((m as any).email) : `User • ${String(m.user_id).slice(0, 8)}…`}
+                                  </span>
+                                </TableCell>
                                 <TableCell className="py-2 text-slate-700">
 <Select
   value={m.role}
@@ -938,31 +1128,12 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                             </div>
                           </div>
 
-                          <Button
-                            className="h-7 px-3 text-xs"
-                            disabled={!isOwnerRole || polSaving || polLoading || !selectedBusinessId}
-                            title={!isOwnerRole ? "Only OWNER can edit/save" : "Save role policies"}
-                            onClick={async () => {
-                              if (!selectedBusinessId) return;
-                              setPolSaving(true);
-                              setPolMsg(null);
-                              setPolError(null);
-                              try {
-                                // Save each role’s policy_json
-                                const roles = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"];
-                                for (const r of roles) {
-                                  await upsertRolePolicy(selectedBusinessId, r, polDraft[r] ?? {});
-                                }
-                                setPolMsg("Saved. (Not enforced yet)");
-                              } catch (e: any) {
-                                setPolError(e?.message ?? "Failed to save");
-                              } finally {
-                                setPolSaving(false);
-                              }
-                            }}
+                          <span
+                            className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium"
+                            title="View-only in S1"
                           >
-                            {polSaving ? "Saving…" : "Save"}
-                          </Button>
+                            View-only (S1)
+                          </span>
                         </div>
 
                         {polLoading ? <div className="mt-3"><Skeleton className="h-20 w-full" /></div> : null}
@@ -1006,31 +1177,28 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                                 <TableCell className="py-2 font-medium text-slate-900">{label}</TableCell>
 
                                 {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => {
-                                  const value = polDraft?.[r]?.[key] ?? "NONE";
+                                  const row = polRows.find((x) => String(x.role).toUpperCase() === r);
+                                  const value = String((row?.policy_json as any)?.[key] ?? "NONE").toUpperCase();
+
+                                  const label = value === "FULL" ? "Full" : value === "VIEW" ? "View" : "None";
+                                  const cls =
+                                    value === "FULL"
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                      : value === "VIEW"
+                                        ? "bg-slate-50 text-slate-800 border-slate-200"
+                                        : "bg-slate-50 text-slate-500 border-slate-200";
+
                                   return (
                                     <TableCell key={r} className="py-2 text-center">
-                                      <Select
-                                        value={value}
-                                        onValueChange={(v) =>
-                                          setPolDraft((cur) => ({
-                                            ...cur,
-                                            [r]: { ...(cur[r] ?? {}), [key]: v },
-                                          }))
+                                      <span
+                                        className={
+                                          "inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-semibold border " +
+                                          cls
                                         }
-                                        disabled={!isOwnerRole}
+                                        title="View-only in S1"
                                       >
-                                        <SelectTrigger
-                                          className={`${selectTriggerClass} mx-auto w-28 hover:bg-slate-50`}
-                                          title={!isOwnerRole ? "Only OWNER can edit" : "Set access"}
-                                        >
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="NONE">None</SelectItem>
-                                          <SelectItem value="VIEW">View</SelectItem>
-                                          <SelectItem value="FULL">Full</SelectItem>
-                                        </SelectContent>
-                                      </Select>
+                                        {label}
+                                      </span>
                                     </TableCell>
                                   );
                                 })}
@@ -1120,6 +1288,47 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
       </div>
     </div>
   </AppDialog>
+
+  <AppDialog
+    open={renameOpen}
+    onClose={() => setRenameOpen(false)}
+    title="Rename account"
+    size="sm"
+    footer={
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="outline" onClick={() => setRenameOpen(false)} disabled={renameBusy}>
+          Cancel
+        </Button>
+        <Button
+          onClick={async () => {
+            if (!selectedBusinessId || !renameAccountId) return;
+            setRenameBusy(true);
+            setRenameErr(null);
+            try {
+              await patchAccountName(selectedBusinessId, renameAccountId, renameValue.trim());
+              qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+              setRenameOpen(false);
+            } catch (e: any) {
+              setRenameErr(e?.message ?? "Rename failed");
+            } finally {
+              setRenameBusy(false);
+            }
+          }}
+          disabled={renameBusy || !renameValue.trim()}
+        >
+          {renameBusy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    }
+  >
+    <div className="space-y-3">
+      {renameErr ? <div className="text-sm text-red-600">{renameErr}</div> : null}
+      <div className="space-y-1">
+        <Label>Name</Label>
+        <Input className={inputH7} value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
+      </div>
+    </div>
+  </AppDialog>
 </div>
                 </div>
               </CardHeader>
@@ -1138,6 +1347,7 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                           <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Type</TableHead>
                           <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Opening balance</TableHead>
                           <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Status</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Plaid</TableHead>
                           <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
                         </TableRow>
                       </THead>
@@ -1167,32 +1377,151 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                                 </span>
                               </TableCell>
 
+                              {/* Plaid column (real: status + connect dialog + disconnect) */}
+                              <TableCell className="py-2 text-right">
+                                {(() => {
+                                  const st = plaidByAccount[a.id];
+                                  const loading = !!plaidLoading[a.id];
+
+                                  if (loading && !st) {
+                                    return <span className="text-[11px] text-slate-500">Loading…</span>;
+                                  }
+
+                                  if (st && (st as any)._error) {
+                                    return (
+                                      <div className="flex justify-end">
+                                        <button
+                                          type="button"
+                                          className="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                          onClick={() => {
+                                            // force refetch by clearing cached status for this account
+                                            setPlaidByAccount((cur) => {
+                                              const next = { ...cur };
+                                              delete (next as any)[a.id];
+                                              return next;
+                                            });
+                                          }}
+                                          title="Retry Plaid status"
+                                        >
+                                          Unknown (Retry)
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+
+                                  if (st?.connected) {
+                                    return (
+                                      <div className="flex justify-end items-center gap-2">
+                                        <span
+                                          className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-medium"
+                                          title={st.institutionName ? st.institutionName : "Connected"}
+                                        >
+                                          Connected
+                                        </span>
+
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 px-2 text-xs"
+                                          onClick={async () => {
+                                            if (!selectedBusinessId) return;
+                                            await plaidDisconnect(selectedBusinessId, a.id);
+                                            setPlaidByAccount((cur) => ({
+                                              ...cur,
+                                              [a.id]: { connected: false },
+                                            }));
+                                          }}
+                                        >
+                                          Disconnect
+                                        </Button>
+                                      </div>
+                                    );
+                                  }
+
+                                  // Not connected: open Plaid consent/dialog via existing component
+                                  return (
+                                    <div className="flex justify-end">
+                                      <PlaidConnectButton
+                                        businessId={selectedBusinessId ?? ""}
+                                        accountId={a.id}
+                                        effectiveStartDate={todayYmd()}
+                                        disabledClassName="opacity-50 cursor-not-allowed"
+                                        buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                        disabled={!selectedBusinessId}
+                                        onConnected={async () => {
+                                          if (!selectedBusinessId) return;
+                                          // Refresh status after connect/sync
+                                          try {
+                                            const res: any = await plaidStatus(selectedBusinessId, a.id);
+                                            setPlaidByAccount((cur) => ({
+                                              ...cur,
+                                              [a.id]: {
+                                                connected: !!res?.connected,
+                                                institutionName: res?.institution?.name ?? res?.institution_name ?? undefined,
+                                              },
+                                            }));
+                                          } catch {
+                                            // best effort; UI still works
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                  );
+                                })()}
+                              </TableCell>
+
+                              {/* Actions: Rename / Archive / Delete (Delete only if eligible === true) */}
                               <TableCell className="py-2 text-right">
                                 <div className="flex justify-end gap-1">
                                   <button
                                     type="button"
-                                    className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                                    disabled
-                                    title="Edit (coming soon)"
+                                    className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    title="Rename"
+                                    onClick={() => {
+                                      setRenameAccountId(a.id);
+                                      setRenameValue(a.name);
+                                      setRenameErr(null);
+                                      setRenameOpen(true);
+                                    }}
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>
+
                                   <button
                                     type="button"
-                                    className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                                    disabled
-                                    title="Archive (coming soon)"
+                                    className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                    title={isArchived ? "Unarchive" : "Archive"}
+                                    onClick={async () => {
+                                      if (!selectedBusinessId) return;
+                                      if (isArchived) await unarchiveAccount(selectedBusinessId, a.id);
+                                      else await archiveAccount(selectedBusinessId, a.id);
+                                      qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                                    }}
                                   >
                                     <Archive className="h-3.5 w-3.5" />
                                   </button>
-                                  <button
-                                    type="button"
-                                    className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                                    disabled
-                                    title="Delete (coming soon)"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+
+                                  {(() => {
+                                    const elig = deleteEligByAccount[a.id];
+                                    if (!elig || !elig.eligible) return null;
+
+                                    return (
+                                      <button
+                                        type="button"
+                                        className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-rose-600 hover:bg-rose-50"
+                                        title="Delete (only allowed when no related rows)"
+                                        onClick={async () => {
+                                          if (!selectedBusinessId) return;
+                                          const ok = window.confirm("Delete this account? This cannot be undone.");
+                                          if (!ok) return;
+                                          await deleteAccount(selectedBusinessId, a.id);
+                                          qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                                        }}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    );
+                                  })()}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1262,91 +1591,192 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                   </div>
                 </CardContent>
               </Card>
+               {/* Business Profile (real, persisted) */}
+               <Card>
+                 <CardHeader className="space-y-0 pb-3">
+                   <div className="flex items-start justify-between gap-4">
+                     <div className="min-w-0">
+                       <CardTitle>Business Profile</CardTitle>
+                       <div className="mt-1 text-xs text-muted-foreground">
+                         Optional profile details (saved)
+                       </div>
+                     </div>
 
-              {/* Business Management (UI shell) */}
-              <Card>
-                <CardHeader className="space-y-0 pb-3">
-                  <CardTitle>Business Profile</CardTitle>
-                  <div className="mt-1 text-xs text-muted-foreground">Business details and regional settings</div>
-                </CardHeader>
+                     <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                       {canEditBusinessProfile ? "Editable" : "View-only"}
+                     </span>
+                   </div>
+                 </CardHeader>
 
-                <CardContent className="space-y-4">
-                  {/* Logo + upload (UI-only) */}
-                  <div>
-                    <div className="text-xs font-medium text-slate-700">Business Logo</div>
-                    <div className="mt-2 flex items-start gap-3">
-                      <div className="h-16 w-16 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-slate-400">
-                        <div className="text-xs">Logo</div>
-                      </div>
-                      <div className="space-y-1">
-                        <Button variant="outline" size="sm" disabled>
-                          Upload logo
-                        </Button>
-                        <div className="text-[11px] text-muted-foreground">PNG, JPG, SVG or WebP. Max 2MB.</div>
-                      </div>
-                    </div>
-                  </div>
+                 <CardContent className="space-y-3">
+                   {bpMsg ? <div className="text-xs text-slate-700">{bpMsg}</div> : null}
 
-                  {/* Business fields (UI-only) */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label>Business Name</Label>
-                      <Input className="h-7" disabled value="Snaxle Inc" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Legal Name</Label>
-                      <Input className="h-7" disabled value="My Business LLC" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Industry</Label>
-                      <Input className="h-7" disabled value="retail" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Phone</Label>
-                      <Input className="h-7" disabled value="(469) 781-9171" />
-                    </div>
-                    <div className="space-y-1 col-span-2">
-                      <Label>Address</Label>
-                      <Input className="h-7" disabled value="123 Main St, City, State 12345" />
-                    </div>
-                  </div>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                     <div className="space-y-1">
+                       <Label>Business name</Label>
+                       <Input className={inputH7} disabled value={selectedBusiness?.name ?? ""} />
+                     </div>
 
-                  {/* Regional settings (UI-only) */}
-                  <div className="pt-2 border-t border-slate-200">
-                    <div className="text-xs font-medium text-slate-700 mb-2">Regional Settings</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label>Currency</Label>
-                        <Input className="h-7" disabled value="USD - US Dollar" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Timezone</Label>
-                        <Input className="h-7" disabled value="Central Time (CT)" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Fiscal Year Start</Label>
-                        <Input className="h-7" disabled value="January" />
-                      </div>
-                    </div>
+                     <div className="space-y-1">
+                       <Label>Role</Label>
+                       <Input className={inputH7} disabled value={selectedBusinessRole || ""} />
+                     </div>
 
-                    <div className="mt-3 flex items-center justify-between">
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1.5 text-xs text-rose-600 hover:text-rose-700 disabled:opacity-50"
-                        disabled
-                        title="Delete business (coming soon)"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete Business
-                      </button>
+                     <div className="space-y-1">
+                       <Label>Address</Label>
+                       <Input
+                         className={inputH7}
+                         value={bpAddress}
+                         onChange={(e) => setBpAddress(e.target.value)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                         title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Edit address"}
+                       />
+                     </div>
 
-                      <Button size="sm" disabled>
-                        Save changes
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                     <div className="space-y-1">
+                       <Label>Phone</Label>
+                       <Input
+                         className={inputH7}
+                         value={bpPhone}
+                         onChange={(e) => setBpPhone(e.target.value)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                         title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Edit phone"}
+                       />
+                     </div>
+
+                     <div className="space-y-1">
+                       <Label>Industry</Label>
+                       <Input
+                         className={inputH7}
+                         value={bpIndustry}
+                         onChange={(e) => setBpIndustry(e.target.value)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                         title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Edit industry"}
+                       />
+                     </div>
+
+                     <div className="space-y-1 md:col-span-2">
+                       <Label>Logo URL</Label>
+                       <Input
+                         className={inputH7}
+                         value={bpLogoUrl}
+                         onChange={(e) => setBpLogoUrl(e.target.value)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                         title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Edit logo URL"}
+                       />
+                     </div>
+
+                     <div className="space-y-1">
+                       <Label>Currency</Label>
+                       <Select
+                         value={bpCurrency}
+                         onValueChange={(v) => setBpCurrency(v)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                       >
+                         <SelectTrigger
+                           className={selectTriggerClass}
+                           title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Select currency"}
+                         >
+                           <SelectValue placeholder="Currency" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           <SelectItem value="USD">USD — US Dollar</SelectItem>
+                           <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
+                           <SelectItem value="MXN">MXN — Mexican Peso</SelectItem>
+                           <SelectItem value="EUR">EUR — Euro</SelectItem>
+                           <SelectItem value="GBP">GBP — British Pound</SelectItem>
+                         </SelectContent>
+                       </Select>
+                     </div>
+
+                     <div className="space-y-1">
+                       <Label>Fiscal year start month</Label>
+                       <Select
+                         value={bpFiscalMonth}
+                         onValueChange={(v) => setBpFiscalMonth(v)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                       >
+                         <SelectTrigger
+                           className={selectTriggerClass}
+                           title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Select month"}
+                         >
+                           <SelectValue placeholder="Month" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           <SelectItem value="1">January</SelectItem>
+                           <SelectItem value="2">February</SelectItem>
+                           <SelectItem value="3">March</SelectItem>
+                           <SelectItem value="4">April</SelectItem>
+                           <SelectItem value="5">May</SelectItem>
+                           <SelectItem value="6">June</SelectItem>
+                           <SelectItem value="7">July</SelectItem>
+                           <SelectItem value="8">August</SelectItem>
+                           <SelectItem value="9">September</SelectItem>
+                           <SelectItem value="10">October</SelectItem>
+                           <SelectItem value="11">November</SelectItem>
+                           <SelectItem value="12">December</SelectItem>
+                         </SelectContent>
+                       </Select>
+                     </div>
+
+                     <div className="space-y-1 md:col-span-2">
+                       <Label>Timezone</Label>
+                       <Select
+                         value={bpTimezone}
+                         onValueChange={(v) => setBpTimezone(v)}
+                         disabled={!canEditBusinessProfile || bpSaving}
+                       >
+                         <SelectTrigger
+                           className={selectTriggerClass}
+                           title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Select timezone"}
+                         >
+                           <SelectValue placeholder="Timezone" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           <SelectItem value="America/New_York">America/New_York (ET)</SelectItem>
+                           <SelectItem value="America/Chicago">America/Chicago (CT)</SelectItem>
+                           <SelectItem value="America/Denver">America/Denver (MT)</SelectItem>
+                           <SelectItem value="America/Los_Angeles">America/Los_Angeles (PT)</SelectItem>
+                           <SelectItem value="America/Phoenix">America/Phoenix (AZ)</SelectItem>
+                         </SelectContent>
+                       </Select>
+                     </div>
+                   </div>
+
+                   <div className="flex items-center justify-end gap-2 pt-1">
+                     <Button
+                       className="h-7 px-3 text-xs"
+                       disabled={!canEditBusinessProfile || bpSaving || !selectedBusinessId}
+                       onClick={async () => {
+                         if (!selectedBusinessId) return;
+                         setBpSaving(true);
+                         setBpMsg(null);
+                         try {
+                           await patchBusiness(selectedBusinessId, {
+                             address: bpAddress.trim() || null,
+                             phone: bpPhone.trim() || null,
+                             logo_url: bpLogoUrl.trim() || null,
+                             industry: bpIndustry.trim() || null,
+                             currency: (bpCurrency || "USD").toUpperCase(),
+                             timezone: bpTimezone.trim() || "America/Chicago",
+                             fiscal_year_start_month: Number(bpFiscalMonth || "1"),
+                           });
+                           // Refresh businesses cache (single invalidate)
+                           qc.invalidateQueries({ queryKey: ["businesses"] });
+                           setBpMsg("Saved.");
+                         } catch (e: any) {
+                           setBpMsg(e?.message ?? "Save failed");
+                         } finally {
+                           setBpSaving(false);
+                         }
+                       }}
+                       title={!canEditBusinessProfile ? "Only OWNER/ADMIN can edit business profile" : "Save changes"}
+                     >
+                       {bpSaving ? "Saving…" : "Save changes"}
+                     </Button>
+                   </div>
+                 </CardContent>
+               </Card>
 
               {/* Preferences (UI-only) */}
               <Card>
@@ -1363,13 +1793,7 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                     <Input className="h-7 w-48" disabled value="Central Time (CT)" />
                   </div>
 
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-xs font-medium text-slate-700">Color-blind mode</div>
-                      <div className="text-[11px] text-muted-foreground">High-contrast chart colors</div>
-                    </div>
-                    <div className="h-5 w-9 rounded-full bg-slate-200 relative opacity-60" title="Coming soon" />
-                  </div>
+                   {/* (Removed) Color-blind mode toggle — not implemented yet */}
                 </CardContent>
               </Card>
             </div>
@@ -1389,9 +1813,9 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                       </div>
                     </div>
 
-                    <Button size="sm" disabled title="Save preferences (coming soon)">
-                      Save preferences
-                    </Button>
+                    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                      Active (local)
+                    </span>
                   </div>
                 </CardHeader>
 
@@ -1783,9 +2207,9 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                       </div>
                     </div>
 
-                    <Button size="sm" variant="outline" disabled title="Manage billing (coming soon)">
-                      Manage billing
-                    </Button>
+                    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                      View-only
+                    </span>
                   </div>
                 </CardHeader>
 
@@ -1795,7 +2219,7 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-xs font-medium text-slate-800">Current plan</div>
-                        <div className="text-[11px] text-muted-foreground">Plan management is coming soon</div>
+                        <div className="text-[11px] text-muted-foreground">Plan management is not configured yet.</div>
                       </div>
                       <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
                         Free (Phase 3)
@@ -1809,7 +2233,7 @@ const isOwnerRole = useMemo(() => selectedBusinessRole === "OWNER", [selectedBus
                       <div className="text-xs font-medium text-slate-700">Recent activity</div>
                     </div>
                     <div className="px-3 py-3 text-[11px] text-muted-foreground">
-                      Activity log will appear here once backend events are enabled.
+                      Activity appears in the Activity Log tab (read-only).
                     </div>
                   </div>
                 </CardContent>

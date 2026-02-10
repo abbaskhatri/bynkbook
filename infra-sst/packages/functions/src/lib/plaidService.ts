@@ -162,6 +162,26 @@ export async function getStatus(params: { businessId: string; accountId: string;
   });
 }
 
+export async function disconnectBankConnection(params: { businessId: string; accountId: string; userId: string }) {
+  const { businessId, accountId, userId } = params;
+
+  const prisma = await getPrisma();
+  const role = await requireMembership(prisma, businessId, userId);
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
+
+  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
+  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+
+  // Idempotent disconnect:
+  // Remove ONLY the bank connection mapping/cursor/token for this account.
+  // Do NOT delete bank transaction history (BankTransaction is NOT FK-linked to BankConnection).
+  await prisma.bankConnection.deleteMany({
+    where: { business_id: businessId, account_id: accountId },
+  });
+
+  return json(200, { ok: true, disconnected: true });
+}
+
 /**
  * Sync transactions (cursor-based) + retention + balance + webhook flag clearing + opening adjustment entry.
  * Returns: newCount, upgradedCount(=0), duplicateCount, pendingCount, lastSyncAt

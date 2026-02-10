@@ -1,0 +1,9 @@
+-- Business profile fields (Settings)
+ALTER TABLE "business"
+  ADD COLUMN IF NOT EXISTS "address" TEXT,
+  ADD COLUMN IF NOT EXISTS "phone" TEXT,
+  ADD COLUMN IF NOT EXISTS "logo_url" TEXT,
+  ADD COLUMN IF NOT EXISTS "industry" TEXT,
+  ADD COLUMN IF NOT EXISTS "currency" TEXT NOT NULL DEFAULT 'USD',
+  ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'America/Chicago',
+  ADD COLUMN IF NOT EXISTS "fiscal_year_start_month" INTEGER NOT NULL DEFAULT 1;

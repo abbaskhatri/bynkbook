@@ -30,6 +30,12 @@ export async function plaidStatus(businessId: string, accountId: string) {
   });
 }
 
+export async function plaidDisconnect(businessId: string, accountId: string) {
+  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/disconnect`, {
+    method: "DELETE",
+  });
+}
+
 export async function plaidSync(businessId: string, accountId: string) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
     method: "POST",
