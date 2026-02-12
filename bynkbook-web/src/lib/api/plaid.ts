@@ -16,6 +16,7 @@ export async function plaidExchange(
     effectiveStartDate: string;
     endDate?: string; // optional YYYY-MM-DD
     institution?: { name?: string; institution_id?: string };
+    mask?: string;
   }
 ) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/exchange`, {
@@ -40,5 +41,29 @@ export async function plaidSync(businessId: string, accountId: string) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
     method: "POST",
     body: "{}",
+  });
+}
+
+// New-account Plaid flow (review before create)
+export async function plaidLinkTokenBusiness(businessId: string) {
+  return apiFetch(`/v1/businesses/${businessId}/plaid/link-token`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export async function plaidCreateAccount(businessId: string, body: {
+  public_token: string;
+  plaidAccountId: string;
+  effectiveStartDate: string; // YYYY-MM-DD
+  endDate?: string;
+  institution?: { name?: string; institution_id?: string };
+  mask?: string;
+  name: string;
+  type: string;
+}) {
+  return apiFetch(`/v1/businesses/${businessId}/plaid/create-account`, {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }

@@ -56,3 +56,12 @@ export async function patchBusiness(
 export async function deleteBusiness(businessId: string): Promise<void> {
   await apiFetch(`/v1/businesses/${businessId}`, { method: "DELETE" });
 }
+
+export async function getBusinessUsage(businessId: string): Promise<{
+  entries_count: number;
+  accounts_count: number;
+  members_count: number;
+}> {
+  const res: any = await apiFetch(`/v1/businesses/${businessId}/usage`);
+  return res?.usage ?? { entries_count: 0, accounts_count: 0, members_count: 0 };
+}

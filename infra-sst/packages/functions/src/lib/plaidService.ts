@@ -79,8 +79,9 @@ export async function exchangePublicToken(params: {
   endDate?: string; // optional YYYY-MM-DD (end defaults to today)
   institution?: { name?: string; institution_id?: string };
   plaidAccountId: string;
+  mask?: string; // last 4 digits (Plaid account mask)
 }) {
-  const { businessId, accountId, userId, publicToken, effectiveStartDate, institution, plaidAccountId } = params;
+  const { businessId, accountId, userId, publicToken, effectiveStartDate, institution, plaidAccountId, mask } = params;
 
   const prisma = await getPrisma();
   const role = await requireMembership(prisma, businessId, userId);
@@ -111,6 +112,7 @@ export async function exchangePublicToken(params: {
       effective_start_date: start,
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
+      plaid_mask: mask ?? null,
       status: "CONNECTED",
       has_new_transactions: false,
     },
@@ -121,6 +123,7 @@ export async function exchangePublicToken(params: {
       effective_start_date: start,
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
+      plaid_mask: mask ?? null,
       status: "CONNECTED",
       error_code: null,
       error_message: null,
@@ -148,11 +151,35 @@ export async function getStatus(params: { businessId: string; accountId: string;
 
   if (!conn) return json(200, { ok: true, connected: false });
 
+  // Backfill plaid_mask for legacy connections (best-effort).
+  // This keeps UI non-placeholder while avoiding new schemas on Account.
+  if (!conn.plaid_mask) {
+    try {
+      const plaid = await getPlaidClient();
+      const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+      const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
+      const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
+      const mask = acct?.mask ? String(acct.mask) : null;
+
+      if (mask) {
+        await prisma.bankConnection.updateMany({
+          where: { business_id: businessId, account_id: accountId },
+          data: { plaid_mask: mask, updated_at: new Date() },
+        });
+        // update in-memory for response
+        (conn as any).plaid_mask = mask;
+      }
+    } catch {
+      // Never fail status just because backfill failed
+    }
+  }
+
   return json(200, {
     ok: true,
     connected: conn.status === "CONNECTED",
     status: conn.status,
     institutionName: conn.institution_name,
+    last4: conn.plaid_mask ?? null,
     lastSyncAt: conn.last_sync_at ? conn.last_sync_at.toISOString() : null,
     hasNewTransactions: !!conn.has_new_transactions,
     effectiveStartDate: conn.effective_start_date.toISOString().slice(0, 10),

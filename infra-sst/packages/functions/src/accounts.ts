@@ -182,16 +182,19 @@ export async function handler(event: any) {
   }
 
   // POST /v1/businesses/{businessId}/accounts/{accountId}/archive
+  // Rule: archiving auto-disconnects Plaid (removes bank_connection mapping).
   if (method === "POST" && (event?.requestContext?.http?.path ?? "").toString().endsWith("/archive")) {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
 
-    const updated = await prisma.account.update({
-      where: { id: accountId },
-      data: { archived_at: new Date() },
-    });
+    const now = new Date();
 
-    return json(200, { ok: true, account: { id: updated.id, archived_at: updated.archived_at?.toISOString() ?? null } });
+    await prisma.$transaction([
+      prisma.bankConnection.deleteMany({ where: { business_id: businessId, account_id: accountId } }),
+      prisma.account.update({ where: { id: accountId }, data: { archived_at: now } }),
+    ]);
+
+    return json(200, { ok: true, account: { id: accountId, archived_at: now.toISOString() } });
   }
 
   // POST /v1/businesses/{businessId}/accounts/{accountId}/unarchive

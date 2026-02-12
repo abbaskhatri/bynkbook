@@ -22,6 +22,7 @@ export async function handler(event: any) {
   const endDate = (body?.endDate ?? "").toString().trim(); // optional YYYY-MM-DD (end defaults to today)
   const plaidAccountId = (body?.plaidAccountId ?? "").toString().trim();
   const institution = body?.institution ?? undefined;
+  const mask = (body?.mask ?? "").toString().trim() || undefined;
 
   if (!publicToken) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing public_token" }) };
   if (!effectiveStartDate) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing effectiveStartDate" }) };
@@ -36,5 +37,6 @@ export async function handler(event: any) {
     endDate, // service may ignore until implemented
     institution,
     plaidAccountId,
+    mask,
   } as any);
 }

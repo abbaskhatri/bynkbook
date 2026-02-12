@@ -26,6 +26,26 @@ export async function handler(event: any) {
 
   const prisma = await getPrisma();
 
+  // GET /v1/businesses/{businessId}/usage  (minimal counts; membership required)
+  if (method === "GET" && businessId && path?.endsWith(`/v1/businesses/${businessId}/usage`)) {
+    const mem = await prisma.userBusinessRole.findFirst({
+      where: { business_id: businessId, user_id: sub },
+      select: { role: true },
+    });
+    if (!mem) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+
+    const [entries_count, accounts_count, members_count] = await Promise.all([
+      prisma.entry.count({ where: { business_id: businessId, deleted_at: null } }),
+      prisma.account.count({ where: { business_id: businessId, archived_at: null } }),
+      prisma.userBusinessRole.count({ where: { business_id: businessId } }),
+    ]);
+
+    return json(200, {
+      ok: true,
+      usage: { entries_count, accounts_count, members_count },
+    });
+  }
+
   // GET /v1/businesses
   if (method === "GET" && path?.endsWith("/v1/businesses")) {
     const rows = await prisma.userBusinessRole.findMany({

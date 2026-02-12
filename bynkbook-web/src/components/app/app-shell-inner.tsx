@@ -249,6 +249,27 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const effectiveAccountId = accountIdFromUrl ?? firstActiveAccountId ?? null;
   const currentAccountId = effectiveAccountId ?? "";
 
+  // When the current URL uses accountId=all, single-account routes must never navigate with "all".
+  // Compute a safe fallback for link-building: last real account for this business, else first active account.
+  const navAccountId = useMemo(() => {
+    if (!businessId) return "";
+    if (!effectiveAccountId) return "";
+    if (effectiveAccountId !== "all") return effectiveAccountId;
+
+    const accounts = accountsQ.data ?? [];
+
+    try {
+      const key = `bynkbook:lastAccountId:${businessId}`;
+      const stored = localStorage.getItem(key);
+      if (stored && stored !== "all") {
+        const ok = accounts.some((a) => a.id === stored && !a.archived_at);
+        if (ok) return stored;
+      }
+    } catch {}
+
+    return firstActiveAccountId ?? "";
+  }, [businessId, effectiveAccountId, accountsQ.data, firstActiveAccountId]);
+
   const account = useMemo(() => {
     const list = accountsQ.data ?? [];
     const id = effectiveAccountId ?? "";
@@ -377,7 +398,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const href = (path: string, needsAccountId: boolean) => {
     if (!businessId) return path;
     const base = `${path}?businessId=${businessId}`;
-    return needsAccountId && currentAccountId ? `${base}&accountId=${currentAccountId}` : base;
+
+    if (!needsAccountId) return base;
+
+    const id = navAccountId || "";
+    return id ? `${base}&accountId=${id}` : base;
   };
 
   const navGroups = [
@@ -569,21 +594,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
           {/* Right: Icon buttons + user menu */}
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
-              title="Notifications"
-            >
-              <Bell className="h-4 w-4" />
-            </button>
-
-            <button
-              type="button"
-              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
-              title="Help"
-            >
-              <HelpCircle className="h-4 w-4" />
-            </button>
+            {/* Placeholder icon buttons removed (no non-functional UI). */}
 
             <div className="relative" ref={userMenuRef}>
               <button

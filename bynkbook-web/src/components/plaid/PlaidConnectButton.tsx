@@ -395,12 +395,14 @@ export function PlaidConnectButton(props: Props) {
                 setErrorMsg(null);
 
                 try {
+                  const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
                   const res = await plaidExchange(businessId, accountId, {
                     public_token: pendingPublicToken,
                     plaidAccountId: selectedPlaidAccountId,
                     effectiveStartDate: startDate,
-                    endDate: endDate, // optional; backend may ignore until we implement
+                    endDate: endDate, // optional
                     institution: pendingInstitution ?? undefined,
+                    mask: selected?.mask ?? undefined,
                   });
 
                   if (!res?.ok) throw new Error(res?.error ?? "Exchange failed");

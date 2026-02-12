@@ -94,6 +94,9 @@ export default $config({
     api.route("GET /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("PATCH /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+    // Settings usage stats (minimal, business-scoped)
+    api.route("GET /v1/businesses/{businessId}/usage", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // ---------- Accounts ----------
 const acctHandler = {
   ...bizHandler,
@@ -235,6 +238,30 @@ api.route(
 api.route(
   "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/sync",
   plaidSyncHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+// ---------- Plaid (New account via review) ----------
+const plaidLinkTokenBusinessHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidLinkTokenBusiness.handler",
+} satisfies ApiHandler;
+
+const plaidCreateAccountHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidCreateAccount.handler",
+  timeout: "45 seconds",
+} satisfies ApiHandler;
+
+api.route(
+  "POST /v1/businesses/{businessId}/plaid/link-token",
+  plaidLinkTokenBusinessHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "POST /v1/businesses/{businessId}/plaid/create-account",
+  plaidCreateAccountHandler,
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
 
