@@ -1,4 +1,4 @@
-import { createLinkToken, getClaims } from "./lib/plaidService";
+import { createLinkTokenBusiness, getClaims } from "./lib/plaidService";
 
 export async function handler(event: any) {
   const claims = getClaims(event);
@@ -10,5 +10,5 @@ export async function handler(event: any) {
 
   // Create a link token without requiring an existing account.
   // We'll create the account only after user review.
-  return createLinkToken({ businessId, accountId: "__new__", userId: sub } as any);
+  return createLinkTokenBusiness({ businessId, userId: sub } as any);
 }

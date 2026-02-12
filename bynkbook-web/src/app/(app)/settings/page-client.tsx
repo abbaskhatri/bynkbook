@@ -18,7 +18,7 @@ import {
   type Account,
   type AccountType,
 } from "@/lib/api/accounts";
-import { plaidStatus, plaidDisconnect } from "@/lib/api/plaid";
+import { plaidStatus, plaidDisconnect, plaidLinkTokenBusiness, plaidCreateAccount } from "@/lib/api/plaid";
 import { PlaidConnectButton } from "@/components/plaid/PlaidConnectButton";
 import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
 import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
@@ -179,6 +179,7 @@ export default function SettingsPageClient() {
   const accountsQ = useAccounts(selectedBusinessId);
 
   const usageQ = useQuery({
+
     queryKey: ["business-usage", selectedBusinessId],
     enabled: !!selectedBusinessId && authReady,
     queryFn: () => getBusinessUsage(String(selectedBusinessId)),
@@ -191,6 +192,17 @@ export default function SettingsPageClient() {
   const [plaidByAccount, setPlaidByAccount] = useState<Record<string, PlaidCellState>>({});
   const [plaidLoading, setPlaidLoading] = useState<Record<string, boolean>>({});
   const [plaidChecked, setPlaidChecked] = useState<Record<string, boolean>>({});
+
+  const institutionSuggestions = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of accountsQ.data ?? []) {
+      const manual = String((a as any).institution_name ?? "").trim();
+      if (manual) set.add(manual);
+      const plaid = String(plaidByAccount[a.id]?.institutionName ?? "").trim();
+      if (plaid) set.add(plaid);
+    }
+    return Array.from(set).sort((x, y) => x.localeCompare(y));
+  }, [accountsQ.data, plaidByAccount]);
 
   // Delete eligibility cache (LOCK: only show Delete if eligible === true)
   const [deleteEligByAccount, setDeleteEligByAccount] = useState<Record<string, { eligible: boolean; related_total: number }>>({});
@@ -207,6 +219,19 @@ export default function SettingsPageClient() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Create account wizard
+  const [createMode, setCreateMode] = useState<"choose" | "plaid" | "manual">("choose");
+  const [plaidReviewOpen, setPlaidReviewOpen] = useState(false);
+  const [plaidDraft, setPlaidDraft] = useState<{
+    public_token: string;
+    institution?: { name?: string; institution_id?: string };
+    plaidAccountId: string;
+    mask?: string;
+    name: string;
+    type: string;
+    effectiveStartDate: string;
+  } | null>(null);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editAccountId, setEditAccountId] = useState<string | null>(null);
@@ -390,6 +415,11 @@ export default function SettingsPageClient() {
   const [openingBalance, setOpeningBalance] = useState("0.00");
   const [openingDate, setOpeningDate] = useState(todayYmd());
 
+  // Manual metadata (persisted fields)
+  const [manualCurrency, setManualCurrency] = useState("USD");
+  const [manualInstitution, setManualInstitution] = useState("");
+  const [manualLast4, setManualLast4] = useState("");
+
   async function onSignOut() {
     await signOut();
     router.replace("/login");
@@ -428,7 +458,12 @@ export default function SettingsPageClient() {
         type,
         opening_balance_cents: cents,
         opening_balance_date: ymdToIso(openingDate),
-      });
+
+        // Manual metadata (optional)
+        currency_code: manualCurrency || null,
+        institution_name: manualInstitution.trim() || null,
+        last4: manualLast4.trim().length === 4 ? manualLast4.trim() : null,
+      } as any);
 
       qc.setQueryData<Account[]>(key, (cur) => {
         const list = cur ?? [];
@@ -439,6 +474,10 @@ export default function SettingsPageClient() {
       setType("CHECKING");
       setOpeningBalance("0.00");
       setOpeningDate(todayYmd());
+
+      setManualCurrency("USD");
+      setManualInstitution("");
+      setManualLast4("");
 
       setTimeout(() => {
         qc.invalidateQueries({ queryKey: key });
@@ -579,8 +618,9 @@ export default function SettingsPageClient() {
               const institutionName =
                 res?.institutionName ?? res?.institution_name ?? res?.institution?.name ?? undefined;
               const status = res?.status ?? undefined;
-const lastSyncAt = res?.lastSyncAt ?? null;
-results.push({ id: a.id, connected, institutionName, status, lastSyncAt });
+              const lastSyncAt = res?.lastSyncAt ?? null;
+              const last4 = res?.last4 ?? null;
+              results.push({ id: a.id, connected, institutionName, status, lastSyncAt, last4 });
             } catch {
               results.push({ id: a.id, connected: false as const, institutionName: undefined, _error: true as const });
             }
@@ -597,9 +637,10 @@ results.push({ id: a.id, connected, institutionName, status, lastSyncAt });
             next[r.id] = {
               connected: !!r.connected,
               institutionName: r.institutionName,
+              last4: (r as any).last4 ?? null,
               status: (r as any).status,
-lastSyncAt: (r as any).lastSyncAt ?? null,
-_error: !!r._error,
+              lastSyncAt: (r as any).lastSyncAt ?? null,
+              _error: !!r._error,
             };
           }
           return next;
@@ -1383,32 +1424,319 @@ _error: !!r._error,
               <div>
                 <Button size="sm" onClick={() => setOpen(true)}>Add account</Button>
 
-                <AppDialog
-                  open={open}
-                  onClose={() => setOpen(false)}
-                  title="Create account"
+<AppDialog
+  open={open}
+  onClose={() => {
+    setOpen(false);
+    setErr(null);
+    setCreateMode("choose");
+    setPlaidDraft(null);
+  }}
+  title="Create account"
                   size="md"
                   footer={
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
-                      <Button onClick={onCreateAccount} disabled={saving || !selectedBusinessId || !name.trim()}>
-                        {saving ? "Creating…" : "Create"}
+                      <Button
+  variant="outline"
+  onClick={() => {
+    setOpen(false);
+    setErr(null);
+    setCreateMode("choose");
+    setPlaidDraft(null);
+  }}
+  disabled={saving}
+>
+  Cancel
+</Button>
+                      <Button
+  onClick={() => {
+    if (createMode === "manual") onCreateAccount();
+    else if (createMode === "choose") setErr("Select a creation method.");
+    else setErr("Continue to Plaid to review details.");
+  }}
+  disabled={
+    saving ||
+    !selectedBusinessId ||
+    (createMode === "manual" ? !name.trim() : false)
+  }
+>
+  {saving ? "Working…" : (createMode === "manual" ? "Create" : "Continue")}
+</Button>
+                    </div>
+                  }
+                >
+  <div className="space-y-3">
+    {err && <div className="text-sm text-red-600">{err}</div>}
+
+    {createMode === "choose" ? (
+      <div className="space-y-3">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-sm font-semibold text-slate-900">How would you like to add this account?</div>
+          <div className="mt-1 text-xs text-slate-600">
+            Connect via Plaid for automatic bank sync, or set up manually for cash/offline tracking.
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+          onClick={() => setCreateMode("plaid")}
+          disabled={!selectedBusinessId}
+        >
+          <div className="text-sm font-semibold text-slate-900">Connect with Plaid</div>
+          <div className="mt-1 text-xs text-slate-600">Link your bank account for automatic transaction sync</div>
+        </button>
+
+        <button
+          type="button"
+          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+          onClick={() => setCreateMode("manual")}
+        >
+          <div className="text-sm font-semibold text-slate-900">Set up account manually</div>
+          <div className="mt-1 text-xs text-slate-600">For cash accounts or manual tracking</div>
+        </button>
+      </div>
+    ) : createMode === "manual" ? (
+      <>
+
+        <div className="space-y-1">
+          <Label>Name</Label>
+          <Input className={inputH7} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+
+        <div className="space-y-1">
+          <Label>Type</Label>
+          <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
+            <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="CHECKING">Checking</SelectItem>
+              <SelectItem value="SAVINGS">Savings</SelectItem>
+              <SelectItem value="CREDIT_CARD">Credit card</SelectItem>
+              <SelectItem value="CASH">Cash</SelectItem>
+              <SelectItem value="OTHER">Other</SelectItem>
+            </SelectContent>
+          </Select>
+</div>
+
+<div className="grid grid-cols-2 gap-3">
+  <div className="space-y-1">
+    <Label>Currency</Label>
+    <Select value={manualCurrency} onValueChange={(v) => setManualCurrency(v)}>
+      <SelectTrigger className={selectTriggerClass}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="USD">USD</SelectItem>
+        <SelectItem value="CAD">CAD</SelectItem>
+        <SelectItem value="MXN">MXN</SelectItem>
+        <SelectItem value="EUR">EUR</SelectItem>
+        <SelectItem value="GBP">GBP</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+
+  <div className="space-y-1">
+    <Label>Last 4 digits</Label>
+    <Input
+      className={inputH7}
+      value={manualLast4}
+      onChange={(e) => setManualLast4(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+      placeholder="1234"
+    />
+  </div>
+
+  <div className="space-y-1 col-span-2">
+    <Label>Institution name</Label>
+    <Input
+  className={inputH7}
+  value={manualInstitution}
+  onChange={(e) => setManualInstitution(e.target.value)}
+  placeholder="Bank name (optional)"
+  list="institution-suggestions"
+/>
+<datalist id="institution-suggestions">
+  {institutionSuggestions.map((x) => (
+    <option key={x} value={x} />
+  ))}
+</datalist>
+  </div>
+</div>
+
+<div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label>Opening balance</Label>
+            <Input className={inputH7} value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Opening date</Label>
+            <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+          </div>
+        </div>
+      </>
+    ) : (
+      <>
+        <div className="flex items-center justify-between">
+          <Button
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={() => setCreateMode("choose")}
+          >
+            Back
+          </Button>
+        </div>
+
+        <div className="text-sm text-slate-700">
+          Choose an opening balance date (retention start). You’ll review account details next.
+        </div>
+
+        <div className="space-y-1">
+          <Label>Opening date</Label>
+          <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+        </div>
+
+        <Button
+          className="h-8 px-3 text-xs"
+          onClick={async () => {
+            if (!selectedBusinessId) return;
+            try {
+              // Open Plaid Link using business-level token; PlaidConnectButton is account-scoped, so we do it here.
+              const lt: any = await plaidLinkTokenBusiness(selectedBusinessId);
+              const linkToken = lt?.link_token;
+              if (!linkToken) throw new Error("Failed to create link token");
+
+              // Load Plaid script (same approach as PlaidConnectButton)
+              const scriptSrc = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+              const existing = document.querySelector(`script[src="${scriptSrc}"]`);
+              if (!existing) {
+                const s = document.createElement("script");
+                s.src = scriptSrc;
+                s.async = true;
+                document.head.appendChild(s);
+                await new Promise<void>((resolve, reject) => {
+                  s.onload = () => resolve();
+                  s.onerror = () => reject(new Error("Plaid script failed to load"));
+                });
+              }
+
+              if (!(window as any).Plaid?.create) throw new Error("Plaid failed to load");
+
+              const handler = (window as any).Plaid.create({
+                token: linkToken,
+                onSuccess: (public_token: string, metadata: any) => {
+                  const institution = metadata?.institution
+                    ? { name: metadata.institution.name, institution_id: metadata.institution.institution_id }
+                    : undefined;
+
+                  const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
+                  const first = accountsRaw[0];
+                  if (!first?.id) {
+                    setErr("Plaid returned no accounts");
+                    return;
+                  }
+
+                  // Prefill draft from Plaid (user can edit on review)
+                  setPlaidDraft({
+                    public_token,
+                    institution,
+                    plaidAccountId: String(first.id),
+                    mask: first.mask ? String(first.mask) : undefined,
+                    name: first.name ? String(first.name) : (institution?.name ? `${institution.name} Account` : "Bank Account"),
+                    type: String((first.subtype ?? first.type ?? "CHECKING")).toUpperCase(),
+                    effectiveStartDate: openingDate,
+                  });
+
+                  setPlaidReviewOpen(true);
+                },
+              });
+
+              handler.open();
+            } catch (e: any) {
+              setErr(e?.message ?? "Plaid failed");
+            }
+          }}
+          disabled={!selectedBusinessId}
+        >
+          Continue to Plaid
+        </Button>
+      </>
+    )}
+  </div>
+                </AppDialog>
+
+                {/* Plaid review (step after Plaid selection) */}
+                <AppDialog
+                  open={plaidReviewOpen}
+                  onClose={() => setPlaidReviewOpen(false)}
+                  title="Review bank account"
+                  size="md"
+                  footer={
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setPlaidReviewOpen(false);
+                          setCreateMode("plaid");
+                        }}
+                      >
+                        Back
+                      </Button>
+
+                      <Button
+                        onClick={async () => {
+                          if (!selectedBusinessId || !plaidDraft) return;
+                          setSaving(true);
+                          setErr(null);
+                          try {
+                            const body: any = {
+                              public_token: plaidDraft.public_token,
+                              plaidAccountId: plaidDraft.plaidAccountId,
+                              effectiveStartDate: plaidDraft.effectiveStartDate,
+                              institution: plaidDraft.institution,
+                              mask: plaidDraft.mask,
+                              name: plaidDraft.name.trim(),
+                              type: plaidDraft.type,
+                            };
+
+                            const res: any = await plaidCreateAccount(selectedBusinessId, body);
+                            if (!res?.ok) throw new Error(res?.error ?? "Create failed");
+
+                            qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                            setPlaidReviewOpen(false);
+                            setOpen(false);
+
+                            // Reset wizard for next time
+                            setCreateMode("choose");
+                            setPlaidDraft(null);
+                          } catch (e: any) {
+                            setErr(e?.message ?? "Failed to create account");
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        disabled={saving || !plaidDraft?.name?.trim()}
+                      >
+                        {saving ? "Creating…" : "Create Account"}
                       </Button>
                     </div>
                   }
                 >
                   <div className="space-y-3">
-                    {err && <div className="text-sm text-red-600">{err}</div>}
+                    {err ? <div className="text-sm text-red-600">{err}</div> : null}
 
                     <div className="space-y-1">
                       <Label>Name</Label>
-                      <Input className="h-7" value={name} onChange={(e) => setName(e.target.value)} />
+                      <Input
+                        className="h-7"
+                        value={plaidDraft?.name ?? ""}
+                        onChange={(e) => setPlaidDraft((cur) => (cur ? { ...cur, name: e.target.value } : cur))}
+                      />
                     </div>
 
                     <div className="space-y-1">
                       <Label>Type</Label>
-                      <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
-                        <SelectTrigger className="h-7"><SelectValue placeholder="Select type" /></SelectTrigger>
+                      <Select
+                        value={(plaidDraft?.type ?? "CHECKING") as any}
+                        onValueChange={(v) => setPlaidDraft((cur) => (cur ? { ...cur, type: v } : cur))}
+                      >
+                        <SelectTrigger className="h-7"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="CHECKING">Checking</SelectItem>
                           <SelectItem value="SAVINGS">Savings</SelectItem>
@@ -1421,12 +1749,27 @@ _error: !!r._error,
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label>Opening balance</Label>
-                        <Input className="h-7" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+                        <Label>Institution</Label>
+                        <Input className="h-7" value={plaidDraft?.institution?.name ?? ""} disabled />
                       </div>
                       <div className="space-y-1">
-                        <Label>Opening date</Label>
-                        <Input className="h-7" type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+                        <Label>Last 4</Label>
+                        <Input className="h-7" value={plaidDraft?.mask ?? ""} disabled />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label>Opening balance date</Label>
+                      <Input
+                        className="h-7"
+                        type="date"
+                        value={plaidDraft?.effectiveStartDate ?? todayYmd()}
+                        onChange={(e) =>
+                          setPlaidDraft((cur) => (cur ? { ...cur, effectiveStartDate: e.target.value } : cur))
+                        }
+                      />
+                      <div className="text-[11px] text-slate-500">
+                        This date controls how far back we retain transactions. Opening is computed after creation.
                       </div>
                     </div>
                   </div>
@@ -1439,7 +1782,10 @@ _error: !!r._error,
                   size="md"
                   footer={
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editBusy}>Cancel</Button>
+                      <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editBusy}>
+                        Cancel
+                      </Button>
+
                       <Button
                         onClick={async () => {
                           if (!selectedBusinessId || !editAccountId) return;
@@ -1570,20 +1916,30 @@ _error: !!r._error,
                           <TableCell className="py-2 font-medium text-slate-900">{a.name}</TableCell>
 <TableCell className="py-2 text-slate-700">{formatAccountType(a.type)}</TableCell>
 
-{/* Institution (from Plaid status when available) */}
+{/* Institution (Plaid OR manual) */}
 <TableCell className="py-2 text-slate-700 text-xs">
   {st?.institutionName ? (
     <span className="truncate inline-block max-w-[220px]" title={st.institutionName}>
       {st.institutionName}
     </span>
+  ) : (a as any)?.institution_name ? (
+    <span className="truncate inline-block max-w-[220px]" title={(a as any).institution_name}>
+      {(a as any).institution_name}
+    </span>
   ) : (
-    <span className="text-slate-400">—</span>
+    <span className="text-slate-400"></span>
   )}
 </TableCell>
 
-{/* Last 4 (requires backend support; placeholder until then) */}
+{/* Last 4 (Plaid OR manual) */}
 <TableCell className="py-2 text-slate-700 text-xs font-mono">
-  {st?.last4 ? `•••• ${st.last4}` : <span className="text-slate-400">—</span>}
+  {st?.last4
+    ? `•••• ${st.last4}`
+    : (a as any)?.last4
+      ? `•••• ${(a as any).last4}`
+      : st?.connected
+        ? <span className="text-slate-600">Reconnect</span>
+        : <span className="text-slate-400"></span>}
 </TableCell>
 
                           <TableCell className="py-2 text-right">

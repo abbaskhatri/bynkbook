@@ -229,6 +229,40 @@ api.route(
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
 
+const plaidPreviewOpeningHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidPreviewOpening.handler",
+} satisfies ApiHandler;
+
+const plaidApplyOpeningHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidApplyOpening.handler",
+} satisfies ApiHandler;
+
+const plaidChangeOpeningDateHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidChangeOpeningDate.handler",
+  timeout: "45 seconds",
+} satisfies ApiHandler;
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/preview-opening",
+  plaidPreviewOpeningHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/apply-opening",
+  plaidApplyOpeningHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/change-opening-date",
+  plaidChangeOpeningDateHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
 api.route(
   "DELETE /v1/businesses/{businessId}/accounts/{accountId}/plaid/disconnect",
   plaidDisconnectHandler,

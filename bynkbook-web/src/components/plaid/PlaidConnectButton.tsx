@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
-import { plaidExchange, plaidLinkToken, plaidSync } from "@/lib/api/plaid";
+import { plaidApplyOpening, plaidExchange, plaidLinkToken, plaidPreviewOpening, plaidSync } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
 
 function TinySpinner() {
@@ -64,6 +64,10 @@ type Props = {
   disabledClassName: string;
   buttonClassName: string;
   disabled?: boolean;
+
+  // Label override (e.g., "Switch")
+  label?: string;
+
   onConnected: (syncResult?: any) => void;
 };
 
@@ -118,6 +122,11 @@ export function PlaidConnectButton(props: Props) {
   // Initial sync progress
   const [openSyncing, setOpenSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<{ newCount: number; pendingCount: number } | null>(null);
+
+  // Opening preview / conflict review
+  const [openOpeningReview, setOpenOpeningReview] = useState(false);
+  const [openingPreview, setOpeningPreview] = useState<any>(null);
+  const [openingChoiceBusy, setOpeningChoiceBusy] = useState(false);
 
   // Guard to prevent double-open on rapid clicks
   const openingRef = useRef(false);
@@ -229,7 +238,7 @@ export function PlaidConnectButton(props: Props) {
         onClick={openPlaid}
         title={busy ? "Working…" : undefined}
       >
-        <Sparkles className="h-3.5 w-3.5" /> {busy ? "Opening…" : "Connect Plaid"}
+        <Sparkles className="h-3.5 w-3.5" /> {busy ? "Opening…" : (props.label ?? "Connect Plaid")}
       </button>
 
       {errorMsg ? <div className="mt-1 text-[11px] text-red-700">{errorMsg}</div> : null}
@@ -407,6 +416,63 @@ export function PlaidConnectButton(props: Props) {
 
                   if (!res?.ok) throw new Error(res?.error ?? "Exchange failed");
 
+                  // Preview opening (conflict-aware)
+                  const pv: any = await plaidPreviewOpening(businessId, accountId, { effectiveStartDate: startDate });
+                  setOpeningPreview(pv);
+
+                  // If balance unavailable, we cannot compute suggested opening.
+                  // Proceed with connect+sync, but enforce KEEP_MANUAL (B1) and do not touch opening.
+                  if (pv && pv.balanceAvailable === false) {
+                    await plaidApplyOpening(businessId, accountId, {
+                      choice: "KEEP_MANUAL",
+                      effectiveStartDate: startDate,
+                      suggestedOpeningCents: undefined,
+                    });
+
+                    setOpenSelect(false);
+                    setPendingPublicToken(null);
+                    setPendingInstitution(null);
+                    setPendingAccounts([]);
+                    setSelectedPlaidAccountId("");
+
+                    setOpenSyncing(true);
+                    setSyncInfo(null);
+
+                    let syncRes: any = null;
+                    try {
+                      const s: any = await plaidSync(businessId, accountId);
+                      syncRes = s;
+                      setSyncInfo({
+                        newCount: Number(s?.newCount ?? 0),
+                        pendingCount: Number(s?.pendingCount ?? 0),
+                      });
+                    } catch {
+                      setSyncInfo({ newCount: 0, pendingCount: 0 });
+                    } finally {
+                      setOpenSyncing(false);
+                    }
+
+                    onConnected(syncRes);
+                    return;
+                  }
+
+                  // If conflict exists, open review dialog and let user choose A/B/C
+                  const conflict = pv?.conflict ?? {};
+                  if (conflict.hasRealEntries || conflict.hasManualOpeningNonZero || conflict.hasMatchesOrClearing || conflict.hasExistingBankTxns) {
+                    setOpenSelect(false);
+                    setOpenOpeningReview(true);
+                    return;
+                  }
+
+                  // No conflict and balance available -> auto apply Plaid suggested opening
+                  if (pv?.suggestedOpeningCents != null) {
+                    await plaidApplyOpening(businessId, accountId, {
+                      choice: "APPLY_PLAID",
+                      effectiveStartDate: startDate,
+                      suggestedOpeningCents: String(pv.suggestedOpeningCents),
+                    });
+                  }
+
                   setOpenSelect(false);
                   setPendingPublicToken(null);
                   setPendingInstitution(null);
@@ -446,6 +512,147 @@ export function PlaidConnectButton(props: Props) {
       </AppDialog>
 
       {/* Initial sync progress dialog (separate, not nested) */}
+      <AppDialog
+        open={openOpeningReview}
+        onClose={() => {
+          // If user closes, treat as cancel connect (disconnect mapping)
+          setOpenOpeningReview(false);
+          setOpeningPreview(null);
+        }}
+        title="Review opening balance"
+        size="md"
+      >
+        <div className="p-3 max-h-[70vh] overflow-y-auto">
+          <div className="text-xs text-slate-700">
+            We found existing activity or a manual opening for this account. Choose how to handle the opening balance.
+          </div>
+
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Plaid suggested opening</span>
+              <span className="font-semibold text-slate-900">
+                {String(openingPreview?.suggestedOpeningCents ?? "—")}
+              </span>
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="text-slate-500">Start date</span>
+              <span className="font-semibold text-slate-900">{String(openingPreview?.effectiveStartDate ?? "")}</span>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              className="h-9 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 disabled:opacity-50 text-left"
+              disabled={openingChoiceBusy || openingPreview?.suggestedOpeningCents == null}
+              onClick={async () => {
+                setOpeningChoiceBusy(true);
+                try {
+                  await plaidApplyOpening(businessId, accountId, {
+                    choice: "APPLY_PLAID",
+                    effectiveStartDate: String(openingPreview?.effectiveStartDate),
+                    suggestedOpeningCents: String(openingPreview?.suggestedOpeningCents),
+                  });
+
+                  // sync after applying
+                  setOpenOpeningReview(false);
+                  setOpenSyncing(true);
+                  setSyncInfo(null);
+
+                  let syncRes: any = null;
+                  try {
+                    const s: any = await plaidSync(businessId, accountId);
+                    syncRes = s;
+                    setSyncInfo({ newCount: Number(s?.newCount ?? 0), pendingCount: Number(s?.pendingCount ?? 0) });
+                  } catch {
+                    setSyncInfo({ newCount: 0, pendingCount: 0 });
+                  } finally {
+                    setOpenSyncing(false);
+                  }
+
+                  onConnected(syncRes);
+                } finally {
+                  setOpeningChoiceBusy(false);
+                }
+              }}
+            >
+              <div className="font-semibold">A) Use Plaid suggested opening</div>
+              <div className="text-[11px] text-emerald-900/70">
+                Updates the single canonical opening entry and updates account opening fields.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-left"
+              disabled={openingChoiceBusy}
+              onClick={async () => {
+                setOpeningChoiceBusy(true);
+                try {
+                  await plaidApplyOpening(businessId, accountId, {
+                    choice: "KEEP_MANUAL",
+                    effectiveStartDate: String(openingPreview?.effectiveStartDate),
+                    suggestedOpeningCents: String(openingPreview?.suggestedOpeningCents ?? "0"),
+                  });
+
+                  // sync but do not touch opening
+                  setOpenOpeningReview(false);
+                  setOpenSyncing(true);
+                  setSyncInfo(null);
+
+                  let syncRes: any = null;
+                  try {
+                    const s: any = await plaidSync(businessId, accountId);
+                    syncRes = s;
+                    setSyncInfo({ newCount: Number(s?.newCount ?? 0), pendingCount: Number(s?.pendingCount ?? 0) });
+                  } catch {
+                    setSyncInfo({ newCount: 0, pendingCount: 0 });
+                  } finally {
+                    setOpenSyncing(false);
+                  }
+
+                  onConnected(syncRes);
+                } finally {
+                  setOpeningChoiceBusy(false);
+                }
+              }}
+            >
+              <div className="font-semibold">B) Keep manual opening</div>
+              <div className="text-[11px] text-slate-500">
+                Imports Plaid transactions but does not create/overwrite the opening entry or account opening fields. Stores Plaid suggestion for reference.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-left"
+              disabled={openingChoiceBusy}
+              onClick={async () => {
+                setOpeningChoiceBusy(true);
+                try {
+                  await plaidApplyOpening(businessId, accountId, {
+                    choice: "CANCEL",
+                    effectiveStartDate: String(openingPreview?.effectiveStartDate),
+                  });
+                  setOpenOpeningReview(false);
+                } finally {
+                  setOpeningChoiceBusy(false);
+                }
+              }}
+            >
+              <div className="font-semibold">C) Cancel connect</div>
+              <div className="text-[11px] text-slate-500">Disconnects and makes no changes.</div>
+            </button>
+          </div>
+
+          {openingPreview?.balanceAvailable === false ? (
+            <div className="mt-3 text-xs text-rose-600">
+              Balance unavailable — cannot compute Plaid suggested opening.
+            </div>
+          ) : null}
+        </div>
+      </AppDialog>
+
       <AppDialog
         open={openSyncing}
         onClose={() => {}}

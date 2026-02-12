@@ -107,6 +107,18 @@ export async function handler(event: any) {
       patch.type = type;
     }
 
+    if ("currency_code" in body) {
+  patch.currency_code = body.currency_code ?? null;
+}
+
+if ("institution_name" in body) {
+  patch.institution_name = body.institution_name ?? null;
+}
+
+if ("last4" in body) {
+  patch.last4 = body.last4 ?? null;
+}
+
     const wantsOpening = "opening_balance_cents" in body || "opening_balance_date" in body;
     if (wantsOpening) {
       const counts = await prisma.$transaction([
@@ -286,6 +298,9 @@ export async function handler(event: any) {
 
     const name = (body?.name ?? "").toString().trim();
     const type = (body?.type ?? "").toString().trim();
+    const currency_code = body?.currency_code ?? null;
+const institution_name = body?.institution_name ?? null;
+const last4 = body?.last4 ?? null;
     const opening_balance_cents_raw = body?.opening_balance_cents ?? 0;
     const opening_balance_date_raw = (body?.opening_balance_date ?? "").toString().trim();
 
@@ -305,16 +320,19 @@ export async function handler(event: any) {
 
     const accountId = randomUUID();
 
-    const created = await prisma.account.create({
-      data: {
-        id: accountId,
-        business_id: businessId,
-        name,
-        type,
-        opening_balance_cents: BigInt(Math.trunc(openingBalanceNumber)),
-        opening_balance_date: openingDate,
-      },
-    });
+const created = await prisma.account.create({
+  data: {
+    id: accountId,
+    business_id: businessId,
+    name,
+    type,
+    opening_balance_cents: BigInt(Math.trunc(openingBalanceNumber)),
+    opening_balance_date: openingDate,
+    currency_code: currency_code,
+    institution_name: institution_name,
+    last4: last4,
+  },
+});
 
     return json(201, {
       ok: true,

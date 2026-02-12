@@ -75,6 +75,12 @@ model Account {
   type                  String
   opening_balance_cents BigInt
   opening_balance_date  DateTime            @db.Timestamptz(6)
+
+  // Manual metadata (non-Plaid accounts OR pre-connect storage)
+  currency_code         String?             @db.VarChar(3)
+  institution_name      String?
+  last4                 String?             @db.VarChar(8)
+
   archived_at           DateTime?           @db.Timestamptz(6)
   created_at            DateTime            @default(now()) @db.Timestamptz(6)
   updated_at            DateTime            @default(now()) @db.Timestamptz(6)
@@ -225,6 +231,15 @@ model BankConnection {
   last_known_balance_at    DateTime? @db.Timestamptz(6)
 
   opening_adjustment_created_at DateTime? @db.Timestamptz(6)
+
+  // Opening handling
+  opening_policy String @default("AUTO") // AUTO | MANUAL (manual means never create/overwrite opening)
+
+  // If user chooses "Keep manual opening", store Plaid suggestion here (for reference + explicit apply later)
+  suggested_opening_cents BigInt?
+  suggested_opening_date  DateTime? @db.Date
+  suggested_balance_cents BigInt?
+  suggested_balance_at    DateTime? @db.Timestamptz(6)
 
   institution_name String?
   institution_id   String?

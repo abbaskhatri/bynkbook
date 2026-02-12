@@ -36,6 +36,29 @@ export async function requireAccountInBusiness(prisma: any, businessId: string, 
  * Create link token (server-side).
  * Phase 4B: transactions product only.
  */
+export async function createLinkTokenBusiness(params: {
+  businessId: string;
+  userId: string;
+}) {
+  const { businessId, userId } = params;
+
+  const prisma = await getPrisma();
+  const role = await requireMembership(prisma, businessId, userId);
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
+
+  const plaid = await getPlaidClient();
+
+  const res = await plaid.linkTokenCreate({
+    user: { client_user_id: userId },
+    client_name: "BynkBook",
+    products: [Products.Transactions],
+    country_codes: [CountryCode.Us],
+    language: "en",
+  });
+
+  return json(200, { ok: true, link_token: res.data.link_token });
+}
+
 export async function createLinkToken(params: {
   businessId: string;
   accountId: string;
@@ -157,9 +180,21 @@ export async function getStatus(params: { businessId: string; accountId: string;
     try {
       const plaid = await getPlaidClient();
       const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
-      const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
-      const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-      const mask = acct?.mask ? String(acct.mask) : null;
+      let mask: string | null = null;
+
+      try {
+        const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
+        const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
+        mask = acct?.mask ? String(acct.mask) : null;
+      } catch {}
+
+      if (!mask) {
+        try {
+          const ar = await plaid.accountsGet({ access_token: accessToken });
+          const acct2 = ar.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
+          mask = acct2?.mask ? String(acct2.mask) : null;
+        } catch {}
+      }
 
       if (mask) {
         await prisma.bankConnection.updateMany({
@@ -172,6 +207,39 @@ export async function getStatus(params: { businessId: string; accountId: string;
     } catch {
       // Never fail status just because backfill failed
     }
+  }
+
+  // Backfill plaid_mask for legacy connections (best-effort, never break status)
+  if (!conn.plaid_mask) {
+    try {
+      const plaid = await getPlaidClient();
+      const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+
+      // Try balance endpoint first (usually includes mask)
+      let mask: string | null = null;
+      try {
+        const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
+        const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
+        mask = acct?.mask ? String(acct.mask) : null;
+      } catch {}
+
+      // Fallback: accountsGet (also includes mask)
+      if (!mask) {
+        try {
+          const ar = await plaid.accountsGet({ access_token: accessToken });
+          const acct2 = ar.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
+          mask = acct2?.mask ? String(acct2.mask) : null;
+        } catch {}
+      }
+
+      if (mask) {
+        await prisma.bankConnection.updateMany({
+          where: { business_id: businessId, account_id: accountId },
+          data: { plaid_mask: mask, updated_at: new Date() },
+        });
+        (conn as any).plaid_mask = mask;
+      }
+    } catch {}
   }
 
   return json(200, {
