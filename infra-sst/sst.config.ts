@@ -162,9 +162,12 @@ const plaidHandler = {
   handler: "packages/functions/src/plaidLinkToken.handler",
   environment: {
     ...bizHandler.environment,
-    PLAID_ENV: $app.stage === "prod" ? "production" : "sandbox",
-    PLAID_CLIENT_ID_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/client_id" : "ledrigo-dev/plaid/client_id",
-    PLAID_SECRET_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/secret" : "ledrigo-dev/plaid/secret",
+    // Do not hardcode Plaid env by stage. Use SST secret/env so dev can be production when needed.
+    PLAID_ENV: "production",
+
+    // Dev is using production Plaid; therefore dev must read production Plaid credentials.
+    PLAID_CLIENT_ID_SECRET_ID: "ledrigo-prod/plaid/client_id",
+    PLAID_SECRET_SECRET_ID: "ledrigo-prod/plaid/secret",
     PLAID_TOKEN_KMS_KEY_ARN: "arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36",
   },
   permissions: [
@@ -305,9 +308,12 @@ const plaidWebhookHandler = {
   handler: "packages/functions/src/plaidWebhook.handler",
   environment: {
     ...bizHandler.environment,
-    PLAID_ENV: $app.stage === "prod" ? "production" : "sandbox",
-    PLAID_CLIENT_ID_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/client_id" : "ledrigo-dev/plaid/client_id",
-    PLAID_SECRET_SECRET_ID: $app.stage === "prod" ? "ledrigo-prod/plaid/secret" : "ledrigo-dev/plaid/secret",
+    // Do not hardcode Plaid env by stage. Use SST secret/env so dev can be production when needed.
+    PLAID_ENV: "production",
+
+    // Dev is using production Plaid; therefore dev must read production Plaid credentials.
+    PLAID_CLIENT_ID_SECRET_ID: "ledrigo-prod/plaid/client_id",
+    PLAID_SECRET_SECRET_ID: "ledrigo-prod/plaid/secret",
     PLAID_TOKEN_KMS_KEY_ARN: "arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36",
   },
   permissions: [

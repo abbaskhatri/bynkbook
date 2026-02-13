@@ -186,14 +186,14 @@ export async function getStatus(params: { businessId: string; accountId: string;
         const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
         const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
         mask = acct?.mask ? String(acct.mask) : null;
-      } catch {}
+      } catch { }
 
       if (!mask) {
         try {
           const ar = await plaid.accountsGet({ access_token: accessToken });
           const acct2 = ar.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
           mask = acct2?.mask ? String(acct2.mask) : null;
-        } catch {}
+        } catch { }
       }
 
       if (mask) {
@@ -221,7 +221,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
         const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
         const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
         mask = acct?.mask ? String(acct.mask) : null;
-      } catch {}
+      } catch { }
 
       // Fallback: accountsGet (also includes mask)
       if (!mask) {
@@ -229,7 +229,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
           const ar = await plaid.accountsGet({ access_token: accessToken });
           const acct2 = ar.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
           mask = acct2?.mask ? String(acct2.mask) : null;
-        } catch {}
+        } catch { }
       }
 
       if (mask) {
@@ -239,7 +239,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
         });
         (conn as any).plaid_mask = mask;
       }
-    } catch {}
+    } catch { }
   }
 
   return json(200, {
@@ -249,6 +249,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
     institutionName: conn.institution_name,
     last4: conn.plaid_mask ?? null,
     lastSyncAt: conn.last_sync_at ? conn.last_sync_at.toISOString() : null,
+    needsAttention: conn.status !== "CONNECTED" || !!conn.error_code || !!conn.error_message,
     hasNewTransactions: !!conn.has_new_transactions,
     effectiveStartDate: conn.effective_start_date.toISOString().slice(0, 10),
     lastKnownBalanceCents: conn.last_known_balance_cents?.toString?.() ?? null,
@@ -531,30 +532,65 @@ export async function syncTransactions(params: { businessId: string; accountId: 
       return x === "opening balance" || x === "opening balance (estimated)" || x.startsWith("opening balance");
     };
 
-    const hasNonOpeningEntries = existing.some((e) => !isOpeningLike(e.payee));
-    const zeroOpening = existing.find((e) => isOpeningLike(e.payee) && BigInt(e.amount_cents ?? 0) === 0n);
+    const openingLike = existing.filter((e) => isOpeningLike(e.payee));
+    const nonOpening = existing.filter((e) => !isOpeningLike(e.payee));
+
+    const hasNonOpeningEntries = nonOpening.length > 0;
+    const zeroOpening = openingLike.find((e) => BigInt(e.amount_cents ?? 0) === 0n);
+
+    // Canonical opening enforcement (data-level):
+    // If we have multiple opening-like entries and no other entries, keep the earliest and void the rest.
+    if (!hasNonOpeningEntries && openingLike.length > 1) {
+      const keep = openingLike[0];
+      const extras = openingLike.slice(1);
+      await prisma.entry.updateMany({
+        where: { id: { in: extras.map((x) => x.id) } as any },
+        data: {
+          deleted_at: now,
+          memo: "Voided duplicate opening balance entry (system cleanup).",
+          updated_at: now,
+        } as any,
+      });
+
+      // If the kept opening is zero placeholder, our logic below will update it to estimated.
+      // If kept opening is non-zero, we do NOT overwrite (guardrail).
+    }
 
     if (!hasNonOpeningEntries) {
       if (zeroOpening) {
         // Replace the placeholder opening with the Plaid-estimated opening (no duplicates)
-        await prisma.entry.update({
-          where: { id: zeroOpening.id },
-          data: {
-            payee: "Opening balance (estimated)",
-            memo: "Estimated from current balance and synced transactions (Plaid).",
-            amount_cents: signed,
-            type: entryType,
-            method: null,
-            category_id: null,
-            vendor_id: null,
-            status: "EXPECTED",
-            date: conn.effective_start_date,
-            updated_at: now,
-          } as any,
-        });
+        await prisma.$transaction([
+          prisma.entry.update({
+            where: { id: zeroOpening.id },
+            data: {
+              payee: "Opening balance (estimated)",
+              memo: "Estimated from current balance and synced transactions (Plaid).",
+              amount_cents: signed,
+              type: entryType,
+              method: null,
+              category_id: null,
+              vendor_id: null,
+              status: "EXPECTED",
+              date: conn.effective_start_date,
+              updated_at: now,
+            } as any,
+          }),
+
+          // Option A (strict guardrail): only because we are replacing a ZERO placeholder
+          // and there are no non-opening entries. Settings must match Ledger.
+          prisma.account.update({
+            where: { id: accountId },
+            data: {
+              opening_balance_cents: abs,
+              opening_balance_date: conn.effective_start_date,
+              updated_at: now,
+            } as any,
+          }),
+        ]);
       } else if (existing.length === 0) {
-        // Truly empty account => create the estimated opening once
-        await prisma.entry.create({
+        // Truly empty account => create the estimated opening once (and update account opening fields)
+        await prisma.$transaction([
+          prisma.entry.create({
           data: {
             id: (await import("node:crypto")).randomUUID(),
             business_id: businessId,
@@ -569,7 +605,17 @@ export async function syncTransactions(params: { businessId: string; accountId: 
             vendor_id: null,
             status: "EXPECTED",
           },
-        });
+          }),
+
+          prisma.account.update({
+            where: { id: accountId },
+            data: {
+              opening_balance_cents: abs,
+              opening_balance_date: conn.effective_start_date,
+              updated_at: now,
+            } as any,
+          }),
+        ]);
       }
     }
 

@@ -878,7 +878,7 @@ export default function SettingsPageClient() {
                       <TableRow className="bg-slate-50">
                         <TableCell colSpan={4} className="py-2">
                           <pre className="text-[11px] whitespace-pre-wrap break-words bg-white border border-slate-200 rounded-md p-2">
-{JSON.stringify(actItems.find((x) => x.id === actDetailsId)?.payload_json ?? {}, null, 2)}
+                            {JSON.stringify(actItems.find((x) => x.id === actDetailsId)?.payload_json ?? {}, null, 2)}
                           </pre>
                         </TableCell>
                       </TableRow>
@@ -909,9 +909,8 @@ export default function SettingsPageClient() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                    teamSubTab === "members" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
-                  }`}
+                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "members" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
                   onClick={() => setTeamSubTab("members")}
                 >
                   Team Members
@@ -919,9 +918,8 @@ export default function SettingsPageClient() {
 
                 <button
                   type="button"
-                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                    teamSubTab === "roles" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
-                  }`}
+                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "roles" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                    }`}
                   onClick={() => setTeamSubTab("roles")}
                 >
                   Roles & Permissions
@@ -1234,17 +1232,17 @@ export default function SettingsPageClient() {
                                           idx >= 0
                                             ? (out[idx].policy_json as any)
                                             : {
-                                                dashboard: "NONE",
-                                                ledger: "NONE",
-                                                reconcile: "NONE",
-                                                issues: "NONE",
-                                                vendors: "NONE",
-                                                invoices: "NONE",
-                                                reports: "NONE",
-                                                settings: "NONE",
-                                                bank_connections: "NONE",
-                                                team_management: "NONE",
-                                              };
+                                              dashboard: "NONE",
+                                              ledger: "NONE",
+                                              reconcile: "NONE",
+                                              issues: "NONE",
+                                              vendors: "NONE",
+                                              invoices: "NONE",
+                                              reports: "NONE",
+                                              settings: "NONE",
+                                              bank_connections: "NONE",
+                                              team_management: "NONE",
+                                            };
 
                                         const nextPolicy = { ...base, [key]: String(nextVal).toUpperCase() };
 
@@ -1378,9 +1376,8 @@ export default function SettingsPageClient() {
                         <TableRow key={c.id} className="hover:bg-slate-50">
                           <TableCell className="py-2 font-medium text-slate-900">{c.name}</TableCell>
                           <TableCell className="py-2 text-right">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                              archived ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-700"
-                            }`}>
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${archived ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-700"
+                              }`}>
                               {archived ? "Archived" : "Active"}
                             </span>
                           </TableCell>
@@ -1424,241 +1421,241 @@ export default function SettingsPageClient() {
               <div>
                 <Button size="sm" onClick={() => setOpen(true)}>Add account</Button>
 
-<AppDialog
-  open={open}
-  onClose={() => {
-    setOpen(false);
-    setErr(null);
-    setCreateMode("choose");
-    setPlaidDraft(null);
-  }}
-  title="Create account"
+                <AppDialog
+                  open={open}
+                  onClose={() => {
+                    setOpen(false);
+                    setErr(null);
+                    setCreateMode("choose");
+                    setPlaidDraft(null);
+                  }}
+                  title="Create account"
                   size="md"
                   footer={
                     <div className="flex items-center justify-end gap-2">
                       <Button
-  variant="outline"
-  onClick={() => {
-    setOpen(false);
-    setErr(null);
-    setCreateMode("choose");
-    setPlaidDraft(null);
-  }}
-  disabled={saving}
->
-  Cancel
-</Button>
+                        variant="outline"
+                        onClick={() => {
+                          setOpen(false);
+                          setErr(null);
+                          setCreateMode("choose");
+                          setPlaidDraft(null);
+                        }}
+                        disabled={saving}
+                      >
+                        Cancel
+                      </Button>
                       <Button
-  onClick={() => {
-    if (createMode === "manual") onCreateAccount();
-    else if (createMode === "choose") setErr("Select a creation method.");
-    else setErr("Continue to Plaid to review details.");
-  }}
-  disabled={
-    saving ||
-    !selectedBusinessId ||
-    (createMode === "manual" ? !name.trim() : false)
-  }
->
-  {saving ? "Working…" : (createMode === "manual" ? "Create" : "Continue")}
-</Button>
+                        onClick={() => {
+                          if (createMode === "manual") onCreateAccount();
+                          else if (createMode === "choose") setErr("Select a creation method.");
+                          else setErr("Continue to Plaid to review details.");
+                        }}
+                        disabled={
+                          saving ||
+                          !selectedBusinessId ||
+                          (createMode === "manual" ? !name.trim() : false)
+                        }
+                      >
+                        {saving ? "Working…" : (createMode === "manual" ? "Create" : "Continue")}
+                      </Button>
                     </div>
                   }
                 >
-  <div className="space-y-3">
-    {err && <div className="text-sm text-red-600">{err}</div>}
+                  <div className="space-y-3">
+                    {err && <div className="text-sm text-red-600">{err}</div>}
 
-    {createMode === "choose" ? (
-      <div className="space-y-3">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="text-sm font-semibold text-slate-900">How would you like to add this account?</div>
-          <div className="mt-1 text-xs text-slate-600">
-            Connect via Plaid for automatic bank sync, or set up manually for cash/offline tracking.
-          </div>
-        </div>
+                    {createMode === "choose" ? (
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <div className="text-sm font-semibold text-slate-900">How would you like to add this account?</div>
+                          <div className="mt-1 text-xs text-slate-600">
+                            Connect via Plaid for automatic bank sync, or set up manually for cash/offline tracking.
+                          </div>
+                        </div>
 
-        <button
-          type="button"
-          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
-          onClick={() => setCreateMode("plaid")}
-          disabled={!selectedBusinessId}
-        >
-          <div className="text-sm font-semibold text-slate-900">Connect with Plaid</div>
-          <div className="mt-1 text-xs text-slate-600">Link your bank account for automatic transaction sync</div>
-        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          onClick={() => setCreateMode("plaid")}
+                          disabled={!selectedBusinessId}
+                        >
+                          <div className="text-sm font-semibold text-slate-900">Connect with Plaid</div>
+                          <div className="mt-1 text-xs text-slate-600">Link your bank account for automatic transaction sync</div>
+                        </button>
 
-        <button
-          type="button"
-          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
-          onClick={() => setCreateMode("manual")}
-        >
-          <div className="text-sm font-semibold text-slate-900">Set up account manually</div>
-          <div className="mt-1 text-xs text-slate-600">For cash accounts or manual tracking</div>
-        </button>
-      </div>
-    ) : createMode === "manual" ? (
-      <>
+                        <button
+                          type="button"
+                          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          onClick={() => setCreateMode("manual")}
+                        >
+                          <div className="text-sm font-semibold text-slate-900">Set up account manually</div>
+                          <div className="mt-1 text-xs text-slate-600">For cash accounts or manual tracking</div>
+                        </button>
+                      </div>
+                    ) : createMode === "manual" ? (
+                      <>
 
-        <div className="space-y-1">
-          <Label>Name</Label>
-          <Input className={inputH7} value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
+                        <div className="space-y-1">
+                          <Label>Name</Label>
+                          <Input className={inputH7} value={name} onChange={(e) => setName(e.target.value)} />
+                        </div>
 
-        <div className="space-y-1">
-          <Label>Type</Label>
-          <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
-            <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CHECKING">Checking</SelectItem>
-              <SelectItem value="SAVINGS">Savings</SelectItem>
-              <SelectItem value="CREDIT_CARD">Credit card</SelectItem>
-              <SelectItem value="CASH">Cash</SelectItem>
-              <SelectItem value="OTHER">Other</SelectItem>
-            </SelectContent>
-          </Select>
-</div>
+                        <div className="space-y-1">
+                          <Label>Type</Label>
+                          <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
+                            <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="CHECKING">Checking</SelectItem>
+                              <SelectItem value="SAVINGS">Savings</SelectItem>
+                              <SelectItem value="CREDIT_CARD">Credit card</SelectItem>
+                              <SelectItem value="CASH">Cash</SelectItem>
+                              <SelectItem value="OTHER">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-<div className="grid grid-cols-2 gap-3">
-  <div className="space-y-1">
-    <Label>Currency</Label>
-    <Select value={manualCurrency} onValueChange={(v) => setManualCurrency(v)}>
-      <SelectTrigger className={selectTriggerClass}><SelectValue /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="USD">USD</SelectItem>
-        <SelectItem value="CAD">CAD</SelectItem>
-        <SelectItem value="MXN">MXN</SelectItem>
-        <SelectItem value="EUR">EUR</SelectItem>
-        <SelectItem value="GBP">GBP</SelectItem>
-      </SelectContent>
-    </Select>
-  </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label>Currency</Label>
+                            <Select value={manualCurrency} onValueChange={(v) => setManualCurrency(v)}>
+                              <SelectTrigger className={selectTriggerClass}><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="USD">USD</SelectItem>
+                                <SelectItem value="CAD">CAD</SelectItem>
+                                <SelectItem value="MXN">MXN</SelectItem>
+                                <SelectItem value="EUR">EUR</SelectItem>
+                                <SelectItem value="GBP">GBP</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
 
-  <div className="space-y-1">
-    <Label>Last 4 digits</Label>
-    <Input
-      className={inputH7}
-      value={manualLast4}
-      onChange={(e) => setManualLast4(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
-      placeholder="1234"
-    />
-  </div>
+                          <div className="space-y-1">
+                            <Label>Last 4 digits</Label>
+                            <Input
+                              className={inputH7}
+                              value={manualLast4}
+                              onChange={(e) => setManualLast4(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                              placeholder="1234"
+                            />
+                          </div>
 
-  <div className="space-y-1 col-span-2">
-    <Label>Institution name</Label>
-    <Input
-  className={inputH7}
-  value={manualInstitution}
-  onChange={(e) => setManualInstitution(e.target.value)}
-  placeholder="Bank name (optional)"
-  list="institution-suggestions"
-/>
-<datalist id="institution-suggestions">
-  {institutionSuggestions.map((x) => (
-    <option key={x} value={x} />
-  ))}
-</datalist>
-  </div>
-</div>
+                          <div className="space-y-1 col-span-2">
+                            <Label>Institution name</Label>
+                            <Input
+                              className={inputH7}
+                              value={manualInstitution}
+                              onChange={(e) => setManualInstitution(e.target.value)}
+                              placeholder="Bank name (optional)"
+                              list="institution-suggestions"
+                            />
+                            <datalist id="institution-suggestions">
+                              {institutionSuggestions.map((x) => (
+                                <option key={x} value={x} />
+                              ))}
+                            </datalist>
+                          </div>
+                        </div>
 
-<div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label>Opening balance</Label>
-            <Input className={inputH7} value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label>Opening date</Label>
-            <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
-          </div>
-        </div>
-      </>
-    ) : (
-      <>
-        <div className="flex items-center justify-between">
-          <Button
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            onClick={() => setCreateMode("choose")}
-          >
-            Back
-          </Button>
-        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label>Opening balance</Label>
+                            <Input className={inputH7} value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+                          </div>
+                          <div className="space-y-1">
+                            <Label>Opening date</Label>
+                            <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <Button
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setCreateMode("choose")}
+                          >
+                            Back
+                          </Button>
+                        </div>
 
-        <div className="text-sm text-slate-700">
-          Choose an opening balance date (retention start). You’ll review account details next.
-        </div>
+                        <div className="text-sm text-slate-700">
+                          Choose an opening balance date (retention start). You’ll review account details next.
+                        </div>
 
-        <div className="space-y-1">
-          <Label>Opening date</Label>
-          <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
-        </div>
+                        <div className="space-y-1">
+                          <Label>Opening date</Label>
+                          <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+                        </div>
 
-        <Button
-          className="h-8 px-3 text-xs"
-          onClick={async () => {
-            if (!selectedBusinessId) return;
-            try {
-              // Open Plaid Link using business-level token; PlaidConnectButton is account-scoped, so we do it here.
-              const lt: any = await plaidLinkTokenBusiness(selectedBusinessId);
-              const linkToken = lt?.link_token;
-              if (!linkToken) throw new Error("Failed to create link token");
+                        <Button
+                          className="h-8 px-3 text-xs"
+                          onClick={async () => {
+                            if (!selectedBusinessId) return;
+                            try {
+                              // Open Plaid Link using business-level token; PlaidConnectButton is account-scoped, so we do it here.
+                              const lt: any = await plaidLinkTokenBusiness(selectedBusinessId);
+                              const linkToken = lt?.link_token;
+                              if (!linkToken) throw new Error("Failed to create link token");
 
-              // Load Plaid script (same approach as PlaidConnectButton)
-              const scriptSrc = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
-              const existing = document.querySelector(`script[src="${scriptSrc}"]`);
-              if (!existing) {
-                const s = document.createElement("script");
-                s.src = scriptSrc;
-                s.async = true;
-                document.head.appendChild(s);
-                await new Promise<void>((resolve, reject) => {
-                  s.onload = () => resolve();
-                  s.onerror = () => reject(new Error("Plaid script failed to load"));
-                });
-              }
+                              // Load Plaid script (same approach as PlaidConnectButton)
+                              const scriptSrc = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+                              const existing = document.querySelector(`script[src="${scriptSrc}"]`);
+                              if (!existing) {
+                                const s = document.createElement("script");
+                                s.src = scriptSrc;
+                                s.async = true;
+                                document.head.appendChild(s);
+                                await new Promise<void>((resolve, reject) => {
+                                  s.onload = () => resolve();
+                                  s.onerror = () => reject(new Error("Plaid script failed to load"));
+                                });
+                              }
 
-              if (!(window as any).Plaid?.create) throw new Error("Plaid failed to load");
+                              if (!(window as any).Plaid?.create) throw new Error("Plaid failed to load");
 
-              const handler = (window as any).Plaid.create({
-                token: linkToken,
-                onSuccess: (public_token: string, metadata: any) => {
-                  const institution = metadata?.institution
-                    ? { name: metadata.institution.name, institution_id: metadata.institution.institution_id }
-                    : undefined;
+                              const handler = (window as any).Plaid.create({
+                                token: linkToken,
+                                onSuccess: (public_token: string, metadata: any) => {
+                                  const institution = metadata?.institution
+                                    ? { name: metadata.institution.name, institution_id: metadata.institution.institution_id }
+                                    : undefined;
 
-                  const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
-                  const first = accountsRaw[0];
-                  if (!first?.id) {
-                    setErr("Plaid returned no accounts");
-                    return;
-                  }
+                                  const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
+                                  const first = accountsRaw[0];
+                                  if (!first?.id) {
+                                    setErr("Plaid returned no accounts");
+                                    return;
+                                  }
 
-                  // Prefill draft from Plaid (user can edit on review)
-                  setPlaidDraft({
-                    public_token,
-                    institution,
-                    plaidAccountId: String(first.id),
-                    mask: first.mask ? String(first.mask) : undefined,
-                    name: first.name ? String(first.name) : (institution?.name ? `${institution.name} Account` : "Bank Account"),
-                    type: String((first.subtype ?? first.type ?? "CHECKING")).toUpperCase(),
-                    effectiveStartDate: openingDate,
-                  });
+                                  // Prefill draft from Plaid (user can edit on review)
+                                  setPlaidDraft({
+                                    public_token,
+                                    institution,
+                                    plaidAccountId: String(first.id),
+                                    mask: first.mask ? String(first.mask) : undefined,
+                                    name: first.name ? String(first.name) : (institution?.name ? `${institution.name} Account` : "Bank Account"),
+                                    type: String((first.subtype ?? first.type ?? "CHECKING")).toUpperCase(),
+                                    effectiveStartDate: openingDate,
+                                  });
 
-                  setPlaidReviewOpen(true);
-                },
-              });
+                                  setPlaidReviewOpen(true);
+                                },
+                              });
 
-              handler.open();
-            } catch (e: any) {
-              setErr(e?.message ?? "Plaid failed");
-            }
-          }}
-          disabled={!selectedBusinessId}
-        >
-          Continue to Plaid
-        </Button>
-      </>
-    )}
-  </div>
+                              handler.open();
+                            } catch (e: any) {
+                              setErr(e?.message ?? "Plaid failed");
+                            }
+                          }}
+                          disabled={!selectedBusinessId}
+                        >
+                          Continue to Plaid
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </AppDialog>
 
                 {/* Plaid review (step after Plaid selection) */}
@@ -1890,14 +1887,14 @@ export default function SettingsPageClient() {
                 <Table>
                   <THead className="bg-slate-50">
                     <TableRow className="hover:bg-slate-50">
- <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Name</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Type</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Institution</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Last 4</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Opening balance</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Status</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-center">Plaid</TableHead>
-<TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Name</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Type</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Institution</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Last 4</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Opening balance</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Status</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-center">Plaid</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
                     </TableRow>
                   </THead>
 
@@ -1914,33 +1911,33 @@ export default function SettingsPageClient() {
                       return (
                         <TableRow key={a.id} className="hover:bg-slate-50">
                           <TableCell className="py-2 font-medium text-slate-900">{a.name}</TableCell>
-<TableCell className="py-2 text-slate-700">{formatAccountType(a.type)}</TableCell>
+                          <TableCell className="py-2 text-slate-700">{formatAccountType(a.type)}</TableCell>
 
-{/* Institution (Plaid OR manual) */}
-<TableCell className="py-2 text-slate-700 text-xs">
-  {st?.institutionName ? (
-    <span className="truncate inline-block max-w-[220px]" title={st.institutionName}>
-      {st.institutionName}
-    </span>
-  ) : (a as any)?.institution_name ? (
-    <span className="truncate inline-block max-w-[220px]" title={(a as any).institution_name}>
-      {(a as any).institution_name}
-    </span>
-  ) : (
-    <span className="text-slate-400"></span>
-  )}
-</TableCell>
+                          {/* Institution (Plaid OR manual) */}
+                          <TableCell className="py-2 text-slate-700 text-xs">
+                            {st?.institutionName ? (
+                              <span className="truncate inline-block max-w-[220px]" title={st.institutionName}>
+                                {st.institutionName}
+                              </span>
+                            ) : (a as any)?.institution_name ? (
+                              <span className="truncate inline-block max-w-[220px]" title={(a as any).institution_name}>
+                                {(a as any).institution_name}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400"></span>
+                            )}
+                          </TableCell>
 
-{/* Last 4 (Plaid OR manual) */}
-<TableCell className="py-2 text-slate-700 text-xs font-mono">
-  {st?.last4
-    ? `•••• ${st.last4}`
-    : (a as any)?.last4
-      ? `•••• ${(a as any).last4}`
-      : st?.connected
-        ? <span className="text-slate-600">Reconnect</span>
-        : <span className="text-slate-400"></span>}
-</TableCell>
+                          {/* Last 4 (Plaid OR manual) */}
+                          <TableCell className="py-2 text-slate-700 text-xs font-mono">
+                            {st?.last4
+                              ? `•••• ${st.last4}`
+                              : (a as any)?.last4
+                                ? `•••• ${(a as any).last4}`
+                                : st?.connected
+                                  ? <span className="text-slate-600">Reconnect</span>
+                                  : <span className="text-slate-400"></span>}
+                          </TableCell>
 
                           <TableCell className="py-2 text-right">
                             <div className="font-medium text-slate-900 leading-none">{amount}</div>
@@ -1954,133 +1951,191 @@ export default function SettingsPageClient() {
                           </TableCell>
 
                           {/* Plaid (status only) */}
-<TableCell className="py-2 text-center">
-  {!st && loading ? (
-    <span className="text-[11px] text-slate-500">Checking…</span>
-  ) : st?.connected ? (
-    <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-medium">
-      Connected
-    </span>
-  ) : (
-    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
-      Not connected
-    </span>
-  )}
-</TableCell>
+                          <TableCell className="py-2 text-center">
+                            {!st && loading ? (
+                              <span className="text-[11px] text-slate-500">Checking…</span>
+                            ) : (st as any)?.needsAttention ? (
+                              <span
+                                className="inline-flex items-center rounded-full bg-amber-50 text-amber-800 px-2 py-0.5 text-[11px] font-medium"
+                                title={(st as any)?.errorMessage ?? "Needs attention"}
+                              >
+                                Needs attention
+                              </span>
+                            ) : isArchived ? (
+                              <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                                Not connected
+                              </span>
+                            ) : st?.connected ? (
+                              <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-medium">
+                                Connected
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                                Not connected
+                              </span>
+                            )}
+                          </TableCell>
 
 
                           {/* Actions */}
                           <TableCell className="py-2 text-right">
-<div className="flex justify-end gap-1 items-center">
-  {(() => {
-    // Plaid actions live in Actions column
-    if (!selectedBusinessId) return null;
+                            <div className="flex justify-end gap-1 items-center">
+                              {(() => {
+                                // Plaid actions live in Actions column
+                                if (!selectedBusinessId) return null;
 
-    // Not connected -> Connect Plaid
-    if (!st?.connected && !isArchived) {
-      return (
-        <PlaidConnectButton
-          businessId={selectedBusinessId}
-          accountId={a.id}
-          effectiveStartDate={todayYmd()}
-          disabledClassName="opacity-50 cursor-not-allowed"
-          buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
-          disabled={!selectedBusinessId}
-          onConnected={async () => {
-            // Refresh status after connect
-            try {
-              const res: any = await plaidStatus(selectedBusinessId, a.id);
-              setPlaidByAccount((cur) => ({
-                ...cur,
-                [a.id]: {
-                  connected: !!res?.connected,
-                  institutionName: res?.institutionName ?? undefined,
-                  last4: res?.last4 ?? null,
-                  status: res?.status ?? undefined,
-                  lastSyncAt: res?.lastSyncAt ?? null,
-                },
-              }));
-              setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
-            } catch {}
-          }}
-        />
-      );
-    }
+                                // Archived accounts: no Plaid actions, no edit/archive; delete handled separately
+                                if (isArchived) return null;
 
-    // Connected -> Switch + Disconnect (hide if archived)
-    if (st?.connected && !isArchived) {
-      return (
-        <>
-          <PlaidConnectButton
-            businessId={selectedBusinessId}
-            accountId={a.id}
-            effectiveStartDate={todayYmd()}
-            disabledClassName="opacity-50 cursor-not-allowed"
-            buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
-            disabled={!selectedBusinessId}
-            onConnected={async () => {
-              try {
-                const res: any = await plaidStatus(selectedBusinessId, a.id);
-                setPlaidByAccount((cur) => ({
-                  ...cur,
-                  [a.id]: {
-                    connected: !!res?.connected,
-                    institutionName: res?.institutionName ?? undefined,
-                    last4: res?.last4 ?? null,
-                    status: res?.status ?? undefined,
-                    lastSyncAt: res?.lastSyncAt ?? null,
-                  },
-                }));
-                setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
-              } catch {}
-            }}
-          />
+                                // While status is still loading/unknown, don't render connect/switch controls (prevents wrong flashes).
+                                if (!checked || loading) return null;
 
-          <button
-            type="button"
-            className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-            title="Disconnect Plaid"
-            onClick={async () => {
-              await plaidDisconnect(selectedBusinessId, a.id);
-              setPlaidByAccount((cur) => ({ ...cur, [a.id]: { connected: false } }));
-              setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
-            }}
-          >
-            <Link2Off className="h-4 w-4" />
-          </button>
-        </>
-      );
-    }
+                                // Needs attention -> Reconnect
+                                if ((st as any)?.needsAttention && !isArchived) {
+                                  return (
+                                    <PlaidConnectButton
+                                      businessId={selectedBusinessId}
+                                      accountId={a.id}
+                                      effectiveStartDate={todayYmd()}
+                                      disabledClassName="opacity-50 cursor-not-allowed"
+                                      buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                      disabled={!selectedBusinessId}
+                                      label="Reconnect (Plaid)"
+                                      onConnected={async () => {
+                                        try {
+                                          const res: any = await plaidStatus(selectedBusinessId, a.id);
+                                          setPlaidByAccount((cur) => ({
+                                            ...cur,
+                                            [a.id]: {
+                                              connected: !!res?.connected,
+                                              institutionName: res?.institutionName ?? undefined,
+                                              last4: res?.last4 ?? null,
+                                              status: res?.status ?? undefined,
+                                              lastSyncAt: res?.lastSyncAt ?? null,
+                                              needsAttention: !!res?.needsAttention,
+                                              errorMessage: res?.error ?? null,
+                                            } as any,
+                                          }));
+                                          setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
+                                          qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                                        } catch { }
+                                      }}
+                                    />
+                                  );
+                                }
 
-    return null;
-  })()}
+                                // Not connected -> Connect Plaid
+                                if (!st?.connected && !isArchived) {
+                                  return (
+                                    <PlaidConnectButton
+                                      businessId={selectedBusinessId}
+                                      accountId={a.id}
+                                      effectiveStartDate={todayYmd()}
+                                      disabledClassName="opacity-50 cursor-not-allowed"
+                                      buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                      disabled={!selectedBusinessId}
+                                      label="Connect (Plaid)"
+                                      onConnected={async () => {
+                                        // Refresh status after connect
+                                        try {
+                                          const res: any = await plaidStatus(selectedBusinessId, a.id);
+                                          setPlaidByAccount((cur) => ({
+                                            ...cur,
+                                            [a.id]: {
+                                              connected: !!res?.connected,
+                                              institutionName: res?.institutionName ?? undefined,
+                                              last4: res?.last4 ?? null,
+                                              status: res?.status ?? undefined,
+                                              lastSyncAt: res?.lastSyncAt ?? null,
+                                            },
+                                          }));
+                                          setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
+                                          qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                                        } catch { }
+                                      }}
+                                    />
+                                  );
+                                }
+
+                                // Connected -> Switch + Disconnect (hide if archived)
+                                if (st?.connected && !isArchived) {
+                                  return (
+                                    <>
+                                      <PlaidConnectButton
+                                        businessId={selectedBusinessId}
+                                        accountId={a.id}
+                                        effectiveStartDate={todayYmd()}
+                                        disabledClassName="opacity-50 cursor-not-allowed"
+                                        buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                        disabled={!selectedBusinessId}
+                                        label="Connect different bank account (Plaid)"
+                                        onConnected={async () => {
+
+                                          try {
+                                            const res: any = await plaidStatus(selectedBusinessId, a.id);
+                                            setPlaidByAccount((cur) => ({
+                                              ...cur,
+                                              [a.id]: {
+                                                connected: !!res?.connected,
+                                                institutionName: res?.institutionName ?? undefined,
+                                                last4: res?.last4 ?? null,
+                                                status: res?.status ?? undefined,
+                                                lastSyncAt: res?.lastSyncAt ?? null,
+                                              },
+                                            }));
+                                            setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
+                                          } catch { }
+                                        }}
+                                      />
+
+                                      <button
+                                        type="button"
+                                        className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                        title="Disconnect Plaid"
+                                        onClick={async () => {
+                                          await plaidDisconnect(selectedBusinessId, a.id);
+                                          setPlaidByAccount((cur) => ({ ...cur, [a.id]: { connected: false } }));
+                                          setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
+                                        }}
+                                      >
+                                        <Link2Off className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  );
+                                }
+
+                                return null;
+                              })()}
+                              {!isArchived ? (
                                 <button
-                                type="button"
-                                className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-                                title="Edit"
-                                onClick={() => {
-                                  setEditAccountId(a.id);
-                                  setEditName(a.name);
-                                  setEditType(a.type as AccountType);
-                                  setEditOpeningBalance(String((Number(a.opening_balance_cents ?? 0) as any) / 100));
-                                  setEditOpeningDate(todayYmd());
-                                  setEditErr(null);
-                                  setEditOpen(true);
+                                  type="button"
+                                  className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                  title="Edit"
+                                  onClick={() => {
+                                    setEditAccountId(a.id);
+                                    setEditName(a.name);
+                                    setEditType(a.type as AccountType);
+                                    setEditOpeningBalance(String((Number(a.opening_balance_cents ?? 0) as any) / 100));
+                                    setEditOpeningDate(todayYmd());
+                                    setEditErr(null);
+                                    setEditOpen(true);
 
-                                  try {
-                                    const d = new Date(a.opening_balance_date as any);
-                                    if (!Number.isNaN(d.getTime())) {
-                                      const y = d.getFullYear();
-                                      const m = String(d.getMonth() + 1).padStart(2, "0");
-                                      const day = String(d.getDate()).padStart(2, "0");
-                                      setEditOpeningDate(`${y}-${m}-${day}`);
-                                    }
-                                  } catch {}
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
+                                    try {
+                                      const d = new Date(a.opening_balance_date as any);
+                                      if (!Number.isNaN(d.getTime())) {
+                                        const y = d.getFullYear();
+                                        const m = String(d.getMonth() + 1).padStart(2, "0");
+                                        const day = String(d.getDate()).padStart(2, "0");
+                                        setEditOpeningDate(`${y}-${m}-${day}`);
+                                      }
+                                    } catch { }
+                                  }}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              ) : null}
 
+                              {/* Archive / Unarchive */}
                               <button
                                 type="button"
                                 className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -2095,17 +2150,33 @@ export default function SettingsPageClient() {
                                 <Archive className="h-3.5 w-3.5" />
                               </button>
 
+                              {/* Delete (archived only) */}
                               {(() => {
+                                if (!isArchived) return null;
+
                                 const elig = deleteEligByAccount[a.id];
-if (!isArchived) return null;
-if (!elig || !elig.eligible) return null;
+                                const loadingElig = !!deleteEligLoading[a.id];
+
+                                const eligible = !!elig?.eligible;
+                                const relatedTotal = elig?.related_total ?? null;
+
+                                const disabled = loadingElig || !eligible;
+
+                                const title = loadingElig
+                                  ? "Checking delete eligibility…"
+                                  : eligible
+                                    ? "Delete account"
+                                    : `Cannot delete: ${relatedTotal ?? "unknown"} related rows. Remove related data first.`;
 
                                 return (
                                   <button
                                     type="button"
-                                    className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-rose-600 hover:bg-rose-50"
-                                    title="Delete (only allowed when no related rows)"
+                                    className={`h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 ${disabled ? "text-slate-300 cursor-not-allowed" : "text-rose-600 hover:bg-rose-50"
+                                      }`}
+                                    title={title}
+                                    disabled={disabled}
                                     onClick={async () => {
+                                      if (disabled) return;
                                       if (!selectedBusinessId) return;
                                       const ok = window.confirm("Delete this account? This cannot be undone.");
                                       if (!ok) return;

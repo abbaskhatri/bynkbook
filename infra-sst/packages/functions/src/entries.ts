@@ -196,46 +196,46 @@ export async function handler(event: any) {
     return json(200, {
       ok: true,
       entries: rows.map((e) => {
-  const tid = e.transfer_id ? String(e.transfer_id) : null;
-  const transferDisplay = tid ? transferDisplayById.get(tid) : null;
+        const tid = e.transfer_id ? String(e.transfer_id) : null;
+        const transferDisplay = tid ? transferDisplayById.get(tid) : null;
 
-  return {
-    id: e.id,
-    business_id: e.business_id,
-    account_id: e.account_id,
-    date: e.date,
-    payee: e.payee,
-    memo: e.memo,
-    amount_cents: String(e.amount_cents),
-    type: e.type,
-    method: e.method,
-    status: e.status,
+        return {
+          id: e.id,
+          business_id: e.business_id,
+          account_id: e.account_id,
+          date: e.date,
+          payee: e.payee,
+          memo: e.memo,
+          amount_cents: String(e.amount_cents),
+          type: e.type,
+          method: e.method,
+          status: e.status,
 
-    // Categories
-    category_id: e.category_id,
-    category_name: e.category_id
-      ? categoryNameById.get(String(e.category_id)) ?? null
-      : null,
+          // Categories
+          category_id: e.category_id,
+          category_name: e.category_id
+            ? categoryNameById.get(String(e.category_id)) ?? null
+            : null,
 
-    // Vendor link (persisted)
-    vendor_id: (e as any).vendor_id ?? null,
-    vendor_name: (e as any).vendor_id ? (vendorNameById.get(String((e as any).vendor_id)) ?? null) : null,
+          // Vendor link (persisted)
+          vendor_id: (e as any).vendor_id ?? null,
+          vendor_name: (e as any).vendor_id ? (vendorNameById.get(String((e as any).vendor_id)) ?? null) : null,
 
-    // Transfers (DURABLE, BACKEND-DERIVED)
-    transfer_id: e.transfer_id,
-    transfer_other_account_name: transferDisplay?.other_account_name ?? null,
-    transfer_other_account_id: transferDisplay?.other_account_id ?? null,
-    transfer_direction:
-      e.transfer_id
-        ? (BigInt(String(e.amount_cents)) < 0n ? "OUT" : "IN")
-        : null,
+          // Transfers (DURABLE, BACKEND-DERIVED)
+          transfer_id: e.transfer_id,
+          transfer_other_account_name: transferDisplay?.other_account_name ?? null,
+          transfer_other_account_id: transferDisplay?.other_account_id ?? null,
+          transfer_direction:
+            e.transfer_id
+              ? (BigInt(String(e.amount_cents)) < 0n ? "OUT" : "IN")
+              : null,
 
-    is_adjustment: e.is_adjustment,
-    created_at: e.created_at,
-    updated_at: e.updated_at,
-    deleted_at: e.deleted_at,
-  };
-})
+          is_adjustment: e.is_adjustment,
+          created_at: e.created_at,
+          updated_at: e.updated_at,
+          deleted_at: e.deleted_at,
+        };
+      })
     });
   }
 

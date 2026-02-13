@@ -103,7 +103,7 @@ function toBigIntSafe(v: unknown): bigint {
     if (typeof v === "bigint") return v;
     if (typeof v === "number") return BigInt(Math.trunc(v));
     if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch {}
+  } catch { }
   return ZERO;
 }
 
@@ -168,6 +168,11 @@ function statusTone(
   if (s === "PENDING") return "warning";
   if (s.includes("FAIL") || s.includes("ERROR")) return "danger";
   return "default";
+}
+
+function isOpeningLikePayee(payee: string | null | undefined): boolean {
+  const x = String(payee ?? "").trim().toLowerCase();
+  return x === "opening balance" || x === "opening balance (estimated)" || x.startsWith("opening balance");
 }
 
 function stripMoneyDisplay(s: string): string {
@@ -388,22 +393,22 @@ function HoverTooltip(props: { text: string; children: any }) {
       {children}
       {open && text && body && pos
         ? createPortal(
-            <div
-              style={{
-                position: "fixed",
-                left: pos.x,
-                top: pos.y + 6,
-                transform: "translateX(-100%)",
-                zIndex: 9999,
-                pointerEvents: "none",
-                maxWidth: 420,
-              }}
-              className="rounded-md bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg whitespace-pre-line break-words w-max"
-            >
-              {text}
-            </div>,
-            body
-          )
+          <div
+            style={{
+              position: "fixed",
+              left: pos.x,
+              top: pos.y + 6,
+              transform: "translateX(-100%)",
+              zIndex: 9999,
+              pointerEvents: "none",
+              maxWidth: 420,
+            }}
+            className="rounded-md bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg whitespace-pre-line break-words w-max"
+          >
+            {text}
+          </div>,
+          body
+        )
         : null}
     </span>
   );
@@ -417,7 +422,7 @@ function VendorSuggestPill(props: {
   onLinked: (vendor: { id: string; name: string }) => void;
   onDismiss: () => void;
 }) {
-const { businessId, accountId, entryId, payee, onLinked, onDismiss } = props;
+  const { businessId, accountId, entryId, payee, onLinked, onDismiss } = props;
   const [best, setBest] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
@@ -467,26 +472,26 @@ const { businessId, accountId, entryId, payee, onLinked, onDismiss } = props;
         type="button"
         className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-200"
         title="Link to vendor"
-onClick={async () => {
-  try {
-    const res: any = await apiFetch(
-      `/v1/businesses/${businessId}/accounts/${accountId}/entries/${entryId}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({ vendor_id: best.id }),
-      }
-    );
+        onClick={async () => {
+          try {
+            const res: any = await apiFetch(
+              `/v1/businesses/${businessId}/accounts/${accountId}/entries/${entryId}`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({ vendor_id: best.id }),
+              }
+            );
 
-    if (!res?.ok) {
-      // keep pill visible if backend rejected
-      return;
-    }
+            if (!res?.ok) {
+              // keep pill visible if backend rejected
+              return;
+            }
 
-    onLinked({ id: best.id, name: best.name });
-  } catch {
-    // keep pill visible on error
-  }
-}}
+            onLinked({ id: best.id, name: best.name });
+          } catch {
+            // keep pill visible on error
+          }
+        }}
       >
         <Check className="h-3.5 w-3.5 text-emerald-700" />
       </button>
@@ -574,7 +579,7 @@ function uiTypeFromRaw(raw: string | null | undefined): UiType {
 function uiMethodFromRaw(raw: string | null | undefined): UiMethod {
   const m = String(raw || "").toUpperCase();
   const allowed: UiMethod[] = [
-    "CASH","CARD","ACH","WIRE","CHECK","DIRECT_DEPOSIT","ZELLE","TRANSFER","OTHER",
+    "CASH", "CARD", "ACH", "WIRE", "CHECK", "DIRECT_DEPOSIT", "ZELLE", "TRANSFER", "OTHER",
   ];
   return (allowed as string[]).includes(m) ? (m as UiMethod) : "OTHER";
 }
@@ -671,7 +676,7 @@ export default function LedgerPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshScopeKey]);
 
-    // Uploads "create entries" triggers a lightweight ledger refresh (no storms)
+  // Uploads "create entries" triggers a lightweight ledger refresh (no storms)
   useEffect(() => {
     const fn = () => scheduleEntriesRefresh("uploadsCreateEntries");
     window.addEventListener("bynk:ledger-refresh", fn as any);
@@ -731,7 +736,7 @@ export default function LedgerPageClient() {
 
   // Transfer display is derived from backend fields on each entry (stable across refetch).
 
-    // Filters + toggle
+  // Filters + toggle
   const [searchPayee, setSearchPayee] = useState("");
   const [debouncedPayee, setDebouncedPayee] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
@@ -850,6 +855,12 @@ export default function LedgerPageClient() {
 
   const entriesWithOpening = useMemo(() => {
     if (!openingEntry) return entriesSorted;
+
+    // If backend already has a real opening entry, do NOT inject the synthetic system opening row.
+    const hasRealOpening = entriesSorted.some((e: any) => isOpeningLikePayee(e?.payee));
+
+    if (hasRealOpening) return entriesSorted;
+
     const list = entriesSorted.slice();
     if (!list.some((e) => e.id === "opening_balance")) list.push(openingEntry);
     list.sort(sortEntriesDisplayDesc);
@@ -887,7 +898,7 @@ export default function LedgerPageClient() {
     return () => {
       try {
         delete (globalThis as any).__BYNK_CATEGORY_NORM_MAP_HAS;
-      } catch {}
+      } catch { }
     };
   }, [categoryIdByNormName]);
 
@@ -1021,7 +1032,7 @@ export default function LedgerPageClient() {
     return n;
   }, [rowModels]);
 
-      // Issues: create separate columns
+  // Issues: create separate columns
   const issuesById = useMemo(() => {
     const map: Record<
       string,
@@ -1088,7 +1099,7 @@ export default function LedgerPageClient() {
   }, [openIssues, rowModels]);
 
   // Stage A attention counts (UI-only; not authoritative)
-const issuesAttentionCount = useMemo(() => {
+  const issuesAttentionCount = useMemo(() => {
     // Ledger badge should reflect real open issues for this account
     return openIssueCountForAccount;
   }, [openIssueCountForAccount]);
@@ -1130,79 +1141,79 @@ const issuesAttentionCount = useMemo(() => {
     });
   }, [rowModels, issuesById]);
 
-   const filteredRowsAll = useMemo(() => {
-  const q = debouncedPayee.trim().toLowerCase();
+  const filteredRowsAll = useMemo(() => {
+    const q = debouncedPayee.trim().toLowerCase();
 
-  // Normalize date bounds (YYYY-MM-DD strings compare lexicographically)
-  const from = (filterFrom || "").trim();
-  const to = (filterTo || "").trim();
+    // Normalize date bounds (YYYY-MM-DD strings compare lexicographically)
+    const from = (filterFrom || "").trim();
+    const to = (filterTo || "").trim();
 
-  // Amount filters (interpreted as dollars; compared on absolute value)
-  const exactStr = (filterAmountExact || "").trim();
-  const minStr = (filterAmountMin || "").trim();
-  const maxStr = (filterAmountMax || "").trim();
+    // Amount filters (interpreted as dollars; compared on absolute value)
+    const exactStr = (filterAmountExact || "").trim();
+    const minStr = (filterAmountMin || "").trim();
+    const maxStr = (filterAmountMax || "").trim();
 
-  const exactCentsAbs = exactStr ? Math.round(Math.abs(Number(exactStr)) * 100) : null;
-  const minCentsAbs = minStr ? Math.round(Math.abs(Number(minStr)) * 100) : null;
-  const maxCentsAbs = maxStr ? Math.round(Math.abs(Number(maxStr)) * 100) : null;
+    const exactCentsAbs = exactStr ? Math.round(Math.abs(Number(exactStr)) * 100) : null;
+    const minCentsAbs = minStr ? Math.round(Math.abs(Number(minStr)) * 100) : null;
+    const maxCentsAbs = maxStr ? Math.round(Math.abs(Number(maxStr)) * 100) : null;
 
-  const hasExact = exactCentsAbs !== null && Number.isFinite(exactCentsAbs);
-  const hasMin = minCentsAbs !== null && Number.isFinite(minCentsAbs);
-  const hasMax = maxCentsAbs !== null && Number.isFinite(maxCentsAbs);
+    const hasExact = exactCentsAbs !== null && Number.isFinite(exactCentsAbs);
+    const hasMin = minCentsAbs !== null && Number.isFinite(minCentsAbs);
+    const hasMax = maxCentsAbs !== null && Number.isFinite(maxCentsAbs);
 
-  return rowsUi.filter((r) => {
-    // Payee search (debounced)
-    if (q && !r.payee.toLowerCase().includes(q)) return false;
+    return rowsUi.filter((r) => {
+      // Payee search (debounced)
+      if (q && !r.payee.toLowerCase().includes(q)) return false;
 
-    // Type filter (rawType expected to be "INCOME"/"EXPENSE" for real rows)
-    if (filterType !== "ALL") {
-      const t = (r.rawType || "").toString().toUpperCase();
-      if (t !== filterType) return false;
-    }
-
-    // Method filter (compare against rawMethod when possible; fallback to display)
-    if (filterMethod !== "ALL") {
-      const mRaw = (r.rawMethod || "").toString().toUpperCase();
-      const mDisp = (r.methodDisplay || "").toString().toUpperCase().replace(/\s+/g, "_");
-      const want = filterMethod.toUpperCase();
-      if (mRaw !== want && mDisp !== want) return false;
-    }
-
-    // Category filter (real category_id)
-    if (filterCategory !== "ALL") {
-      const cid = r.categoryId;
-      if (filterCategory === "__UNCATEGORIZED__") {
-        if (cid) return false;
-      } else {
-        if (cid !== filterCategory) return false;
+      // Type filter (rawType expected to be "INCOME"/"EXPENSE" for real rows)
+      if (filterType !== "ALL") {
+        const t = (r.rawType || "").toString().toUpperCase();
+        if (t !== filterType) return false;
       }
-    }
 
-    // Date range filter (skip if no bounds)
-    if (from) {
-      const d = (r.date || "").slice(0, 10);
-      if (d && d < from) return false;
-    }
-    if (to) {
-      const d = (r.date || "").slice(0, 10);
-      if (d && d > to) return false;
-    }
-
-    // Amount filter (absolute cents)
-    if (hasExact || hasMin || hasMax) {
-      const centsAbs = Math.abs(Number(r.amountCents || 0));
-
-      if (hasExact) {
-        if (centsAbs !== exactCentsAbs) return false;
-      } else {
-        if (hasMin && centsAbs < (minCentsAbs as number)) return false;
-        if (hasMax && centsAbs > (maxCentsAbs as number)) return false;
+      // Method filter (compare against rawMethod when possible; fallback to display)
+      if (filterMethod !== "ALL") {
+        const mRaw = (r.rawMethod || "").toString().toUpperCase();
+        const mDisp = (r.methodDisplay || "").toString().toUpperCase().replace(/\s+/g, "_");
+        const want = filterMethod.toUpperCase();
+        if (mRaw !== want && mDisp !== want) return false;
       }
-    }
 
-    return true;
-  });
-}, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
+      // Category filter (real category_id)
+      if (filterCategory !== "ALL") {
+        const cid = r.categoryId;
+        if (filterCategory === "__UNCATEGORIZED__") {
+          if (cid) return false;
+        } else {
+          if (cid !== filterCategory) return false;
+        }
+      }
+
+      // Date range filter (skip if no bounds)
+      if (from) {
+        const d = (r.date || "").slice(0, 10);
+        if (d && d < from) return false;
+      }
+      if (to) {
+        const d = (r.date || "").slice(0, 10);
+        if (d && d > to) return false;
+      }
+
+      // Amount filter (absolute cents)
+      if (hasExact || hasMin || hasMax) {
+        const centsAbs = Math.abs(Number(r.amountCents || 0));
+
+        if (hasExact) {
+          if (centsAbs !== exactCentsAbs) return false;
+        } else {
+          if (hasMin && centsAbs < (minCentsAbs as number)) return false;
+          if (hasMax && centsAbs > (maxCentsAbs as number)) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
 
   const startIdx = (page - 1) * rowsPerPage;
   const endIdx = page * rowsPerPage;
@@ -1245,7 +1256,7 @@ const issuesAttentionCount = useMemo(() => {
   const canPrev = page > 1;
   const totalPages = Math.max(1, Math.ceil(filteredRowsAll.length / rowsPerPage));
 
-// Selection
+  // Selection
   const checkboxClass =
     "h-4 w-4 rounded border border-slate-300 bg-white checked:bg-slate-900 checked:border-slate-900";
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
@@ -1357,7 +1368,7 @@ const issuesAttentionCount = useMemo(() => {
   const [draftDate, setDraftDate] = useState(todayYmd());
   const [draftRef, setDraftRef] = useState("");
   const [draftPayee, setDraftPayee] = useState("");
-    const [draftType, setDraftType] = useState<UiType>("EXPENSE");
+  const [draftType, setDraftType] = useState<UiType>("EXPENSE");
   const [draftMethod, setDraftMethod] = useState<UiMethod>("CASH");
   const [draftCategory, setDraftCategory] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
@@ -1369,7 +1380,7 @@ const issuesAttentionCount = useMemo(() => {
   const [draftAmount, setDraftAmount] = useState("0.00");
   const [err, setErr] = useState<string | null>(null);
 
-    // Last scan (UI-only, persisted per business+account)
+  // Last scan (UI-only, persisted per business+account)
   const scanKey = useMemo(() => {
     if (!selectedBusinessId || !selectedAccountId) return "";
     return `bynkbook:lastScanAt:${selectedBusinessId}:${selectedAccountId}`;
@@ -1514,7 +1525,7 @@ const issuesAttentionCount = useMemo(() => {
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpenId]);
 
-    // Mutations (keep working behavior)
+  // Mutations (keep working behavior)
   const createMut = useMutation({
     mutationFn: async (vars: any) => {
       if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
@@ -1586,78 +1597,78 @@ const issuesAttentionCount = useMemo(() => {
       });
     },
     onMutate: async (vars: any) => {
-  const t0 = performance.now();
-  const mark = `[PERF][create][${vars?.tempId || "noid"}]`;
-  perfLog(`${mark} click→onMutate start`);
+      const t0 = performance.now();
+      const mark = `[PERF][create][${vars?.tempId || "noid"}]`;
+      perfLog(`${mark} click→onMutate start`);
 
-  setErr(null);
-  cancelEntriesRefresh();
-  await qc.cancelQueries({ queryKey: entriesKey });
+      setErr(null);
+      cancelEntriesRefresh();
+      await qc.cancelQueries({ queryKey: entriesKey });
 
-  const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
-  const nowIso = new Date().toISOString();
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const nowIso = new Date().toISOString();
 
-  const cents = parseMoneyToCents(vars.amountStr);
+      const cents = parseMoneyToCents(vars.amountStr);
 
-  // optimistic amount/type rules
-  let backendType: string = vars.type;
-  let signed: number = cents;
+      // optimistic amount/type rules
+      let backendType: string = vars.type;
+      let signed: number = cents;
 
-  if (vars.type === "TRANSFER") {
-    backendType = "TRANSFER";
-    signed = cents; // IMPORTANT: keep the signed value user typed for current account
-  } else if (vars.type === "ADJUSTMENT") {
-    backendType = "ADJUSTMENT";
-    signed = cents; // keep sign
-  } else if (vars.type === "INCOME") {
-    backendType = "INCOME";
-    signed = Math.abs(cents);
-  } else {
-    backendType = "EXPENSE";
-    signed = -Math.abs(cents);
-  }
+      if (vars.type === "TRANSFER") {
+        backendType = "TRANSFER";
+        signed = cents; // IMPORTANT: keep the signed value user typed for current account
+      } else if (vars.type === "ADJUSTMENT") {
+        backendType = "ADJUSTMENT";
+        signed = cents; // keep sign
+      } else if (vars.type === "INCOME") {
+        backendType = "INCOME";
+        signed = Math.abs(cents);
+      } else {
+        backendType = "EXPENSE";
+        signed = -Math.abs(cents);
+      }
 
-  const optimistic: Entry = {
-    id: vars.tempId,
-    business_id: selectedBusinessId!,
-    account_id: selectedAccountId!,
-    date: vars.date,
-    payee: vars.payee.trim(),
-    memo: vars.type === "ADJUSTMENT" ? ((vars.note ?? "").trim() || null) : null,
-    category_id: vars.categoryId ?? null,
-    amount_cents: String(signed),
-    type: backendType,
-    method: normalizeBackendMethod(vars.method),
-    status: "EXPECTED",
-    deleted_at: null,
-    created_at: nowIso,
-    updated_at: nowIso,
-  };
+      const optimistic: Entry = {
+        id: vars.tempId,
+        business_id: selectedBusinessId!,
+        account_id: selectedAccountId!,
+        date: vars.date,
+        payee: vars.payee.trim(),
+        memo: vars.type === "ADJUSTMENT" ? ((vars.note ?? "").trim() || null) : null,
+        category_id: vars.categoryId ?? null,
+        amount_cents: String(signed),
+        type: backendType,
+        method: normalizeBackendMethod(vars.method),
+        status: "EXPECTED",
+        deleted_at: null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
 
-  // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
-  // Display ordering is handled by existing memoized sorting logic.
-  qc.setQueryData(entriesKey, [optimistic, ...previous]);
+      // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
+      // Display ordering is handled by existing memoized sorting logic.
+      qc.setQueryData(entriesKey, [optimistic, ...previous]);
 
-  // reset add-row
-  setDraftRef("");
-  setDraftPayee("");
-  setDraftCategory("");
-  setDraftCategoryId(null);
-  setDraftNote("");
-  setDraftToAccountId("");
-  setDraftAmount("0.00");
-  setDraftType("EXPENSE");
-  setDraftMethod("CASH");
+      // reset add-row
+      setDraftRef("");
+      setDraftPayee("");
+      setDraftCategory("");
+      setDraftCategoryId(null);
+      setDraftNote("");
+      setDraftToAccountId("");
+      setDraftAmount("0.00");
+      setDraftType("EXPENSE");
+      setDraftMethod("CASH");
 
-    // Controlled inputs reset via state; no direct DOM writes needed
+      // Controlled inputs reset via state; no direct DOM writes needed
 
-  requestAnimationFrame(() => payeeInputRef.current?.focus());
+      requestAnimationFrame(() => payeeInputRef.current?.focus());
 
-  const t1 = performance.now();
-  perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
+      const t1 = performance.now();
+      perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
 
-  return { previous, __perf: { t0, mark } };
-},
+      return { previous, __perf: { t0, mark } };
+    },
 
     onError: (e: any, vars: any, ctx: any) => {
       const mark = ctx?.__perf?.mark || `[PERF][create][${vars?.tempId || "noid"}]`;
@@ -1669,7 +1680,7 @@ const issuesAttentionCount = useMemo(() => {
       setErr(e?.message || "Create failed");
     },
     onSuccess: async (_data: any, vars: any, ctx: any) => {
-            // Track last created entry so we can show a post-save suggestion pill
+      // Track last created entry so we can show a post-save suggestion pill
       const createdId =
         (_data?.entry?.id as string | undefined) ||
         (_data?.id as string | undefined) ||
@@ -1677,9 +1688,9 @@ const issuesAttentionCount = useMemo(() => {
         null;
 
       if (createdId) {
-  setLastCreatedEntryId(createdId);
-  setLastCreatedLinkedVendor(null);
-}
+        setLastCreatedEntryId(createdId);
+        setLastCreatedLinkedVendor(null);
+      }
       const mark = ctx?.__perf?.mark || `[PERF][create][${vars?.tempId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
       const tOk = performance.now();
@@ -1710,7 +1721,7 @@ const issuesAttentionCount = useMemo(() => {
 
   });
 
-    const updateMut = useMutation({
+  const updateMut = useMutation({
     mutationFn: async (p: { entryId: string; updates: any }) => {
       if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
       return updateEntry({
@@ -1721,41 +1732,41 @@ const issuesAttentionCount = useMemo(() => {
       });
     },
     onMutate: async (p) => {
-  const t0 = performance.now();
-  const mark = `[PERF][update][${p?.entryId || "noid"}]`;
-  perfLog(`${mark} click→onMutate start`);
+      const t0 = performance.now();
+      const mark = `[PERF][update][${p?.entryId || "noid"}]`;
+      perfLog(`${mark} click→onMutate start`);
 
-  setErr(null);
-  void qc.cancelQueries({ queryKey: entriesKey });
+      setErr(null);
+      void qc.cancelQueries({ queryKey: entriesKey });
 
-  const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
-  const idx = previous.findIndex((e) => e.id === p.entryId);
-  if (idx < 0) {
-    const tSkip = performance.now();
-    perfLog(`${mark} onMutate skipped (row not in cache) in ${(tSkip - t0).toFixed(1)}ms`);
-    return { previous, __perf: { t0, mark } };
-  }
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const idx = previous.findIndex((e) => e.id === p.entryId);
+      if (idx < 0) {
+        const tSkip = performance.now();
+        perfLog(`${mark} onMutate skipped (row not in cache) in ${(tSkip - t0).toFixed(1)}ms`);
+        return { previous, __perf: { t0, mark } };
+      }
 
-  const prevRow = previous[idx];
-  const nextRow: Entry = {
-    ...prevRow,
-    ...p.updates,
-    memo: p.updates.memo ?? prevRow.memo,
-    updated_at: new Date().toISOString(),
-  };
+      const prevRow = previous[idx];
+      const nextRow: Entry = {
+        ...prevRow,
+        ...p.updates,
+        memo: p.updates.memo ?? prevRow.memo,
+        updated_at: new Date().toISOString(),
+      };
 
-  const next = previous.slice();
-  next[idx] = nextRow;
+      const next = previous.slice();
+      next[idx] = nextRow;
 
-  // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
-  // Display ordering is handled by existing memoized sorting logic.
-  qc.setQueryData(entriesKey, next);
+      // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
+      // Display ordering is handled by existing memoized sorting logic.
+      qc.setQueryData(entriesKey, next);
 
-  const t1 = performance.now();
-  perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
+      const t1 = performance.now();
+      perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
 
-  return { previous, __perf: { t0, mark } };
-},
+      return { previous, __perf: { t0, mark } };
+    },
 
     onError: (e: any, vars: any, ctx: any) => {
       const mark = ctx?.__perf?.mark || `[PERF][update][${vars?.entryId || "noid"}]`;
@@ -1767,18 +1778,18 @@ const issuesAttentionCount = useMemo(() => {
       setErr("Update failed");
     },
     onSuccess: async (_data, vars: any, ctx: any) => {
-  const mark = ctx?.__perf?.mark || `[PERF][update][${vars?.entryId || "noid"}]`;
-  const t0 = ctx?.__perf?.t0 ?? performance.now();
-  const tOk = performance.now();
-  perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
+      const mark = ctx?.__perf?.mark || `[PERF][update][${vars?.entryId || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tOk = performance.now();
+      perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  if (vars?.entryId) setEditedIds((m) => ({ ...m, [vars.entryId]: true }));
+      if (vars?.entryId) setEditedIds((m) => ({ ...m, [vars.entryId]: true }));
 
-  scheduleEntriesRefresh("update");
+      scheduleEntriesRefresh("update");
 
-  // Update footer totals promptly (cheap query; no entries refetch storm)
-  void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
-},
+      // Update footer totals promptly (cheap query; no entries refetch storm)
+      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+    },
 
   });
 
@@ -1795,197 +1806,197 @@ const issuesAttentionCount = useMemo(() => {
 
       return deleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: p.entryId });
     },
-  onMutate: async (p) => {
-    const entryId = p.entryId;
-  const t0 = performance.now();
-  const mark = `[PERF][delete][${entryId || "noid"}]`;
-  perfLog(`${mark} click→onMutate start`);
+    onMutate: async (p) => {
+      const entryId = p.entryId;
+      const t0 = performance.now();
+      const mark = `[PERF][delete][${entryId || "noid"}]`;
+      perfLog(`${mark} click→onMutate start`);
 
-  // Do NOT auto-toggle Deleted view. User control must remain stable.
-  setDeletingId(entryId);
-  cancelEntriesRefresh();
-  void qc.cancelQueries({ queryKey: entriesKey });
+      // Do NOT auto-toggle Deleted view. User control must remain stable.
+      setDeletingId(entryId);
+      cancelEntriesRefresh();
+      void qc.cancelQueries({ queryKey: entriesKey });
 
-  const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
-  const nowIso = new Date().toISOString();
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const nowIso = new Date().toISOString();
 
-  const next = previous.map((e) =>
-    e.id === entryId ? { ...e, deleted_at: nowIso, updated_at: nowIso } : e
-  );
+      const next = previous.map((e) =>
+        e.id === entryId ? { ...e, deleted_at: nowIso, updated_at: nowIso } : e
+      );
 
-  // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
-  // Display ordering is handled by existing memoized sorting logic.
-  qc.setQueryData(entriesKey, next);
+      // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
+      // Display ordering is handled by existing memoized sorting logic.
+      qc.setQueryData(entriesKey, next);
 
-  const t1 = performance.now();
-  perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
+      const t1 = performance.now();
+      perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
 
-  return { previous, __perf: { t0, mark } };
-},
+      return { previous, __perf: { t0, mark } };
+    },
 
-  onError: (e: any, p: any, ctx: any) => {
-    const id = p?.entryId;
-    setDeletingId(null);
-    const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
-    const t0 = ctx?.__perf?.t0 ?? performance.now();
-    const tErr = performance.now();
-    perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
+    onError: (e: any, p: any, ctx: any) => {
+      const id = p?.entryId;
+      setDeletingId(null);
+      const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tErr = performance.now();
+      perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
-    // If server says already gone, treat as success (idempotent UI)
-    const msg = String(e?.message ?? "");
-    if (msg.includes("404") || msg.includes("Entry not found")) {
-      setErr(null);
-      // ensure row stays deleted in UI
-      void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
-      return;
-    }
+      // If server says already gone, treat as success (idempotent UI)
+      const msg = String(e?.message ?? "");
+      if (msg.includes("404") || msg.includes("Entry not found")) {
+        setErr(null);
+        // ensure row stays deleted in UI
+        void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+        return;
+      }
 
-    if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-    setErr("Delete failed");
-  },
-  onSuccess: async (_data: any, p: any, ctx: any) => {
-    const id = p?.entryId;
-    setDeletingId(null);
-  const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
-  const t0 = ctx?.__perf?.t0 ?? performance.now();
-  const tOk = performance.now();
-  perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+      setErr("Delete failed");
+    },
+    onSuccess: async (_data: any, p: any, ctx: any) => {
+      const id = p?.entryId;
+      setDeletingId(null);
+      const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tOk = performance.now();
+      perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  // Recompute issue groups after deletion (best-effort)
-  setTimeout(() => void scanIssues(), 1500);
+      // Recompute issue groups after deletion (best-effort)
+      setTimeout(() => void scanIssues(), 1500);
 
-  scheduleEntriesRefresh("delete");
+      scheduleEntriesRefresh("delete");
 
-  // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
-  if (p?.isTransfer && p?.transferId && selectedBusinessId) {
-    void qc.invalidateQueries({
-      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "entries" && q.queryKey[1] === selectedBusinessId,
-    });
-  }
+      // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
+      if (p?.isTransfer && p?.transferId && selectedBusinessId) {
+        void qc.invalidateQueries({
+          predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "entries" && q.queryKey[1] === selectedBusinessId,
+        });
+      }
 
-  // Update footer totals promptly (cheap query)
-  void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
-},
+      // Update footer totals promptly (cheap query)
+      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+    },
 
-});
+  });
 
   const restoreMut = useMutation({
-  mutationFn: async (p: { entryId: string; transferId?: string | null; isTransfer?: boolean }) => {
-    if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+    mutationFn: async (p: { entryId: string; transferId?: string | null; isTransfer?: boolean }) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
 
-    // CRITICAL: Transfer restores must restore BOTH legs atomically
-    if (p.isTransfer && p.transferId) {
-      return restoreTransfer({ businessId: selectedBusinessId, scopeAccountId: selectedAccountId, transferId: p.transferId });
-    }
+      // CRITICAL: Transfer restores must restore BOTH legs atomically
+      if (p.isTransfer && p.transferId) {
+        return restoreTransfer({ businessId: selectedBusinessId, scopeAccountId: selectedAccountId, transferId: p.transferId });
+      }
 
-    return restoreEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: p.entryId });
-  },
-  onMutate: async (p) => {
-    const entryId = p.entryId;
-  const t0 = performance.now();
-  const mark = `[PERF][restore][${entryId || "noid"}]`;
-  perfLog(`${mark} click→onMutate start`);
+      return restoreEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId: p.entryId });
+    },
+    onMutate: async (p) => {
+      const entryId = p.entryId;
+      const t0 = performance.now();
+      const mark = `[PERF][restore][${entryId || "noid"}]`;
+      perfLog(`${mark} click→onMutate start`);
 
-  setErr(null);
-  await qc.cancelQueries({ queryKey: entriesKey });
+      setErr(null);
+      await qc.cancelQueries({ queryKey: entriesKey });
 
-  const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
-  const nowIso = new Date().toISOString();
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const nowIso = new Date().toISOString();
 
-  // Optimistic: clear deleted_at so it feels instant
-  const next = previous.map((e) =>
-    e.id === entryId ? { ...e, deleted_at: null, updated_at: nowIso } : e
-  );
+      // Optimistic: clear deleted_at so it feels instant
+      const next = previous.map((e) =>
+        e.id === entryId ? { ...e, deleted_at: null, updated_at: nowIso } : e
+      );
 
-  // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
-  // Display ordering is handled by existing memoized sorting logic.
-  qc.setQueryData(entriesKey, next);
+      // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
+      // Display ordering is handled by existing memoized sorting logic.
+      qc.setQueryData(entriesKey, next);
 
-  const t1 = performance.now();
-  perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
+      const t1 = performance.now();
+      perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
 
-  return { previous, __perf: { t0, mark } };
-},
+      return { previous, __perf: { t0, mark } };
+    },
 
-  onError: (e: any, p: any, ctx: any) => {
-    const entryId = p?.entryId;
-    const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
-    const t0 = ctx?.__perf?.t0 ?? performance.now();
-    const tErr = performance.now();
-    perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
+    onError: (e: any, p: any, ctx: any) => {
+      const entryId = p?.entryId;
+      const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tErr = performance.now();
+      perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
-    if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-    setErr("Restore failed");
-  },
-  onSuccess: async (_data: any, p: any, ctx: any) => {
-  const entryId = p?.entryId;
-  const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
-  const t0 = ctx?.__perf?.t0 ?? performance.now();
-  const tOk = performance.now();
-  perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+      setErr("Restore failed");
+    },
+    onSuccess: async (_data: any, p: any, ctx: any) => {
+      const entryId = p?.entryId;
+      const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tOk = performance.now();
+      perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  void scanIssues();
+      void scanIssues();
 
-  scheduleEntriesRefresh("restore");
+      scheduleEntriesRefresh("restore");
 
-  // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
-  if (p?.isTransfer && p?.transferId && selectedBusinessId) {
-    void qc.invalidateQueries({
-      predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "entries" && q.queryKey[1] === selectedBusinessId,
-    });
-  }
+      // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
+      if (p?.isTransfer && p?.transferId && selectedBusinessId) {
+        void qc.invalidateQueries({
+          predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "entries" && q.queryKey[1] === selectedBusinessId,
+        });
+      }
 
-  // Update footer totals promptly (cheap query)
-  void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
-},
-});
+      // Update footer totals promptly (cheap query)
+      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+    },
+  });
 
   const hardDeleteMut = useMutation({
-  mutationFn: async (entryId: string) => {
-    if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
-    return hardDeleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId });
-  },
-  onMutate: async (entryId: string) => {
-    const t0 = performance.now();
-    const mark = `[PERF][hardDelete][${entryId || "noid"}]`;
-    perfLog(`${mark} click→onMutate start`);
+    mutationFn: async (entryId: string) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+      return hardDeleteEntry({ businessId: selectedBusinessId, accountId: selectedAccountId, entryId });
+    },
+    onMutate: async (entryId: string) => {
+      const t0 = performance.now();
+      const mark = `[PERF][hardDelete][${entryId || "noid"}]`;
+      perfLog(`${mark} click→onMutate start`);
 
-    setErr(null);
-    cancelEntriesRefresh();
-    void qc.cancelQueries({ queryKey: entriesKey });
+      setErr(null);
+      cancelEntriesRefresh();
+      void qc.cancelQueries({ queryKey: entriesKey });
 
-    const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
 
-    // Optimistic: remove immediately
-    const next = previous.filter((e) => e.id !== entryId);
-    qc.setQueryData(entriesKey, next);
+      // Optimistic: remove immediately
+      const next = previous.filter((e) => e.id !== entryId);
+      qc.setQueryData(entriesKey, next);
 
-    const t1 = performance.now();
-    perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
+      const t1 = performance.now();
+      perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
 
-    return { previous, __perf: { t0, mark } };
-  },
-  onError: (e: any, entryId: any, ctx: any) => {
-    const mark = ctx?.__perf?.mark || `[PERF][hardDelete][${entryId || "noid"}]`;
-    const t0 = ctx?.__perf?.t0 ?? performance.now();
-    const tErr = performance.now();
-    perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
+      return { previous, __perf: { t0, mark } };
+    },
+    onError: (e: any, entryId: any, ctx: any) => {
+      const mark = ctx?.__perf?.mark || `[PERF][hardDelete][${entryId || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tErr = performance.now();
+      perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
-    if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-    setErr("Hard delete failed");
-  },
-  onSuccess: async (_data: any, entryId: any, ctx: any) => {
-  const mark = ctx?.__perf?.mark || `[PERF][hardDelete][${entryId || "noid"}]`;
-  const t0 = ctx?.__perf?.t0 ?? performance.now();
-  const tOk = performance.now();
-  perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+      setErr("Hard delete failed");
+    },
+    onSuccess: async (_data: any, entryId: any, ctx: any) => {
+      const mark = ctx?.__perf?.mark || `[PERF][hardDelete][${entryId || "noid"}]`;
+      const t0 = ctx?.__perf?.t0 ?? performance.now();
+      const tOk = performance.now();
+      perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-  scheduleEntriesRefresh("hardDelete");
+      scheduleEntriesRefresh("hardDelete");
 
-  // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
-  // Totals remain last-known until a later refresh policy is applied.
-},
-});
+      // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
+      // Totals remain last-known until a later refresh policy is applied.
+    },
+  });
 
   function triggerSaveEdit(entryId: string) {
     if (!editDraft) return;
@@ -2323,16 +2334,16 @@ const issuesAttentionCount = useMemo(() => {
             onKeyDown={(e) => e.key === "Enter" && submitInline()}
           />
         ) : (
-            <AutoInput
-              value={draftCategory}
-              onValueChange={(v) => {
-                setDraftCategory(v);
+          <AutoInput
+            value={draftCategory}
+            onValueChange={(v) => {
+              setDraftCategory(v);
 
-                // Keep category_id aligned with what the user typed/selected
-                const n = normalizeCategoryName(v);
-                const hit = categoryIdByNormName.get(normKey(n)) ?? null;
-                setDraftCategoryId(hit);
-              }}
+              // Keep category_id aligned with what the user typed/selected
+              const n = normalizeCategoryName(v);
+              const hit = categoryIdByNormName.get(normKey(n)) ?? null;
+              setDraftCategoryId(hit);
+            }}
             options={categoryOptions}
             placeholder="Category"
             inputRef={categoryInputRef}
@@ -2409,290 +2420,290 @@ const issuesAttentionCount = useMemo(() => {
   );
 
   // Filters wrapped as compact "area" + Reset thin/icon like old app
-const filterLeft = useMemo(() => (
-  <div className="w-full max-w-full px-3 py-2">
-    {/* Top row: compact main strip */}
-    <div className="flex items-center gap-2 min-w-0">
-      {/* Left cluster: search + filters (can shrink) */}
-      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 py-1 pl-1">
-        <input
-          className={[inputH7, "w-[220px] min-w-0"].join(" ")}
-          placeholder="Search payee..."
-          value={searchPayee}
-          onChange={(e) => setSearchPayee(e.target.value)}
-        />
+  const filterLeft = useMemo(() => (
+    <div className="w-full max-w-full px-3 py-2">
+      {/* Top row: compact main strip */}
+      <div className="flex items-center gap-2 min-w-0">
+        {/* Left cluster: search + filters (can shrink) */}
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 py-1 pl-1">
+          <input
+            className={[inputH7, "w-[220px] min-w-0"].join(" ")}
+            placeholder="Search payee..."
+            value={searchPayee}
+            onChange={(e) => setSearchPayee(e.target.value)}
+          />
 
-        {/* Type */}
-        <Select value={filterType} onValueChange={(v) => { setFilterType(v as any); setPage(1); }}>
-          <SelectTrigger className={[selectTriggerClass, "w-[120px]"].join(" ")}>
-            <SelectValue placeholder="Type" />
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectItem value="ALL">All Types</SelectItem>
-            <SelectItem value="INCOME">Income</SelectItem>
-            <SelectItem value="EXPENSE">Expense</SelectItem>
-            <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
-            <SelectItem value="TRANSFER">Transfer</SelectItem>
-          </SelectContent>
-        </Select>
+          {/* Type */}
+          <Select value={filterType} onValueChange={(v) => { setFilterType(v as any); setPage(1); }}>
+            <SelectTrigger className={[selectTriggerClass, "w-[120px]"].join(" ")}>
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectItem value="ALL">All Types</SelectItem>
+              <SelectItem value="INCOME">Income</SelectItem>
+              <SelectItem value="EXPENSE">Expense</SelectItem>
+              <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
+              <SelectItem value="TRANSFER">Transfer</SelectItem>
+            </SelectContent>
+          </Select>
 
-        {/* Method */}
-        <Select value={filterMethod} onValueChange={(v) => { setFilterMethod(v); setPage(1); }}>
-          <SelectTrigger className={[selectTriggerClass, "w-[140px]"].join(" ")}>
-            <SelectValue placeholder="Method" />
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectItem value="ALL">All Methods</SelectItem>
-            <SelectItem value="CASH">Cash</SelectItem>
-            <SelectItem value="CARD">Card</SelectItem>
-            <SelectItem value="ACH">ACH</SelectItem>
-            <SelectItem value="WIRE">Wire</SelectItem>
-            <SelectItem value="CHECK">Check</SelectItem>
-            <SelectItem value="DIRECT_DEPOSIT">Direct Deposit</SelectItem>
-            <SelectItem value="ZELLE">Zelle</SelectItem>
-            <SelectItem value="TRANSFER">Transfer</SelectItem>
-            <SelectItem value="OTHER">Other</SelectItem>
-          </SelectContent>
-        </Select>
+          {/* Method */}
+          <Select value={filterMethod} onValueChange={(v) => { setFilterMethod(v); setPage(1); }}>
+            <SelectTrigger className={[selectTriggerClass, "w-[140px]"].join(" ")}>
+              <SelectValue placeholder="Method" />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectItem value="ALL">All Methods</SelectItem>
+              <SelectItem value="CASH">Cash</SelectItem>
+              <SelectItem value="CARD">Card</SelectItem>
+              <SelectItem value="ACH">ACH</SelectItem>
+              <SelectItem value="WIRE">Wire</SelectItem>
+              <SelectItem value="CHECK">Check</SelectItem>
+              <SelectItem value="DIRECT_DEPOSIT">Direct Deposit</SelectItem>
+              <SelectItem value="ZELLE">Zelle</SelectItem>
+              <SelectItem value="TRANSFER">Transfer</SelectItem>
+              <SelectItem value="OTHER">Other</SelectItem>
+            </SelectContent>
+          </Select>
 
-        {/* Category */}
-        <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v); setPage(1); }}>
-          <SelectTrigger className={[selectTriggerClass, "w-[160px]"].join(" ")}>
-            <SelectValue placeholder="Category" />
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectItem value="ALL">All Categories</SelectItem>
+          {/* Category */}
+          <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v); setPage(1); }}>
+            <SelectTrigger className={[selectTriggerClass, "w-[160px]"].join(" ")}>
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectItem value="ALL">All Categories</SelectItem>
 
-            {rowsUi.some((r) => !r.categoryId) ? (
-              <SelectItem value="__UNCATEGORIZED__">Uncategorized</SelectItem>
+              {rowsUi.some((r) => !r.categoryId) ? (
+                <SelectItem value="__UNCATEGORIZED__">Uncategorized</SelectItem>
+              ) : null}
+
+              {categoryRows
+                .filter((c) => !c.archived_at)
+                .map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+
+          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 shrink-0">
+            {/* Advanced toggle */}
+            <button
+              type="button"
+              className={[
+                "h-7 px-1.5 text-xs font-medium rounded-md shrink-0 inline-flex items-center border",
+                showAdvancedFilters
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900",
+              ].join(" ")}
+              onClick={() => setShowAdvancedFilters((v) => !v)}
+              title={showAdvancedFilters ? "Hide advanced filters" : "Show advanced filters"}
+            >
+              Advanced
+            </button>
+
+            {/* Reset All */}
+            <Button
+              variant="outline"
+              className="h-7 px-1 text-xs font-medium shrink-0 inline-flex items-center gap-1"
+              onClick={() => {
+                setSearchPayee("");
+                setFilterType("ALL");
+                setFilterMethod("ALL");
+                setFilterCategory("ALL");
+                setFilterFrom("");
+                setFilterTo("");
+                setFilterAmountMin("");
+                setFilterAmountMax("");
+                setFilterAmountExact("");
+                setShowAdvancedFilters(false);
+                setPage(1);
+              }}
+              title="Reset all filters"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </Button>
+
+            {/* Bulk actions (compact, after Reset) */}
+            {selectedCount > 0 ? (
+              <div className="ml-2 flex items-center gap-2 shrink-0">
+                <span className="text-xs text-slate-600 whitespace-nowrap">
+                  Selected: <span className="font-medium text-slate-900">{selectedCount}</span>
+                </span>
+
+                <Button
+                  variant="outline"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => bulkDeleteMut.mutate(selectablePageIds.filter((id) => !!selectedIds[id]))}
+                  disabled={bulkDeleteMut.isPending}
+                  title="Delete selected entries"
+                >
+                  {bulkDeleteMut.isPending ? "Deleting…" : "Delete"}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="h-7 px-2 text-xs"
+                  onClick={clearSelection}
+                  title="Clear selection"
+                >
+                  Clear
+                </Button>
+
+                {bulkMsg ? <div className="text-xs text-slate-600 whitespace-nowrap">{bulkMsg}</div> : null}
+              </div>
             ) : null}
 
-            {categoryRows
-              .filter((c) => !c.archived_at)
-              .map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+            {/* Divider after Reset area (like old app) */}
+            <div className="h-6 w-px bg-slate-200 mx-1 shrink-0" />
 
-        <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 shrink-0">
-          {/* Advanced toggle */}
-          <button
-            type="button"
-            className={[
-              "h-7 px-1.5 text-xs font-medium rounded-md shrink-0 inline-flex items-center border",
-              showAdvancedFilters
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900",
-            ].join(" ")}
-            onClick={() => setShowAdvancedFilters((v) => !v)}
-            title={showAdvancedFilters ? "Hide advanced filters" : "Show advanced filters"}
-          >
-            Advanced
-          </button>
+            {/* Scan label + Scan button (grouped; Scan immediately after time) */}
+            <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">
+              Scan: <span className="font-medium text-slate-900">{formatScanLabel(lastScanAt)}</span>
+            </span>
 
-           {/* Reset All */}
-          <Button
-            variant="outline"
-            className="h-7 px-1 text-xs font-medium shrink-0 inline-flex items-center gap-1"
-            onClick={() => {
-              setSearchPayee("");
-              setFilterType("ALL");
-              setFilterMethod("ALL");
-              setFilterCategory("ALL");
-              setFilterFrom("");
-              setFilterTo("");
-              setFilterAmountMin("");
-              setFilterAmountMax("");
-              setFilterAmountExact("");
-              setShowAdvancedFilters(false);
-              setPage(1);
-            }}
-            title="Reset all filters"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Reset
-          </Button>
+            <Button
+              variant="outline"
+              className="h-7 px-1 text-xs font-medium shrink-0 inline-flex items-center gap-1"
+              onClick={scanIssues}
+              disabled={scanBusy}
+              title="Scan issues"
+            >
+              {scanBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              <span>Scan</span>
+            </Button>
 
-           {/* Bulk actions (compact, after Reset) */}
-          {selectedCount > 0 ? (
-            <div className="ml-2 flex items-center gap-2 shrink-0">
-              <span className="text-xs text-slate-600 whitespace-nowrap">
-                Selected: <span className="font-medium text-slate-900">{selectedCount}</span>
-              </span>
-
-              <Button
-                variant="outline"
-                className="h-7 px-2 text-xs"
-                onClick={() => bulkDeleteMut.mutate(selectablePageIds.filter((id) => !!selectedIds[id]))}
-                disabled={bulkDeleteMut.isPending}
-                title="Delete selected entries"
-              >
-                {bulkDeleteMut.isPending ? "Deleting…" : "Delete"}
-              </Button>
-
-              <Button
-                variant="outline"
-                className="h-7 px-2 text-xs"
-                onClick={clearSelection}
-                title="Clear selection"
-              >
-                Clear
-              </Button>
-
-              {bulkMsg ? <div className="text-xs text-slate-600 whitespace-nowrap">{bulkMsg}</div> : null}
-            </div>
-          ) : null}
-
-          {/* Divider after Reset area (like old app) */}
-          <div className="h-6 w-px bg-slate-200 mx-1 shrink-0" />
-
-          {/* Scan label + Scan button (grouped; Scan immediately after time) */}
-          <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">
-            Scan: <span className="font-medium text-slate-900">{formatScanLabel(lastScanAt)}</span>
-          </span>
-
-          <Button
-            variant="outline"
-            className="h-7 px-1 text-xs font-medium shrink-0 inline-flex items-center gap-1"
-            onClick={scanIssues}
-            disabled={scanBusy}
-            title="Scan issues"
-          >
-            {scanBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            <span>Scan</span>
-          </Button>
-
-          {/* Deleted toggle (last) */}
-          <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">Deleted</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={showDeleted}
-            aria-label="Show deleted entries"
-            title="Show/hide deleted entries"
-            onClick={() => {
-              setShowDeleted((v) => !v);
-              setPage(1);
-              qc.invalidateQueries({ queryKey: entriesKey, exact: false });
-            }}
-            className={[
-              "relative inline-flex items-center rounded-full transition-colors shrink-0",
-              "h-[16px] w-[30px]",
-              showDeleted ? "bg-emerald-600" : "bg-slate-200",
-            ].join(" ")}
-          >
-            <span
+            {/* Deleted toggle (last) */}
+            <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">Deleted</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showDeleted}
+              aria-label="Show deleted entries"
+              title="Show/hide deleted entries"
+              onClick={() => {
+                setShowDeleted((v) => !v);
+                setPage(1);
+                qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+              }}
               className={[
-                "inline-block rounded-full bg-white shadow transition-transform",
-                "h-[12px] w-[12px]",
-                showDeleted ? "translate-x-[16px]" : "translate-x-[2px]",
+                "relative inline-flex items-center rounded-full transition-colors shrink-0",
+                "h-[16px] w-[30px]",
+                showDeleted ? "bg-emerald-600" : "bg-slate-200",
               ].join(" ")}
-            />
-          </button>
+            >
+              <span
+                className={[
+                  "inline-block rounded-full bg-white shadow transition-transform",
+                  "h-[12px] w-[12px]",
+                  showDeleted ? "translate-x-[16px]" : "translate-x-[2px]",
+                ].join(" ")}
+              />
+            </button>
 
-          {err ? (
-            <div className="text-sm text-red-600 whitespace-nowrap shrink-0" role="alert">
-              {err}
-            </div>
-          ) : null}
+            {err ? (
+              <div className="text-sm text-red-600 whitespace-nowrap shrink-0" role="alert">
+                {err}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
+
+      {/* Expanded advanced area (inside same box) */}
+      {showAdvancedFilters ? (
+        <>
+          <div className="my-2 h-px bg-slate-200" />
+
+          <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
+            {/* Date range */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-600">From</span>
+              <input
+                className={[inputH7, "w-[132px]"].join(" ")}
+                type="date"
+                value={filterFrom}
+                onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }}
+                title="From"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-600">To</span>
+              <input
+                className={[inputH7, "w-[132px]"].join(" ")}
+                type="date"
+                value={filterTo}
+                onChange={(e) => { setFilterTo(e.target.value); setPage(1); }}
+                title="To"
+              />
+            </div>
+
+            <div className="h-6 w-px bg-slate-200 mx-1" />
+
+            {/* Amount filters */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-600">Min</span>
+              <input
+                className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
+                inputMode="decimal"
+                placeholder="0.00"
+                value={filterAmountMin}
+                onChange={(e) => { setFilterAmountMin(e.target.value); setPage(1); }}
+                title="Min amount"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-600">Max</span>
+              <input
+                className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
+                inputMode="decimal"
+                placeholder="0.00"
+                value={filterAmountMax}
+                onChange={(e) => { setFilterAmountMax(e.target.value); setPage(1); }}
+                title="Max amount"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-600">Exact</span>
+              <input
+                className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
+                inputMode="decimal"
+                placeholder="0.00"
+                value={filterAmountExact}
+                onChange={(e) => { setFilterAmountExact(e.target.value); setPage(1); }}
+                title="Exact amount"
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
+  ), [
+    searchPayee,
+    filterType,
+    filterMethod,
+    filterCategory,
+    showAdvancedFilters,
+    filterFrom,
+    filterTo,
+    filterAmountMin,
+    filterAmountMax,
+    filterAmountExact,
+    selectedCount,
+    allPageSelected,
+    scanBusy,
+    showDeleted,
+    lastScanAt,
+    bulkMsg,
+  ]);
 
-    {/* Expanded advanced area (inside same box) */}
-    {showAdvancedFilters ? (
-      <>
-        <div className="my-2 h-px bg-slate-200" />
-
-        <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
-          {/* Date range */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600">From</span>
-            <input
-              className={[inputH7, "w-[132px]"].join(" ")}
-              type="date"
-              value={filterFrom}
-              onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }}
-              title="From"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600">To</span>
-            <input
-              className={[inputH7, "w-[132px]"].join(" ")}
-              type="date"
-              value={filterTo}
-              onChange={(e) => { setFilterTo(e.target.value); setPage(1); }}
-              title="To"
-            />
-          </div>
-
-          <div className="h-6 w-px bg-slate-200 mx-1" />
-
-          {/* Amount filters */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600">Min</span>
-            <input
-              className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
-              inputMode="decimal"
-              placeholder="0.00"
-              value={filterAmountMin}
-              onChange={(e) => { setFilterAmountMin(e.target.value); setPage(1); }}
-              title="Min amount"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600">Max</span>
-            <input
-              className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
-              inputMode="decimal"
-              placeholder="0.00"
-              value={filterAmountMax}
-              onChange={(e) => { setFilterAmountMax(e.target.value); setPage(1); }}
-              title="Max amount"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-600">Exact</span>
-            <input
-              className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
-              inputMode="decimal"
-              placeholder="0.00"
-              value={filterAmountExact}
-              onChange={(e) => { setFilterAmountExact(e.target.value); setPage(1); }}
-              title="Exact amount"
-            />
-          </div>
-        </div>
-      </>
-    ) : null}
-  </div>
-), [
-  searchPayee,
-  filterType,
-  filterMethod,
-  filterCategory,
-  showAdvancedFilters,
-  filterFrom,
-  filterTo,
-  filterAmountMin,
-  filterAmountMax,
-  filterAmountExact,
-  selectedCount,
-  allPageSelected,
-  scanBusy,
-  showDeleted,
-  lastScanAt,
-  bulkMsg,
-]);
-
-const filterRight = null;
+  const filterRight = null;
 
   // Delete confirm dialog
   const [deleteDialog, setDeleteDialog] = useState<{
@@ -2706,13 +2717,13 @@ const filterRight = null;
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
 
   // FixIssue dialog (reusable; Ledger + Issues page)
-const [fixDialog, setFixDialog] = useState<
-  | {
+  const [fixDialog, setFixDialog] = useState<
+    | {
       id: string;
       kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
     }
-  | null
->(null);
+    | null
+  >(null);
 
   // Quick-fix: Missing Category inline (no dialog)
 
@@ -2800,49 +2811,49 @@ const [fixDialog, setFixDialog] = useState<
                 {/* Single-line vendor indicator (persisted) */}
                 {(r.vendorName || linkedVendorByEntryId[r.id]) ? (
                   <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700 max-w-[180px] shrink-0">
-  {/* vendor icon */}
-  <BookOpen className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+                    {/* vendor icon */}
+                    <BookOpen className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
 
-  {/* vendor name (truncate with …) */}
-  <span
-    className="font-semibold truncate min-w-0"
-    title={r.vendorName ?? linkedVendorByEntryId[r.id]}
-  >
-    {(() => {
-  const full = (r.vendorName ?? linkedVendorByEntryId[r.id] ?? "").trim();
-  const first = full.split(/\s+/)[0] || "";
-  return first ? `${first}...` : "";
-})()}
+                    {/* vendor name (truncate with …) */}
+                    <span
+                      className="font-semibold truncate min-w-0"
+                      title={r.vendorName ?? linkedVendorByEntryId[r.id]}
+                    >
+                      {(() => {
+                        const full = (r.vendorName ?? linkedVendorByEntryId[r.id] ?? "").trim();
+                        const first = full.split(/\s+/)[0] || "";
+                        return first ? `${first}...` : "";
+                      })()}
 
-  </span>
+                    </span>
 
-  {/* unlink */}
-  <button
-    type="button"
-    className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-100 shrink-0"
-    title="Unlink vendor"
-    onClick={async () => {
-      try {
-        await apiFetch(
-          `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
-          { method: "PATCH", body: JSON.stringify({ vendor_id: null }) }
-        );
+                    {/* unlink */}
+                    <button
+                      type="button"
+                      className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-100 shrink-0"
+                      title="Unlink vendor"
+                      onClick={async () => {
+                        try {
+                          await apiFetch(
+                            `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
+                            { method: "PATCH", body: JSON.stringify({ vendor_id: null }) }
+                          );
 
-        setLinkedVendorByEntryId((m) => {
-          const next = { ...m };
-          delete next[r.id];
-          return next;
-        });
+                          setLinkedVendorByEntryId((m) => {
+                            const next = { ...m };
+                            delete next[r.id];
+                            return next;
+                          });
 
-        scheduleEntriesRefresh("vendorUnlink");
-      } catch {
-        // non-blocking
-      }
-    }}
-  >
-    <X className="h-3.5 w-3.5 text-emerald-700" />
-  </button>
-</span>
+                          scheduleEntriesRefresh("vendorUnlink");
+                        } catch {
+                          // non-blocking
+                        }
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5 text-emerald-700" />
+                    </button>
+                  </span>
 
                 ) : r.id === lastCreatedEntryId && (r.rawType || "").toString().toUpperCase() === "EXPENSE" ? (
                   <VendorSuggestPill
@@ -2984,10 +2995,10 @@ const [fixDialog, setFixDialog] = useState<
                   className="inline-flex items-center justify-center"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-setFixDialog({
-  id: r.id,
-  kind: r.hasDup ? "DUPLICATE" : "STALE_CHECK",
-});
+                    setFixDialog({
+                      id: r.id,
+                      kind: r.hasDup ? "DUPLICATE" : "STALE_CHECK",
+                    });
                   }}
                   title="Fix issue"
                 >
@@ -3000,11 +3011,11 @@ setFixDialog({
           {/* CAT column (tight padding) */}
           <td className={td + " " + center + " px-0.5"}>
             {!deletedRow &&
-            r.hasMissing &&
-            (() => {
-              const t = (r.rawType || "").toString().toUpperCase();
-              return t !== "TRANSFER" && t !== "ADJUSTMENT" && t !== "OPENING";
-            })() ? (
+              r.hasMissing &&
+              (() => {
+                const t = (r.rawType || "").toString().toUpperCase();
+                return t !== "TRANSFER" && t !== "ADJUSTMENT" && t !== "OPENING";
+              })() ? (
               <HoverTooltip text={r.missingTooltip}>
                 <button
                   type="button"
@@ -3033,20 +3044,20 @@ setFixDialog({
                     onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                       restoreMut.mutate({
-  entryId: r.id,
-  isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
-  transferId: r.transferId ?? null,
-});
+                        entryId: r.id,
+                        isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
+                        transferId: r.transferId ?? null,
+                      });
                     }}
                   >
                     <RotateCcw className="h-4 w-4" />
                   </Button>
                   <Button
-  variant="outline"
-  className="h-6 w-8 p-0"
-  title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
-  disabled={deletingId === r.id || hardDeleteMut.isPending}
-  onClick={() => {
+                    variant="outline"
+                    className="h-6 w-8 p-0"
+                    title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
+                    disabled={deletingId === r.id || hardDeleteMut.isPending}
+                    onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                       setDeleteDialog({ id: r.id, mode: "hard" });
                     }}
@@ -3142,26 +3153,26 @@ setFixDialog({
                       ) : null}
 
                       <Button
-  variant="outline"
-  className="h-6 w-8 p-0"
-  title="Move to Deleted"
-  disabled={deletingId === r.id || deleteMut.isPending}
-  onClick={() => {
-    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-    if (deletingId === r.id || deleteMut.isPending) return;
-    setDeleteDialog({
-      id: r.id,
-      mode: "soft",
-      isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
-      transferId: r.transferId ?? null,
-    });
-  }}
->
+                        variant="outline"
+                        className="h-6 w-8 p-0"
+                        title="Move to Deleted"
+                        disabled={deletingId === r.id || deleteMut.isPending}
+                        onClick={() => {
+                          if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+                          if (deletingId === r.id || deleteMut.isPending) return;
+                          setDeleteDialog({
+                            id: r.id,
+                            mode: "soft",
+                            isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
+                            transferId: r.transferId ?? null,
+                          });
+                        }}
+                      >
                         {deletingId === r.id || deleteMut.isPending ? (
-  <Loader2 className="h-4 w-4 animate-spin" />
-) : (
-  <Trash2 className="h-4 w-4" />
-)}
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
                       </Button>
                     </>
                   ) : null}
@@ -3222,26 +3233,26 @@ setFixDialog({
                 ) : null}
 
                 <button
-  type="button"
-  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
-  onClick={() => {
-    setOpenUpload(true);
-  }}
->
-  Upload Receipt
-</button>
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  onClick={() => {
+                    setOpenUpload(true);
+                  }}
+                >
+                  Upload Receipt
+                </button>
 
-{/* Upload Invoice lives on Vendor page only */}
+                {/* Upload Invoice lives on Vendor page only */}
 
-<button
-  type="button"
-  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
-  disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
-  title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
-  onClick={() => setClosePeriodOpen(true)}
->
-  Close period
-</button>
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
+                  title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
+                  onClick={() => setClosePeriodOpen(true)}
+                >
+                  Close period
+                </button>
               </div>
             }
           />
@@ -3348,78 +3359,78 @@ setFixDialog({
       />
 
       <AppDialog
-  open={!!deleteDialog}
-  onClose={() => setDeleteDialog(null)}
-  title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
-  size="md"
-  disableOverlayClose={false}
-  footer={
-    <div className="flex items-center justify-end gap-2">
-      <Button variant="outline" onClick={() => setDeleteDialog(null)}>
-        Cancel
-      </Button>
+        open={!!deleteDialog}
+        onClose={() => setDeleteDialog(null)}
+        title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
+        size="md"
+        disableOverlayClose={false}
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeleteDialog(null)}>
+              Cancel
+            </Button>
 
-      <Button
-        variant={deleteDialog?.mode === "hard" ? "destructive" : "default"}
-        onClick={() => {
-          if (!deleteDialog) return;
+            <Button
+              variant={deleteDialog?.mode === "hard" ? "destructive" : "default"}
+              onClick={() => {
+                if (!deleteDialog) return;
 
-          // Guard: opening balance cannot be deleted (soft or hard)
-          if (deleteDialog.id === "opening_balance") {
-            setErr("Opening balance cannot be deleted.");
-            setDeleteDialog(null);
-            return;
-          }
+                // Guard: opening balance cannot be deleted (soft or hard)
+                if (deleteDialog.id === "opening_balance") {
+                  setErr("Opening balance cannot be deleted.");
+                  setDeleteDialog(null);
+                  return;
+                }
 
-          // Guard: optimistic temp rows are not yet server-backed (avoid DELETE/PUT against temp ids)
-          if (deleteDialog.id.startsWith("temp_")) {
-            setErr("Still syncing—try again in a moment.");
-            setDeleteDialog(null);
-            return;
-          }
+                // Guard: optimistic temp rows are not yet server-backed (avoid DELETE/PUT against temp ids)
+                if (deleteDialog.id.startsWith("temp_")) {
+                  setErr("Still syncing—try again in a moment.");
+                  setDeleteDialog(null);
+                  return;
+                }
 
-          if (deleteDialog.mode === "hard") {
-            hardDeleteMut.mutate(deleteDialog.id);
-          } else {
-            deleteMut.mutate({
-              entryId: deleteDialog.id,
-              isTransfer: !!deleteDialog.isTransfer,
-              transferId: deleteDialog.transferId ?? null,
-            });
-          }
+                if (deleteDialog.mode === "hard") {
+                  hardDeleteMut.mutate(deleteDialog.id);
+                } else {
+                  deleteMut.mutate({
+                    entryId: deleteDialog.id,
+                    isTransfer: !!deleteDialog.isTransfer,
+                    transferId: deleteDialog.transferId ?? null,
+                  });
+                }
 
-          setDeleteDialog(null);
-        }}
+                setDeleteDialog(null);
+              }}
+            >
+              {deleteDialog?.mode === "hard" ? "Delete permanently" : "Move to Deleted"}
+            </Button>
+          </div>
+        }
       >
-        {deleteDialog?.mode === "hard" ? "Delete permanently" : "Move to Deleted"}
-      </Button>
-    </div>
-  }
->
-  <div className="text-sm text-slate-700">
-    {deleteDialog?.mode === "hard"
-      ? "This will permanently delete the entry. This action is irreversible."
-      : "This will move the entry to Deleted. You can restore it later (reversible)."}
-  </div>
-</AppDialog>
+        <div className="text-sm text-slate-700">
+          {deleteDialog?.mode === "hard"
+            ? "This will permanently delete the entry. This action is irreversible."
+            : "This will move the entry to Deleted. You can restore it later (reversible)."}
+        </div>
+      </AppDialog>
 
-<UploadPanel
-  open={openUpload}
-  onClose={() => setOpenUpload(false)}
-  type={uploadType}
-  ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
-  allowMultiple={true}
-/>
+      <UploadPanel
+        open={openUpload}
+        onClose={() => setOpenUpload(false)}
+        type={uploadType}
+        ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
+        allowMultiple={true}
+      />
 
-{selectedBusinessId && selectedAccountId ? (
-  <ClosePeriodDialog
-    open={closePeriodOpen}
-    onOpenChange={setClosePeriodOpen}
-    businessId={selectedBusinessId}
-    accountId={selectedAccountId}
-    accountName={selectedAccount?.name ?? null}
-  />
-) : null}
+      {selectedBusinessId && selectedAccountId ? (
+        <ClosePeriodDialog
+          open={closePeriodOpen}
+          onOpenChange={setClosePeriodOpen}
+          businessId={selectedBusinessId}
+          accountId={selectedAccountId}
+          accountName={selectedAccount?.name ?? null}
+        />
+      ) : null}
     </div>
   );
 }
