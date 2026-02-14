@@ -416,6 +416,12 @@ const categoriesHandler = {
   handler: "packages/functions/src/categories.handler",
 } satisfies ApiHandler;
 
+// ---------- Bookkeeping Preferences ----------
+const bookkeepingPreferencesHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/bookkeepingPreferences.handler",
+} satisfies ApiHandler;
+
 // ---------- Category Migration (Category System v2) ----------
 const categoryMigrationHandler = {
   ...bizHandler,
@@ -442,6 +448,10 @@ api.route("PATCH /v1/businesses/{businessId}/goals/{goalId}", goalsHandler, { au
 api.route("GET /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PATCH /v1/businesses/{businessId}/categories/{categoryId}", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("DELETE /v1/businesses/{businessId}/categories/{categoryId}", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("GET /v1/businesses/{businessId}/bookkeeping/preferences", bookkeepingPreferencesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("PUT /v1/businesses/{businessId}/bookkeeping/preferences", bookkeepingPreferencesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 api.route("GET /v1/businesses/{businessId}/category-migration/preview", categoryMigrationHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/category-migration/apply", categoryMigrationHandler, { auth: { jwt: { authorizer: authorizer.id } } });

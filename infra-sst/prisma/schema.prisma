@@ -35,13 +35,14 @@ model Business {
   bankTransactions   BankTransaction[]
   bankMatches        BankMatch[]
   reconcileSnapshots ReconcileSnapshot[]
-  invites            BusinessInvite[]
-  categories         Category[]
-  rolePolicies       BusinessRolePolicy[]
-  transfers          Transfer[]
-  activityLogs       ActivityLog[]
-  closedPeriods      ClosedPeriod[]
-  vendors            Vendor[]
+  invites                  BusinessInvite[]
+  categories               Category[]
+  bookkeeping_preferences  BookkeepingPreferences?
+  rolePolicies             BusinessRolePolicy[]
+  transfers                Transfer[]
+  activityLogs             ActivityLog[]
+  closedPeriods            ClosedPeriod[]
+  vendors                  Vendor[]
 
   budgets Budget[]
   goals   Goal[]
@@ -163,6 +164,23 @@ model Category {
   @@unique([business_id, name], map: "u_category_business_name")
   @@index([business_id, archived_at], map: "i_category_business_archived")
   @@map("category")
+}
+
+model BookkeepingPreferences {
+  business_id            String  @id @db.Uuid
+
+  amount_tolerance_cents BigInt  @default(0)
+  days_tolerance         Int     @default(3)
+  duplicate_window_days  Int     @default(7)
+  stale_threshold_days   Int     @default(90)
+  auto_suggest           Boolean @default(true)
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("bookkeeping_preferences")
 }
 
 model EntryIssue {

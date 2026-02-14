@@ -35,3 +35,9 @@ export async function updateCategory(
     body: JSON.stringify(patch),
   });
 }
+
+export async function deleteCategory(businessId: string, categoryId: string): Promise<{ ok: true }> {
+  return apiFetch(`/v1/businesses/${businessId}/categories/${categoryId}`, {
+    method: "DELETE",
+  });
+}

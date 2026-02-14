@@ -137,6 +137,25 @@ export async function handler(event: any) {
 
     if (body?.archived !== undefined) {
       const archived = !!body.archived;
+
+      // Block archiving when referenced (entries/budgets/goals). Unarchive is always allowed.
+      if (archived) {
+        const [entries, budgets, goals] = await Promise.all([
+          prisma.entry.count({ where: { business_id: biz, category_id: id } }),
+          prisma.budget.count({ where: { business_id: biz, category_id: id } }),
+          prisma.goal.count({ where: { business_id: biz, category_id: id } }),
+        ]);
+
+        const related_total = entries + budgets + goals;
+        if (related_total > 0) {
+          return json(409, {
+            ok: false,
+            error: "Category is in use",
+            related: { entries, budgets, goals, related_total },
+          });
+        }
+      }
+
       data.archived_at = archived ? new Date() : null;
     }
 
@@ -157,6 +176,43 @@ export async function handler(event: any) {
     } catch (e: any) {
       return json(400, { ok: false, error: "Update failed", detail: String(e?.message ?? e) });
     }
+  }
+
+  // DELETE /v1/businesses/{businessId}/categories/{categoryId}
+  // Hard delete only if truly unused AND already archived.
+  if (method === "DELETE" && path === `/v1/businesses/${biz}/categories/${categoryId}`) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Forbidden" });
+
+    const id = categoryId.toString().trim();
+    if (!id) return json(400, { ok: false, error: "Missing categoryId" });
+
+    const existing = await prisma.category.findFirst({
+      where: { id, business_id: biz },
+      select: { id: true, archived_at: true },
+    });
+    if (!existing) return json(404, { ok: false, error: "Not found" });
+
+    if (!existing.archived_at) {
+      return json(400, { ok: false, error: "Archive category before deleting" });
+    }
+
+    const [entries, budgets, goals] = await Promise.all([
+      prisma.entry.count({ where: { business_id: biz, category_id: id } }),
+      prisma.budget.count({ where: { business_id: biz, category_id: id } }),
+      prisma.goal.count({ where: { business_id: biz, category_id: id } }),
+    ]);
+
+    const related_total = entries + budgets + goals;
+    if (related_total > 0) {
+      return json(409, {
+        ok: false,
+        error: "Category is in use",
+        related: { entries, budgets, goals, related_total },
+      });
+    }
+
+    await prisma.category.delete({ where: { id } });
+    return json(200, { ok: true });
   }
 
   return json(404, { ok: false, error: "Not found" });

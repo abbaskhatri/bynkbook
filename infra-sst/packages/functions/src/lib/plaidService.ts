@@ -172,7 +172,25 @@ export async function getStatus(params: { businessId: string; accountId: string;
     where: { business_id: businessId, account_id: accountId },
   });
 
-  if (!conn) return json(200, { ok: true, connected: false });
+  if (!conn)
+    return json(200, {
+      ok: true,
+      connected: false,
+      status: null,
+      needsAttention: false,
+      errorMessage: null,
+      institutionName: null,
+      last4: null,
+      lastSyncAt: null,
+      hasNewTransactions: false,
+      effectiveStartDate: null,
+      lastKnownBalanceCents: null,
+      lastKnownBalanceAt: null,
+      error: null,
+    });
+    
+  // TS guard: keep a non-null reference for the rest of this function (incl. nested helpers)
+  const connRow = conn;
 
   // Backfill plaid_mask for legacy connections (best-effort).
   // This keeps UI non-placeholder while avoiding new schemas on Account.
@@ -242,19 +260,88 @@ export async function getStatus(params: { businessId: string; accountId: string;
     } catch { }
   }
 
+  const rawStatus = (connRow.status ?? "").toString();
+  const statusNorm = rawStatus.trim().toUpperCase();
+
+  // Guardrail: needsAttention is ONLY for true unhealthy states (reauth / error / disconnected),
+  // or when error_code/error_message exists. Do NOT show amber for transitional states.
+  const hasError = !!connRow.error_code || !!connRow.error_message;
+
+  // Explicit allowlists (conservative): unknown statuses are treated as NOT needing attention
+  // unless an error_code/error_message exists.
+  const UNHEALTHY_STATUSES = new Set<string>([
+    "ERROR",
+    "DISCONNECTED",
+    "REAUTH_REQUIRED",
+    "LOGIN_REQUIRED",
+    "ITEM_LOGIN_REQUIRED",
+    "ITEM_ERROR",
+    "INACTIVE",
+    "EXPIRED",
+  ]);
+
+  const TRANSITIONAL_STATUSES = new Set<string>([
+    "CONNECTING",
+    "PENDING",
+    "SYNCING",
+    "UPDATING",
+    "INITIALIZING",
+  ]);
+
+  const isUnhealthyStatus = UNHEALTHY_STATUSES.has(statusNorm);
+  const isTransitionalStatus = TRANSITIONAL_STATUSES.has(statusNorm);
+
+  const needsAttention = (hasError || isUnhealthyStatus) && !isTransitionalStatus;
+
+  function shortDetailFromStatusOrError() {
+    // Prefer status-based short copy (user-friendly), then fallback to error_code/message.
+    if (statusNorm === "REAUTH_REQUIRED") return "Re-authentication required";
+    if (statusNorm === "LOGIN_REQUIRED" || statusNorm === "ITEM_LOGIN_REQUIRED") return "Login required";
+    if (statusNorm === "DISCONNECTED") return "Connection disconnected";
+    if (statusNorm === "ERROR" || statusNorm === "ITEM_ERROR") return "Bank connection error";
+
+    const code = (connRow.error_code ?? "").toString().trim();
+    if (code) {
+      // Turn ITEM_LOGIN_REQUIRED -> "Login required", etc (basic normalization)
+      const c = code.toUpperCase();
+      if (c.includes("LOGIN")) return "Login required";
+      if (c.includes("REAUTH")) return "Re-authentication required";
+      if (c.includes("DISCONNECT")) return "Connection disconnected";
+      return code.length > 40 ? code.slice(0, 40) + "…" : code;
+    }
+
+    const msg = (connRow.error_message ?? "").toString().trim();
+    if (msg) {
+      // Keep the tooltip short: first sentence-ish, capped.
+      const first = msg.split("\n")[0]?.split(". ")[0] ?? msg;
+      const clean = first.trim();
+      return clean.length > 80 ? clean.slice(0, 80) + "…" : clean;
+    }
+
+    return "";
+  }
+
+  const errorMessage = needsAttention
+    ? (() => {
+      const d = shortDetailFromStatusOrError();
+      return d ? `Reconnect required — ${d}` : "Reconnect required";
+    })()
+    : null;
+
   return json(200, {
     ok: true,
-    connected: conn.status === "CONNECTED",
-    status: conn.status,
-    institutionName: conn.institution_name,
-    last4: conn.plaid_mask ?? null,
-    lastSyncAt: conn.last_sync_at ? conn.last_sync_at.toISOString() : null,
-    needsAttention: conn.status !== "CONNECTED" || !!conn.error_code || !!conn.error_message,
-    hasNewTransactions: !!conn.has_new_transactions,
-    effectiveStartDate: conn.effective_start_date.toISOString().slice(0, 10),
-    lastKnownBalanceCents: conn.last_known_balance_cents?.toString?.() ?? null,
-    lastKnownBalanceAt: conn.last_known_balance_at ? conn.last_known_balance_at.toISOString() : null,
-    error: conn.error_message ?? null,
+    connected: connRow.status === "CONNECTED",
+    status: connRow.status,
+    institutionName: connRow.institution_name,
+    last4: connRow.plaid_mask ?? null,
+    lastSyncAt: connRow.last_sync_at ? connRow.last_sync_at.toISOString() : null,
+    needsAttention,
+    errorMessage,
+    hasNewTransactions: !!connRow.has_new_transactions,
+    effectiveStartDate: connRow.effective_start_date.toISOString().slice(0, 10),
+    lastKnownBalanceCents: connRow.last_known_balance_cents?.toString?.() ?? null,
+    lastKnownBalanceAt: connRow.last_known_balance_at ? connRow.last_known_balance_at.toISOString() : null,
+    error: connRow.error_message ?? null,
   });
 }
 
@@ -591,20 +678,20 @@ export async function syncTransactions(params: { businessId: string; accountId: 
         // Truly empty account => create the estimated opening once (and update account opening fields)
         await prisma.$transaction([
           prisma.entry.create({
-          data: {
-            id: (await import("node:crypto")).randomUUID(),
-            business_id: businessId,
-            account_id: accountId,
-            date: conn.effective_start_date,
-            payee: "Opening balance (estimated)",
-            memo: "Estimated from current balance and synced transactions (Plaid).",
-            amount_cents: signed,
-            type: entryType,
-            method: null,
-            category_id: null,
-            vendor_id: null,
-            status: "EXPECTED",
-          },
+            data: {
+              id: (await import("node:crypto")).randomUUID(),
+              business_id: businessId,
+              account_id: accountId,
+              date: conn.effective_start_date,
+              payee: "Opening balance (estimated)",
+              memo: "Estimated from current balance and synced transactions (Plaid).",
+              amount_cents: signed,
+              type: entryType,
+              method: null,
+              category_id: null,
+              vendor_id: null,
+              status: "EXPECTED",
+            },
           }),
 
           prisma.account.update({

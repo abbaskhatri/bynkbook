@@ -131,6 +131,39 @@ export async function handler(event: any) {
       }),
     ]);
 
+    // Prefill default categories (safe for existing data; no gating; no duplicates)
+    // Uses @@unique([business_id, name]) + skipDuplicates.
+    const DEFAULT_CATEGORIES = [
+      "Advertising",
+      "Bank Fees",
+      "Fuel",
+      "Insurance",
+      "Loan Payment",
+      "Maintenance",
+      "Misc",
+      "Marketing",
+      "Office Supplies",
+      "Payroll",
+      "Purchase",
+      "Rent",
+      "Sale",
+      "Service Charges",
+      "Supplies",
+      "Tax",
+      "Travel",
+      "Utilities",
+      "Interest",
+    ];
+
+    try {
+      await prisma.category.createMany({
+        data: DEFAULT_CATEGORIES.map((n) => ({ business_id: businessId, name: n })),
+        skipDuplicates: true,
+      });
+    } catch {
+      // Best-effort: do not block business creation if seeding fails for any reason.
+    }
+
     return json(201, {
       ok: true,
       business: {

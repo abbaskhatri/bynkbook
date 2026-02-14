@@ -23,7 +23,8 @@ import { PlaidConnectButton } from "@/components/plaid/PlaidConnectButton";
 import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
 import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
-import { listCategories, createCategory, updateCategory, type CategoryRow } from "@/lib/api/categories";
+import { listCategories, createCategory, updateCategory, deleteCategory, type CategoryRow } from "@/lib/api/categories";
+import { getBookkeepingPreferences, updateBookkeepingPreferences } from "@/lib/api/bookkeepingPreferences";
 
 import { HintWrap } from "@/components/primitives/HintWrap";
 import { canWriteByRolePolicy } from "@/lib/auth/permissionHints";
@@ -110,6 +111,8 @@ type PlaidCellState = {
   last4?: string | null;
   status?: string;
   lastSyncAt?: string | null;
+  needsAttention?: boolean;
+  errorMessage?: string | null;
   _error?: boolean;
 };
 
@@ -204,9 +207,36 @@ export default function SettingsPageClient() {
     return Array.from(set).sort((x, y) => x.localeCompare(y));
   }, [accountsQ.data, plaidByAccount]);
 
-  // Delete eligibility cache (LOCK: only show Delete if eligible === true)
-  const [deleteEligByAccount, setDeleteEligByAccount] = useState<Record<string, { eligible: boolean; related_total: number }>>({});
+  // Delete eligibility cache (real data only; never fabricate counts)
+  const [deleteEligByAccount, setDeleteEligByAccount] = useState<
+    Record<string, { eligible: boolean; related_total: number | null }>
+  >({});
   const [deleteEligLoading, setDeleteEligLoading] = useState<Record<string, boolean>>({});
+
+  // Refs to avoid volatile deps causing in-flight cancellation / stuck loading
+  const deleteEligByAccountRef = useRef(deleteEligByAccount);
+  const deleteEligLoadingRef = useRef(deleteEligLoading);
+
+  useEffect(() => {
+    deleteEligByAccountRef.current = deleteEligByAccount;
+  }, [deleteEligByAccount]);
+
+  useEffect(() => {
+    deleteEligLoadingRef.current = deleteEligLoading;
+  }, [deleteEligLoading]);
+
+  // Bookkeeping: Preferences (real, persisted)
+  const [bkLoading, setBkLoading] = useState(false);
+  const [bkSaving, setBkSaving] = useState(false);
+  const [bkError, setBkError] = useState<string | null>(null);
+  const [bkMsg, setBkMsg] = useState<string | null>(null);
+
+  const [bkAmountTol, setBkAmountTol] = useState("0.00"); // dollars UI
+  const [bkDaysTol, setBkDaysTol] = useState("3");
+  const [bkDupWindow, setBkDupWindow] = useState("7");
+  const [bkStaleDays, setBkStaleDays] = useState("90");
+  const [bkAutoSuggest, setBkAutoSuggest] = useState(true);
+  const [bkInitial, setBkInitial] = useState<string>(""); // snapshot for dirty-check
 
   // Bookkeeping: Categories (real, persisted)
   const [catLoading, setCatLoading] = useState(false);
@@ -214,6 +244,52 @@ export default function SettingsPageClient() {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [catShowArchived, setCatShowArchived] = useState(false);
   const [catNewName, setCatNewName] = useState("");
+
+    // Load bookkeeping preferences when Bookkeeping tab is active
+  useEffect(() => {
+    const tab = sp.get("tab") || "business";
+    if (tab !== "bookkeeping") return;
+    if (!authReady) return;
+    if (!selectedBusinessId) return;
+
+    let cancelled = false;
+    (async () => {
+      setBkLoading(true);
+      setBkError(null);
+      setBkMsg(null);
+      try {
+        const res = await getBookkeepingPreferences(selectedBusinessId);
+
+        const amountCents = Number(res.amountToleranceCents || "0");
+        const dollars = (amountCents / 100).toFixed(2);
+
+        if (!cancelled) {
+          setBkAmountTol(dollars);
+          setBkDaysTol(String(res.daysTolerance ?? 3));
+          setBkDupWindow(String(res.duplicateWindowDays ?? 7));
+          setBkStaleDays(String(res.staleThresholdDays ?? 90));
+          setBkAutoSuggest(!!res.autoSuggest);
+
+          const snap = JSON.stringify({
+            dollars,
+            days: String(res.daysTolerance ?? 3),
+            dup: String(res.duplicateWindowDays ?? 7),
+            stale: String(res.staleThresholdDays ?? 90),
+            auto: !!res.autoSuggest,
+          });
+          setBkInitial(snap);
+        }
+      } catch (e: any) {
+        if (!cancelled) setBkError(e?.message ?? "Failed to load bookkeeping preferences");
+      } finally {
+        if (!cancelled) setBkLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [spKey, authReady, selectedBusinessId]);
 
   // Account create/edit dialogs
   const [open, setOpen] = useState(false);
@@ -620,7 +696,11 @@ export default function SettingsPageClient() {
               const status = res?.status ?? undefined;
               const lastSyncAt = res?.lastSyncAt ?? null;
               const last4 = res?.last4 ?? null;
-              results.push({ id: a.id, connected, institutionName, status, lastSyncAt, last4 });
+
+              const needsAttention = !!res?.needsAttention;
+              const errorMessage = (res?.errorMessage ?? res?.error ?? null) as string | null;
+
+              results.push({ id: a.id, connected, institutionName, status, lastSyncAt, last4, needsAttention, errorMessage });
             } catch {
               results.push({ id: a.id, connected: false as const, institutionName: undefined, _error: true as const });
             }
@@ -640,6 +720,8 @@ export default function SettingsPageClient() {
               last4: (r as any).last4 ?? null,
               status: (r as any).status,
               lastSyncAt: (r as any).lastSyncAt ?? null,
+              needsAttention: !!(r as any).needsAttention,
+              errorMessage: (r as any).errorMessage ?? null,
               _error: !!r._error,
             };
           }
@@ -705,8 +787,12 @@ export default function SettingsPageClient() {
     if (list.length === 0) return;
 
     let cancelled = false;
+
     (async () => {
-      const toFetch = list.filter((a) => deleteEligByAccount[a.id] == null && !deleteEligLoading[a.id]);
+      const curElig = deleteEligByAccountRef.current;
+      const curLoading = deleteEligLoadingRef.current;
+
+      const toFetch = list.filter((a) => curElig[a.id] == null && !curLoading[a.id]);
       if (toFetch.length === 0) return;
 
       setDeleteEligLoading((cur) => {
@@ -716,16 +802,25 @@ export default function SettingsPageClient() {
       });
 
       try {
-        const results = await Promise.all(
-          toFetch.map(async (a) => {
+        // Concurrency cap to reduce API burst/503s
+        const MAX_IN_FLIGHT = 2;
+        const queue = [...toFetch];
+        const results: any[] = [];
+
+        async function worker() {
+          while (queue.length) {
+            const a = queue.shift()!;
             try {
               const res = await getAccountDeleteEligibility(selectedBusinessId, a.id);
-              return { id: a.id, ...res };
+              results.push({ id: a.id, ...res });
             } catch {
-              return { id: a.id, eligible: false, related_total: 1 };
+              // Guardrail: no fake counts. Unknown eligibility -> disable Delete with a non-numeric tooltip.
+              results.push({ id: a.id, eligible: false, related_total: null });
             }
-          })
-        );
+          }
+        }
+
+        await Promise.all(Array.from({ length: Math.min(MAX_IN_FLIGHT, toFetch.length) }, () => worker()));
 
         if (cancelled) return;
 
@@ -735,6 +830,7 @@ export default function SettingsPageClient() {
           return next;
         });
       } finally {
+        // Always clear loading flags for the batch if this effect instance is still active
         if (!cancelled) {
           setDeleteEligLoading((cur) => {
             const next = { ...cur };
@@ -748,7 +844,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId, accountsQ.isLoading, accountsQ.data, deleteEligByAccount, deleteEligLoading]);
+  }, [spKey, authReady, selectedBusinessId, accountsQ.isLoading, accountsQ.data]);
 
   // current tab (only allowed)
   const tab = (() => {
@@ -1297,118 +1393,303 @@ export default function SettingsPageClient() {
           </CardContent>
         </Card>
       ) : tab === "bookkeeping" ? (
-        <Card>
-          <CardHeader className="space-y-0 pb-3">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <CardTitle>Bookkeeping</CardTitle>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Manage categories used for ledger classification.
+        <div className="space-y-4">
+          {/* Bookkeeping Preferences */}
+          <Card>
+            <CardHeader className="space-y-0 pb-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <CardTitle>Bookkeeping Preferences</CardTitle>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Configure tolerances and issue detection settings.
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {bkError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {bkError}
+                </div>
+              ) : null}
+
+              {bkMsg ? <div className="text-xs text-slate-700">{bkMsg}</div> : null}
+              {bkLoading ? <Skeleton className="h-20 w-full" /> : null}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Amount tolerance ($)</Label>
+                  <Input className={inputH7} value={bkAmountTol} onChange={(e) => setBkAmountTol(e.target.value)} />
+                  <div className="text-[11px] text-muted-foreground">Maximum difference allowed when matching ledger entries to bank transactions.</div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Days tolerance</Label>
+                  <Input className={inputH7} value={bkDaysTol} onChange={(e) => setBkDaysTol(e.target.value.replace(/[^0-9]/g, ""))} />
+                  <div className="text-[11px] text-muted-foreground">Maximum days difference between ledger and bank transaction dates.</div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Duplicate detection window (days)</Label>
+                  <Input className={inputH7} value={bkDupWindow} onChange={(e) => setBkDupWindow(e.target.value.replace(/[^0-9]/g, ""))} />
+                  <div className="text-[11px] text-muted-foreground">Time window to check for potential duplicate entries.</div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Stale check threshold (days)</Label>
+                  <Input className={inputH7} value={bkStaleDays} onChange={(e) => setBkStaleDays(e.target.value.replace(/[^0-9]/g, ""))} />
+                  <div className="text-[11px] text-muted-foreground">Days before an uncleared check is flagged as stale.</div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Label className="text-[11px] text-slate-600">Show archived</Label>
-                <input
-                  type="checkbox"
-                  checked={catShowArchived}
-                  onChange={(e) => setCatShowArchived(e.target.checked)}
-                />
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-medium text-slate-800">Auto-suggest categories</div>
+                    <div className="text-[11px] text-muted-foreground">Automatically suggest categories based on payee history and rules.</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className={`h-6 w-10 rounded-full border ${bkAutoSuggest ? "bg-emerald-500 border-emerald-600" : "bg-slate-200 border-slate-300"} relative`}
+                    onClick={() => setBkAutoSuggest((v) => !v)}
+                    aria-label="Toggle auto-suggest"
+                  >
+                    <span
+                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all ${bkAutoSuggest ? "left-[18px]" : "left-0.5"}`}
+                    />
+                  </button>
+                </div>
               </div>
-            </div>
-          </CardHeader>
 
-          <CardContent className="space-y-3">
-            {catError ? <div className="text-xs text-red-600">{catError}</div> : null}
-            {catLoading ? <Skeleton className="h-10 w-full" /> : null}
+              {(() => {
+                const snap = JSON.stringify({
+                  dollars: bkAmountTol,
+                  days: bkDaysTol,
+                  dup: bkDupWindow,
+                  stale: bkStaleDays,
+                  auto: bkAutoSuggest,
+                });
+                const dirty = bkInitial ? snap !== bkInitial : false;
 
-            <div className="flex items-end gap-2">
-              <div className="flex-1 space-y-1">
-                <Label>New category</Label>
-                <Input
-                  className={inputH7}
-                  value={catNewName}
-                  onChange={(e) => setCatNewName(e.target.value)}
-                  placeholder="e.g. Office Supplies"
-                />
+                return (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      className="h-7 px-3 text-xs"
+                      disabled={!selectedBusinessId || bkSaving || !dirty}
+                      onClick={async () => {
+                        if (!selectedBusinessId) return;
+                        setBkSaving(true);
+                        setBkError(null);
+                        setBkMsg(null);
+
+                        try {
+                          const cents = Math.max(0, Math.round(Number(bkAmountTol || "0") * 100));
+                          const payload = {
+                            amountToleranceCents: String(cents),
+                            daysTolerance: Number(bkDaysTol || "0"),
+                            duplicateWindowDays: Number(bkDupWindow || "0"),
+                            staleThresholdDays: Number(bkStaleDays || "0"),
+                            autoSuggest: !!bkAutoSuggest,
+                          };
+
+                          const res = await updateBookkeepingPreferences(selectedBusinessId, payload);
+
+                          const nextSnap = JSON.stringify({
+                            dollars: (Number(res.amountToleranceCents || "0") / 100).toFixed(2),
+                            days: String(res.daysTolerance ?? 3),
+                            dup: String(res.duplicateWindowDays ?? 7),
+                            stale: String(res.staleThresholdDays ?? 90),
+                            auto: !!res.autoSuggest,
+                          });
+
+                          setBkInitial(nextSnap);
+                          setBkMsg("Saved.");
+                        } catch (e: any) {
+                          setBkError(e?.message ?? "Save failed");
+                        } finally {
+                          setBkSaving(false);
+                        }
+                      }}
+                    >
+                      {bkSaving ? "Saving…" : "Save preferences"}
+                    </Button>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Categories */}
+          <Card>
+            <CardHeader className="space-y-0 pb-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <CardTitle>Categories</CardTitle>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Keep this list short and clean. Archive categories you don’t use.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Label className="text-[11px] text-slate-600">Show archived</Label>
+                  <input
+                    type="checkbox"
+                    checked={catShowArchived}
+                    onChange={(e) => setCatShowArchived(e.target.checked)}
+                  />
+                </div>
               </div>
-              <Button
-                className="h-7 px-3 text-xs"
-                onClick={async () => {
-                  if (!selectedBusinessId) return;
-                  const name = catNewName.trim();
-                  if (!name) return;
-                  try {
-                    await createCategory(selectedBusinessId, name);
-                    setCatNewName("");
-                    const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                    setCategories(res?.rows ?? res?.items ?? []);
-                  } catch (e: any) {
-                    setCatError(e?.message ?? "Failed to create category");
-                  }
-                }}
-                disabled={!selectedBusinessId || !catNewName.trim()}
-              >
-                Add
-              </Button>
-            </div>
+            </CardHeader>
 
-            <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-              <Table>
-                <THead className="bg-slate-50">
-                  <TableRow className="hover:bg-slate-50">
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Name</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Status</TableHead>
-                    <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
-                  </TableRow>
-                </THead>
-                <TableBody>
-                  {(categories ?? []).length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={3} className="py-3 text-xs text-muted-foreground">
-                        No categories yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    (categories ?? []).map((c: any) => {
-                      const archived = !!(c.archived_at || c.archivedAt || c.archived);
-                      return (
-                        <TableRow key={c.id} className="hover:bg-slate-50">
-                          <TableCell className="py-2 font-medium text-slate-900">{c.name}</TableCell>
-                          <TableCell className="py-2 text-right">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${archived ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-700"
-                              }`}>
-                              {archived ? "Archived" : "Active"}
-                            </span>
-                          </TableCell>
-                          <TableCell className="py-2 text-right">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 px-2 text-xs"
+            <CardContent className="space-y-3">
+              {catError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {catError}
+                </div>
+              ) : null}
+
+              <div className="flex items-end gap-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-[11px]">Add category</Label>
+                  <Input
+                    className={inputH7}
+                    value={catNewName}
+                    onChange={(e) => setCatNewName(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+
+                      if (!selectedBusinessId) return;
+                      const name = catNewName.trim();
+                      if (!name) return;
+
+                      setCatError(null);
+                      try {
+                        await createCategory(selectedBusinessId, name);
+                        setCatNewName("");
+                        const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
+                        setCategories(res?.rows ?? res?.items ?? []);
+                      } catch (err: any) {
+                        setCatError(err?.message ?? "Failed to create category");
+                      }
+                    }}
+                    placeholder="e.g. Office Supplies"
+                  />
+                </div>
+                <Button
+                  className="h-7 px-3 text-xs"
+                  onClick={async () => {
+                    if (!selectedBusinessId) return;
+                    const name = catNewName.trim();
+                    if (!name) return;
+
+                    setCatError(null);
+                    try {
+                      await createCategory(selectedBusinessId, name);
+                      setCatNewName("");
+                      const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
+                      setCategories(res?.rows ?? res?.items ?? []);
+                    } catch (e: any) {
+                      setCatError(e?.message ?? "Failed to create category");
+                    }
+                  }}
+                  disabled={!selectedBusinessId || !catNewName.trim()}
+                >
+                  Add
+                </Button>
+              </div>
+
+              {catLoading ? <Skeleton className="h-10 w-full" /> : null}
+
+              {(categories ?? []).length === 0 ? (
+                <div className="text-xs text-muted-foreground">No categories yet.</div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {(categories ?? []).map((c: any) => {
+                    const archived = !!(c.archived_at || c.archivedAt || c.archived);
+
+                    return (
+                      <span
+                        key={c.id}
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-800"
+                      >
+                        <span className="max-w-[220px] truncate" title={c.name}>
+                          {c.name}
+                        </span>
+
+                        {!archived ? (
+                          <button
+                            type="button"
+                            className="text-slate-500 hover:text-slate-700"
+                            title="Archive"
+                            onClick={async () => {
+                              if (!selectedBusinessId) return;
+                              setCatError(null);
+                              try {
+                                await updateCategory(selectedBusinessId, c.id, { archived: true });
+                                const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
+                                setCategories(res?.rows ?? res?.items ?? []);
+                              } catch (e: any) {
+                                setCatError(e?.message ?? "Cannot archive category");
+                              }
+                            }}
+                          >
+                            <Archive className="h-3.5 w-3.5" />
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="text-slate-500 hover:text-slate-700"
+                              title="Unarchive"
                               onClick={async () => {
                                 if (!selectedBusinessId) return;
+                                setCatError(null);
                                 try {
-                                  await updateCategory(selectedBusinessId, c.id, { archived: !archived });
+                                  await updateCategory(selectedBusinessId, c.id, { archived: false });
                                   const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                                   setCategories(res?.rows ?? res?.items ?? []);
                                 } catch (e: any) {
-                                  setCatError(e?.message ?? "Failed to update category");
+                                  setCatError(e?.message ?? "Cannot unarchive category");
                                 }
                               }}
                             >
-                              {archived ? "Unarchive" : "Archive"}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+                              <Archive className="h-3.5 w-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              className="text-rose-600 hover:text-rose-700"
+                              title="Delete category"
+                              onClick={async () => {
+                                if (!selectedBusinessId) return;
+                                const ok = window.confirm("Delete this category? This cannot be undone.");
+                                if (!ok) return;
+
+                                setCatError(null);
+                                try {
+                                  await deleteCategory(selectedBusinessId, c.id);
+                                  const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
+                                  setCategories(res?.rows ?? res?.items ?? []);
+                                } catch (e: any) {
+                                  setCatError(e?.message ?? "Cannot delete category");
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       ) : tab === "accounts" ? (
         <Card>
           <CardHeader className="space-y-0 pb-3">
@@ -1432,33 +1713,56 @@ export default function SettingsPageClient() {
                   title="Create account"
                   size="md"
                   footer={
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setOpen(false);
-                          setErr(null);
-                          setCreateMode("choose");
-                          setPlaidDraft(null);
-                        }}
-                        disabled={saving}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          if (createMode === "manual") onCreateAccount();
-                          else if (createMode === "choose") setErr("Select a creation method.");
-                          else setErr("Continue to Plaid to review details.");
-                        }}
-                        disabled={
-                          saving ||
-                          !selectedBusinessId ||
-                          (createMode === "manual" ? !name.trim() : false)
-                        }
-                      >
-                        {saving ? "Working…" : (createMode === "manual" ? "Create" : "Continue")}
-                      </Button>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        {createMode !== "choose" ? (
+                          <Button
+                            variant="outline"
+                            className="h-7 px-3 text-xs"
+                            onClick={() => {
+                              setErr(null);
+                              setCreateMode("choose");
+                              // keep any entered manual fields; only clear plaid draft
+                              setPlaidDraft(null);
+                            }}
+                            disabled={saving}
+                          >
+                            Back
+                          </Button>
+                        ) : null}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-7 px-3 text-xs"
+                          onClick={() => {
+                            setOpen(false);
+                            setErr(null);
+                            setCreateMode("choose");
+                            setPlaidDraft(null);
+                          }}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </Button>
+
+                        <Button
+                          className="h-7 px-3 text-xs"
+                          onClick={() => {
+                            if (createMode === "manual") onCreateAccount();
+                            else if (createMode === "choose") setErr("Select a creation method.");
+                            else setErr("Continue to Plaid to review details.");
+                          }}
+                          disabled={
+                            saving ||
+                            !selectedBusinessId ||
+                            (createMode === "manual" ? !name.trim() : false)
+                          }
+                        >
+                          {saving ? "Working…" : (createMode === "manual" ? "Create" : "Continue")}
+                        </Button>
+                      </div>
                     </div>
                   }
                 >
@@ -1570,15 +1874,6 @@ export default function SettingsPageClient() {
                       </>
                     ) : (
                       <>
-                        <div className="flex items-center justify-between">
-                          <Button
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => setCreateMode("choose")}
-                          >
-                            Back
-                          </Button>
-                        </div>
 
                         <div className="text-sm text-slate-700">
                           Choose an opening balance date (retention start). You’ll review account details next.
@@ -1721,7 +2016,7 @@ export default function SettingsPageClient() {
                     <div className="space-y-1">
                       <Label>Name</Label>
                       <Input
-                        className="h-7"
+                        className={inputH7}
                         value={plaidDraft?.name ?? ""}
                         onChange={(e) => setPlaidDraft((cur) => (cur ? { ...cur, name: e.target.value } : cur))}
                       />
@@ -1733,7 +2028,7 @@ export default function SettingsPageClient() {
                         value={(plaidDraft?.type ?? "CHECKING") as any}
                         onValueChange={(v) => setPlaidDraft((cur) => (cur ? { ...cur, type: v } : cur))}
                       >
-                        <SelectTrigger className="h-7"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className={selectTriggerClass}><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="CHECKING">Checking</SelectItem>
                           <SelectItem value="SAVINGS">Savings</SelectItem>
@@ -1747,18 +2042,18 @@ export default function SettingsPageClient() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label>Institution</Label>
-                        <Input className="h-7" value={plaidDraft?.institution?.name ?? ""} disabled />
+                        <Input className={inputH7} value={plaidDraft?.institution?.name ?? ""} disabled />
                       </div>
                       <div className="space-y-1">
                         <Label>Last 4</Label>
-                        <Input className="h-7" value={plaidDraft?.mask ?? ""} disabled />
+                        <Input className={inputH7} value={plaidDraft?.mask ?? ""} disabled />
                       </div>
                     </div>
 
                     <div className="space-y-1">
                       <Label>Opening balance date</Label>
                       <Input
-                        className="h-7"
+                        className={inputH7}
                         type="date"
                         value={plaidDraft?.effectiveStartDate ?? todayYmd()}
                         onChange={(e) =>
@@ -1954,10 +2249,10 @@ export default function SettingsPageClient() {
                           <TableCell className="py-2 text-center">
                             {!st && loading ? (
                               <span className="text-[11px] text-slate-500">Checking…</span>
-                            ) : (st as any)?.needsAttention ? (
+                            ) : st?.needsAttention ? (
                               <span
                                 className="inline-flex items-center rounded-full bg-amber-50 text-amber-800 px-2 py-0.5 text-[11px] font-medium"
-                                title={(st as any)?.errorMessage ?? "Needs attention"}
+                                title={st?.errorMessage ?? "Reconnect required"}
                               >
                                 Needs attention
                               </span>
@@ -1991,7 +2286,7 @@ export default function SettingsPageClient() {
                                 if (!checked || loading) return null;
 
                                 // Needs attention -> Reconnect
-                                if ((st as any)?.needsAttention && !isArchived) {
+                                if (st?.needsAttention && !isArchived) {
                                   return (
                                     <PlaidConnectButton
                                       businessId={selectedBusinessId}
@@ -2013,7 +2308,7 @@ export default function SettingsPageClient() {
                                               status: res?.status ?? undefined,
                                               lastSyncAt: res?.lastSyncAt ?? null,
                                               needsAttention: !!res?.needsAttention,
-                                              errorMessage: res?.error ?? null,
+                                              errorMessage: (res?.errorMessage ?? res?.error ?? null) as any,
                                             } as any,
                                           }));
                                           setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
@@ -2047,6 +2342,8 @@ export default function SettingsPageClient() {
                                               last4: res?.last4 ?? null,
                                               status: res?.status ?? undefined,
                                               lastSyncAt: res?.lastSyncAt ?? null,
+                                              needsAttention: !!res?.needsAttention,
+                                              errorMessage: (res?.errorMessage ?? res?.error ?? null) as any,
                                             },
                                           }));
                                           setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
@@ -2081,6 +2378,8 @@ export default function SettingsPageClient() {
                                                 last4: res?.last4 ?? null,
                                                 status: res?.status ?? undefined,
                                                 lastSyncAt: res?.lastSyncAt ?? null,
+                                                needsAttention: !!res?.needsAttention,
+                                                errorMessage: (res?.errorMessage ?? res?.error ?? null) as any,
                                               },
                                             }));
                                             setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
@@ -2094,7 +2393,10 @@ export default function SettingsPageClient() {
                                         title="Disconnect Plaid"
                                         onClick={async () => {
                                           await plaidDisconnect(selectedBusinessId, a.id);
-                                          setPlaidByAccount((cur) => ({ ...cur, [a.id]: { connected: false } }));
+                                          setPlaidByAccount((cur) => ({
+                                            ...cur,
+                                            [a.id]: { connected: false, needsAttention: false, errorMessage: null },
+                                          }));
                                           setPlaidChecked((cur) => ({ ...cur, [a.id]: true }));
                                         }}
                                       >
@@ -2157,16 +2459,21 @@ export default function SettingsPageClient() {
                                 const elig = deleteEligByAccount[a.id];
                                 const loadingElig = !!deleteEligLoading[a.id];
 
-                                const eligible = !!elig?.eligible;
                                 const relatedTotal = elig?.related_total ?? null;
 
-                                const disabled = loadingElig || !eligible;
+                                // Hardening: if backend reports 0 related rows, treat as eligible even if elig.eligible is false.
+                                // This prevents the broken state: "Cannot delete: 0 related rows".
+                                const eligible =
+                                  !!elig?.eligible || (typeof relatedTotal === "number" && relatedTotal === 0);
 
+                                const disabled = loadingElig || !eligible;
                                 const title = loadingElig
                                   ? "Checking delete eligibility…"
                                   : eligible
                                     ? "Delete account"
-                                    : `Cannot delete: ${relatedTotal ?? "unknown"} related rows. Remove related data first.`;
+                                    : typeof relatedTotal === "number"
+                                      ? `Cannot delete: ${relatedTotal} related rows. Remove related data first.`
+                                      : "Cannot delete: eligibility unavailable. Try again.";
 
                                 return (
                                   <button
