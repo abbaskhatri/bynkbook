@@ -210,8 +210,15 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
   const uploadMeta = useMemo(() => {
     if (type !== "INVOICE") return {};
+
+    // If this upload panel is opened from a vendor detail page, we force vendor_id.
+    const forcedVendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
+
+    if (forcedVendorId) return { vendor_id: forcedVendorId };
+
+    // Otherwise, keep existing behavior (vendor can be created by parsing)
     return selectedVendor ? { vendor_id: selectedVendor.id, vendor_name: selectedVendor.name } : {};
-  }, [type, selectedVendor]);
+  }, [type, selectedVendor, ctx]);
 
   const controller = useUploadController({ type, ctx, meta: uploadMeta });
 
@@ -241,6 +248,16 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
     const allDone = controller.items.every((it) => it.status === "COMPLETED" || it.status === "UPLOADED");
     if (allDone) {
       setShowSummary(true);
+
+      // Notify vendors pages to refresh (AP + vendor list) after invoice uploads complete
+      if (type === "INVOICE") {
+        window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+
+        const forcedVendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
+        if (forcedVendorId) {
+          window.dispatchEvent(new CustomEvent("bynk:vendor-detail-refresh", { detail: { vendorId: forcedVendorId } }));
+        }
+      }
 
       // Default selection: all items that have a parsed amount (deterministic, no stubs)
       setSelectedForEntry((prev) => {
@@ -831,6 +848,36 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                           return next;
                         });
 
+                        if (type === "INVOICE") {
+                          const res: any = await apiFetch(`/v1/businesses/${ctx.businessId}/uploads/create-bills`, {
+                            method: "POST",
+                            body: JSON.stringify({ upload_ids: ids }),
+                          });
+
+                          const results = Array.isArray(res?.results) ? res.results : [];
+                          setEntryCreateStatus((m) => {
+                            const next = { ...m };
+                            for (const r of results) {
+                              const uid = String(r.upload_id || "");
+                              if (!uid) continue;
+                              if (r.bill_id && r.already) next[uid] = { state: "already", entryId: r.bill_id };
+                              else if (r.bill_id) next[uid] = { state: "created", entryId: r.bill_id };
+                              else next[uid] = { state: "failed", error: r.error || "Failed" };
+                            }
+                            return next;
+                          });
+
+                          // Refresh vendors + vendor detail instantly
+                          window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+                          const forcedVendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
+                          if (forcedVendorId) {
+                            window.dispatchEvent(new CustomEvent("bynk:vendor-detail-refresh", { detail: { vendorId: forcedVendorId } }));
+                          }
+
+                          return;
+                        }
+
+                        // RECEIPT -> ledger entries path
                         const entry_dates: Record<string, string> = {};
                         for (const id of ids) {
                           const v = (entryDateByUploadId[id] || "").trim();
@@ -858,7 +905,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh"));
                       }}
                     >
-                      Create entries
+                      {type === "INVOICE" ? "Create bills" : "Create entries"}
                     </Button>
                   );
                 })()}

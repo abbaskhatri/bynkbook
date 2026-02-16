@@ -3,6 +3,7 @@
 
   const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
   const ENTRY_STATUS = ["EXPECTED", "CLEARED"] as const;
+  const ENTRY_KIND = ["GENERAL", "VENDOR_PAYMENT"] as const;
 
   function json(statusCode: number, body: any) {
     return {
@@ -58,6 +59,7 @@
       type: e.type,
       method: e.method ?? null,
       status: e.status,
+      entry_kind: (e as any).entry_kind ?? "GENERAL",
       deleted_at: e.deleted_at ? toIso(e.deleted_at) : null,
       created_at: toIso(e.created_at),
       updated_at: toIso(e.updated_at),
@@ -136,6 +138,25 @@
         if (!cp.ok) return cp.response;
       }
 
+      // AP invariant: If this entry has ACTIVE bill applications, it becomes immutable for key fields.
+      // Block editing: amount_cents, vendor_id, account_id, type, method.
+      const hasActiveApps = await prisma.billPaymentApplication.count({
+        where: { business_id: biz, entry_id: ent, is_active: true },
+      });
+
+      if (hasActiveApps > 0) {
+        const touchesImmutable =
+          body.amount_cents !== undefined ||
+          body.vendor_id !== undefined ||
+          body.account_id !== undefined ||
+          body.type !== undefined ||
+          body.method !== undefined;
+
+        if (touchesImmutable) {
+          return json(409, { ok: false, error: "APPLIED_PAYMENT_IMMUTABLE" });
+        }
+      }
+
       // Build update payload (PATCH-like behavior for both PUT and PATCH)
       const data: any = { updated_at: new Date() };
 
@@ -203,6 +224,34 @@ if (body.category_id !== undefined) {
       }
     }
 
+    // Payment marker: allow entry_kind updates (GENERAL | VENDOR_PAYMENT)
+    if (body.entry_kind !== undefined) {
+      const k = String(body.entry_kind ?? "").trim().toUpperCase();
+      if (!(ENTRY_KIND as readonly string[]).includes(k)) {
+        return json(400, { ok: false, error: `entry_kind must be one of ${ENTRY_KIND.join(", ")}` });
+      }
+      (data as any).entry_kind = k;
+
+      // If marking as vendor payment, force category = Purchase (create if missing).
+      if (k === "VENDOR_PAYMENT") {
+        const purchase = await prisma.category.findFirst({
+          where: { business_id: biz, name: { equals: "Purchase", mode: "insensitive" }, archived_at: null },
+          select: { id: true },
+        });
+
+        let purchaseId = purchase?.id ?? null;
+
+        if (!purchaseId) {
+          const created = await prisma.category.create({
+            data: { business_id: biz, name: "Purchase" },
+            select: { id: true },
+          });
+          purchaseId = created.id;
+        }
+
+        (data as any).category_id = purchaseId;
+      }
+    }
     // Vendor link: allow vendor_id updates (nullable)
     if (body.vendor_id !== undefined) {
       const vendorRaw = body.vendor_id;
@@ -223,6 +272,7 @@ if (body.category_id !== undefined) {
         }
       }
     }
+
       // Enforce entry-type rules & sign normalization (backend is source of truth)
       // - TRANSFER cannot be updated via generic entry update; use /transfers
       // - INCOME: +abs(amount)

@@ -21,7 +21,12 @@ export type ActivityEventType =
   | "LEDGER_TRANSFER_CREATE"
   | "LEDGER_TRANSFER_UPDATE"
   | "LEDGER_TRANSFER_DELETE"
-  | "LEDGER_TRANSFER_RESTORE";
+  | "LEDGER_TRANSFER_RESTORE"
+  | "AP_BILL_CREATED"
+  | "AP_BILL_UPDATED"
+  | "AP_BILL_VOIDED"
+  | "AP_PAYMENT_APPLIED"
+  | "AP_PAYMENT_UNAPPLIED";
 
 export async function logActivity(prisma: any, args: {
   businessId: string;

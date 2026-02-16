@@ -8,41 +8,45 @@ datasource db {
 }
 
 model Business {
-  id                 String               @id @db.Uuid
-  name               String
-  owner_user_id      String
+  id            String @id @db.Uuid
+  name          String
+  owner_user_id String
 
   // Optional Business Profile metadata (Settings)
-  address                  String?
-  phone                    String?
-  logo_url                 String?
-  logo_upload_id           String?              @db.Uuid
-  industry                 String?
-  currency                 String               @default("USD")
-  timezone                 String               @default("America/Chicago")
-  fiscal_year_start_month  Int                  @default(1)
+  address                 String?
+  phone                   String?
+  logo_url                String?
+  logo_upload_id          String? @db.Uuid
+  industry                String?
+  currency                String  @default("USD")
+  timezone                String  @default("America/Chicago")
+  fiscal_year_start_month Int     @default(1)
 
   // Phase 7.1: per-business authz mode flag (default OFF)
-  authz_mode         String               @default("OFF")
+  authz_mode              String                  @default("OFF")
   // Phase 7.2: enforcement wave gate (0=none, 1=Team+RolePolicy, 2=Reconcile, 3=Snapshots/Exports)
-  authz_enforce_wave Int                  @default(0)
-  created_at         DateTime             @default(now()) @db.Timestamptz(6)
-  accounts           Account[]
-  entries            Entry[]
-  roles              UserBusinessRole[]
-  uploads            Upload[]
-  bankConnections    BankConnection[]
-  bankTransactions   BankTransaction[]
-  bankMatches        BankMatch[]
-  reconcileSnapshots ReconcileSnapshot[]
-  invites                  BusinessInvite[]
-  categories               Category[]
-  bookkeeping_preferences  BookkeepingPreferences?
-  rolePolicies             BusinessRolePolicy[]
-  transfers                Transfer[]
-  activityLogs             ActivityLog[]
-  closedPeriods            ClosedPeriod[]
-  vendors                  Vendor[]
+  authz_enforce_wave      Int                     @default(0)
+  created_at              DateTime                @default(now()) @db.Timestamptz(6)
+  accounts                Account[]
+  entries                 Entry[]
+  roles                   UserBusinessRole[]
+  uploads                 Upload[]
+  bankConnections         BankConnection[]
+  bankTransactions        BankTransaction[]
+  bankMatches             BankMatch[]
+  reconcileSnapshots      ReconcileSnapshot[]
+  invites                 BusinessInvite[]
+  categories              Category[]
+  bookkeeping_preferences BookkeepingPreferences?
+  rolePolicies            BusinessRolePolicy[]
+  transfers               Transfer[]
+  activityLogs            ActivityLog[]
+  closedPeriods           ClosedPeriod[]
+  vendors                 Vendor[]
+
+  // Accounts Payable
+  bills                   Bill[]
+  billPaymentApplications BillPaymentApplication[]
 
   budgets Budget[]
   goals   Goal[]
@@ -52,16 +56,16 @@ model Business {
 }
 
 model UserBusinessRole {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  business_id String   @db.Uuid
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
   user_id     String
 
   // Best-effort email for display. Filled on invite accept and backfilled for the current user on team fetch.
-  email       String?
+  email String?
 
-  role        String
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  business    Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  role       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  business   Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([business_id, user_id])
   @@index([user_id], map: "idx_ubr_user_id")
@@ -70,28 +74,31 @@ model UserBusinessRole {
 }
 
 model Account {
-  id                    String              @id @db.Uuid
-  business_id           String              @db.Uuid
+  id                    String   @id @db.Uuid
+  business_id           String   @db.Uuid
   name                  String
   type                  String
   opening_balance_cents BigInt
-  opening_balance_date  DateTime            @db.Timestamptz(6)
+  opening_balance_date  DateTime @db.Timestamptz(6)
 
   // Manual metadata (non-Plaid accounts OR pre-connect storage)
-  currency_code         String?             @db.VarChar(3)
-  institution_name      String?
-  last4                 String?             @db.VarChar(8)
+  currency_code    String? @db.VarChar(3)
+  institution_name String?
+  last4            String? @db.VarChar(8)
 
-  archived_at           DateTime?           @db.Timestamptz(6)
-  created_at            DateTime            @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime            @default(now()) @db.Timestamptz(6)
-  business              Business            @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  entries               Entry[]
-  uploads               Upload[]
-  bankConnections       BankConnection[]
-  bankTransactions      BankTransaction[]
-  bankMatches           BankMatch[]
-  reconcileSnapshots    ReconcileSnapshot[]
+  archived_at        DateTime?           @db.Timestamptz(6)
+  created_at         DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime            @default(now()) @db.Timestamptz(6)
+  business           Business            @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entries            Entry[]
+  uploads            Upload[]
+  bankConnections    BankConnection[]
+  bankTransactions   BankTransaction[]
+  bankMatches        BankMatch[]
+  reconcileSnapshots ReconcileSnapshot[]
+
+  // Accounts Payable: applications scoped to this account via Entry.account_id
+  billPaymentApplications BillPaymentApplication[]
 
   @@index([business_id, archived_at], map: "idx_account_business_archived")
   @@index([business_id, name], map: "idx_account_business_name")
@@ -112,6 +119,9 @@ model Entry {
   vendor_id    String?  @db.Uuid
   vendor       Vendor?  @relation(fields: [vendor_id], references: [id])
 
+  // Accounts Payable: payment allocations
+  billPaymentApplications BillPaymentApplication[]
+
   transfer_id String? @db.Uuid
 
   // Durable upload→entry linkage (one upload creates at most one entry)
@@ -122,6 +132,10 @@ model Entry {
 
   // Category System v2
   category Category? @relation(fields: [category_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  // Payment marker (prevents misclassifying normal vendor expenses)
+  // GENERAL | VENDOR_PAYMENT
+  entry_kind String @default("GENERAL")
 
   status     String    @default("EXPECTED")
   deleted_at DateTime? @db.Timestamptz(6)
@@ -143,6 +157,7 @@ model Entry {
   @@index([business_id, account_id, date, created_at], map: "idx_entry_business_account_date_created")
   @@index([business_id, account_id, deleted_at], map: "idx_entry_business_account_deleted")
   @@index([business_id, category_id], map: "idx_entry_business_category")
+  @@index([business_id, entry_kind], map: "idx_entry_business_kind")
   @@map("entry")
 }
 
@@ -167,7 +182,7 @@ model Category {
 }
 
 model BookkeepingPreferences {
-  business_id            String  @id @db.Uuid
+  business_id String @id @db.Uuid
 
   amount_tolerance_cents BigInt  @default(0)
   days_tolerance         Int     @default(3)
@@ -220,12 +235,17 @@ model Upload {
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
   completed_at       DateTime? @db.Timestamptz(6)
 
+  // Soft delete
+  deleted_at         DateTime? @db.Timestamptz(6)
+  deleted_by_user_id String?
+
   business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   account  Account? @relation(fields: [account_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@index([business_id, created_at], map: "idx_upload_business_created")
-  @@index([business_id, account_id, created_at], map: "idx_upload_business_account_created")
-  @@index([business_id, upload_type, status], map: "idx_upload_business_type_status")
+  // Accounts Payable: Bill upload attachment (optional)
+  bills Bill[]
+
+  @@index([business_id, created_at(sort: Desc)], map: "i_upload_scope_created_desc")
   @@map("upload")
 }
 
@@ -499,9 +519,86 @@ model Vendor {
   // Opposite side of Entry.vendor relation
   entries Entry[]
 
+  // Accounts Payable
+  bills Bill[]
+
   @@unique([business_id, name], map: "u_vendor_scope_name")
   @@index([business_id, updated_at(sort: Desc)], map: "i_vendor_scope_updated_desc")
   @@map("vendor")
+}
+
+model Bill {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  vendor_id   String @db.Uuid
+
+  invoice_date DateTime @db.Date
+  due_date     DateTime @db.Date
+
+  // Stored as positive cents
+  amount_cents BigInt
+
+  // OPEN | PARTIAL | PAID | VOID
+  status String @default("OPEN")
+
+  memo      String?
+  terms     String?
+  upload_id String? @db.Uuid
+
+  created_by_user_id String
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  voided_at         DateTime? @db.Timestamptz(6)
+  voided_by_user_id String?
+  void_reason       String?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendor   Vendor   @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  upload   Upload?  @relation(fields: [upload_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  applications BillPaymentApplication[]
+
+  @@index([business_id, vendor_id, due_date], map: "i_bill_scope_vendor_due")
+  @@index([business_id, status, due_date], map: "i_bill_scope_status_due")
+
+  // Idempotency: only one bill may link to a given upload_id (multiple NULLs allowed)
+  @@unique([upload_id], map: "u_bill_upload_id")
+
+  @@map("bill")
+}
+
+model BillPaymentApplication {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+  entry_id    String @db.Uuid
+  bill_id     String @db.Uuid
+
+  // Stored as positive cents
+  applied_amount_cents BigInt
+
+  applied_at DateTime @default(now()) @db.Timestamptz(6)
+
+  created_by_user_id String
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  // Auditable voiding (keep history)
+  is_active         Boolean   @default(true)
+  voided_at         DateTime? @db.Timestamptz(6)
+  voided_by_user_id String?
+  void_reason       String?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entry    Entry    @relation(fields: [entry_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  bill     Bill     @relation(fields: [bill_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([entry_id, bill_id, is_active], map: "u_bill_app_entry_bill_active")
+  @@index([business_id, bill_id, is_active], map: "i_bill_app_scope_bill_active")
+  @@index([business_id, entry_id, is_active], map: "i_bill_app_scope_entry_active")
+  @@index([business_id, account_id, entry_id], map: "i_bill_app_scope_account_entry")
+  @@map("bill_payment_application")
 }
 
 model Budget {

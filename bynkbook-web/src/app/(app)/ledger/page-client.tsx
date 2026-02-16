@@ -185,6 +185,29 @@ function normalizeCategoryName(name: string): string {
   return (name || "").trim().replace(/\s+/g, " ");
 }
 
+function centsFromDollarsInput(s: string): number {
+  const n = Number((s || "").trim());
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n * 100);
+}
+
+function computeAutoAlloc(bills: any[], amountAbsCents: bigint) {
+  let remaining = amountAbsCents;
+  const next: Record<string, string> = {};
+
+  for (const b of bills) {
+    if (remaining <= ZERO) break;
+    const out = toBigIntSafe((b as any).outstanding_cents ?? 0);
+    if (out <= ZERO) continue;
+
+    const use = remaining < out ? remaining : out;
+    next[String(b.id)] = (Number(use) / 100).toFixed(2);
+    remaining -= use;
+  }
+
+  return { alloc: next, remaining };
+}
+
 function normKey(name: string): string {
   return normalizeCategoryName(name).toLowerCase();
 }
@@ -478,7 +501,7 @@ function VendorSuggestPill(props: {
               `/v1/businesses/${businessId}/accounts/${accountId}/entries/${entryId}`,
               {
                 method: "PATCH",
-                body: JSON.stringify({ vendor_id: best.id }),
+                body: JSON.stringify({ vendor_id: best.id, entry_kind: "VENDOR_PAYMENT" }),
               }
             );
 
@@ -488,6 +511,29 @@ function VendorSuggestPill(props: {
             }
 
             onLinked({ id: best.id, name: best.name });
+
+            // Open apply dialog IN LEDGER (no redirect) with entry details
+            const e = res?.entry ?? null;
+            const amt = toBigIntSafe(e?.amount_cents ?? 0);
+            const absAmt = amt < ZERO ? -amt : amt;
+
+            window.dispatchEvent(
+              new CustomEvent("bynk:ledger-open-apply", {
+                detail: {
+                  vendorId: best.id,
+                  vendorName: best.name,
+                  entryId,
+                  entry: {
+                    id: entryId,
+                    date: String(e?.date ?? "").slice(0, 10),
+                    payee: String(e?.payee ?? payee ?? ""),
+                    method: String(e?.method ?? "OTHER"),
+                    amountCentsAbs: absAmt.toString(),
+                    memo: String(e?.memo ?? ""),
+                  },
+                },
+              })
+            );
           } catch {
             // keep pill visible on error
           }
@@ -637,8 +683,8 @@ export default function LedgerPageClient() {
   // Coalesced background refresh for entries (no storms)
   const entriesRefreshTimerRef = useRef<number | null>(null);
 
-  const scheduleEntriesRefresh = (reason: string) => {
-    if (!selectedBusinessId || !selectedAccountId) return;
+  const scheduleEntriesRefresh = (businessId: string | null, accountId: string | null, reason: string) => {
+    if (!businessId || !accountId) return;
 
     // coalesce
     if (entriesRefreshTimerRef.current) {
@@ -648,11 +694,13 @@ export default function LedgerPageClient() {
 
     entriesRefreshTimerRef.current = window.setTimeout(() => {
       entriesRefreshTimerRef.current = null;
-      // One background refresh (never block UI)
-      void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
 
-      // Also refresh summary in the same coalesced cycle (prevents stale footer totals)
-      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+      // One background refresh (never block UI)
+      void qc.invalidateQueries({ queryKey: ["entries", businessId, accountId], exact: false });
+
+      // Also refresh issues + footer summary (prevents stale badges/totals)
+      void qc.invalidateQueries({ queryKey: ["entryIssues", businessId, accountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["ledgerSummary", businessId, accountId], exact: false });
 
       perfLog(`[PERF][entriesRefresh] fired (${reason})`);
     }, 15000); // 15s idle
@@ -665,12 +713,42 @@ export default function LedgerPageClient() {
     }
   };
 
+  // Fast UI update for deletes: mark row deleted in cache immediately (no 15s wait)
+  // IMPORTANT: do NOT reference entriesKey/selectedBusinessId variables here (declared later).
+  const markEntryDeletedInCache = (businessId: string | null, accountId: string | null, entryId: string) => {
+    if (!businessId || !accountId) return;
+
+    const nowIso = new Date().toISOString();
+
+    // Update ALL cached pages for this account (different limits / showDeleted flags)
+    const hits = qc.getQueriesData({ queryKey: ["entries", businessId, accountId] });
+
+    for (const [key, data] of hits) {
+      const prev = (data as Entry[] | undefined) ?? [];
+      const next = prev.map((e) =>
+        e.id === entryId ? { ...e, deleted_at: nowIso, updated_at: nowIso } : e
+      );
+      qc.setQueryData(key, next);
+    }
+
+    // Immediate targeted refresh for visible UX (no 15s wait)
+    void qc.invalidateQueries({ queryKey: ["entries", businessId, accountId], exact: false });
+    void qc.invalidateQueries({ queryKey: ["entryIssues", businessId, accountId], exact: false });
+    void qc.invalidateQueries({ queryKey: ["ledgerSummary", businessId, accountId], exact: false });
+  };
+
   // Refresh on window focus (coalesced)
   // Use a stable key here to avoid referencing business/account variables before declaration.
   const refreshScopeKey = `${sp.get("businessId") ?? sp.get("businessesId") ?? ""}|${sp.get("accountId") ?? ""}`;
 
+  // Stable refs to avoid using selectedBusinessId/selectedAccountId before declaration
+  const selectedBusinessIdRef = useRef<string | null>(null);
+  const selectedAccountIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const onFocus = () => scheduleEntriesRefresh("focus");
+    const onFocus = () =>
+      scheduleEntriesRefresh(selectedBusinessIdRef.current, selectedAccountIdRef.current, "focus");
+
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -678,10 +756,73 @@ export default function LedgerPageClient() {
 
   // Uploads "create entries" triggers a lightweight ledger refresh (no storms)
   useEffect(() => {
-    const fn = () => scheduleEntriesRefresh("uploadsCreateEntries");
+    const fn = () =>
+      scheduleEntriesRefresh(selectedBusinessIdRef.current, selectedAccountIdRef.current, "uploadsCreateEntries");
+
     window.addEventListener("bynk:ledger-refresh", fn as any);
     return () => window.removeEventListener("bynk:ledger-refresh", fn as any);
   }, [scheduleEntriesRefresh]);
+
+  // Open Apply Payment dialog from vendor suggestion pill (no redirect)
+  useEffect(() => {
+    const handler = async (e: any) => {
+      const d = e?.detail ?? {};
+      const vendorId = String(d.vendorId ?? "").trim();
+      const vendorName = String(d.vendorName ?? "").trim();
+      const entryId = String(d.entryId ?? "").trim();
+
+      const biz = selectedBusinessIdRef.current;
+      const acct = selectedAccountIdRef.current;
+
+      if (!biz || !acct || !vendorId || !entryId) return;
+
+      setLedgerApplyVendor({ id: vendorId, name: vendorName || "Vendor" });
+      setLedgerApplyEntryId(entryId);
+
+      const entryObj = d?.entry ?? null;
+      if (entryObj) {
+        const absCents = toBigIntSafe(entryObj.amountCentsAbs ?? 0);
+        setLedgerApplyEntry({
+          id: entryId,
+          date: String(entryObj.date ?? "").slice(0, 10),
+          payee: String(entryObj.payee ?? ""),
+          method: String(entryObj.method ?? "OTHER"),
+          amountCentsAbs: absCents,
+          memo: String(entryObj.memo ?? ""),
+        });
+      } else {
+        setLedgerApplyEntry(null);
+      }
+
+      setLedgerAlloc({});
+      setLedgerBills([]);
+      setLedgerApplyOpen(true);
+
+      setLedgerApplyLoading(true);
+      try {
+        const res: any = await apiFetch(
+          `/v1/businesses/${biz}/vendors/${vendorId}/bills?status=open&limit=200`,
+          { method: "GET" }
+        );
+        const bills = Array.isArray(res?.bills) ? res.bills : [];
+        setLedgerBills(bills);
+
+        // Auto-fill allocations from payment amount (oldest first)
+        const amtAbs = entryObj ? toBigIntSafe(entryObj.amountCentsAbs ?? 0) : ZERO;
+        if (amtAbs > ZERO) {
+          const { alloc } = computeAutoAlloc(bills, amtAbs);
+          setLedgerAlloc(alloc);
+        }
+      } catch (err: any) {
+        setErr(err?.message ?? "Failed to load bills");
+      } finally {
+        setLedgerApplyLoading(false);
+      }
+    };
+
+    window.addEventListener("bynk:ledger-open-apply", handler as any);
+    return () => window.removeEventListener("bynk:ledger-open-apply", handler as any);
+  }, []);
 
   // Auth
   const [authReady, setAuthReady] = useState(false);
@@ -722,6 +863,12 @@ export default function LedgerPageClient() {
     if (accountIdFromUrl) return accountIdFromUrl;
     return list.find((a) => !a.archived_at)?.id ?? "";
   }, [accountsQ.data, accountIdFromUrl]);
+
+  // Keep refs in sync for early effects
+  useEffect(() => {
+    selectedBusinessIdRef.current = selectedBusinessId ?? null;
+    selectedAccountIdRef.current = selectedAccountId ?? null;
+  }, [selectedBusinessId, selectedAccountId]);
 
   const selectedAccount = useMemo(() => {
     const list = accountsQ.data ?? [];
@@ -853,6 +1000,41 @@ export default function LedgerPageClient() {
     return list;
   }, [entriesQ.data]);
 
+  // Bulk AP totals for ledger payment badges (single request, limit-bounded)
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    const ids = (entriesQ.data ?? [])
+      .filter((e: any) => String((e as any).entry_kind ?? "").toUpperCase() === "VENDOR_PAYMENT")
+      .map((e: any) => String(e.id))
+      .slice(0, 200);
+
+    if (!ids.length) {
+      setApTotalsByEntryId({});
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res: any = await apiFetch(
+          `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/ap-totals`,
+          { method: "POST", body: JSON.stringify({ entry_ids: ids }) }
+        );
+        if (cancelled) return;
+        setApTotalsByEntryId((res?.totals as any) ?? {});
+      } catch {
+        if (cancelled) return;
+        setApTotalsByEntryId({});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId, selectedAccountId, entriesQ.data]);
+
   const entriesWithOpening = useMemo(() => {
     if (!openingEntry) return entriesSorted;
 
@@ -951,6 +1133,7 @@ export default function LedgerPageClient() {
       const catName = ((e as any).category_name ?? (e as any).categoryName ?? null) as string | null;
       const vid = ((e as any).vendor_id ?? (e as any).vendorId ?? null) as string | null;
       const vname = ((e as any).vendor_name ?? (e as any).vendorName ?? null) as string | null;
+      const ekind = String((e as any).entry_kind ?? "GENERAL").toUpperCase();
 
       const tid = ((e as any).transfer_id ?? (e as any).transferId ?? null) as string | null;
       const tOtherName = ((e as any).transfer_other_account_name ?? null) as string | null;
@@ -1000,6 +1183,7 @@ export default function LedgerPageClient() {
         categoryId: cid,
         vendorId: vid,
         vendorName: vname,
+        entryKind: ekind,
         transferId: tid,
         amountCents: amt.toString(),
         amountStr: formatUsdFromCents(amt),
@@ -1358,7 +1542,7 @@ export default function LedgerPageClient() {
     onSuccess: (res) => {
       if (res.failed > 0) setBulkMsg(`Deleted with ${res.failed} failures`);
       else setBulkMsg("Deleted");
-      scheduleEntriesRefresh("bulkDelete");
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "bulkDelete");
       clearSelection();
       setTimeout(() => setBulkMsg(null), 1800);
     },
@@ -1380,6 +1564,28 @@ export default function LedgerPageClient() {
   const [draftAmount, setDraftAmount] = useState("0.00");
   const [err, setErr] = useState<string | null>(null);
 
+  const [vendorsForBusiness, setVendorsForBusiness] = useState<any[]>([]);
+
+  // Ledger: Apply payment dialog (no redirect)
+  const [ledgerApplyOpen, setLedgerApplyOpen] = useState(false);
+  const [ledgerApplyVendor, setLedgerApplyVendor] = useState<{ id: string; name: string } | null>(null);
+  const [ledgerApplyEntryId, setLedgerApplyEntryId] = useState<string | null>(null);
+  const [ledgerApplyEntry, setLedgerApplyEntry] = useState<{
+    id: string;
+    date: string;
+    payee: string;
+    method: string;
+    amountCentsAbs: bigint;
+    memo: string;
+  } | null>(null);
+
+  const [ledgerBills, setLedgerBills] = useState<any[]>([]);
+  const [ledgerAlloc, setLedgerAlloc] = useState<Record<string, string>>({});
+  const [ledgerApplyLoading, setLedgerApplyLoading] = useState(false);
+
+  // AP totals for payment badges (bulk-loaded; no per-row calls)
+  const [apTotalsByEntryId, setApTotalsByEntryId] = useState<Record<string, { applied_cents: string; unapplied_cents: string; amount_abs_cents: string }>>({});
+
   // Last scan (UI-only, persisted per business+account)
   const scanKey = useMemo(() => {
     if (!selectedBusinessId || !selectedAccountId) return "";
@@ -1396,6 +1602,32 @@ export default function LedgerPageClient() {
       // ignore
     }
   }, [scanKey]);
+
+  useEffect(() => {
+    if (!selectedBusinessId) {
+      setVendorsForBusiness([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res: any = await apiFetch(
+          `/v1/businesses/${selectedBusinessId}/vendors?sort=name_asc`,
+          { method: "GET" }
+        );
+        const list = Array.isArray(res?.vendors) ? res.vendors : [];
+        if (!cancelled) setVendorsForBusiness(list.slice(0, 200));
+      } catch {
+        if (!cancelled) setVendorsForBusiness([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId]);
 
   function formatScanLabel(iso: string | null) {
     if (!iso) return "Never";
@@ -1569,6 +1801,7 @@ export default function LedgerPageClient() {
               (vars.note ?? "").trim() ||
               (vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined),
             category_id: vars.categoryId ?? null,
+            vendor_id: vars.vendorId ?? null,
             amount_cents: centsRaw,
             type: "ADJUSTMENT",
             method: normalizeBackendMethod(vars.method),
@@ -1589,6 +1822,7 @@ export default function LedgerPageClient() {
           payee: vars.payee.trim(),
           memo: (vars.note ?? "").trim() || (vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined),
           category_id: vars.categoryId ?? null,
+          vendor_id: vars.vendorId ?? null,
           amount_cents: signed,
           type: backendType,
           method: normalizeBackendMethod(vars.method),
@@ -1716,7 +1950,7 @@ export default function LedgerPageClient() {
       void scanIssues();
 
       // Keep coalesced refresh too (safe)
-      scheduleEntriesRefresh("create");
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "create");
     },
 
   });
@@ -1785,7 +2019,7 @@ export default function LedgerPageClient() {
 
       if (vars?.entryId) setEditedIds((m) => ({ ...m, [vars.entryId]: true }));
 
-      scheduleEntriesRefresh("update");
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "update");
 
       // Update footer totals promptly (cheap query; no entries refetch storm)
       void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
@@ -1852,6 +2086,13 @@ export default function LedgerPageClient() {
       }
 
       if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
+      const msg2 = String(e?.message ?? "");
+      if (msg2.includes("APPLIED_PAYMENT_IMMUTABLE")) {
+        // Open the correct payment delete dialog (explicit unapply+delete) instead of generic delete UX.
+        setPaymentDeleteDialog({ id: id, isApplied: true });
+        setErr(null);
+        return;
+      }
       setErr("Delete failed");
     },
     onSuccess: async (_data: any, p: any, ctx: any) => {
@@ -1865,7 +2106,7 @@ export default function LedgerPageClient() {
       // Recompute issue groups after deletion (best-effort)
       setTimeout(() => void scanIssues(), 1500);
 
-      scheduleEntriesRefresh("delete");
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "delete");
 
       // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
       if (p?.isTransfer && p?.transferId && selectedBusinessId) {
@@ -1930,6 +2171,16 @@ export default function LedgerPageClient() {
     },
     onSuccess: async (_data: any, p: any, ctx: any) => {
       const entryId = p?.entryId;
+      if (entryId) {
+        setLinkedVendorByEntryId((m) => {
+          const next = { ...m };
+          delete next[entryId];
+          return next;
+        });
+
+        // Re-suggest vendor payment workflow after restore
+        setLastCreatedEntryId(entryId);
+      }
       const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
       const tOk = performance.now();
@@ -1937,7 +2188,7 @@ export default function LedgerPageClient() {
 
       void scanIssues();
 
-      scheduleEntriesRefresh("restore");
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "restore");
 
       // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
       if (p?.isTransfer && p?.transferId && selectedBusinessId) {
@@ -1991,7 +2242,7 @@ export default function LedgerPageClient() {
       const tOk = performance.now();
       perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-      scheduleEntriesRefresh("hardDelete");
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "hardDelete");
 
       // NOTE: Summary refresh intentionally NOT triggered on every mutation (Phase 3 performance).
       // Totals remain last-known until a later refresh policy is applied.
@@ -2064,7 +2315,7 @@ export default function LedgerPageClient() {
         },
       })
         .then(() => {
-          scheduleEntriesRefresh("transferEdit");
+          scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "transferEdit");
           setEditingId(null);
           setEditDraft(null);
         })
@@ -2713,6 +2964,12 @@ export default function LedgerPageClient() {
     transferId?: string | null;
   } | null>(null);
 
+  // Payment delete confirm (explicit action)
+  const [paymentDeleteDialog, setPaymentDeleteDialog] = useState<{
+    id: string;
+    isApplied: boolean;
+  } | null>(null);
+
   // Stage 2A: Close period dialog
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
 
@@ -2797,19 +3054,21 @@ export default function LedgerPageClient() {
           {/* Payee */}
           <td className={td + " min-w-0"}>
             {isEditing && editDraft ? (
-              <input
-                ref={editPayeeRef}
-                className={inputH7}
-                value={editDraft.payee}
-                onChange={(e) => setEditDraft({ ...editDraft, payee: e.target.value })}
-                onKeyDown={onEditKeyDown}
-              />
+              <div className="min-w-0">
+                <input
+                  ref={editPayeeRef}
+                  className={inputH7}
+                  value={editDraft.payee}
+                  onChange={(e) => setEditDraft({ ...editDraft, payee: e.target.value })}
+                  onKeyDown={onEditKeyDown}
+                />
+              </div>
             ) : (
               <div className="flex items-center gap-2 min-w-0">
                 <span className={trunc + " font-medium " + deletedText + " min-w-0"}>{r.payee}</span>
 
                 {/* Single-line vendor indicator (persisted) */}
-                {(r.vendorName || linkedVendorByEntryId[r.id]) ? (
+                {!deletedRow && (r.vendorName || linkedVendorByEntryId[r.id]) ? (
                   <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700 max-w-[180px] shrink-0">
                     {/* vendor icon */}
                     <BookOpen className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
@@ -2836,7 +3095,7 @@ export default function LedgerPageClient() {
                         try {
                           await apiFetch(
                             `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
-                            { method: "PATCH", body: JSON.stringify({ vendor_id: null }) }
+                            { method: "PATCH", body: JSON.stringify({ vendor_id: null, entry_kind: "GENERAL" }) }
                           );
 
                           setLinkedVendorByEntryId((m) => {
@@ -2845,7 +3104,7 @@ export default function LedgerPageClient() {
                             return next;
                           });
 
-                          scheduleEntriesRefresh("vendorUnlink");
+                          scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorUnlink");
                         } catch {
                           // non-blocking
                         }
@@ -2863,11 +3122,71 @@ export default function LedgerPageClient() {
                     payee={r.payee}
                     onLinked={(v) => {
                       setLinkedVendorByEntryId((m) => ({ ...m, [r.id]: v.name }));
-                      scheduleEntriesRefresh("vendorLink");
+                      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorLink");
                       setLastCreatedEntryId(null);
                     }}
                     onDismiss={() => setLastCreatedEntryId(null)}
                   />
+                ) : null}
+
+                {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
+                  <>
+                    {(() => {
+                      const t = apTotalsByEntryId[r.id];
+                      const applied = t ? BigInt(String(t.applied_cents ?? "0")) : 0n;
+                      const unapplied = t ? BigInt(String(t.unapplied_cents ?? "0")) : 0n;
+                      const absAmt = t ? BigInt(String(t.amount_abs_cents ?? "0")) : 0n;
+
+                      let label = "Unapplied";
+                      let cls = "bg-slate-100 text-slate-700";
+
+                      if (applied > 0n && unapplied === 0n && absAmt > 0n) {
+                        label = "Applied";
+                        cls = "bg-emerald-50 text-emerald-700";
+                      } else if (applied > 0n && unapplied > 0n) {
+                        label = "Partial";
+                        cls = "bg-amber-50 text-amber-700";
+                      } else if (applied === 0n && unapplied > 0n && absAmt > 0n) {
+                        label = "Unapplied credit";
+                        cls = "bg-slate-100 text-slate-700";
+                      }
+
+                      return (
+                        <span className={"inline-flex h-6 items-center rounded-full px-2 text-[11px] shrink-0 " + cls} title="Payment status">
+                          {label}
+                        </span>
+                      );
+                    })()}
+
+                    <button
+                      type="button"
+                      className="inline-flex h-6 items-center rounded-full bg-slate-900 px-2 text-[11px] text-white shrink-0"
+                      title="Apply this vendor payment"
+                      onClick={() => {
+                        if (!selectedBusinessId || !selectedAccountId || !r.vendorId) return;
+
+                        window.dispatchEvent(
+                          new CustomEvent("bynk:ledger-open-apply", {
+                            detail: {
+                              vendorId: r.vendorId,
+                              vendorName: r.vendorName ?? linkedVendorByEntryId[r.id] ?? "",
+                              entryId: r.id,
+                              entry: {
+                                id: r.id,
+                                date: String(r.date ?? "").slice(0, 10),
+                                payee: String(r.payee ?? ""),
+                                method: String(r.rawMethod ?? r.methodDisplay ?? "OTHER"),
+                                amountCentsAbs: String(Math.abs(Number(r.amountCents ?? 0))),
+                                memo: String((rowModels.find((x) => x.id === r.id) as any)?.memo ?? ""),
+                              },
+                            },
+                          })
+                        );
+                      }}
+                    >
+                      Apply payment
+                    </button>
+                  </>
                 ) : null}
 
                 {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
@@ -3149,17 +3468,62 @@ export default function LedgerPageClient() {
                             <Copy className="h-3.5 w-3.5" />
                             Duplicate
                           </button>
+
+                          {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
+                            <button
+                              type="button"
+                              className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 text-red-700"
+                              onMouseDown={async (ev) => {
+                                ev.preventDefault();
+                                setMenuOpenId(null);
+
+                                try {
+                                  await apiFetch(
+                                    `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}/ap/unapply-and-delete`,
+                                    { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
+                                  );
+
+                                  scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "unapplyDeletePayment");
+                                } catch (e: any) {
+                                  setErr(e?.message ?? "Unapply+Delete failed");
+                                }
+                              }}
+                              title="Explicit: unapply all allocations then delete payment"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Unapply+Delete payment
+                            </button>
+                          ) : null}
+
                         </div>
                       ) : null}
 
                       <Button
                         variant="outline"
                         className="h-6 w-8 p-0"
-                        title="Move to Deleted"
+                        title={r.entryKind === "VENDOR_PAYMENT" ? "Delete payment" : "Move to Deleted"}
                         disabled={deletingId === r.id || deleteMut.isPending}
                         onClick={() => {
                           if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                           if (deletingId === r.id || deleteMut.isPending) return;
+
+                          // Payments must use explicit Unapply+Delete (no normal delete).
+                          const memo = String((rowModels.find((x) => x.id === r.id) as any)?.memo ?? "");
+                          const memoSaysApplied = memo.includes(" — Applied to: ");
+
+                          const catIsPurchase = String(r.category ?? "").trim().toLowerCase() === "purchase";
+                          const vendorLinked = !!r.vendorId || !!linkedVendorByEntryId[r.id];
+
+                          const isVendorPaymentRow =
+                            r.entryKind === "VENDOR_PAYMENT" ||
+                            (vendorLinked && catIsPurchase) ||
+                            memoSaysApplied;
+
+                          if (isVendorPaymentRow) {
+                            setPaymentDeleteDialog({ id: r.id, isApplied: memoSaysApplied });
+                            return;
+                          }
+
                           setDeleteDialog({
                             id: r.id,
                             mode: "soft",
@@ -3359,6 +3723,78 @@ export default function LedgerPageClient() {
       />
 
       <AppDialog
+        open={!!paymentDeleteDialog}
+        onClose={() => setPaymentDeleteDialog(null)}
+        title="Delete vendor payment"
+        size="md"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setPaymentDeleteDialog(null)}>
+              Cancel
+            </Button>
+
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!paymentDeleteDialog || !selectedBusinessId || !selectedAccountId) return;
+
+                try {
+                  await apiFetch(
+                    `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${paymentDeleteDialog.id}/ap/unapply-and-delete`,
+                    { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
+                  );
+
+                  // Instant UI update (no 15s delay)
+                  markEntryDeletedInCache(selectedBusinessId, selectedAccountId, paymentDeleteDialog.id);
+
+                  // Clear optimistic vendor badge immediately (backend clears vendor_id too)
+                  setLinkedVendorByEntryId((m) => {
+                    const next = { ...m };
+                    delete next[paymentDeleteDialog.id];
+                    return next;
+                  });
+
+                  setPaymentDeleteDialog(null);
+                } catch (e: any) {
+                  const msg = String(e?.message ?? "");
+
+                  // Idempotent: if already deleted, treat as success
+                  if (msg.includes("404") || msg.includes("Entry not found")) {
+                    markEntryDeletedInCache(selectedBusinessId, selectedAccountId, paymentDeleteDialog.id);
+                    setLinkedVendorByEntryId((m) => {
+                      const next = { ...m };
+                      delete next[paymentDeleteDialog.id];
+                      return next;
+                    });
+                    setPaymentDeleteDialog(null);
+                    return;
+                  }
+
+                  setErr(e?.message ?? "Unapply+Delete failed");
+                }
+              }}
+              title="Explicit: unapply all allocations then delete payment"
+            >
+              Unapply+Delete payment
+            </Button>
+          </div>
+        }
+      >
+        <div className="text-sm text-slate-700 space-y-2">
+          {paymentDeleteDialog?.isApplied ? (
+            <div>
+              This payment is <span className="font-semibold">applied to bills</span>. It cannot be deleted normally.
+              Use <span className="font-semibold">Unapply+Delete</span> (auditable).
+            </div>
+          ) : (
+            <div>
+              This is a vendor payment. To delete it, use <span className="font-semibold">Unapply+Delete</span> (auditable).
+            </div>
+          )}
+        </div>
+      </AppDialog>
+
+      <AppDialog
         open={!!deleteDialog}
         onClose={() => setDeleteDialog(null)}
         title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
@@ -3382,22 +3818,44 @@ export default function LedgerPageClient() {
                   return;
                 }
 
-                // Guard: optimistic temp rows are not yet server-backed (avoid DELETE/PUT against temp ids)
+                // Guard: optimistic temp rows are not yet server-backed (avoid DELETE against temp ids)
                 if (deleteDialog.id.startsWith("temp_")) {
                   setErr("Still syncing—try again in a moment.");
                   setDeleteDialog(null);
                   return;
                 }
 
+                // HARD delete: never route to payment dialog
                 if (deleteDialog.mode === "hard") {
                   hardDeleteMut.mutate(deleteDialog.id);
-                } else {
-                  deleteMut.mutate({
-                    entryId: deleteDialog.id,
-                    isTransfer: !!deleteDialog.isTransfer,
-                    transferId: deleteDialog.transferId ?? null,
-                  });
+                  setDeleteDialog(null);
+                  return;
                 }
+
+                // SOFT delete: if this is a vendor payment row, use payment delete dialog instead
+                const row = rowModels.find((x) => x.id === deleteDialog.id);
+                const memo = String((rowModels.find((x) => x.id === deleteDialog.id) as any)?.memo ?? "");
+                const memoSaysApplied = memo.includes(" — Applied to: ");
+
+                const catIsPurchase = String((row as any)?.category ?? "").trim().toLowerCase() === "purchase";
+                const vendorLinked = !!(row as any)?.vendorId || !!linkedVendorByEntryId[deleteDialog.id];
+
+                const isVendorPaymentRow =
+                  (row as any)?.entryKind === "VENDOR_PAYMENT" ||
+                  (vendorLinked && catIsPurchase) ||
+                  memoSaysApplied;
+
+                if (isVendorPaymentRow) {
+                  setPaymentDeleteDialog({ id: deleteDialog.id, isApplied: memoSaysApplied });
+                  setDeleteDialog(null);
+                  return;
+                }
+
+                deleteMut.mutate({
+                  entryId: deleteDialog.id,
+                  isTransfer: !!deleteDialog.isTransfer,
+                  transferId: deleteDialog.transferId ?? null,
+                });
 
                 setDeleteDialog(null);
               }}
@@ -3411,6 +3869,127 @@ export default function LedgerPageClient() {
           {deleteDialog?.mode === "hard"
             ? "This will permanently delete the entry. This action is irreversible."
             : "This will move the entry to Deleted. You can restore it later (reversible)."}
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={ledgerApplyOpen}
+        onClose={() => setLedgerApplyOpen(false)}
+        title="Apply payment"
+        size="lg"
+        footer={
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-slate-600">
+              Vendor: <span className="font-medium">{ledgerApplyVendor?.name ?? "—"}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setLedgerApplyOpen(false)}>
+                Close
+              </Button>
+
+              <Button
+                className="h-7 px-3 text-xs"
+                disabled={!ledgerApplyEntryId || ledgerBills.length === 0}
+                onClick={async () => {
+                  if (!selectedBusinessId || !selectedAccountId || !ledgerApplyEntryId) return;
+
+                  const apps: Array<{ bill_id: string; applied_amount_cents: number }> = [];
+                  for (const b of ledgerBills) {
+                    const key = String(b.id);
+                    const cents = centsFromDollarsInput(ledgerAlloc[key] || "");
+                    if (cents > 0) apps.push({ bill_id: key, applied_amount_cents: cents });
+                  }
+
+                  if (!apps.length) {
+                    setErr("Enter amounts to apply.");
+                    return;
+                  }
+
+                  try {
+                    await apiFetch(
+                      `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${ledgerApplyEntryId}/ap/apply`,
+                      { method: "POST", body: JSON.stringify({ applications: apps }) }
+                    );
+
+                    // Refresh ledger + close
+                    scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "applyPayment");
+                    setLedgerApplyOpen(false);
+                  } catch (e: any) {
+                    setErr(e?.message ?? "Apply failed");
+                  }
+                }}
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="text-[11px] text-slate-600">Payment details</div>
+            <div className="mt-1 grid grid-cols-4 gap-2 text-xs">
+              <div><span className="text-slate-600">Date:</span> <span className="font-medium">{ledgerApplyEntry?.date ?? "—"}</span></div>
+              <div><span className="text-slate-600">Payee:</span> <span className="font-medium">{ledgerApplyEntry?.payee ?? "—"}</span></div>
+              <div><span className="text-slate-600">Method:</span> <span className="font-medium">{ledgerApplyEntry?.method ?? "—"}</span></div>
+              <div className="text-right">
+                <span className="text-slate-600">Amount:</span>{" "}
+                <span className="font-semibold tabular-nums">{ledgerApplyEntry ? formatUsdFromCents(ledgerApplyEntry.amountCentsAbs) : "—"}</span>
+              </div>
+            </div>
+            {ledgerApplyEntry?.memo ? (
+              <div className="mt-2 text-xs text-slate-600 truncate" title={ledgerApplyEntry.memo}>
+                <span className="text-slate-600">Memo:</span> {ledgerApplyEntry.memo}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-lg border border-slate-200 overflow-hidden">
+            <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
+              <div className="text-xs font-semibold text-slate-900">Allocate to open bills</div>
+              <div className="text-[11px] text-slate-600">Enter amounts per bill (USD).</div>
+            </div>
+
+            <div className="max-h-[420px] overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white border-b border-slate-200">
+                  <tr className="h-9">
+                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Apply</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledgerApplyLoading ? (
+                    <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>Loading…</td></tr>
+                  ) : ledgerBills.length === 0 ? (
+                    <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>No open bills.</td></tr>
+                  ) : (
+                    ledgerBills.map((b: any) => (
+                      <tr key={b.id} className="h-9 border-b border-slate-100">
+                        <td className="px-3 text-sm tabular-nums">
+                          {String(b.invoice_date ?? "").slice(0, 10)}{" "}
+                          <span className="text-xs text-slate-500">({b.memo ?? "—"})</span>
+                        </td>
+                        <td className="px-3 text-right text-sm tabular-nums font-semibold">
+                          {formatUsdFromCents(toBigIntSafe(b.outstanding_cents))}
+                        </td>
+                        <td className="px-3 text-right">
+                          <input
+                            className="h-7 w-[120px] text-right text-xs rounded-md border border-slate-200 bg-white px-2 tabular-nums"
+                            placeholder="0.00"
+                            value={ledgerAlloc[String(b.id)] ?? ""}
+                            onChange={(e) => setLedgerAlloc((m) => ({ ...m, [String(b.id)]: e.target.value }))}
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </AppDialog>
 

@@ -153,6 +153,11 @@ api.route("GET /v1/businesses/{businessId}/uploads/{uploadId}/download", uploads
 api.route("POST /v1/businesses/{businessId}/uploads/{uploadId}/create-entry", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/uploads/create-entries", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// Accounts Payable
+api.route("POST /v1/businesses/{businessId}/uploads/create-bills", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/uploads/backfill-bills", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/uploads/{uploadId}/delete", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // Phase 4C: Manual CSV import (BANK_STATEMENT only)
 api.route("POST /v1/businesses/{businessId}/uploads/{uploadId}/import", uploadsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
@@ -470,6 +475,27 @@ api.route("GET /v1/businesses/{businessId}/vendors", vendorsHandler, { auth: { j
 api.route("POST /v1/businesses/{businessId}/vendors", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PATCH /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// ---------- Accounts Payable (Bills) ----------
+const apHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/ap.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}/bills", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/vendors/{vendorId}/bills", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("PATCH /v1/businesses/{businessId}/vendors/{vendorId}/bills/{billId}", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/vendors/{vendorId}/bills/{billId}/void", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}/ap/summary", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}/ap/payments-summary", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/vendors/{vendorId}/payments", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}/ap/statement.csv", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/ap/vendors-summary", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/ap/apply", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/ap/unapply", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/ap/unapply-and-delete", apHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Role Policies (store-only) ----------
 const rolePoliciesHandler = {

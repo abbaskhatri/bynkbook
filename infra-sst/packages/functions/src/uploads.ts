@@ -436,26 +436,100 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
       // If INVOICE: derive/link vendor deterministically (no user pick required)
       let vendorLinked: any = null;
       if (row.upload_type === "INVOICE") {
-        const parsedName = parsed?.vendor_name ? String(parsed.vendor_name).trim() : "";
-        const fallbackName = filenameStem(row.original_filename);
-        const vnRaw = parsedName || fallbackName;
-        const vn = normalizeVendorName(vnRaw);
+        // Prefer explicit vendor_id passed by the client (vendor detail upload),
+        // else fall back to parsed vendor_name/filename stem.
+        const explicitVendorId =
+          baseMeta && typeof baseMeta === "object" && !Array.isArray(baseMeta) ? (baseMeta as any).vendor_id : null;
 
-        if (vn) {
-          const existing = await prisma.vendor.findFirst({
-            where: { business_id: biz, name: { equals: vn, mode: "insensitive" } },
+        if (explicitVendorId) {
+          const v = await prisma.vendor.findFirst({
+            where: { id: String(explicitVendorId), business_id: biz },
             select: { id: true, name: true },
           });
+          if (v) vendorLinked = v;
+        }
 
-          if (existing) {
-            vendorLinked = existing;
-          } else {
-            // Create vendor (safe, deterministic)
-            const created = await prisma.vendor.create({
-              data: { business_id: biz, name: vn, notes: null },
+        if (!vendorLinked) {
+          const parsedName = parsed?.vendor_name ? String(parsed.vendor_name).trim() : "";
+          const fallbackName = filenameStem(row.original_filename);
+          const vnRaw = parsedName || fallbackName;
+          const vn = normalizeVendorName(vnRaw);
+
+          if (vn) {
+            const existing = await prisma.vendor.findFirst({
+              where: { business_id: biz, name: { equals: vn, mode: "insensitive" } },
               select: { id: true, name: true },
             });
-            vendorLinked = created;
+
+            if (existing) {
+              vendorLinked = existing;
+            } else {
+              // Create vendor (safe, deterministic)
+              const created = await prisma.vendor.create({
+                data: { business_id: biz, name: vn, notes: null },
+                select: { id: true, name: true },
+              });
+              vendorLinked = created;
+            }
+          }
+        }
+      }
+
+      // If INVOICE: create Bill (AP) and link Bill.upload_id = Upload.id (idempotent, no duplicates)
+      let billLinked: any = null;
+      if (row.upload_type === "INVOICE" && vendorLinked) {
+        const existingBillId =
+          baseMeta && typeof baseMeta === "object" && !Array.isArray(baseMeta) ? (baseMeta as any).bill_id : null;
+
+        if (existingBillId) {
+          const b = await prisma.bill.findFirst({
+            where: { id: String(existingBillId), business_id: biz, vendor_id: vendorLinked.id, upload_id: row.id },
+            select: { id: true },
+          });
+          if (b) billLinked = b;
+        }
+
+        if (!billLinked) {
+          // durable idempotency guard: Bill with upload_id already exists
+          const existingByUpload = await prisma.bill.findFirst({
+            where: { business_id: biz, upload_id: row.id },
+            select: { id: true },
+          });
+          if (existingByUpload) {
+            billLinked = existingByUpload;
+          } else {
+            const cents = parsed?.amount_cents ?? null;
+
+            // Only create a Bill when we have a deterministic positive amount.
+            // If parsing failed (no amount), user can still create a Bill manually via New Bill.
+            if (typeof cents === "number" && Number.isFinite(cents) && cents !== 0) {
+              const amountCents = Math.abs(Math.round(cents));
+              const invoiceIso = toIsoDateStr(String(parsed?.doc_date || "").trim()) || new Date().toISOString().slice(0, 10);
+              const dueIso = toIsoDateStr(String(parsed?.due_date || "").trim()) || invoiceIso;
+
+              const docNo = String(parsed?.doc_number || "").trim();
+              const memo = docNo ? `Invoice ${docNo}` : "Invoice";
+
+              const createdBill = await prisma.bill.create({
+                data: {
+                  business_id: biz,
+                  vendor_id: vendorLinked.id,
+                  invoice_date: new Date(invoiceIso + "T00:00:00Z"),
+                  due_date: new Date(dueIso + "T00:00:00Z"),
+                  amount_cents: BigInt(amountCents), // positive
+                  status: "OPEN",
+                  memo,
+                  terms: null,
+                  upload_id: row.id,
+                  created_by_user_id: sub,
+                  created_at: new Date(),
+                  updated_at: new Date(),
+                },
+                select: { id: true },
+              });
+
+              billLinked = createdBill;
+            }
           }
         }
       }
@@ -466,6 +540,7 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
         parsed_status: parseStatus,
         parsed,
         ...(vendorLinked ? { vendor_id: vendorLinked.id, vendor_name: vendorLinked.name } : {}),
+        ...(billLinked ? { bill_id: billLinked.id, bill_created_at: new Date().toISOString() } : {}),
       };
 
       const updated = await prisma.upload.update({
@@ -722,6 +797,168 @@ const entry = await prisma.entry.create({
   }
 
   // -------------------------
+  // BACKFILL BILLS (POST /uploads/backfill-bills)  [Accounts Payable]
+  // body: { vendor_id?: string, limit?: number, cursor?: { created_at: string, id: string } }
+  // Safe for scale: paging via created_at/id cursor. Idempotent: never double-creates bills.
+  // -------------------------
+  if (method === "POST" && path === `${uploadsBasePath}/backfill-bills`) {
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+
+    const vendorFilter = body?.vendor_id ? String(body.vendor_id).trim() : "";
+    const limitRaw = Number(body?.limit ?? 100);
+    const limit = Math.max(1, Math.min(200, Number.isFinite(limitRaw) ? Math.trunc(limitRaw) : 100));
+
+    const cursorCreatedAt = body?.cursor?.created_at ? String(body.cursor.created_at).trim() : "";
+    const cursorId = body?.cursor?.id ? String(body.cursor.id).trim() : "";
+
+    const where: any = {
+      business_id: biz,
+      upload_type: "INVOICE",
+      status: "COMPLETED",
+      deleted_at: null,
+    };
+
+    // Only uploads tagged to a vendor
+    where.meta = { path: ["vendor_id"], not: null };
+    if (vendorFilter) where.meta = { path: ["vendor_id"], equals: vendorFilter };
+
+    // Pagination cursor
+    if (cursorCreatedAt && cursorId) {
+      const dt = new Date(cursorCreatedAt);
+      if (!isNaN(dt.getTime())) {
+        where.OR = [
+          { created_at: { lt: dt } },
+          { created_at: dt, id: { lt: cursorId } },
+        ];
+      }
+    }
+
+    const rows = await prisma.upload.findMany({
+      where,
+      orderBy: [{ created_at: "desc" }, { id: "desc" }],
+      take: limit,
+      select: { id: true, created_at: true, original_filename: true, meta: true },
+    });
+
+    let created = 0;
+    let skipped = 0;
+    const results: any[] = [];
+
+    for (const r of rows) {
+      const metaObj = r.meta && typeof r.meta === "object" && !Array.isArray(r.meta) ? (r.meta as any) : {};
+      const vendorId = metaObj.vendor_id ? String(metaObj.vendor_id).trim() : "";
+      if (!vendorId) {
+        skipped += 1;
+        results.push({ upload_id: r.id, status: "SKIPPED", reason: "MISSING_VENDOR_ID" });
+        continue;
+      }
+
+      // idempotent: if bill already exists for upload, skip
+      const exists = await prisma.bill.findFirst({
+        where: { business_id: biz, upload_id: r.id },
+        select: { id: true },
+      });
+      if (exists) {
+        skipped += 1;
+        results.push({ upload_id: r.id, status: "SKIPPED", reason: "ALREADY_HAS_BILL", bill_id: exists.id });
+        continue;
+      }
+
+      const parsed = getParsedMeta(metaObj);
+      const cents = parsed?.amount_cents ?? null;
+      if (typeof cents !== "number" || !Number.isFinite(cents) || cents === 0) {
+        skipped += 1;
+        results.push({ upload_id: r.id, status: "SKIPPED", reason: "MISSING_AMOUNT", code: "NEEDS_REVIEW" });
+        continue;
+      }
+
+      const amountCents = Math.abs(Math.round(cents));
+      const invoiceIso = toIsoDateStr(String(parsed?.doc_date || "").trim()) || new Date().toISOString().slice(0, 10);
+      const dueIso = toIsoDateStr(String(parsed?.due_date || "").trim()) || invoiceIso;
+      const docNo = String(parsed?.doc_number || "").trim();
+      const memo = docNo ? `Invoice ${docNo}` : filenameStem(r.original_filename) ? `Invoice ${filenameStem(r.original_filename)}` : "Invoice";
+
+      try {
+        const bill = await prisma.bill.create({
+          data: {
+            business_id: biz,
+            vendor_id: vendorId,
+            invoice_date: new Date(invoiceIso + "T00:00:00Z"),
+            due_date: new Date(dueIso + "T00:00:00Z"),
+            amount_cents: BigInt(amountCents),
+            status: "OPEN",
+            memo,
+            terms: null,
+            upload_id: r.id,
+            created_by_user_id: sub,
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+          select: { id: true },
+        });
+
+        // store bill_id back onto upload meta for traceability
+        const nextMeta = { ...metaObj, bill_id: bill.id, bill_created_at: new Date().toISOString() };
+        await prisma.upload.update({ where: { id: r.id }, data: { meta: nextMeta } });
+
+        created += 1;
+        results.push({ upload_id: r.id, status: "CREATED", bill_id: bill.id });
+      } catch (e: any) {
+        // uniqueness by upload_id (if added) will also make this safe
+        skipped += 1;
+        results.push({ upload_id: r.id, status: "SKIPPED", reason: "CREATE_FAILED", error: e?.message || "Failed" });
+      }
+    }
+
+    const next_cursor =
+      rows.length === limit
+        ? { created_at: rows[rows.length - 1].created_at.toISOString(), id: rows[rows.length - 1].id }
+        : null;
+
+    return json(200, { ok: true, created, skipped, next_cursor, results });
+  }
+
+  // -------------------------
+  // SOFT DELETE UPLOAD (POST /uploads/{uploadId}/delete)
+  // Strict checks: 409 if referenced by Bill.upload_id or Entry.sourceUploadId
+  // -------------------------
+  if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/delete`) {
+    const requestedUploadId = uploadId?.toString?.().trim();
+    if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
+
+    const row = await prisma.upload.findFirst({
+      where: { id: requestedUploadId, business_id: biz },
+      select: { id: true, deleted_at: true },
+    });
+    if (!row) return json(404, { ok: false, error: "Upload not found" });
+    if (row.deleted_at) return json(200, { ok: true, deleted: true, already: true });
+
+    const billRef = await prisma.bill.findFirst({
+      where: { business_id: biz, upload_id: requestedUploadId },
+      select: { id: true },
+    });
+    if (billRef) return json(409, { ok: false, error: "UPLOAD_REFERENCED_BY_BILL" });
+
+    const entryRef = await prisma.entry.findFirst({
+      where: { business_id: biz, sourceUploadId: requestedUploadId },
+      select: { id: true },
+    });
+    if (entryRef) return json(409, { ok: false, error: "UPLOAD_REFERENCED_BY_ENTRY" });
+
+    await prisma.upload.update({
+      where: { id: requestedUploadId },
+      data: { deleted_at: new Date(), deleted_by_user_id: sub },
+    });
+
+    return json(200, { ok: true, deleted: true });
+  }
+
+  // -------------------------
   // IMPORT (POST /uploads/{uploadId}/import)  [Phase 4C]
   // Manual CSV import -> BankTransaction rows ONLY (no ledger mutations)
   // -------------------------
@@ -914,7 +1151,10 @@ const entry = await prisma.entry.create({
       if (!ok) return json(404, { ok: false, error: "Account not found in this business" });
     }
 
+    const includeDeleted = qs.include_deleted === "true";
+
     const where: any = { business_id: biz };
+    if (!includeDeleted) where.deleted_at = null;
     if (accountId) where.account_id = accountId;
 
     // Filter invoice uploads by vendor tag stored in meta.vendor_id

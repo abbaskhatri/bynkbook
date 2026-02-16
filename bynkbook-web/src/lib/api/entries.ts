@@ -146,12 +146,22 @@ export async function listEntries(params: {
   accountId: string;
   limit: number;
   includeDeleted?: boolean;
+  type?: string; // e.g. "EXPENSE" or "EXPENSE,INCOME"
+  vendorId?: string;
+  date_from?: string;
+  date_to?: string;
 }): Promise<Entry[]> {
   const { businessId, accountId, limit, includeDeleted } = params;
 
-  const url =
-    `/v1/businesses/${businessId}/accounts/${accountId}/entries?limit=${limit}` +
-    (includeDeleted ? `&include_deleted=true` : ``);
+  const qs = new URLSearchParams();
+  qs.set("limit", String(Math.max(1, Math.min(200, limit))));
+  if (includeDeleted) qs.set("include_deleted", "true");
+  if (params.type) qs.set("type", params.type);
+  if (params.vendorId) qs.set("vendorId", params.vendorId);
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+
+  const url = `/v1/businesses/${businessId}/accounts/${accountId}/entries?${qs.toString()}`;
 
   const res: any = await apiFetch(url);
 
@@ -167,6 +177,7 @@ export async function createEntry(params: {
     payee: string;
     memo?: string;
     category_id?: string | null;
+    vendor_id?: string | null;
     amount_cents: number; // signed integer cents
     type: string; // EXPENSE | INCOME | ADJUSTMENT | ...
     method: string; // CARD | ...
@@ -187,6 +198,9 @@ export async function createEntry(params: {
 
     category_id: input.category_id ?? null,
     categoryId: input.category_id ?? null,
+
+    vendor_id: input.vendor_id ?? null,
+    vendorId: input.vendor_id ?? null,
 
     amount_cents: input.amount_cents,
     amountCents: input.amount_cents,
@@ -239,6 +253,7 @@ export async function updateEntry(params: {
     method?: string;
     status?: string;
     category_id?: string | null;
+    vendor_id?: string | null;
   };
 }): Promise<Entry> {
   const { businessId, accountId, entryId, updates } = params;

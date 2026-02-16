@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -13,11 +13,31 @@ import { Building2 } from "lucide-react";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { listVendors, createVendor } from "@/lib/api/vendors";
+import { getVendorsApSummary } from "@/lib/api/ap";
 
 // Upload invoice stays as-is (pipeline already exists)
 import { UploadPanel } from "@/components/uploads/UploadPanel";
 
 type SortKey = "name_asc" | "name_desc" | "updated_desc";
+
+function toBigIntSafe(v: any): bigint {
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "number") return BigInt(Math.trunc(v));
+    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
+  } catch {}
+  return 0n;
+}
+
+function formatUsdFromCents(cents: bigint) {
+  const neg = cents < 0n;
+  const abs = neg ? -cents : cents;
+  const dollars = abs / 100n;
+  const pennies = abs % 100n;
+  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
+  return neg ? `($${core})` : `$${core}`;
+}
 
 export default function VendorsPageClient() {
   const router = useRouter();
@@ -41,6 +61,7 @@ export default function VendorsPageClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [vendors, setVendors] = useState<any[]>([]);
+  const [apByVendorId, setApByVendorId] = useState<Record<string, any>>({});
 
   const [openUpload, setOpenUpload] = useState(false);
 
@@ -50,16 +71,38 @@ export default function VendorsPageClient() {
 
   async function refresh() {
     if (!businessId) return;
+
+    let mounted = true;
+    const cancel = () => { mounted = false; };
+
+    // If this refresh was triggered while unmounting, guard state updates
     setLoading(true);
     setErr(null);
+
     try {
       const res = await listVendors({ businessId, q: q.trim() || undefined, sort });
-      setVendors(res.vendors ?? []);
+      if (!mounted) return;
+
+      const list = res.vendors ?? [];
+      setVendors(list);
+
+      const ids = list.map((v: any) => String(v.id)).slice(0, 200);
+      const sumRes = await getVendorsApSummary({ businessId, vendorIds: ids, limit: 200 });
+      if (!mounted) return;
+
+      const m: Record<string, any> = {};
+      for (const row of (sumRes.vendors ?? [])) m[String(row.vendor_id)] = row;
+      setApByVendorId(m);
     } catch (e: any) {
+      if (!mounted) return;
       setErr(e?.message ?? "Failed to load vendors");
     } finally {
+      if (!mounted) return;
       setLoading(false);
     }
+
+    // Attach cancel to window lifecycle for safety
+    window.addEventListener("beforeunload", cancel, { once: true });
   }
 
   async function onCreate() {
@@ -82,9 +125,19 @@ export default function VendorsPageClient() {
   }
 
   // auto-load
-  useState(() => {
+  useEffect(() => {
     if (businessId && vendors.length === 0 && !loading && !err) refresh();
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId]);
+
+  // refresh vendors list after invoice uploads (no manual refresh required)
+  useEffect(() => {
+    function onRefresh() {
+      refresh();
+    }
+    window.addEventListener("bynk:vendors-refresh", onRefresh as any);
+    return () => window.removeEventListener("bynk:vendors-refresh", onRefresh as any);
+  }, [businessId, q, sort]);
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
@@ -173,6 +226,7 @@ export default function VendorsPageClient() {
           colgroup={
             <>
               <col />
+              <col style={{ width: 160 }} />
               <col style={{ width: 220 }} />
               <col style={{ width: 220 }} />
             </>
@@ -180,6 +234,8 @@ export default function VendorsPageClient() {
           header={
             <tr className="h-9">
               <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Vendor</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Open AP</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Aging</th>
               <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Updated</th>
               <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Created</th>
             </tr>
@@ -197,6 +253,29 @@ export default function VendorsPageClient() {
                   }}
                 >
                   <td className="px-3 text-sm">{v.name}</td>
+
+                  <td className="px-3 text-sm tabular-nums font-semibold">
+                    {(() => {
+                      const row = apByVendorId[String(v.id)];
+                      const cents = toBigIntSafe(row?.total_open_cents ?? 0);
+                      const txt = formatUsdFromCents(cents);
+                      return <span className={cents > 0n ? "text-slate-900" : "text-slate-400"}>{txt}</span>;
+                    })()}
+                  </td>
+
+                  <td className="px-3 text-xs text-slate-600 tabular-nums">
+                    {(() => {
+                      const row = apByVendorId[String(v.id)];
+                      const a = row?.aging;
+                      if (!a) return "—";
+                      const c = toBigIntSafe(a.current ?? 0);
+                      const d30 = toBigIntSafe(a.days_30 ?? 0);
+                      const d60 = toBigIntSafe(a.days_60 ?? 0);
+                      const d90 = toBigIntSafe(a.days_90 ?? 0);
+                      return `C ${formatUsdFromCents(c)} • 30 ${formatUsdFromCents(d30)} • 60 ${formatUsdFromCents(d60)} • 90+ ${formatUsdFromCents(d90)}`;
+                    })()}
+                  </td>
+
                   <td className="px-3 text-sm text-slate-600">{String(v.updated_at ?? "").slice(0, 10)}</td>
                   <td className="px-3 text-sm text-slate-600">{String(v.created_at ?? "").slice(0, 10)}</td>
                 </tr>

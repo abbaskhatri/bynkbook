@@ -79,13 +79,28 @@ export async function handler(event: any) {
     const q = qs(event);
     const includeDeleted = q.include_deleted === "true";
     const limitRaw = q.limit ?? "200";
-    const limit = Math.max(1, Math.min(500, Number(limitRaw) || 200));
+    const limit = Math.max(1, Math.min(200, Number(limitRaw) || 200));
 
     const rows = await prisma.entry.findMany({
       where: {
         business_id: biz,
         account_id: acct,
         ...(includeDeleted ? {} : { deleted_at: null }),
+
+        // Optional filters (used by Vendors/AP payment picker; always index-friendly)
+        ...(q.type
+          ? { type: { in: String(q.type).split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) } }
+          : {}),
+        ...(q.vendorId ? { vendor_id: String(q.vendorId).trim() } : {}),
+        ...(q.date_from ? { date: { gte: new Date(String(q.date_from).trim() + "T00:00:00Z") } } : {}),
+        ...(q.date_to
+          ? {
+              date: {
+                ...(q.date_from ? { gte: new Date(String(q.date_from).trim() + "T00:00:00Z") } : {}),
+                lte: new Date(String(q.date_to).trim() + "T00:00:00Z"),
+              },
+            }
+          : {}),
       },
       orderBy: [{ date: "desc" }, { created_at: "desc" }],
       take: limit,
@@ -211,6 +226,9 @@ export async function handler(event: any) {
           method: e.method,
           status: e.status,
 
+          // Payment marker
+          entry_kind: (e as any).entry_kind ?? "GENERAL",
+
           // Categories
           category_id: e.category_id,
           category_name: e.category_id
@@ -239,6 +257,55 @@ export async function handler(event: any) {
     });
   }
 
+  // POST /entries/ap-totals (bulk AP totals for ledger badges)
+  // body: { entry_ids: string[] }  (max 200)
+  if (method === "POST" && path?.endsWith("/entries/ap-totals")) {
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+
+    const ids = Array.isArray(body?.entry_ids)
+      ? body.entry_ids.map((x: any) => String(x).trim()).filter(Boolean).slice(0, 200)
+      : [];
+
+    if (!ids.length) return json(400, { ok: false, error: "entry_ids required" });
+
+    // Fetch entries (scoped) and applied sums in 2 queries (no per-row loops)
+    const ents = await prisma.entry.findMany({
+      where: { business_id: biz, account_id: acct, id: { in: ids } },
+      select: { id: true, amount_cents: true, entry_kind: true, vendor_id: true, deleted_at: true },
+    });
+
+    const sums = await prisma.billPaymentApplication.groupBy({
+      by: ["entry_id"],
+      where: { business_id: biz, is_active: true, entry_id: { in: ids } },
+      _sum: { applied_amount_cents: true },
+    });
+
+    const appliedByEntry = new Map<string, bigint>();
+    for (const s of sums as any[]) {
+      appliedByEntry.set(String(s.entry_id), BigInt(String(s._sum?.applied_amount_cents ?? 0)));
+    }
+
+    const out: Record<string, { applied_cents: string; unapplied_cents: string; amount_abs_cents: string }> = {};
+    for (const e of ents as any[]) {
+      const amt = BigInt(String(e.amount_cents ?? 0));
+      const absAmt = amt < 0n ? -amt : amt;
+      const applied = appliedByEntry.get(String(e.id)) ?? 0n;
+      const unapplied = absAmt - applied;
+      out[String(e.id)] = {
+        amount_abs_cents: String(absAmt),
+        applied_cents: String(applied),
+        unapplied_cents: String(unapplied < 0n ? 0n : unapplied),
+      };
+    }
+
+    return json(200, { ok: true, totals: out });
+  }
+
   // POST /entries (create)
   if (method === "POST" && path?.endsWith("/entries")) {
     let body: any = {};
@@ -255,6 +322,10 @@ export async function handler(event: any) {
     // Category (optional)
     const categoryIdRaw = body?.category_id ?? body?.categoryId ?? null;
     const category_id = categoryIdRaw ? categoryIdRaw.toString().trim() : null;
+
+    // Vendor (optional)
+    const vendorIdRaw = body?.vendor_id ?? body?.vendorId ?? null;
+    const vendor_id = vendorIdRaw ? vendorIdRaw.toString().trim() : null;
 
     const type = (body?.type ?? "").toString().trim();
     const methodField = body?.method ?? null;
@@ -295,6 +366,14 @@ export async function handler(event: any) {
       if (!hit) return json(400, { ok: false, error: "Invalid category" });
     }
 
+    if (vendor_id) {
+      const hit = await prisma.vendor.findFirst({
+        where: { id: vendor_id, business_id: biz },
+        select: { id: true },
+      });
+      if (!hit) return json(400, { ok: false, error: "Invalid vendor" });
+    }
+
     const entryUuid = randomUUID();
     const created = await prisma.entry.create({
       data: {
@@ -305,6 +384,7 @@ export async function handler(event: any) {
         payee,
         memo,
         category_id,
+        vendor_id,
         amount_cents: amount,
         type,
         method: methodField,
@@ -335,6 +415,14 @@ export async function handler(event: any) {
 
   // DELETE /entries/{entryId} (soft delete)
   if (method === "DELETE" && ent) {
+    // AP invariant: block delete if this entry has ACTIVE bill applications.
+    const activeApps = await prisma.billPaymentApplication.count({
+      where: { business_id: biz, entry_id: ent, is_active: true },
+    });
+    if (activeApps > 0) {
+      return json(409, { ok: false, error: "APPLIED_PAYMENT_IMMUTABLE" });
+    }
+
     const existing = await prisma.entry.findFirst({
       where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
       select: { date: true },
