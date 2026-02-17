@@ -6,7 +6,7 @@ import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { getPnl, getCashflow } from "@/lib/api/reports";
+import { getPnlSummary, getCashflowSeries } from "@/lib/api/reports";
 import { getIssuesCount } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -193,15 +193,15 @@ useEffect(() => {
   (async () => {
     try {
       const [pnl, cashflow, issues] = await Promise.all([
-        getPnl(selectedBusinessId, { from, to, accountId: selectedAccountId }),
-        getCashflow(selectedBusinessId, { from, to, accountId: selectedAccountId }),
+        getPnlSummary(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
+        getCashflowSeries(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
         getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId }),
       ]);
 
       setKpis({
-        income: pnl.totals.income_cents,
-        expense: pnl.totals.expense_cents,
-        net: pnl.totals.net_cents,
+        income: pnl.period.income_cents,
+        expense: pnl.period.expense_cents,
+        net: pnl.period.net_cents,
         cashIn: cashflow.totals.cash_in_cents,
         cashOut: cashflow.totals.cash_out_cents,
         issues: issues.count,

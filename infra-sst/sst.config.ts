@@ -480,6 +480,14 @@ api.route("GET /v1/businesses/{businessId}/reports/cashflow", reportsHandler, { 
 api.route("GET /v1/businesses/{businessId}/reports/activity", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/reports/categories", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// Reports vNext (CPA-grade aggregates; cash-basis from INCOME+EXPENSE only)
+api.route("GET /v1/businesses/{businessId}/reports/pnl/summary", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/cashflow/series", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/accounts/summary", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/ap/aging", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/ap/aging/{vendorId}", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/reports/categories/detail", reportsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 api.route("GET /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/closed-periods/preview", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
