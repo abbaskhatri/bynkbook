@@ -30,6 +30,24 @@ export async function createMatch(args: {
   });
 }
 
+export async function createMatchBatch(args: {
+  businessId: string;
+  accountId: string;
+  items: Array<{
+    client_id: string; // stable id echoed back per-item
+    bankTransactionId: string;
+    entryId: string;
+    matchType: "FULL" | "PARTIAL";
+    matchedAmountCents: string; // signed string
+  }>;
+}) {
+  const { businessId, accountId, items } = args;
+  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/matches/batch`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+}
+
 export async function unmatchBankTransaction(args: {
   businessId: string;
   accountId: string;

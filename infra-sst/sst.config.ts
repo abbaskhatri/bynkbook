@@ -365,8 +365,22 @@ const matchesHandler = {
 // Create match
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/matches", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// Batch create matches (best-effort; per-item results)
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/matches/batch", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
 // List active matches (Phase 4D v1)
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/matches", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// ---------- Match Groups (CPA-clean; full match only) ----------
+const matchGroupsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/matchGroups.handler",
+} satisfies ApiHandler;
+
+api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/match-groups", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/batch", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/{matchGroupId}/void", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Team & Roles (Phase 6C) ----------
 const teamHandler = {

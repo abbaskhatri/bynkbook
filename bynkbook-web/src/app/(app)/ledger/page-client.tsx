@@ -1049,6 +1049,12 @@ export default function LedgerPageClient() {
     return list;
   }, [entriesSorted, openingEntry]);
 
+  useEffect(() => {
+    if (!selectedBusinessId) return;
+    // One refresh on navigation / business scope change (prevents stale category list)
+    void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+  }, [selectedBusinessId]);
+
   const categoriesQ = useQuery({
     queryKey: ["categories", selectedBusinessId],
     enabled: !!selectedBusinessId,
@@ -2974,13 +2980,73 @@ export default function LedgerPageClient() {
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
 
   // FixIssue dialog (reusable; Ledger + Issues page)
+  // NOTE: Missing category is now inline (no dialog).
   const [fixDialog, setFixDialog] = useState<
+
     | {
       id: string;
       kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
     }
     | null
   >(null);
+
+  // Quick-fix: Missing Category inline (no dialog)
+  const [quickCatEntryId, setQuickCatEntryId] = useState<string | null>(null);
+  const [quickCatValue, setQuickCatValue] = useState<string>("");
+  const [quickCatBusy, setQuickCatBusy] = useState(false);
+  const [quickCatErr, setQuickCatErr] = useState<string | null>(null);
+
+  const cancelQuickCat = () => {
+    setQuickCatEntryId(null);
+    setQuickCatValue("");
+    setQuickCatBusy(false);
+    setQuickCatErr(null);
+  };
+
+  const saveQuickCat = async () => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (!quickCatEntryId) return;
+
+    const name = normalizeCategoryName(quickCatValue || "");
+    if (!name) {
+      setQuickCatErr("Category is required.");
+      return;
+    }
+
+    setQuickCatBusy(true);
+    setQuickCatErr(null);
+
+    try {
+      // Resolve/create category id deterministically
+      let catId = categoryIdByNormName.get(normKey(name)) ?? null;
+
+      if (!catId) {
+        const res = await createCategory(selectedBusinessId, name);
+        catId = res?.row?.id ?? null;
+
+        // ensure category list updates (so suggestions are fresh)
+        void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+      }
+
+      if (!catId) throw new Error("Failed to resolve category");
+
+      // Update the entry (category_id only)
+      await (updateMut as any).mutateAsync({
+        entryId: quickCatEntryId,
+        updates: { category_id: catId },
+      });
+
+      // Refresh issues immediately (so missing icon disappears)
+      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+
+      cancelQuickCat();
+    } catch (e: any) {
+      setQuickCatErr(e?.message ?? "Fix category failed");
+    } finally {
+      setQuickCatBusy(false);
+    }
+  };
 
   // Quick-fix: Missing Category inline (no dialog)
 
@@ -3256,10 +3322,46 @@ export default function LedgerPageClient() {
                 onChange={(e) => setEditDraft({ ...editDraft, category: e.target.value })}
                 onKeyDown={onEditKeyDown}
               />
-            ) : (
+            ) : quickCatEntryId === r.id ? (
+              <div className="flex flex-col gap-1">
+                <AutoInput
+                  value={quickCatValue}
+                  onValueChange={(v) => setQuickCatValue(v)}
+                  options={categoryOptions}
+                  placeholder="Category"
+                  inputClassName={inputH7}
+                  allowCreate
+                  onCreate={(name) => setQuickCatValue(name)}
+                  onSubmit={saveQuickCat}
+                />
 
-              // IMPORTANT: do NOT wrap long text in HoverTooltip (it forces h-5 w-5).
-              // Use native title tooltip so truncation/ellipsis uses the full column width.
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-[11px]"
+                    onClick={cancelQuickCat}
+                    disabled={quickCatBusy}
+                    title="Cancel"
+                    aria-label="Cancel"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 text-[11px]"
+                    onClick={saveQuickCat}
+                    disabled={quickCatBusy || !quickCatValue.trim()}
+                    title="Save"
+                    aria-label="Save"
+                  >
+                    <Check className="h-4 w-4 mr-1" />
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : (
               <span
                 className="block max-w-full truncate"
                 title={r.categoryTooltip ? r.categoryTooltip : r.category}
@@ -3267,6 +3369,10 @@ export default function LedgerPageClient() {
                 {r.category}
               </span>
             )}
+
+            {quickCatEntryId === r.id && quickCatErr ? (
+              <div className="mt-1 text-[11px] text-red-700">{quickCatErr}</div>
+            ) : null}
           </td>
 
           {/* Amount */}
@@ -3341,7 +3447,11 @@ export default function LedgerPageClient() {
                   className="inline-flex items-center justify-center"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                    setFixDialog({ id: r.id, kind: "MISSING_CATEGORY" });
+
+                    setQuickCatEntryId(r.id);
+                    setQuickCatValue("");
+                    setQuickCatErr(null);
+                    setQuickCatBusy(false);
                   }}
                   title="Fix category"
                 >
@@ -3688,7 +3798,7 @@ export default function LedgerPageClient() {
       />
 
       <FixIssueDialog
-        open={!!fixDialog}
+        open={!!fixDialog && fixDialog?.kind !== "MISSING_CATEGORY"}
         onOpenChange={(open) => {
           if (!open) setFixDialog(null);
         }}

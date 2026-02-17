@@ -177,6 +177,13 @@ export default function VendorDetailPageClient() {
   const [vendorPayments, setVendorPayments] = useState<any[]>([]);
   const [paymentsErr, setPaymentsErr] = useState<string | null>(null);
 
+  // Vendor credit (derived from payments-summary totals.total_unapplied_cents)
+  const [vendorCreditCents, setVendorCreditCents] = useState<bigint>(0n);
+
+  // Apply credit flow (guardrail: do not preselect payment without known account context)
+  const [creditApplyCandidateEntryId, setCreditApplyCandidateEntryId] = useState<string | null>(null);
+  const [creditApplyRequested, setCreditApplyRequested] = useState(false);
+
   const [billsLoading, setBillsLoading] = useState(false);
 
   const [billDialogOpen, setBillDialogOpen] = useState(false);
@@ -262,9 +269,20 @@ export default function VendorDetailPageClient() {
       if ((payRes as any)?.ok === false) {
         setPaymentsErr(String((payRes as any)?.error ?? "Payments unavailable"));
         setVendorPayments([]);
+        setVendorCreditCents(0n);
+        setCreditApplyCandidateEntryId(null);
       } else {
         setPaymentsErr(null);
-        setVendorPayments(Array.isArray((payRes as any)?.payments) ? (payRes as any).payments : []);
+
+        const payments = Array.isArray((payRes as any)?.payments) ? (payRes as any).payments : [];
+        setVendorPayments(payments);
+
+        const totalUnapplied = toBigIntSafe((payRes as any)?.totals?.total_unapplied_cents ?? 0);
+        setVendorCreditCents(totalUnapplied);
+
+        // Candidate payment entry: first with unapplied > 0 (do not preselect until account context is known)
+        const cand = payments.find((p: any) => toBigIntSafe(p?.unapplied_cents ?? 0) > 0n);
+        setCreditApplyCandidateEntryId(cand ? String(cand.entry_id ?? "") : null);
       }
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load vendor");
@@ -421,6 +439,15 @@ export default function VendorDetailPageClient() {
         if (!cancelled) {
           setPaymentEntries(linked);
           setSuggestedEntries(suggested);
+
+          // Apply credit: only preselect if account context is known AND candidate exists in this account list
+          if (creditApplyRequested && creditApplyCandidateEntryId) {
+            const exists = linked.some((e: any) => String(e.id) === String(creditApplyCandidateEntryId));
+            if (exists) {
+              setPaymentEntryId(creditApplyCandidateEntryId);
+              setCreditApplyRequested(false);
+            }
+          }
         }
       } catch {
         if (!cancelled) {
@@ -602,7 +629,22 @@ export default function VendorDetailPageClient() {
                 Apply Payment
               </Button>
 
-              <Button className="h-7 px-3 text-xs" onClick={() => setBillDialogOpen(true)} disabled={!canWrite || !businessId}>
+              <Button
+                className="h-7 px-3 text-xs"
+                onClick={() => {
+                  // deterministic reset (guardrail)
+                  setBillEditId(null);
+                  setBillInvoiceDate(todayYmd());
+                  setBillDueDate(todayYmd());
+                  setBillAmount("");
+                  setBillMemo("");
+                  setBillTerms("");
+                  setBillVoidReason("");
+                  setErr(null);
+                  setBillDialogOpen(true);
+                }}
+                disabled={!canWrite || !businessId}
+              >
                 New Bill
               </Button>
             </div>
@@ -614,6 +656,13 @@ export default function VendorDetailPageClient() {
             <div className="text-[11px] text-slate-600">AP Balance (open)</div>
             <div className="mt-1 text-sm font-semibold tabular-nums">
               {formatUsdFromCents(toBigIntSafe(apSummary?.total_open_cents ?? 0))}
+            </div>
+
+            <div className="mt-1 text-xs text-slate-600">
+              Vendor credit (unapplied):{" "}
+              <span className={vendorCreditCents > 0n ? "font-semibold text-slate-900 tabular-nums" : "text-slate-500 tabular-nums"}>
+                {formatUsdFromCents(vendorCreditCents)}
+              </span>
             </div>
 
             <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
@@ -637,7 +686,36 @@ export default function VendorDetailPageClient() {
           </div>
 
           {apTab === "bills" ? (
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
+            <div className="space-y-2">
+              {vendorCreditCents > 0n ? (
+                <div className="rounded-lg border border-slate-200 bg-emerald-50 px-3 py-2 flex items-center justify-between">
+                  <div className="text-xs text-emerald-800">
+                    Vendor credit available: <span className="font-semibold tabular-nums">{formatUsdFromCents(vendorCreditCents)}</span>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="h-7 px-3 text-xs"
+                    onClick={() => {
+                      // Guardrail: do NOT preselect a payment unless account context is known.
+                      setCreditApplyRequested(true);
+                      setApplyOpen(true);
+
+                      // If the deep-link accountIdParam exists, we can set it.
+                      if (accountIdParam) setApplyAccountId(accountIdParam);
+                      else setApplyAccountId(null);
+
+                      setPaymentEntryId(null);
+                      setApplyAmounts({});
+                    }}
+                    title="Apply available vendor credit to open bills"
+                  >
+                    Apply credit
+                  </Button>
+                </div>
+              ) : null}
+
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
               <div className="max-h-[420px] overflow-auto">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
@@ -732,6 +810,7 @@ export default function VendorDetailPageClient() {
               </div>
 
               {err ? <div className="px-3 py-2 text-xs text-red-600 border-t border-slate-200">{err}</div> : null}
+              </div>
             </div>
           ) : (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -937,7 +1016,8 @@ export default function VendorDetailPageClient() {
                 onClick={async () => {
                   if (!businessId || !vendorId) return;
 
-                  // amount is dollars in UI -> cents integer
+                  setErr(null);
+
                   const amtNum = Number(String(billAmount).trim());
                   if (!Number.isFinite(amtNum) || amtNum <= 0) {
                     setErr("Enter a valid amount.");
@@ -947,10 +1027,9 @@ export default function VendorDetailPageClient() {
 
                   try {
                     setLoading(true);
-                    setErr(null);
 
                     if (billEditId) {
-                      await updateBill({
+                      const res: any = await updateBill({
                         businessId,
                         vendorId,
                         billId: billEditId,
@@ -960,8 +1039,13 @@ export default function VendorDetailPageClient() {
                         memo: billMemo,
                         terms: billTerms,
                       });
+
+                      const updated = res?.bill ?? null;
+                      if (updated?.id) {
+                        setBills((prev) => prev.map((b: any) => (String(b.id) === String(updated.id) ? { ...b, ...updated } : b)));
+                      }
                     } else {
-                      await createBill({
+                      const res: any = await createBill({
                         businessId,
                         vendorId,
                         invoice_date: billInvoiceDate,
@@ -970,9 +1054,16 @@ export default function VendorDetailPageClient() {
                         memo: billMemo,
                         terms: billTerms,
                       });
+
+                      const created = res?.bill ?? null;
+                      if (created?.id) {
+                        setBills((prev) => [created, ...prev]);
+                      }
                     }
 
-                    await refresh();
+                    const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
+                    setApSummary(sumRes?.summary ?? null);
+
                     setBillDialogOpen(false);
                     setBillEditId(null);
                   } catch (e: any) {

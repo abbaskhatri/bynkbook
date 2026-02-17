@@ -82,17 +82,26 @@ export async function handler(event: any) {
     if (!name) return json(400, { ok: false, error: "Missing name" });
     if (name.length > 64) return json(400, { ok: false, error: "Name too long" });
 
-    // Code-first uniqueness: strict normalization + case-insensitive de-dupe
-    const existing = await prisma.category.findFirst({
+    // Code-first uniqueness: strict normalization + case-insensitive de-dupe (INCLUDING archived)
+    const existingAny = await prisma.category.findFirst({
       where: {
         business_id: biz,
-        archived_at: null,
         name: { equals: name, mode: "insensitive" },
       },
       select: { id: true, name: true, archived_at: true, created_at: true, updated_at: true },
     });
-    if (existing) {
-      return json(200, { ok: true, row: existing, existed: true });
+
+    // If it exists, return it. If archived, unarchive it (so UI sees it without "Show archived").
+    if (existingAny) {
+      if (existingAny.archived_at) {
+        const unarchived = await prisma.category.update({
+          where: { id: existingAny.id },
+          data: { archived_at: null },
+          select: { id: true, name: true, archived_at: true, created_at: true, updated_at: true },
+        });
+        return json(200, { ok: true, row: unarchived, existed: true, unarchived: true });
+      }
+      return json(200, { ok: true, row: existingAny, existed: true });
     }
 
     try {
@@ -102,16 +111,26 @@ export async function handler(event: any) {
       });
       return json(200, { ok: true, row: created });
     } catch (e: any) {
-      // Race-safe: if it already exists (case-insensitive), return the existing row
-      const hit = await prisma.category.findFirst({
+      // Race-safe: re-check INCLUDING archived; if archived, unarchive it.
+      const hitAny = await prisma.category.findFirst({
         where: {
           business_id: biz,
-          archived_at: null,
           name: { equals: name, mode: "insensitive" },
         },
         select: { id: true, name: true, archived_at: true, created_at: true, updated_at: true },
       });
-      if (hit) return json(200, { ok: true, row: hit, existed: true });
+
+      if (hitAny) {
+        if (hitAny.archived_at) {
+          const unarchived = await prisma.category.update({
+            where: { id: hitAny.id },
+            data: { archived_at: null },
+            select: { id: true, name: true, archived_at: true, created_at: true, updated_at: true },
+          });
+          return json(200, { ok: true, row: unarchived, existed: true, unarchived: true });
+        }
+        return json(200, { ok: true, row: hitAny, existed: true });
+      }
 
       return json(400, { ok: false, error: "Category already exists or invalid", detail: String(e?.message ?? e) });
     }

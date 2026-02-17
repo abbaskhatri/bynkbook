@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
-import { createMatch } from "@/lib/api/matches";
+import { createMatchGroupsBatch } from "@/lib/api/match-groups";
 
 const DAY_WINDOW = 3;
 const SPLIT_MAX = 5;
@@ -12,7 +12,7 @@ type Suggestion = {
   id: string; // stable key
   bankTxnId: string;
   entryIds: string[]; // 1 for 1-to-1, many for split
-  kind: "ONE_TO_ONE" | "SPLIT";
+  kind: "ONE_TO_ONE" | "SPLIT" | "COMBINE";
   reasons: string[];
   bank: any;
   entries: any[];
@@ -32,6 +32,39 @@ function toBigIntSafe(v: any): bigint {
 
 function absBig(n: bigint) {
   return n < 0n ? -n : n;
+}
+
+// BigInt-safe accounting currency formatting (cents -> $#,###.##, negatives in parentheses)
+function addCommas(intStr: string) {
+  const s = intStr.replace(/^0+(?=\d)/, "");
+  const out: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const idxFromEnd = s.length - i;
+    out.push(s[i]);
+    if (idxFromEnd > 1 && idxFromEnd % 3 === 1) out.push(",");
+  }
+  return out.join("");
+}
+
+function formatUsdAccountingFromCents(centsLike: any): { text: string; isNeg: boolean } {
+  let n: bigint;
+  try {
+    n = toBigIntSafe(centsLike);
+  } catch {
+    return { text: "—", isNeg: false };
+  }
+
+  const isNeg = n < 0n;
+  const abs = isNeg ? -n : n;
+
+  const dollars = abs / 100n;
+  const cents = abs % 100n;
+
+  const dollarsStr = addCommas(dollars.toString());
+  const cents2 = cents.toString().padStart(2, "0");
+
+  const base = `$${dollarsStr}.${cents2}`;
+  return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
 function parseYmd(ymd: string): { y: number; m: number; d: number } | null {
@@ -221,6 +254,66 @@ export function AutoReconcileDialog(props: {
       });
     }
 
+    function tryCombine(e: any) {
+      // COMBINE: multiple bank txns sum to one entry (≤5 txns), all within ±3d
+      const entryAbs = absBig(toBigIntSafe(e.amount_cents));
+      if (entryAbs <= 0n) return;
+
+      const entryDate = String(e.date ?? "").slice(0, 10);
+
+      const candidates = banks
+        .filter((t: any) => !bankAlreadySuggested.has(t.id)) // don't use banks already used by 1-to-1/split suggestions
+        .filter((t: any) => withinWindow(entryDate, String(t.posted_date ?? "").slice(0, 10), DAY_WINDOW))
+        .map((t: any) => ({ t, abs: absBig(toBigIntSafe(t.amount_cents)) }))
+        .filter((x: any) => x.abs > 0n)
+        .sort((a: any, b: any) => {
+          if (a.abs !== b.abs) return a.abs > b.abs ? -1 : 1;
+          return String(a.t.id).localeCompare(String(b.t.id));
+        });
+
+      if (candidates.length < 2) return;
+
+      const picked: any[] = [];
+      let found: any[] | null = null;
+
+      function dfs(i: number, sum: bigint) {
+        if (found) return;
+        if (picked.length > 5) return;
+        if (sum === entryAbs && picked.length >= 2) {
+          found = [...picked];
+          return;
+        }
+        if (sum > entryAbs) return;
+        if (i >= candidates.length) return;
+
+        picked.push(candidates[i].t);
+        dfs(i + 1, sum + candidates[i].abs);
+        picked.pop();
+
+        dfs(i + 1, sum);
+      }
+
+      dfs(0, 0n);
+      if (!found) return;
+
+      const foundBanks = found as any[];
+
+      // mark these bank txns as used so we don't suggest them again in other combine suggestions
+      for (const t of foundBanks) bankAlreadySuggested.add(String(t.id));
+
+      out.push({
+        id: `c:${e.id}:${foundBanks.map((t) => t.id).join(",")}`,
+        bankTxnId: String(foundBanks[0].id), // anchor (display only)
+        entryIds: [String(e.id)],
+        kind: "COMBINE",
+        reasons: [`Bank txns sum exactly to entry amount`, `All bank txns within ±${DAY_WINDOW}d`, `≤5 bank txns`],
+        bank: foundBanks[0], // display anchor
+        entries: [e],
+        // We'll also attach banks list via a hidden field for apply below (we keep it in the object)
+      } as any);
+      (out[out.length - 1] as any).bankTxnIds = foundBanks.map((t) => String(t.id));
+    }
+
     const banks = bankTxns
       .slice(0, 600)
       .sort((a, b) => {
@@ -238,6 +331,22 @@ export function AutoReconcileDialog(props: {
       trySplit(t);
     }
 
+    // COMBINE pass (banks → 1 entry), deterministic and capped
+    const eligibleEntries = entries
+      .filter((e: any) => !usedEntryIds.has(e.id))
+      .slice()
+      .sort((a: any, b: any) => {
+        const da = String(a.date ?? "");
+        const db = String(b.date ?? "");
+        if (da !== db) return da.localeCompare(db);
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+    for (const e of eligibleEntries) {
+      // @ts-ignore - helper defined above
+      tryCombine(e);
+    }
+
     return out;
   }, [open, bankTxns, expectedEntries]);
 
@@ -245,7 +354,8 @@ export function AutoReconcileDialog(props: {
     const total = suggestions.length;
     const one = suggestions.filter((s) => s.kind === "ONE_TO_ONE").length;
     const split = suggestions.filter((s) => s.kind === "SPLIT").length;
-    return { total, one, split };
+    const combine = suggestions.filter((s) => s.kind === "COMBINE").length;
+    return { total, one, split, combine };
   }, [suggestions]);
 
   // ---------- Selection + confirmation ----------
@@ -307,26 +417,48 @@ export function AutoReconcileDialog(props: {
 
       for (const s of selectedSuggestions) {
         setRowStatus((prev) => ({ ...prev, [s.id]: "PENDING" }));
+      }
 
-        try {
-          // For each entry in suggestion, create FULL match for that amount.
-          for (const e of s.entries) {
-            await createMatch({
-              businessId,
-              accountId,
-              bankTransactionId: s.bankTxnId,
-              entryId: String(e.id),
-              matchType: "FULL",
-              matchedAmountCents: String(e.amount_cents),
-            });
-          }
+      // Build ONE batch payload (1 item per suggestion = one MatchGroup)
+      const items = selectedSuggestions.map((s) => {
+        // SPLIT/ONE_TO_ONE: 1 bank txn id, many entry ids
+        if (s.kind !== "COMBINE") {
+          return {
+            client_id: s.id,
+            bankTransactionIds: [String(s.bankTxnId)],
+            entryIds: (s.entries ?? []).map((e: any) => String(e.id)),
+          };
+        }
 
+        // COMBINE: many bank txn ids (stored on suggestion), 1 entry id
+        const bankTxnIds = Array.isArray((s as any).bankTxnIds) ? (s as any).bankTxnIds : [String(s.bankTxnId)];
+        return {
+          client_id: s.id,
+          bankTransactionIds: bankTxnIds.map((x: any) => String(x)),
+          entryIds: (s.entries ?? []).map((e: any) => String(e.id)),
+        };
+      });
+
+      const res: any = await createMatchGroupsBatch({ businessId, accountId, items });
+      const results = Array.isArray(res?.results) ? res.results : [];
+
+      // Per-suggestion status keyed by client_id (stable)
+      const bySuggestion = new Map<string, { ok: boolean; err: string | null }>();
+      for (const r of results) {
+        const cid = String(r?.client_id ?? "");
+        if (!cid) continue;
+        bySuggestion.set(cid, { ok: !!r?.ok, err: r?.ok ? null : String(r?.error ?? "Apply failed") });
+      }
+
+      for (const s of selectedSuggestions) {
+        const r = bySuggestion.get(s.id) ?? { ok: false, err: "Apply failed" };
+        if (r.ok) {
           okN += 1;
           setRowStatus((prev) => ({ ...prev, [s.id]: "APPLIED" }));
-        } catch (e: any) {
+        } else {
           failN += 1;
           setRowStatus((prev) => ({ ...prev, [s.id]: "FAILED" }));
-          setRowError((prev) => ({ ...prev, [s.id]: e?.message ?? "Apply failed" }));
+          setRowError((prev) => ({ ...prev, [s.id]: r.err ?? "Apply failed" }));
         }
       }
 
@@ -392,6 +524,9 @@ export function AutoReconcileDialog(props: {
           <span>
             Split: <span className="font-medium text-slate-900">{counts.split}</span>
           </span>
+          <span>
+            Combine: <span className="font-medium text-slate-900">{(counts as any).combine ?? 0}</span>
+          </span>
           <span className="ml-auto text-[11px] text-slate-500">
             Deterministic suggestions (no AI). Review before applying.
           </span>
@@ -408,7 +543,7 @@ export function AutoReconcileDialog(props: {
                 const checked = selected.has(s.id);
                 const bankDate = String(s.bank.posted_date ?? "").slice(0, 10);
                 const bankName = String(s.bank.name ?? "");
-                const bankAmt = String(s.bank.amount_cents ?? "");
+                const bankAmtFmt = formatUsdAccountingFromCents(s.bank.amount_cents);
 
                 const st = rowStatus[s.id] ?? null;
                 const stBadge =
@@ -441,19 +576,41 @@ export function AutoReconcileDialog(props: {
                       <div className="flex items-center gap-2">
                         <div className="text-sm font-medium text-slate-900 truncate">{bankName || "Bank transaction"}</div>
                         <div className="text-xs text-slate-500 tabular-nums">{bankDate}</div>
-                        <div className="ml-auto text-xs text-slate-700 tabular-nums">{bankAmt}</div>
+                        <div
+                          className={`ml-auto text-xs tabular-nums font-semibold ${
+                            bankAmtFmt.isNeg ? "text-red-600" : "text-slate-900"
+                          }`}
+                        >
+                          {bankAmtFmt.text}
+                        </div>
                       </div>
 
                       <div className="mt-1 text-xs text-slate-600">
                         Suggested:{" "}
                         <span className="font-medium text-slate-900">
-                          {s.kind === "ONE_TO_ONE" ? "1 entry" : `${s.entryIds.length} entries`}
+                          {s.kind === "COMBINE"
+                            ? `${(s as any).bankTxnIds?.length ?? 1} bank txns`
+                            : s.kind === "ONE_TO_ONE"
+                              ? "1 entry"
+                              : `${s.entryIds.length} entries`}
                         </span>
                         {" · "}
                         <span className="text-slate-700">
-                          {s.entries
-                            .map((e: any) => `${String(e.payee ?? "Entry")} (${String(e.amount_cents ?? "")})`)
-                            .join(", ")}
+                          {s.kind === "COMBINE"
+                            ? ((s as any).bankTxnIds ?? [s.bankTxnId])
+                                .map((id: any) => {
+                                  const bt = (bankTxns ?? []).find((x: any) => String(x.id) === String(id));
+                                  const name = String(bt?.name ?? "Bank txn");
+                                  const f = formatUsdAccountingFromCents(bt?.amount_cents);
+                                  return `${name} (${f.text})`;
+                                })
+                                .join(", ")
+                            : s.entries
+                                .map((e: any) => {
+                                  const f = formatUsdAccountingFromCents(e.amount_cents);
+                                  return `${String(e.payee ?? "Entry")} (${f.text})`;
+                                })
+                                .join(", ")}
                         </span>
                       </div>
 

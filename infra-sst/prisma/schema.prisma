@@ -34,6 +34,9 @@ model Business {
   bankConnections         BankConnection[]
   bankTransactions        BankTransaction[]
   bankMatches             BankMatch[]
+  matchGroups             MatchGroup[]
+  matchGroupBanks         MatchGroupBank[]
+  matchGroupEntries       MatchGroupEntry[]
   reconcileSnapshots      ReconcileSnapshot[]
   invites                 BusinessInvite[]
   categories              Category[]
@@ -95,6 +98,9 @@ model Account {
   bankConnections    BankConnection[]
   bankTransactions   BankTransaction[]
   bankMatches        BankMatch[]
+  matchGroups        MatchGroup[]
+  matchGroupBanks    MatchGroupBank[]
+  matchGroupEntries  MatchGroupEntry[]
   reconcileSnapshots ReconcileSnapshot[]
 
   // Accounts Payable: applications scoped to this account via Entry.account_id
@@ -151,7 +157,8 @@ model Entry {
   account    Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   business   Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  bankMatches BankMatch[]
+  bankMatches      BankMatch[]
+  matchGroupEntries MatchGroupEntry[]
 
   @@unique([business_id, sourceUploadId], map: "u_entry_scope_source_upload")
   @@index([business_id, account_id, date, created_at], map: "idx_entry_business_account_date_created")
@@ -364,6 +371,82 @@ model BankMatch {
   @@index([business_id, account_id, entry_id], map: "i_bank_match_entry")
   @@index([business_id, account_id, voided_at], map: "i_bank_match_voided")
   @@map("bank_match")
+}
+
+// ------------------------------
+// Match Groups (CPA-clean; full match only; positive cents)
+// ------------------------------
+model MatchGroup {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+
+  // INFLOW | OUTFLOW
+  direction String
+
+  // ACTIVE | VOIDED
+  status String @default("ACTIVE")
+
+  created_by_user_id String
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+
+  voided_at         DateTime? @db.Timestamptz(6)
+  voided_by_user_id String?
+  void_reason       String?
+
+  // Relations
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  banks   MatchGroupBank[]
+  entries MatchGroupEntry[]
+
+  @@index([business_id, account_id, status, created_at], map: "i_match_group_scope_status_created")
+  @@index([business_id, account_id, direction, status], map: "i_match_group_scope_dir_status")
+  @@map("match_group")
+}
+
+model MatchGroupBank {
+  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  match_group_id String @db.Uuid
+
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+
+  bank_transaction_id  String @db.Uuid
+
+  // Positive cents only (FULL match == abs(bank_txn.amount_cents))
+  matched_amount_cents BigInt
+
+  matchGroup MatchGroup @relation(fields: [match_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  business   Business   @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account    Account    @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([business_id, account_id, bank_transaction_id], map: "i_mg_bank_by_txn")
+  @@index([match_group_id], map: "i_mg_bank_by_group")
+  @@map("match_group_bank")
+}
+
+model MatchGroupEntry {
+  id             String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  match_group_id String @db.Uuid
+
+  business_id String @db.Uuid
+  account_id  String @db.Uuid
+
+  entry_id String @db.Uuid
+
+  // Positive cents only (FULL match == abs(entry.amount_cents))
+  matched_amount_cents BigInt
+
+  matchGroup MatchGroup @relation(fields: [match_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  business   Business   @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account    Account    @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entry      Entry      @relation(fields: [entry_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([business_id, account_id, entry_id], map: "i_mg_entry_by_entry")
+  @@index([match_group_id], map: "i_mg_entry_by_group")
+  @@map("match_group_entry")
 }
 
 model Transfer {

@@ -24,7 +24,10 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction } from "@/lib/api/bankTransactions";
-import { listMatches, createMatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
+import { listMatches, createMatch, createMatchBatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
+import { voidMatchGroup } from "@/lib/api/match-groups";
+import { createMatchGroupsBatch } from "@/lib/api/match-groups";
+import { listMatchGroups } from "@/lib/api/match-groups";
 import { getRolePolicies, type RolePolicyRow } from "@/lib/api/rolePolicies";
 import { canWriteByRolePolicy } from "@/lib/auth/permissionHints";
 import { HintWrap } from "@/components/primitives/HintWrap";
@@ -85,7 +88,7 @@ function toBigIntSafe(v: unknown): bigint {
     if (typeof v === "bigint") return v;
     if (typeof v === "number") return BigInt(Math.trunc(v));
     if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch {}
+  } catch { }
   return 0n;
 }
 
@@ -274,6 +277,9 @@ export default function ReconcilePageClient() {
   }, [authReady, selectedBusinessId]);
 
   const policyReconcileWrite = useMemo(() => {
+    // OWNER must never be blocked by frontend policy hints.
+    if (selectedBusinessRole === "OWNER") return null;
+
     // Key: "reconcile"
     return canWriteByRolePolicy(rolePolicyRows, selectedBusinessRole, "reconcile");
   }, [rolePolicyRows, selectedBusinessRole]);
@@ -354,6 +360,8 @@ export default function ReconcilePageClient() {
 
   const [matchesLoading, setMatchesLoading] = useState(false);
   const [matches, setMatches] = useState<any[]>([]);
+  const [matchGroups, setMatchGroups] = useState<any[]>([]);
+  const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
 
   // Plaid status + sync UI
   const [plaidLoading, setPlaidLoading] = useState(false);
@@ -378,7 +386,7 @@ export default function ReconcilePageClient() {
   // Phase 5C: Issues (read-only)
   const [openIssuesHub, setOpenIssuesHub] = useState(false);
   const [openIssuesList, setOpenIssuesList] = useState(false);
-  const [issuesKind, setIssuesKind] = useState<"partial" | "notInView" | "voidHeavy" | "entryConflict">("partial");
+  const [issuesKind, setIssuesKind] = useState<"notInView" | "voidHeavy">("notInView");
   const [issuesSearch, setIssuesSearch] = useState("");
 
   // Phase 5C-2: small info dialog (read-only)
@@ -462,7 +470,7 @@ export default function ReconcilePageClient() {
   // Phase 4D: Entry → Bank match dialog (Expected row Match button)
   const [openEntryMatch, setOpenEntryMatch] = useState(false);
   const [entryMatchEntryId, setEntryMatchEntryId] = useState<string | null>(null);
-  const [entryMatchSelectedBankTxnId, setEntryMatchSelectedBankTxnId] = useState<string | null>(null);
+  const [entryMatchSelectedBankTxnIds, setEntryMatchSelectedBankTxnIds] = useState<Set<string>>(() => new Set());
   const [entryMatchSearch, setEntryMatchSearch] = useState("");
   const [entryMatchBusy, setEntryMatchBusy] = useState(false);
   const [entryMatchError, setEntryMatchError] = useState<string | null>(null);
@@ -494,8 +502,20 @@ export default function ReconcilePageClient() {
     };
   }, [authReady, selectedBusinessId, selectedAccountId]);
 
+  function newestPostedDate(items: any[]): string {
+    let max = "";
+    for (const t of items ?? []) {
+      const d = String(t?.posted_date ?? "");
+      if (d && d > max) max = d;
+    }
+    return max;
+  }
+
   async function refreshBankAndMatches(opts?: { preserveOnEmpty?: boolean }) {
-    if (!selectedBusinessId || !selectedAccountId) return;
+    if (!selectedBusinessId || !selectedAccountId) return { bank: [] as any[], matches: [] as any[] };
+
+    let bankItems: any[] = [];
+    let matchItems: any[] = [];
 
     setBankTxLoading(true);
     try {
@@ -508,6 +528,8 @@ export default function ReconcilePageClient() {
       });
 
       const next = res?.items ?? [];
+      bankItems = next;
+
       setBankTx((prev) => {
         if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
         return next;
@@ -521,19 +543,37 @@ export default function ReconcilePageClient() {
     setMatchesLoading(true);
     try {
       const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-      setMatches(m?.items ?? []);
+      matchItems = m?.items ?? [];
+      setMatches(matchItems);
     } catch {
       setMatches([]);
     } finally {
       setMatchesLoading(false);
     }
+
+    // Load active match groups (new model; additive only during migration)
+    setMatchGroupsLoading(true);
+    try {
+      const mg: any = await listMatchGroups({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        status: "all", // needed for History (includes voided groups)
+      });
+      setMatchGroups(mg?.items ?? []);
+    } catch {
+      setMatchGroups([]);
+    } finally {
+      setMatchGroupsLoading(false);
+    }
+
+    return { bank: bankItems, matches: matchItems };
   }
 
   // One debounced refresh after any mutation (no storms)
   const [refreshBusy, setRefreshBusy] = useState(false);
   const refreshTimerRef = useRef<any>(null);
 
-  // Post-connect confirmation refresh (single shot; avoids "empty until hard refresh")
+  // Post-sync/connect bounded confirmation refresh (event-driven only; no polling storms)
   const postConnectRefreshTimerRef = useRef<any>(null);
 
   useEffect(() => {
@@ -541,6 +581,44 @@ export default function ReconcilePageClient() {
       if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
     };
   }, []);
+
+  async function runBoundedPostSyncRefresh(opts?: { preserveOnEmpty?: boolean }) {
+    // Guardrail: only called from user-initiated Sync or connect completion handlers
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
+
+    const baselineCount = bankTxLenRef.current;
+    const baselineNewest = newestPostedDate(bankTx);
+
+    const schedule = [0, 1500, 3000, 6000]; // bounded backoff (max 4 pulls)
+    let stopped = false;
+
+    const tick = async (i: number) => {
+      if (stopped) return;
+
+      const { bank } = await refreshBankAndMatches({ preserveOnEmpty: true, ...(opts ?? {}) } as any);
+      await entriesQ.refetch?.();
+
+      const nextCount = Array.isArray(bank) ? bank.length : 0;
+      const nextNewest = newestPostedDate(Array.isArray(bank) ? bank : []);
+
+      // Stop early once bank list changes (count OR newest posted_date)
+      if (nextCount !== baselineCount || (nextNewest && nextNewest !== baselineNewest)) {
+        stopped = true;
+        return;
+      }
+
+      if (i + 1 >= schedule.length) return;
+
+      postConnectRefreshTimerRef.current = setTimeout(() => {
+        void tick(i + 1);
+      }, schedule[i + 1]);
+    };
+
+    // immediate tick (0ms), then backoff sequence
+    void tick(0);
+  }
 
   function refreshAllDebounced() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -627,10 +705,21 @@ export default function ReconcilePageClient() {
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
 
-    refreshBankAndMatches();
+    // One targeted refresh on mount / scope change (prevents “needs manual refresh” after navigation)
+    void qc.invalidateQueries({
+      predicate: (q) =>
+        Array.isArray(q.queryKey) &&
+        q.queryKey[0] === "entries" &&
+        q.queryKey[1] === selectedBusinessId &&
+        q.queryKey[2] === selectedAccountId,
+    });
+
+    void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+
+    refreshBankAndMatches({ preserveOnEmpty: true });
   }, [authReady, selectedBusinessId, selectedAccountId, from, to]);
 
-    // Phase 6B: Load snapshot list when dialog opens
+  // Phase 6B: Load snapshot list when dialog opens
   useEffect(() => {
     if (!openSnapshots) return;
     if (!authReady) return;
@@ -730,6 +819,31 @@ export default function ReconcilePageClient() {
     return m;
   }, [bankTxSorted]);
 
+  // MatchGroups lookup maps (read-only for now; used in next step to flip matched state)
+  const activeGroupByBankTxnId = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const g of matchGroups ?? []) {
+      if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
+      for (const b of g?.banks ?? []) {
+        const id = String(b?.bank_transaction_id ?? "");
+        if (id) map.set(id, g);
+      }
+    }
+    return map;
+  }, [matchGroups]);
+
+  const activeGroupByEntryId = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const g of matchGroups ?? []) {
+      if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
+      for (const e of g?.entries ?? []) {
+        const id = String(e?.entry_id ?? "");
+        if (id) map.set(id, g);
+      }
+    }
+    return map;
+  }, [matchGroups]);
+
   // Treat voided matches as inactive (UI-only safety; listMatches may already exclude them)
   const isActiveMatch = (x: any) => {
     if (!x) return false;
@@ -740,22 +854,28 @@ export default function ReconcilePageClient() {
     return true;
   };
 
-  // Phase 5C: thresholds (tunable)
-  const VOID_HEAVY_THRESHOLD = 3;
+  // Legacy helper (v1 BankMatch). Keep for CSV export + "Not in view" diagnostics only.
+  function stableLegacyMatchId(x: any) {
+    if (x?.id) return String(x.id);
+    const bt = x?.bank_transaction_id ? String(x.bank_transaction_id) : "bt?";
+    const en = x?.entry_id ? String(x.entry_id) : "e?";
+    const ca = x?.created_at ? String(x.created_at) : "ca?";
+    return `${bt}:${en}:${ca}`;
+  }
 
-  // Phase 5B-2: derived revert history marker (voided matches)
-  const hasVoidByBankTxnId = useMemo(() => {
-    const s = new Set<string>();
-    for (const x of matches ?? []) {
-      if (!x) continue;
-      const id = x?.bank_transaction_id;
-      if (!id) continue;
-      if (x.voided_at || x.voidedAt || x.is_voided || x.isVoided) s.add(String(id));
-    }
-    return s;
-  }, [matches]);
+  // Legacy v1 active matches (export-only; Reconcile UI uses MatchGroups)
+  const activeMatches = useMemo(() => {
+    return (matches ?? []).filter((x: any) => isActiveMatch(x));
+  }, [matches, isActiveMatch]);
 
-  // v1 constraint: one entry -> at most one active match
+  // (removed legacy matches-based revert marker; MatchGroups-based version is below)
+
+  // MatchGroups (FULL match only): entry is matched iff it appears in an ACTIVE group
+  const matchedEntryIdSet = useMemo(() => {
+    return new Set<string>(Array.from(activeGroupByEntryId.keys()));
+  }, [activeGroupByEntryId]);
+
+  // Legacy v1 map retained only for history/audit fallback UI paths (do not use for matched state)
   const matchByEntryId = useMemo(() => {
     const m = new Map<string, any>();
     for (const x of matches ?? []) {
@@ -764,36 +884,32 @@ export default function ReconcilePageClient() {
       m.set(x.entry_id, x);
     }
     return m;
-  }, [matches]);
+  }, [matches, isActiveMatch]);
 
-  const matchedEntryIdSet = useMemo(() => {
-    return new Set<string>(Array.from(matchByEntryId.keys()));
-  }, [matchByEntryId]);
-
-  // bank txn can have many matches => sum abs(matched_amount_cents) for active matches
+  // MatchGroups (FULL match only): matchedAbs is either 0 or full abs(bank.amount_cents); remainingAbs is either full or 0.
   const matchedAbsByBankTxnId = useMemo(() => {
     const m = new Map<string, bigint>();
-    for (const x of matches ?? []) {
-      if (!isActiveMatch(x)) continue;
-      const id = x?.bank_transaction_id;
+    for (const t of bankTxSorted ?? []) {
+      const id = String(t.id);
       if (!id) continue;
-      const amt = toBigIntSafe(x.matched_amount_cents);
-      const prev = m.get(id) ?? 0n;
-      m.set(id, prev + absBig(amt));
+      if (!activeGroupByBankTxnId.has(id)) continue;
+      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
+      if (bankAbs > 0n) m.set(id, bankAbs);
     }
     return m;
-  }, [matches]);
+  }, [bankTxSorted, activeGroupByBankTxnId]);
 
   const remainingAbsByBankTxnId = useMemo(() => {
     const m = new Map<string, bigint>();
     for (const t of bankTxSorted ?? []) {
+      const id = String(t.id);
+      if (!id) continue;
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const matchedAbs = matchedAbsByBankTxnId.get(t.id) ?? 0n;
-      const remaining = bankAbs - matchedAbs;
-      m.set(t.id, remaining > 0n ? remaining : 0n);
+      const isMatched = activeGroupByBankTxnId.has(id);
+      m.set(id, isMatched ? 0n : bankAbs);
     }
     return m;
-  }, [bankTxSorted, matchedAbsByBankTxnId]);
+  }, [bankTxSorted, activeGroupByBankTxnId]);
 
   // -------------------------
   // -------------------------
@@ -812,149 +928,115 @@ export default function ReconcilePageClient() {
     return m;
   }, [allEntriesSorted]);
 
-  const activeMatches = useMemo(() => (matches ?? []).filter((x: any) => isActiveMatch(x)), [matches]);
-  const voidMatches = useMemo(
-    () => (matches ?? []).filter((x: any) => !!(x?.voided_at || x?.voidedAt || x?.is_voided || x?.isVoided)),
-    [matches]
-  );
+  // -------------------------
+  // Issues (MatchGroups-only; full-match only)
+  // -------------------------
+  const activeGroups = useMemo(() => {
+    return (matchGroups ?? []).filter((g: any) => String(g?.status ?? "").toUpperCase() === "ACTIVE");
+  }, [matchGroups]);
+
+  const voidedGroups = useMemo(() => {
+    return (matchGroups ?? []).filter((g: any) => !!g?.voided_at);
+  }, [matchGroups]);
+
+  // Issues threshold (tunable)
+  const VOID_HEAVY_THRESHOLD = 3;
 
   const voidCountByBankTxnId = useMemo(() => {
+    // count voided groups per bank txn id (each voided group counts once for each bank txn in it)
     const m = new Map<string, number>();
-    for (const x of voidMatches) {
-      const bt = x?.bank_transaction_id ? String(x.bank_transaction_id) : "";
-      if (!bt) continue;
-      m.set(bt, (m.get(bt) ?? 0) + 1);
+    for (const g of voidedGroups) {
+      for (const b of (g?.banks ?? [])) {
+        const bt = String(b?.bank_transaction_id ?? "");
+        if (!bt) continue;
+        m.set(bt, (m.get(bt) ?? 0) + 1);
+      }
     }
     return m;
-  }, [voidMatches]);
+  }, [voidedGroups]);
 
-  const activeMatchCountByEntryId = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const x of activeMatches) {
-      const eid = x?.entry_id ? String(x.entry_id) : "";
-      if (!eid) continue;
-      m.set(eid, (m.get(eid) ?? 0) + 1);
+  // Has any revert for this bank txn (used for the RotateCcw icon)
+  const hasVoidByBankTxnId = useMemo(() => {
+    const s = new Set<string>();
+    for (const [bt, n] of voidCountByBankTxnId.entries()) {
+      if (n > 0) s.add(bt);
     }
-    return m;
-  }, [activeMatches]);
-
-  // For conflicts: pick one associated bankTxnId (stable enough for "jump to history")
-  const firstBankTxnByEntryId = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const x of activeMatches) {
-      const eid = x?.entry_id ? String(x.entry_id) : "";
-      const bt = x?.bank_transaction_id ? String(x.bank_transaction_id) : "";
-      if (!eid || !bt) continue;
-      if (!m.has(eid)) m.set(eid, bt);
-    }
-    return m;
-  }, [activeMatches]);
+    return s;
+  }, [voidCountByBankTxnId]);
 
   type IssueRow = {
-    kind: "partial" | "notInView" | "voidHeavy" | "entryConflict";
+    kind: "notInView" | "voidHeavy";
     bankTxnId?: string | null;
     entryId?: string | null;
-    matchId?: string | null;
+    groupId?: string | null;
     title: string;
     detail: string;
   };
 
-  const issuesPartial = useMemo((): IssueRow[] => {
-    const out: IssueRow[] = [];
-    for (const t of bankTxSorted ?? []) {
-      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const matchedAbs = matchedAbsByBankTxnId.get(t.id) ?? 0n;
-      const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
-      if (matchedAbs > 0n && remainingAbs > 0n) {
-        out.push({
-          kind: "partial",
-          bankTxnId: String(t.id),
-          title: `${isoToYmd(String(t.posted_date ?? ""))} • ${String(t.name ?? "").trim() || "—"}`,
-          detail: `Matched ${formatUsdFromCents(matchedAbs)} • Remaining ${formatUsdFromCents(remainingAbs)}`,
-        });
-      }
-    }
-    return out;
-  }, [bankTxSorted, matchedAbsByBankTxnId, remainingAbsByBankTxnId]);
-
   const issuesNotInView = useMemo((): IssueRow[] => {
+    // NotInView: ACTIVE groups referencing bank/entry ids not present in current loaded lists
     const out: IssueRow[] = [];
-    for (const x of activeMatches) {
-      const bt = x?.bank_transaction_id ? String(x.bank_transaction_id) : null;
-      const eid = x?.entry_id ? String(x.entry_id) : null;
 
-      const bankInView = bt ? bankTxnByIdForIssues.has(bt) : false;
-      const entryInView = eid ? entryByIdForIssues.has(eid) : false;
+    for (const g of activeGroups) {
+      const gid = String(g?.id ?? "");
+      const bankTxnIds = (g?.banks ?? []).map((b: any) => String(b?.bank_transaction_id ?? "")).filter(Boolean);
+      const entryIds = (g?.entries ?? []).map((e: any) => String(e?.entry_id ?? "")).filter(Boolean);
 
-      if (!bankInView || !entryInView) {
+      const missingBank = bankTxnIds.find((id: string) => !bankTxnByIdForIssues.has(id)) ?? null;
+      const missingEntry = entryIds.find((id: string) => !entryByIdForIssues.has(id)) ?? null;
+
+      if (missingBank || missingEntry) {
         out.push({
           kind: "notInView",
-          bankTxnId: bt,
-          entryId: eid,
-          matchId: stableMatchId(x),
-          title: `Match ${shortId(stableMatchId(x))}`,
+          bankTxnId: missingBank ?? (bankTxnIds[0] ?? null),
+          entryId: missingEntry ?? (entryIds[0] ?? null),
+          groupId: gid,
+          title: `Group ${shortId(gid)}`,
           detail:
-            `${bt ? (bankInView ? "Bank: in view" : `Bank: ${shortId(bt)} (not in current view)`) : "Bank: —"} • ` +
-            `${eid ? (entryInView ? "Entry: in view" : `Entry: ${shortId(eid)} (not in current view)`) : "Entry: —"}`,
+            `${missingBank ? `Bank: ${shortId(missingBank)} (not in current view)` : "Bank: in view"} • ` +
+            `${missingEntry ? `Entry: ${shortId(missingEntry)} (not in current view)` : "Entry: in view"}`,
         });
       }
     }
+
     return out;
-    }, [activeMatches, bankTxnByIdForIssues, entryByIdForIssues]);
+  }, [activeGroups, bankTxnByIdForIssues, entryByIdForIssues]);
 
   const issuesVoidHeavy = useMemo((): IssueRow[] => {
     const out: IssueRow[] = [];
     for (const [bt, n] of voidCountByBankTxnId.entries()) {
       if (n < VOID_HEAVY_THRESHOLD) continue;
+
       const bank = bankTxnByIdForIssues.get(bt) ?? null;
       const title = bank
         ? `${isoToYmd(String(bank.posted_date ?? ""))} • ${String(bank.name ?? "").trim() || "—"}`
         : `${shortId(bt)} (not in current view)`;
+
       out.push({
         kind: "voidHeavy",
         bankTxnId: bt,
+        groupId: null,
         title,
         detail: `${n} reverts recorded`,
       });
     }
     return out;
-  }, [voidCountByBankTxnId, VOID_HEAVY_THRESHOLD, bankTxnByIdForIssues]);
-
-  const issuesEntryConflict = useMemo((): IssueRow[] => {
-    const out: IssueRow[] = [];
-    for (const [eid, n] of activeMatchCountByEntryId.entries()) {
-      if (n <= 1) continue;
-      const entry = entryByIdForIssues.get(eid) ?? null;
-      const title = entry
-        ? `${String(entry.date ?? "")} • ${String(entry.payee ?? "").trim() || "—"}`
-        : `${shortId(eid)} (not in current view)`;
-
-      const bt = firstBankTxnByEntryId.get(eid) ?? null;
-
-      out.push({
-        kind: "entryConflict",
-        bankTxnId: bt,
-        entryId: eid,
-        title,
-        detail: `Entry ${shortId(eid)} has ${n} active matches (unexpected in v1)`,
-      });
-    }
-    return out;
-  }, [activeMatchCountByEntryId, entryByIdForIssues, firstBankTxnByEntryId]);
+  }, [voidCountByBankTxnId, bankTxnByIdForIssues]);
 
   const issuesCounts = useMemo(() => {
+    const notInView = issuesNotInView.length;
+    const voidHeavy = issuesVoidHeavy.length;
     return {
-      partial: issuesPartial.length,
-      notInView: issuesNotInView.length,
-      voidHeavy: issuesVoidHeavy.length,
-      entryConflict: issuesEntryConflict.length,
-      total: issuesPartial.length + issuesNotInView.length + issuesVoidHeavy.length + issuesEntryConflict.length,
+      notInView,
+      voidHeavy,
+      total: notInView + voidHeavy,
+      conflicts: 0, // full-match groups + one-active-group-per-item => conflicts should not exist
     };
-  }, [issuesPartial.length, issuesNotInView.length, issuesVoidHeavy.length, issuesEntryConflict.length]);
+  }, [issuesNotInView.length, issuesVoidHeavy.length]);
 
   // -------------------------
   // Phase 5A: Reconciliation history (audit)
-  // Derived from BankMatch rows, including voided
+  // Derived from MatchGroups (CPA-clean, full-match only)
   // -------------------------
   function shortId(id: any) {
     const s = String(id ?? "");
@@ -974,83 +1056,73 @@ export default function ReconcilePageClient() {
     return m;
   }, [allEntriesSorted]);
 
-  function stableMatchId(x: any) {
-    // Prefer backend id if present; otherwise build a stable-ish key
-    if (x?.id) return String(x.id);
-    const bt = x?.bank_transaction_id ? String(x.bank_transaction_id) : "bt?";
-    const en = x?.entry_id ? String(x.entry_id) : "e?";
-    const ca = x?.created_at ? String(x.created_at) : "ca?";
-    return `${bt}:${en}:${ca}`;
-  }
-
-  const matchById = useMemo(() => {
-    const m = new Map<string, any>();
-    for (const x of matches ?? []) {
-      if (!x) continue;
-      m.set(stableMatchId(x), x);
-    }
-    return m;
-  }, [matches]);
-
   type ReconAuditEvent = {
-    matchId: string;
-    kind: "MATCH" | "VOID";
+    groupId: string;
+    kind: "MATCH_GROUP_CREATED" | "MATCH_GROUP_VOIDED";
     at: string; // ISO
     by: string | null;
-    bankTxnId: string | null;
-    entryId: string | null;
-    matchedAmountCents: any;
+    bankTxnIds: string[];
+    entryIds: string[];
+    amountAbsCents: bigint; // positive
   };
 
   const reconAuditAll = useMemo(() => {
     const out: ReconAuditEvent[] = [];
-    for (const x of matches ?? []) {
-      if (!x) continue;
-      const matchId = stableMatchId(x);
 
-      // MATCH event
-      if (x.created_at) {
+    for (const g of matchGroups ?? []) {
+      if (!g?.id) continue;
+
+      const gid = String(g.id);
+      const banks = Array.isArray(g?.banks) ? g.banks : [];
+      const entries = Array.isArray(g?.entries) ? g.entries : [];
+
+      const bankTxnIds = banks.map((b: any) => String(b?.bank_transaction_id ?? "")).filter(Boolean);
+      const entryIds = entries.map((e: any) => String(e?.entry_id ?? "")).filter(Boolean);
+
+      const bankSum = banks.reduce((acc: bigint, b: any) => acc + absBig(toBigIntSafe(b?.matched_amount_cents)), 0n);
+
+      if (g?.created_at) {
         out.push({
-          matchId,
-          kind: "MATCH",
-          at: String(x.created_at),
-          by: x.created_by_user_id ? String(x.created_by_user_id) : null,
-          bankTxnId: x.bank_transaction_id ? String(x.bank_transaction_id) : null,
-          entryId: x.entry_id ? String(x.entry_id) : null,
-          matchedAmountCents: x.matched_amount_cents,
+          groupId: gid,
+          kind: "MATCH_GROUP_CREATED",
+          at: String(g.created_at),
+          by: g.created_by_user_id ? String(g.created_by_user_id) : null,
+          bankTxnIds,
+          entryIds,
+          amountAbsCents: bankSum,
         });
       }
 
-      // VOID event (if present)
-      if (x.voided_at) {
+      if (g?.voided_at) {
         out.push({
-          matchId,
-          kind: "VOID",
-          at: String(x.voided_at),
-          by: x.voided_by_user_id ? String(x.voided_by_user_id) : null,
-          bankTxnId: x.bank_transaction_id ? String(x.bank_transaction_id) : null,
-          entryId: x.entry_id ? String(x.entry_id) : null,
-          matchedAmountCents: x.matched_amount_cents,
+          groupId: gid,
+          kind: "MATCH_GROUP_VOIDED",
+          at: String(g.voided_at),
+          by: g.voided_by_user_id ? String(g.voided_by_user_id) : null,
+          bankTxnIds,
+          entryIds,
+          amountAbsCents: bankSum,
         });
       }
     }
 
-    // newest-first, then cap newest 500
+    // newest-first, then deterministic tiebreak
     out.sort((a, b) => {
       const ta = new Date(a.at).getTime();
       const tb = new Date(b.at).getTime();
       if (ta !== tb) return tb - ta;
-      return (a.kind === b.kind ? 0 : a.kind === "VOID" ? -1 : 1);
+      if (a.kind !== b.kind) return a.kind === "MATCH_GROUP_VOIDED" ? -1 : 1;
+      return a.groupId.localeCompare(b.groupId);
     });
 
     return out.slice(0, 500);
-  }, [matches]);
+  }, [matchGroups]);
 
   const reconAuditCounts = useMemo(() => {
     let matchN = 0;
     let voidN = 0;
     for (const e of reconAuditAll) {
-      if (e.kind === "MATCH") matchN++;
+      if (e.kind === "MATCH_GROUP_CREATED") matchN++;
       else voidN++;
     }
     return { all: reconAuditAll.length, match: matchN, void: voidN };
@@ -1059,41 +1131,35 @@ export default function ReconcilePageClient() {
   const reconAuditVisible = useMemo(() => {
     let base =
       reconHistoryFilter === "match"
-        ? reconAuditAll.filter((e) => e.kind === "MATCH")
+        ? reconAuditAll.filter((e) => e.kind === "MATCH_GROUP_CREATED")
         : reconHistoryFilter === "void"
-          ? reconAuditAll.filter((e) => e.kind === "VOID")
+          ? reconAuditAll.filter((e) => e.kind === "MATCH_GROUP_VOIDED")
           : reconAuditAll;
 
     if (reconHistoryBankTxnFilterId) {
-      base = base.filter((e) => String(e.bankTxnId ?? "") === String(reconHistoryBankTxnFilterId));
+      base = base.filter((e) => e.bankTxnIds.some((id) => String(id) === String(reconHistoryBankTxnFilterId)));
     }
 
     const q = reconHistorySearch.trim().toLowerCase();
     if (q) {
       base = base.filter((e) => {
-        const btId = String(e.bankTxnId ?? "").toLowerCase();
-        const enId = String(e.entryId ?? "").toLowerCase();
-        if (btId.includes(q) || enId.includes(q)) return true;
+        if (e.groupId.toLowerCase().includes(q)) return true;
+        if (e.bankTxnIds.some((id) => id.toLowerCase().includes(q))) return true;
+        if (e.entryIds.some((id) => id.toLowerCase().includes(q))) return true;
 
-        const bank = e.bankTxnId ? bankTxnById.get(String(e.bankTxnId)) : null;
-        const entry = e.entryId ? entryById.get(String(e.entryId)) : null;
+        const bank0 = e.bankTxnIds[0] ? bankTxnById.get(String(e.bankTxnIds[0])) : null;
+        const entry0 = e.entryIds[0] ? entryById.get(String(e.entryIds[0])) : null;
 
-        const bankText = String(bank?.name ?? "").toLowerCase();
-        const entryText = String(entry?.payee ?? "").toLowerCase();
+        const bankText = String(bank0?.name ?? "").toLowerCase();
+        const entryText = String(entry0?.payee ?? "").toLowerCase();
 
         return bankText.includes(q) || entryText.includes(q);
       });
     }
 
     return base;
-  }, [
-    reconAuditAll,
-    reconHistoryFilter,
-    reconHistoryBankTxnFilterId,
-    reconHistorySearch,
-    bankTxnById,
-    entryById,
-  ]);
+  }, [reconAuditAll, reconHistoryFilter, reconHistoryBankTxnFilterId, reconHistorySearch, bankTxnById, entryById]);
+  // (removed legacy v1 BankMatch-based history block; MatchGroups history above is the source of truth)
 
   // -------------------------
   // Phase 5D: Export helpers (frontend-only, safe CSV)
@@ -1142,8 +1208,7 @@ export default function ReconcilePageClient() {
       const matchedAbsCents = matchedAbsByBankTxnId.get(t.id) ?? 0n;
       const remainingAbsCents = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
 
-      const status =
-        matchedAbsCents === 0n ? "UNMATCHED" : bankAbs > 0n && remainingAbsCents === 0n ? "MATCHED" : "PARTIAL";
+      const status = matchedAbsCents === 0n ? "UNMATCHED" : "MATCHED";
 
       const voidCount = voidCountByBankTxnId.get(String(t.id)) ?? 0;
 
@@ -1202,7 +1267,7 @@ export default function ReconcilePageClient() {
     const rows = ordered.map((x: any) => ({
       business_id: selectedBusinessId,
       account_id: selectedAccountId,
-      match_id: stableMatchId(x),
+      match_id: stableLegacyMatchId(x),
       bank_transaction_id: String(x.bank_transaction_id ?? ""),
       entry_id: String(x.entry_id ?? ""),
       matched_amount_cents: String(x.matched_amount_cents ?? ""),
@@ -1235,20 +1300,20 @@ export default function ReconcilePageClient() {
     // - bankTxn filter
     // - local search
     const rows = reconAuditVisible.map((ev: any) => {
-      const match = matchById.get(ev.matchId) ?? null;
-      const matchType = match?.match_type ? String(match.match_type) : "";
+      const bank0 = Array.isArray(ev?.bankTxnIds) && ev.bankTxnIds[0] ? String(ev.bankTxnIds[0]) : "";
+      const entry0 = Array.isArray(ev?.entryIds) && ev.entryIds[0] ? String(ev.entryIds[0]) : "";
 
       return {
         business_id: selectedBusinessId,
         account_id: selectedAccountId,
-        event_type: ev.kind === "MATCH" ? "MATCH" : "REVERT",
+        event_type: ev.kind === "MATCH_GROUP_CREATED" ? "MATCH" : "REVERT",
         event_at: String(ev.at ?? ""),
         event_by_user_id: String(ev.by ?? ""),
-        match_id: String(ev.matchId ?? ""),
-        bank_transaction_id: String(ev.bankTxnId ?? ""),
-        entry_id: String(ev.entryId ?? ""),
-        matched_amount_cents: String(ev.matchedAmountCents ?? ""),
-        match_type: matchType,
+        match_group_id: String(ev.groupId ?? ""),
+        bank_transaction_id: bank0,
+        entry_id: entry0,
+        matched_amount_abs_cents: String(ev.amountAbsCents ?? ""),
+        match_type: "FULL",
       };
     });
 
@@ -1258,10 +1323,10 @@ export default function ReconcilePageClient() {
       "event_type",
       "event_at",
       "event_by_user_id",
-      "match_id",
+      "match_group_id",
       "bank_transaction_id",
       "entry_id",
-      "matched_amount_cents",
+      "matched_amount_abs_cents",
       "match_type",
     ];
 
@@ -1304,32 +1369,28 @@ export default function ReconcilePageClient() {
 
   // Tabs: Bank Transactions
   const bankUnmatchedList = useMemo(() => {
-    // Unmatched tab includes UNMATCHED + PARTIAL (abs-based remaining)
+    // FULL-match only: Unmatched tab = not in ACTIVE match group
     return bankTxSorted.filter((t: any) => {
-      // search: description + date + amount
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
       if (!matchesRowSearch(hay)) return false;
 
-      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const matchedAbsSum = matchedAbsByBankTxnId.get(t.id) ?? 0n;
-      const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
-      const isUnmatched = matchedAbsSum === 0n;
-      const isMatched = bankAbs > 0n && remainingAbs === 0n;
-      const isPartial = matchedAbsSum > 0n && !isMatched;
-      return isUnmatched || isPartial;
+      const id = String(t.id ?? "");
+      if (!id) return false;
+      return !activeGroupByBankTxnId.has(id);
     });
-  }, [bankTxSorted, matchedAbsByBankTxnId, remainingAbsByBankTxnId, searchQ]);
+  }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
 
   const bankMatchedList = useMemo(() => {
+    // FULL-match only: Matched tab = in ACTIVE match group
     return bankTxSorted.filter((t: any) => {
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
       if (!matchesRowSearch(hay)) return false;
 
-      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
-      return bankAbs > 0n && remainingAbs === 0n;
+      const id = String(t.id ?? "");
+      if (!id) return false;
+      return activeGroupByBankTxnId.has(id);
     });
-  }, [bankTxSorted, remainingAbsByBankTxnId, searchQ]);
+  }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
 
   const bankUnmatchedCount = bankUnmatchedList.length;
   const bankMatchedCount = bankMatchedList.length;
@@ -1339,32 +1400,24 @@ export default function ReconcilePageClient() {
   // -------------------------
   const bankStateSummary = useMemo(() => {
     let unmatchedN = 0;
-    let partialN = 0;
     let matchedN = 0;
     let remainingAbsTotal = 0n;
 
     for (const t of bankTxSorted ?? []) {
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const matchedAbsSum = matchedAbsByBankTxnId.get(t.id) ?? 0n;
-      const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
+      const isMatched = (remainingAbsByBankTxnId.get(t.id) ?? bankAbs) === 0n;
 
-      const isUnmatched = matchedAbsSum === 0n;
-      const isMatched = bankAbs > 0n && remainingAbs === 0n;
-      const isPartial = matchedAbsSum > 0n && !isMatched;
-
-      if (isUnmatched) {
+      if (isMatched) {
+        matchedN++;
+      } else {
         unmatchedN++;
         remainingAbsTotal += bankAbs;
-      } else if (isPartial) {
-        partialN++;
-        remainingAbsTotal += remainingAbs;
-      } else if (isMatched) {
-        matchedN++;
       }
     }
 
-    return { unmatchedN, partialN, matchedN, remainingAbsTotal };
-  }, [bankTxSorted, matchedAbsByBankTxnId, remainingAbsByBankTxnId]);
+    // Full-match only: partial doesn't exist
+    return { unmatchedN, partialN: 0, matchedN, remainingAbsTotal };
+  }, [bankTxSorted, remainingAbsByBankTxnId]);
 
   const entryStateSummary = useMemo(() => {
     return {
@@ -1373,7 +1426,7 @@ export default function ReconcilePageClient() {
     };
   }, [entriesExpectedList.length, entriesMatchedList.length]);
 
-  const revertsInScope = voidMatches.length;
+  const revertsInScope = voidedGroups.length;
 
   const opts = (accountsQ.data ?? [])
     .filter((a) => !a.archived_at)
@@ -1410,9 +1463,8 @@ export default function ReconcilePageClient() {
       <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
         <button
           type="button"
-          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${
-            canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-          }`}
+          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+            }`}
           onClick={() => {
             if (!canWriteReconcileEffective) return;
             setOpenExportHub(true);
@@ -1429,9 +1481,8 @@ export default function ReconcilePageClient() {
       >
         <button
           type="button"
-          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${
-            canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-          }`}
+          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+            }`}
           disabled={!canWriteReconcileEffective || bankUnmatchedList.length === 0 || entriesExpectedList.length === 0}
           title={
             !canWriteReconcileEffective
@@ -1576,9 +1627,8 @@ export default function ReconcilePageClient() {
 
   const connectedPill = (
     <span
-      className={`inline-flex items-center px-2 h-5 rounded-full border text-[11px] font-medium whitespace-nowrap leading-none ${
-        plaid?.connected ? "bg-slate-50 text-slate-700 border-slate-200" : "bg-white text-slate-500 border-slate-200"
-      }`}
+      className={`inline-flex items-center px-2 h-5 rounded-full border text-[11px] font-medium whitespace-nowrap leading-none ${plaid?.connected ? "bg-slate-50 text-slate-700 border-slate-200" : "bg-white text-slate-500 border-slate-200"
+        }`}
     >
       {plaidLoading ? "Loading…" : plaid?.connected ? "Connected" : "Not connected"}
     </span>
@@ -1632,9 +1682,9 @@ export default function ReconcilePageClient() {
             return (
               <div className="flex flex-col max-h-[55vh]">
                 <div className="flex-1 overflow-y-auto overflow-x-hidden">
-<div className="text-xs text-slate-600">
-  This will create an entry from the selected bank transaction. Review method, category, and memo before creating.
-</div>
+                  <div className="text-xs text-slate-600">
+                    This will create an entry from the selected bank transaction. Review method, category, and memo before creating.
+                  </div>
 
                   <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
                     <div className="flex items-center justify-between gap-2">
@@ -1804,14 +1854,14 @@ export default function ReconcilePageClient() {
 
                         try {
                           await createEntryFromBankTransaction({
-                          businessId: selectedBusinessId,
-                          accountId: selectedAccountId,
-                          bankTransactionId: bankId,
-                          autoMatch: !!createEntryAutoMatch,
-                          memo: createEntryMemo,
-                          method: createEntryMethod,
-                          category_id: createEntryCategoryId.trim() || "",
-                        });
+                            businessId: selectedBusinessId,
+                            accountId: selectedAccountId,
+                            bankTransactionId: bankId,
+                            autoMatch: !!createEntryAutoMatch,
+                            memo: createEntryMemo,
+                            method: createEntryMethod,
+                            category_id: createEntryCategoryId.trim() || "",
+                          });
 
 
                           setOpenCreateEntry(false);
@@ -1857,18 +1907,16 @@ export default function ReconcilePageClient() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  expectedTab === "expected" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "expected" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
                 onClick={() => setExpectedTab("expected")}
               >
                 Expected ({expectedCount})
               </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  expectedTab === "matched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "matched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
                 onClick={() => setExpectedTab("matched")}
               >
                 Matched ({matchedCount})
@@ -1911,35 +1959,24 @@ export default function ReconcilePageClient() {
                       const amt = toBigIntSafe(e.amount_cents);
                       const payee = (e.payee ?? "").trim();
 
-                      const m = matchByEntryId.get(e.id);
-                      const matchedAmt = m ? toBigIntSafe(m.matched_amount_cents) : 0n;
-                      const isPartial = m ? absBig(matchedAmt) > 0n && absBig(matchedAmt) < absBig(amt) : false;
-
                       const isMatched = matchedEntryIdSet.has(e.id);
 
-                      const rowTone =
-                        isMatched ? " bg-emerald-50" :
-                        isPartial ? " bg-amber-50" :
-                        "";
+                      const rowTone = isMatched ? " bg-emerald-50" : "";
 
                       const deEmphasis = expectedTab === "matched" ? " text-slate-600" : "";
 
                       const openAuditForEntry = () => {
-                        const ev0 = (reconAuditAll ?? []).find((ev: any) => String(ev.entryId ?? "") === String(e.id));
+                        const ev0 = (reconAuditAll ?? []).find((ev: any) =>
+                          Array.isArray(ev.entryIds) && ev.entryIds.some((id: any) => String(id) === String(e.id))
+                        );
                         if (ev0) {
                           setSelectedReconAudit(ev0);
                           setOpenReconAuditDetail(true);
                           return;
                         }
-                        // Fallback: open history filtered by the bank transaction that matched this entry (if available)
-                        const btId = m?.bank_transaction_id ? String(m.bank_transaction_id) : null;
-                        if (btId) {
-                          setReconHistoryBankTxnFilterId(btId);
-                          setReconHistoryFilter("all");
-                          setOpenReconciliationHistory(true);
-                        } else {
-                          setOpenReconciliationHistory(true);
-                        }
+
+                        // Fallback: open history (no filter)
+                        setOpenReconciliationHistory(true);
                       };
 
                       return (
@@ -1957,72 +1994,67 @@ export default function ReconcilePageClient() {
                           <td className={`${tdClass} font-medium truncate${deEmphasis}`}>{payee}</td>
                           <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-center pl-3${deEmphasis}`}>
-                            <StatusChip
-                              label={isMatched ? "Matched" : isPartial ? "Partial" : "Expected"}
-                              tone={isMatched ? "success" : isPartial ? "warning" : "default"}
-                            />
+                            <StatusChip label={isMatched ? "Matched" : "Expected"} tone={isMatched ? "success" : "default"} />
                           </td>
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">
-{expectedTab === "matched" ? (
-  <button
-    type="button"
-    className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-    onClick={(ev) => {
-      ev.stopPropagation();
-      openAuditForEntry();
-    }}
-    title="Revert (view audit)"
-    aria-label="Revert (view audit)"
-  >
-    <Undo2 className="h-4 w-4 text-slate-700" />
-  </button>
-) : (
-  <>
-    <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-      <button
-        type="button"
-        className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-          canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-        }`}
-        disabled={!canWriteReconcileEffective}
-        title={canWriteReconcileEffective ? "Match entry" : (reconcileWriteReason ?? noPermTitle)}
-        aria-label="Match entry"
-        onClick={() => {
-          if (!canWriteReconcileEffective) return;
-          setEntryMatchEntryId(e.id);
-          setEntryMatchSelectedBankTxnId(null);
-          setEntryMatchSearch("");
-          setEntryMatchError(null);
-          setOpenEntryMatch(true);
-        }}
-      >
-        <GitMerge className="h-4 w-4 text-slate-700" />
-      </button>
-    </HintWrap>
+                              {expectedTab === "matched" ? (
+                                <button
+                                  type="button"
+                                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    openAuditForEntry();
+                                  }}
+                                  title="Revert (view audit)"
+                                  aria-label="Revert (view audit)"
+                                >
+                                  <Undo2 className="h-4 w-4 text-slate-700" />
+                                </button>
+                              ) : (
+                                <>
+                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                    <button
+                                      type="button"
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                        }`}
+                                      disabled={!canWriteReconcileEffective}
+                                      title={canWriteReconcileEffective ? "Match entry" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="Match entry"
+                                      onClick={() => {
+                                        if (!canWriteReconcileEffective) return;
+                                        setEntryMatchEntryId(e.id);
+                                        setEntryMatchSelectedBankTxnIds(new Set());
+                                        setEntryMatchSearch("");
+                                        setEntryMatchError(null);
+                                        setOpenEntryMatch(true);
+                                      }}
+                                    >
+                                      <GitMerge className="h-4 w-4 text-slate-700" />
+                                    </button>
+                                  </HintWrap>
 
-    <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-      <button
-        type="button"
-        className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-          canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-        }`}
-        disabled={!canWriteReconcileEffective}
-        onClick={() => {
-          if (!canWriteReconcileEffective) return;
-          setAdjustEntryId(e.id);
-          setAdjustReason("");
-          setAdjustError(null);
-          setOpenAdjust(true);
-        }}
-        title={canWriteReconcileEffective ? "Mark adjustment (ledger-only)" : (reconcileWriteReason ?? noPermTitle)}
-        aria-label="Mark adjustment"
-      >
-        <Wrench className="h-4 w-4 text-slate-700" />
-      </button>
-    </HintWrap>
-  </>
-)}
+                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                    <button
+                                      type="button"
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                        }`}
+                                      disabled={!canWriteReconcileEffective}
+                                      onClick={() => {
+                                        if (!canWriteReconcileEffective) return;
+                                        setAdjustEntryId(e.id);
+                                        setAdjustReason("");
+                                        setAdjustError(null);
+                                        setOpenAdjust(true);
+                                      }}
+                                      title={canWriteReconcileEffective ? "Mark adjustment (ledger-only)" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="Mark adjustment"
+                                    >
+                                      <Wrench className="h-4 w-4 text-slate-700" />
+                                    </button>
+                                  </HintWrap>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -2075,73 +2107,42 @@ export default function ReconcilePageClient() {
                       <Download className="h-3.5 w-3.5" /> Upload CSV
                     </button>
 
-<PlaidConnectButton
-  businessId={selectedBusinessId ?? ""}
-  accountId={selectedAccountId ?? ""}
-  effectiveStartDate="2025-11-01"
-  disabledClassName={disabledBtn}
-  buttonClassName="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
-  onConnected={async () => {
-    if (!selectedBusinessId || !selectedAccountId) return;
+                    <PlaidConnectButton
+                      businessId={selectedBusinessId ?? ""}
+                      accountId={selectedAccountId ?? ""}
+                      effectiveStartDate="2025-11-01"
+                      disabledClassName={disabledBtn}
+                      buttonClassName="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+                      onConnected={async () => {
+                        if (!selectedBusinessId || !selectedAccountId) return;
 
-    setSyncMsg(null);
-    setPendingMsg(null);
-    setPlaidLoading(true);
-    try {
-      const res = await plaidStatus(selectedBusinessId, selectedAccountId);
-      setPlaid(res);
+                        setSyncMsg(null);
+                        setPendingMsg(null);
+                        setPlaidLoading(true);
+                        try {
+                          const res = await plaidStatus(selectedBusinessId, selectedAccountId);
+                          setPlaid(res);
 
-      // Immediate pull (but do NOT clobber populated table to empty while Plaid sync is catching up)
-      await refreshBankAndMatches({ preserveOnEmpty: true });
-      await entriesQ.refetch?.();
+                          // Immediate pull (but do NOT clobber populated table to empty while Plaid sync is catching up)
+                          await refreshBankAndMatches({ preserveOnEmpty: true });
+                          await entriesQ.refetch?.();
 
-      // Ensure Ledger page sees new entries without manual refresh
-      void qc.invalidateQueries({
-        predicate: (q) =>
-          Array.isArray(q.queryKey) &&
-          q.queryKey[0] === "entries" &&
-          q.queryKey[1] === selectedBusinessId &&
-          q.queryKey[2] === selectedAccountId,
-      });
+                          // Ensure Ledger page sees new entries without manual refresh
+                          void qc.invalidateQueries({
+                            predicate: (q) =>
+                              Array.isArray(q.queryKey) &&
+                              q.queryKey[0] === "entries" &&
+                              q.queryKey[1] === selectedBusinessId &&
+                              q.queryKey[2] === selectedAccountId,
+                          });
 
-      // Delayed confirmation refresh (best-effort, max 2 tries; avoids storms)
-      if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
-
-      const confirmPull = async () => {
-        await refreshBankAndMatches({ preserveOnEmpty: true });
-        await entriesQ.refetch?.();
-
-        void qc.invalidateQueries({
-          predicate: (q) =>
-            Array.isArray(q.queryKey) &&
-            q.queryKey[0] === "entries" &&
-            q.queryKey[1] === selectedBusinessId &&
-            q.queryKey[2] === selectedAccountId,
-        });
-      };
-
-      // Try once shortly after connect…
-      postConnectRefreshTimerRef.current = setTimeout(async () => {
-        try {
-          await confirmPull();
-
-          // …and if still empty, try one more time later (Plaid may still be posting)
-          if (bankTxLenRef.current === 0) {
-            postConnectRefreshTimerRef.current = setTimeout(async () => {
-              try {
-                await confirmPull();
-              } catch {}
-            }, 2500);
-          }
-        } catch {
-          // no-op
-        }
-      }, 1500);
-    } finally {
-      setPlaidLoading(false);
-    }
-  }}
-/>
+                          // Bounded confirmation refresh (event-driven only; stop early on list change)
+                          await runBoundedPostSyncRefresh({ preserveOnEmpty: true });
+                        } finally {
+                          setPlaidLoading(false);
+                        }
+                      }}
+                    />
                   </>
                 ) : (
                   <>
@@ -2179,26 +2180,8 @@ export default function ReconcilePageClient() {
                           await refreshBankAndMatches({ preserveOnEmpty: true });
                           await entriesQ.refetch?.();
 
-                          // One confirmation refresh (max 2 tries total)
-                          if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
-
-                          const confirmPull = async () => {
-                            await refreshBankAndMatches({ preserveOnEmpty: true });
-                            await entriesQ.refetch?.();
-                          };
-
-                          postConnectRefreshTimerRef.current = setTimeout(async () => {
-                            try {
-                              await confirmPull();
-                              if (bankTxLenRef.current === 0) {
-                                postConnectRefreshTimerRef.current = setTimeout(async () => {
-                                  try {
-                                    await confirmPull();
-                                  } catch {}
-                                }, 2500);
-                              }
-                            } catch {}
-                          }, 1500);
+                          // Bounded confirmation refresh (event-driven only; stop early on list change)
+                          await runBoundedPostSyncRefresh({ preserveOnEmpty: true });
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Sync failed");
                         } finally {
@@ -2218,18 +2201,16 @@ export default function ReconcilePageClient() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  bankTab === "unmatched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`h-7 px-3 text-xs rounded-md border ${bankTab === "unmatched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
                 onClick={() => setBankTab("unmatched")}
               >
                 Unmatched ({bankUnmatchedCount})
               </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  bankTab === "matched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`h-7 px-3 text-xs rounded-md border ${bankTab === "matched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
                 onClick={() => setBankTab("matched")}
               >
                 Matched ({bankMatchedCount})
@@ -2262,17 +2243,17 @@ export default function ReconcilePageClient() {
                     <col style={{ width: 110 }} />
                   </colgroup>
 
-                <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
-                  <tr className="h-[28px]">
-                    <th className={`${thClass} pl-8.5`}>DATE</th>
-                    <th className={thClass}>DESCRIPTION</th>
-                    <th className={`${thClass} text-right pr-4`}>AMOUNT</th>
-                    <th className={`${thClass} text-right`}>ACTIONS</th>
-                  </tr>
-                </thead>
+                  <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+                    <tr className="h-[28px]">
+                      <th className={`${thClass} pl-8.5`}>DATE</th>
+                      <th className={thClass}>DESCRIPTION</th>
+                      <th className={`${thClass} text-right pr-4`}>AMOUNT</th>
+                      <th className={`${thClass} text-right`}>ACTIONS</th>
+                    </tr>
+                  </thead>
 
-                <tbody>
-                  {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).map((t: any) => {
+                  <tbody>
+                    {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).map((t: any) => {
 
                       const amt = toBigIntSafe(t.amount_cents);
                       const dateStr = (() => {
@@ -2284,23 +2265,15 @@ export default function ReconcilePageClient() {
                         }
                       })();
 
-                      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-                      const matchedAbsSum = matchedAbsByBankTxnId.get(t.id) ?? 0n;
-                      const remainingAbs = remainingAbsByBankTxnId.get(t.id) ?? bankAbs;
-
-                      const isUnmatched = matchedAbsSum === 0n;
-                      const isMatched = bankAbs > 0n && remainingAbs === 0n;
-                      const isPartial = matchedAbsSum > 0n && !isMatched;
-
-                      const rowTone =
-                        isMatched ? " bg-emerald-50" :
-                        isPartial ? " bg-amber-50" :
-                        "";
+                      const isMatched = activeGroupByBankTxnId.has(String(t.id));
+                      const rowTone = isMatched ? " bg-emerald-50" : "";
 
                       const deEmphasis = bankTab === "matched" ? " text-slate-600" : "";
 
                       const openAuditForBankTxn = () => {
-                        const ev0 = (reconAuditAll ?? []).find((e: any) => String(e.bankTxnId ?? "") === String(t.id));
+                        const ev0 = (reconAuditAll ?? []).find((e: any) =>
+                          Array.isArray(e.bankTxnIds) && e.bankTxnIds.some((id: any) => String(id) === String(t.id))
+                        );
                         if (ev0) {
                           setSelectedReconAudit(ev0);
                           setRevertError(null);
@@ -2373,72 +2346,70 @@ export default function ReconcilePageClient() {
                                   <Undo2 className="h-4 w-4 text-slate-700" />
                                 </button>
                               ) : (
-<HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-  <button
-    type="button"
-    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-      canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-    }`}
-    disabled={!canWriteReconcileEffective}
-    title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
-    aria-label="Match bank transaction"
-    onClick={() => {
-      if (!canWriteReconcileEffective) return;
-      setMatchBankTxnId(t.id);
-      setMatchSearch("");
-      setMatchSelectedEntryIds(new Set());
-      setMatchError(null);
+                                <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                  <button
+                                    type="button"
+                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                      }`}
+                                    disabled={!canWriteReconcileEffective}
+                                    title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
+                                    aria-label="Match bank transaction"
+                                    onClick={() => {
+                                      if (!canWriteReconcileEffective) return;
+                                      setMatchBankTxnId(t.id);
+                                      setMatchSearch("");
+                                      setMatchSelectedEntryIds(new Set());
+                                      setMatchError(null);
 
-      // Best initial seed: closest abs amount, then closest date
-      const bankAmt = toBigIntSafe(t.amount_cents);
-      const bankAbs = absBig(bankAmt);
-      const bankSign = bankAmt < 0n ? -1n : 1n;
-      const bankDateYmd = isoToYmd(t.posted_date);
-      const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
+                                      // Best initial seed: closest abs amount, then closest date
+                                      const bankAmt = toBigIntSafe(t.amount_cents);
+                                      const bankAbs = absBig(bankAmt);
+                                      const bankSign = bankAmt < 0n ? -1n : 1n;
+                                      const bankDateYmd = isoToYmd(t.posted_date);
+                                      const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
 
-      const eligible = allEntriesSorted.filter((e: any) => {
-        if (matchByEntryId.has(e.id)) return false;
-        const entryAmt = toBigIntSafe(e.amount_cents);
-        const entrySign = entryAmt < 0n ? -1n : 1n;
-        if (entrySign !== bankSign) return false;
-        return true;
-      });
+                                      const eligible = allEntriesSorted.filter((e: any) => {
+                                        if (matchByEntryId.has(e.id)) return false;
+                                        const entryAmt = toBigIntSafe(e.amount_cents);
+                                        const entrySign = entryAmt < 0n ? -1n : 1n;
+                                        if (entrySign !== bankSign) return false;
+                                        return true;
+                                      });
 
-      let bestId: string | null = null;
-      let bestScore = Number.POSITIVE_INFINITY;
+                                      let bestId: string | null = null;
+                                      let bestScore = Number.POSITIVE_INFINITY;
 
-      for (const e of eligible) {
-        const entryAmt = toBigIntSafe(e.amount_cents);
-        const entryAbs = absBig(entryAmt);
-        const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-        const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
-        const score = Number(diff) * 1_000_000 + dt;
-        if (score < bestScore) {
-          bestScore = score;
-          bestId = e.id;
-        }
-      }
+                                      for (const e of eligible) {
+                                        const entryAmt = toBigIntSafe(e.amount_cents);
+                                        const entryAbs = absBig(entryAmt);
+                                        const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+                                        const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
+                                        const score = Number(diff) * 1_000_000 + dt;
+                                        if (score < bestScore) {
+                                          bestScore = score;
+                                          bestId = e.id;
+                                        }
+                                      }
 
-      setMatchSelectedEntryIds(() => {
-        const s = new Set<string>();
-        if (bestId) s.add(bestId);
-        return s;
-      });
+                                      setMatchSelectedEntryIds(() => {
+                                        const s = new Set<string>();
+                                        if (bestId) s.add(bestId);
+                                        return s;
+                                      });
 
-      setOpenMatch(true);
-    }}
-  >
-    <GitMerge className="h-4 w-4 text-slate-700" />
-  </button>
-</HintWrap>
+                                      setOpenMatch(true);
+                                    }}
+                                  >
+                                    <GitMerge className="h-4 w-4 text-slate-700" />
+                                  </button>
+                                </HintWrap>
                               )}
 
                               <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                 <button
                                   type="button"
-                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
-                                    canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                  }`}
+                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                    }`}
                                   disabled={
                                     !canWriteReconcileEffective ||
                                     !!createEntryBusyByBankId[String(t.id)] ||
@@ -2485,35 +2456,35 @@ export default function ReconcilePageClient() {
 
                               {bankTab !== "matched"
                                 ? (() => {
-                                    const matchedAbs = matchedAbsByBankTxnId.get(t.id) ?? 0n;
-                                    const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-                                    const isMatched = matchedAbs === bankAbs && bankAbs > 0n;
-                                    const isPartial = matchedAbs > 0n && matchedAbs < bankAbs;
-                                    if (!isMatched && !isPartial) return null;
+                                  const matchedAbs = matchedAbsByBankTxnId.get(t.id) ?? 0n;
+                                  const bankAbs = absBig(toBigIntSafe(t.amount_cents));
+                                  const isMatched = matchedAbs === bankAbs && bankAbs > 0n;
+                                  const isPartial = matchedAbs > 0n && matchedAbs < bankAbs;
+                                  if (!isMatched && !isPartial) return null;
 
-                                    return (
-                                      <button
-                                        type="button"
-                                        className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-                                        onClick={(ev) => {
-                                          ev.stopPropagation();
-                                          openAuditForBankTxn();
-                                        }}
-                                        title="Revert (view audit)"
-                                        aria-label="Revert (view audit)"
-                                      >
-                                        <Undo2 className="h-4 w-4 text-slate-700" />
-                                      </button>
-                                    );
-                                  })()
+                                  return (
+                                    <button
+                                      type="button"
+                                      className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        openAuditForBankTxn();
+                                      }}
+                                      title="Revert (view audit)"
+                                      aria-label="Revert (view audit)"
+                                    >
+                                      <Undo2 className="h-4 w-4 text-slate-700" />
+                                    </button>
+                                  );
+                                })()
                                 : null}
                             </div>
                           </td>
                         </tr>
                       );
                     })}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
@@ -2554,9 +2525,8 @@ export default function ReconcilePageClient() {
                       <button
                         key={s.id}
                         type="button"
-                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${
-                          selected ? "bg-emerald-50" : "bg-white"
-                        }`}
+                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${selected ? "bg-emerald-50" : "bg-white"
+                          }`}
                         onClick={() => setSelectedSnapshotId(s.id)}
                         title="View snapshot"
                       >
@@ -2607,11 +2577,10 @@ export default function ReconcilePageClient() {
                   >
                     <button
                       type="button"
-                      className={`h-8 px-3 text-xs rounded-md border ${
-                        canWriteSnapshotsEffective
-                          ? "border-slate-200 bg-white hover:bg-slate-50"
-                          : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
-                      }`}
+                      className={`h-8 px-3 text-xs rounded-md border ${canWriteSnapshotsEffective
+                        ? "border-slate-200 bg-white hover:bg-slate-50"
+                        : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
+                        }`}
                       disabled={!canWriteSnapshotsEffective || snapshotCreateBusy || monthAlreadyExists}
                       title={
                         !canWriteSnapshotsEffective
@@ -2745,38 +2714,37 @@ export default function ReconcilePageClient() {
                     </div>
 
                     <div className="flex items-center gap-2">
-{(["bank", "matches", "audit"] as const).map((k) => {
-  const label = k === "bank" ? "Bank CSV" : k === "matches" ? "Matches CSV" : "Audit CSV";
-return (
-  <HintWrap
-    key={k}
-    disabled={!canWriteSnapshotsEffective}
-    reason={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : null}
-  >
-    <button
-        type="button"
-        className={`h-8 px-3 text-xs rounded-md border ${
-          canWriteSnapshotsEffective
-            ? "border-slate-200 bg-white hover:bg-slate-50"
-            : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
-        }`}
-        disabled={!canWriteSnapshotsEffective}
-        title={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : "Download"}
-        onClick={async () => {
-          if (!selectedBusinessId || !selectedAccountId || !snapshot?.id) return;
-          try {
-            const res = await getReconcileSnapshotExportUrl(selectedBusinessId, selectedAccountId, snapshot.id, k);
-            if (res?.url) window.open(res.url, "_blank");
-          } catch {
-            // ignore
-          }
-        }}
-      >
-        {label}
-      </button>
-    </HintWrap>
-  );
-})}
+                      {(["bank", "matches", "audit"] as const).map((k) => {
+                        const label = k === "bank" ? "Bank CSV" : k === "matches" ? "Matches CSV" : "Audit CSV";
+                        return (
+                          <HintWrap
+                            key={k}
+                            disabled={!canWriteSnapshotsEffective}
+                            reason={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : null}
+                          >
+                            <button
+                              type="button"
+                              className={`h-8 px-3 text-xs rounded-md border ${canWriteSnapshotsEffective
+                                ? "border-slate-200 bg-white hover:bg-slate-50"
+                                : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
+                                }`}
+                              disabled={!canWriteSnapshotsEffective}
+                              title={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : "Download"}
+                              onClick={async () => {
+                                if (!selectedBusinessId || !selectedAccountId || !snapshot?.id) return;
+                                try {
+                                  const res = await getReconcileSnapshotExportUrl(selectedBusinessId, selectedAccountId, snapshot.id, k);
+                                  if (res?.url) window.open(res.url, "_blank");
+                                } catch {
+                                  // ignore
+                                }
+                              }}
+                            >
+                              {label}
+                            </button>
+                          </HintWrap>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2803,15 +2771,15 @@ return (
         <div className="flex flex-col max-h-[70vh]">
           {/* Body (scroll only this area) */}
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-slate-600 mb-2">Select eligible entries (v1: entry matches at most one bank txn).</div>
+            <div className="text-xs text-slate-600 mb-2">Select entries to match (same sign; full-match only).</div>
 
             <div className="mb-2">
-                <input
-                  className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
-                  placeholder="Search entries…"
-                  value={matchSearch}
-                  onChange={(e) => setMatchSearch(e.target.value)}
-                />
+              <input
+                className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
+                placeholder="Search entries…"
+                value={matchSearch}
+                onChange={(e) => setMatchSearch(e.target.value)}
+              />
             </div>
 
             {(() => {
@@ -2852,7 +2820,7 @@ return (
                     </div>
                   </div>
 
-                  <div className="mt-1 text-[11px] text-slate-500">v1: select multiple entries until Remaining Δ is exactly 0. No manual amount input.</div>
+                  <div className="mt-1 text-[11px] text-slate-500">Select multiple entries until Remaining Δ is exactly 0. No manual amount input.</div>
                 </div>
               );
             })()}
@@ -2906,15 +2874,15 @@ return (
                 .sort((a: any, b: any) => a.score - b.score)
                 .map((x: any) => x.e);
 
-               // Suggested = exact amount matches only (tolerance=0)
-               const suggested = ranked
-                 .filter((e: any) => {
-                   const entryAbs = absBig(toBigIntSafe(e.amount_cents));
-                   return entryAbs === bankAbs;
-                 })
-                 .slice(0, 3);
+              // Suggested = exact amount matches only (tolerance=0)
+              const suggested = ranked
+                .filter((e: any) => {
+                  const entryAbs = absBig(toBigIntSafe(e.amount_cents));
+                  return entryAbs === bankAbs;
+                })
+                .slice(0, 3);
 
-               if (suggested.length === 0) return null;
+              if (suggested.length === 0) return null;
 
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
@@ -2927,9 +2895,8 @@ return (
                         <button
                           key={e.id}
                           type="button"
-                          className={`w-full text-left h-10 px-2 rounded-md border ${
-                            selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
-                          } flex items-center justify-between gap-2`}
+                          className={`w-full text-left h-10 px-2 rounded-md border ${selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                            } flex items-center justify-between gap-2`}
                           onClick={() => {
                             setMatchSelectedEntryIds((prev) => {
                               const next = new Set(prev);
@@ -2947,9 +2914,9 @@ return (
                                 const bankAbs = absBig(toBigIntSafe(bank.amount_cents));
                                 const entryAbs = absBig(toBigIntSafe(e.amount_cents));
                                 const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                                 const overlap = Math.min(tokenOverlap(String(bank.name ?? ""), String(e.payee ?? "")), 3);
-                                 const dtDays = bank?.posted_date ? Math.abs(Math.round((new Date(`${e.date}T00:00:00Z`).getTime() - new Date(bank.posted_date).getTime()) / 86_400_000)) : 0;
-                                 return `Amount Δ ${formatUsdFromCents(diff)} • Δdays ${dtDays} • Text similarity ${overlap}`;
+                                const overlap = Math.min(tokenOverlap(String(bank.name ?? ""), String(e.payee ?? "")), 3);
+                                const dtDays = bank?.posted_date ? Math.abs(Math.round((new Date(`${e.date}T00:00:00Z`).getTime() - new Date(bank.posted_date).getTime()) / 86_400_000)) : 0;
+                                return `Amount Δ ${formatUsdFromCents(diff)} • Δdays ${dtDays} • Text similarity ${overlap}`;
                               })()}
                             </span>
                           </span>
@@ -3102,67 +3069,92 @@ return (
                   if (!matchBankTxnId) return true;
                   if (matchSelectedEntryIds.size === 0) return true;
 
-                const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
-                const bankAbs = absBig(bank ? toBigIntSafe(bank.amount_cents) : 0n);
+                  const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                  const bankAbs = absBig(bank ? toBigIntSafe(bank.amount_cents) : 0n);
 
-                let selectedAbs = 0n;
-                for (const id of matchSelectedEntryIds) {
-                  const e = allEntriesSorted.find((x: any) => x.id === id);
-                  if (!e) continue;
-                  selectedAbs += absBig(toBigIntSafe(e.amount_cents));
-                }
-                return bankAbs !== selectedAbs;
-              })()}
-              onClick={async () => {
-                if (!selectedBusinessId || !selectedAccountId) return;
-                if (!matchBankTxnId) return;
+                  let selectedAbs = 0n;
+                  for (const id of matchSelectedEntryIds) {
+                    const e = allEntriesSorted.find((x: any) => x.id === id);
+                    if (!e) continue;
+                    selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+                  }
+                  return bankAbs !== selectedAbs;
+                })()}
+                onClick={async () => {
+                  if (!selectedBusinessId || !selectedAccountId) return;
+                  if (!matchBankTxnId) return;
 
-                const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
-                const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
-                const bankAbs = absBig(bankAmt);
+                  const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                  const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
+                  const bankAbs = absBig(bankAmt);
 
-                let selectedAbs = 0n;
-                for (const id of matchSelectedEntryIds) {
-                  const e = allEntriesSorted.find((x: any) => x.id === id);
-                  if (!e) continue;
-                  selectedAbs += absBig(toBigIntSafe(e.amount_cents));
-                }
-                if (selectedAbs !== bankAbs) {
-                  setMatchError("Select entries until Remaining Δ is exactly 0.");
-                  return;
-                }
-
-                setMatchBusy(true);
-                setMatchError(null);
-                try {
-                  for (const entryId of matchSelectedEntryIds) {
-                    const entry = allEntriesSorted.find((x: any) => x.id === entryId);
-                    if (!entry) continue;
-
-                    await createMatch({
-                      businessId: selectedBusinessId,
-                      accountId: selectedAccountId,
-                      bankTransactionId: matchBankTxnId,
-                      entryId,
-                      matchType: "FULL",
-                      matchedAmountCents: String(entry.amount_cents),
-                    });
+                  let selectedAbs = 0n;
+                  for (const id of matchSelectedEntryIds) {
+                    const e = allEntriesSorted.find((x: any) => x.id === id);
+                    if (!e) continue;
+                    selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+                  }
+                  if (selectedAbs !== bankAbs) {
+                    setMatchError("Select entries until Remaining Δ is exactly 0.");
+                    return;
                   }
 
-                  refreshAllDebounced();
+                  setMatchBusy(true);
+                  setMatchError(null);
+                  try {
+                    const items = Array.from(matchSelectedEntryIds).map((entryId) => {
+                      const entry = allEntriesSorted.find((x: any) => x.id === entryId);
+                      return entry
+                        ? {
+                          client_id: `manual:${matchBankTxnId}:${entryId}`,
+                          bankTransactionId: matchBankTxnId,
+                          entryId,
+                          matchType: "FULL" as const,
+                          matchedAmountCents: String(entry.amount_cents),
+                        }
+                        : null;
+                    }).filter(Boolean) as any[];
 
-                  setOpenMatch(false);
-                } catch (e: any) {
-                  setMatchError(e?.message ?? "Match failed");
-                } finally {
-                  setMatchBusy(false);
-                }
-              }}
-              title={matchBusy ? "Matching…" : "Match selected entries (exact sum required)"}
-              aria-label="Match selected entries"
-            >
-              {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
-            </button>
+                    const payloadItems = [
+                      {
+                        client_id: `manual:${matchBankTxnId}:${Date.now()}`,
+                        bankTransactionIds: [matchBankTxnId],
+                        entryIds: Array.from(matchSelectedEntryIds),
+                        // direction optional; backend derives from bank and validates if provided
+                      },
+                    ];
+
+                    const res: any = await createMatchGroupsBatch({
+                      businessId: selectedBusinessId,
+                      accountId: selectedAccountId,
+                      items: payloadItems,
+                    });
+
+                    const results = Array.isArray(res?.results) ? res.results : [];
+                    const first = results[0];
+
+                    if (!first?.ok) {
+                      setMatchError(String(first?.error ?? "Match failed"));
+                      return;
+                    }
+
+                    // Refresh once (no storms)
+                    await refreshBankAndMatches({ preserveOnEmpty: true });
+                    await entriesQ.refetch?.();
+
+                    setOpenMatch(false);
+
+                  } catch (e: any) {
+                    setMatchError(e?.message ?? "Match failed");
+                  } finally {
+                    setMatchBusy(false);
+                  }
+                }}
+                title={matchBusy ? "Matching…" : "Match selected entries (exact sum required)"}
+                aria-label="Match selected entries"
+              >
+                {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
+              </button>
             </HintWrap>
           </div>
         </div>
@@ -3219,36 +3211,36 @@ return (
                   if (!selectedBusinessId || !selectedAccountId) return;
                   if (!adjustEntryId) return;
 
-                setAdjustBusy(true);
-                setAdjustError(null);
-                try {
-                  await markEntryAdjustment({
-                    businessId: selectedBusinessId,
-                    accountId: selectedAccountId,
-                    entryId: adjustEntryId,
-                    reason: adjustReason.trim(),
-                  });
+                  setAdjustBusy(true);
+                  setAdjustError(null);
+                  try {
+                    await markEntryAdjustment({
+                      businessId: selectedBusinessId,
+                      accountId: selectedAccountId,
+                      entryId: adjustEntryId,
+                      reason: adjustReason.trim(),
+                    });
 
-                  setLocallyAdjusted((prev) => {
-                    const next = new Set(prev);
-                    next.add(adjustEntryId);
-                    return next;
-                  });
+                    setLocallyAdjusted((prev) => {
+                      const next = new Set(prev);
+                      next.add(adjustEntryId);
+                      return next;
+                    });
 
-                  refreshAllDebounced();
+                    refreshAllDebounced();
 
-                  setOpenAdjust(false);
-                } catch (e: any) {
-                  setAdjustError(e?.message ?? "Failed to mark adjustment");
-                } finally {
-                  setAdjustBusy(false);
-                }
-              }}
-              title={adjustBusy ? "Saving…" : "Mark adjustment"}
-              aria-label="Mark adjustment"
-            >
-              {adjustBusy ? "Saving…" : "Mark adjustment"}
-            </button>
+                    setOpenAdjust(false);
+                  } catch (e: any) {
+                    setAdjustError(e?.message ?? "Failed to mark adjustment");
+                  } finally {
+                    setAdjustBusy(false);
+                  }
+                }}
+                title={adjustBusy ? "Saving…" : "Mark adjustment"}
+                aria-label="Mark adjustment"
+              >
+                {adjustBusy ? "Saving…" : "Mark adjustment"}
+              </button>
             </HintWrap>
           </div>
         </div>
@@ -3263,7 +3255,7 @@ return (
           setEntryMatchError(null);
           setEntryMatchSearch("");
           setEntryMatchEntryId(null);
-          setEntryMatchSelectedBankTxnId(null);
+          setEntryMatchSelectedBankTxnIds(new Set());
         }}
         title="Match entry"
         size="lg"
@@ -3271,7 +3263,7 @@ return (
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-slate-600 mb-2">
-              Select an eligible bank transaction (same sign; must have enough remaining; v1: entry matches at most one bank txn).
+              Select multiple eligible bank transactions (same sign). Full-match only: the selected bank amounts must sum exactly to the entry amount.
             </div>
 
             <div className="mb-2">
@@ -3285,96 +3277,55 @@ return (
 
             {entryMatchError ? <div className="text-xs text-red-700 mb-2">{entryMatchError}</div> : null}
 
-            {/* Suggested (top candidates) */}
+            {/* COMBINE summary */}
             {(() => {
               const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
               if (!entry) return null;
 
               const entryAmt = toBigIntSafe(entry.amount_cents);
               const entryAbs = absBig(entryAmt);
-              const entrySign = entryAmt < 0n ? -1n : 1n;
 
-              const q = entryMatchSearch.trim().toLowerCase();
+              let selectedAbs = 0n;
+              for (const id of entryMatchSelectedBankTxnIds) {
+                const t = bankByIdFast.get(String(id)) ?? null;
+                if (!t) continue;
+                selectedAbs += absBig(toBigIntSafe(t.amount_cents));
+              }
 
-              const ranked = bankTxSorted
-                .filter((t: any) => {
-                  const bankAmt = toBigIntSafe(t.amount_cents);
-                  const bankSign = bankAmt < 0n ? -1n : 1n;
-                  if (bankSign !== entrySign) return false;
-
-                  const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
-                  if (remaining < entryAbs) return false;
-
-                  if (!q) return true;
-                  const name = (t.name ?? "").toString().toLowerCase();
-                  const date = (t.posted_date ?? "").toString().toLowerCase();
-                  return name.includes(q) || date.includes(q);
-                })
-                .map((t: any) => {
-                  const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-                  const diff = bankAbs > entryAbs ? bankAbs - entryAbs : entryAbs - bankAbs;
-
-                  const dtMs = Math.abs(new Date(t.posted_date).getTime() - new Date(`${entry.date}T00:00:00Z`).getTime());
-                  const dtDays = Math.floor(dtMs / 86_400_000);
-
-                  const overlapRaw = tokenOverlap(String(entry.payee ?? ""), String(t.name ?? ""));
-                  const overlap = Math.min(overlapRaw, 3);
-
-                  const diffN = Number(diff);
-
-                  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-                  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
-
-                  return { t, score };
-                })
-                .sort((a: any, b: any) => a.score - b.score)
-                .map((x: any) => x.t);
-
-               const suggested = ranked
-                 .filter((t: any) => {
-                   const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-                   return bankAbs === entryAbs;
-                 })
-                 .slice(0, 3);
-
-               if (suggested.length === 0) return null;
+              const deltaAbs = entryAbs - selectedAbs;
 
               return (
-                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                  <div className="text-[11px] font-semibold text-slate-600 mb-1">Suggested</div>
-                  <div className="flex flex-col gap-1">
-                    {suggested.map((t: any) => {
-                      const amt = toBigIntSafe(t.amount_cents);
-                      const selected = entryMatchSelectedBankTxnId === t.id;
-                      const dateStr = (() => {
-                        try {
-                          const d = new Date(t.posted_date);
-                          return d.toISOString().slice(0, 10);
-                        } catch {
-                          return String(t.posted_date ?? "");
-                        }
-                      })();
-
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          className={`w-full text-left h-8 px-2 rounded-md border ${
-                            selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
-                          } flex items-center justify-between gap-2`}
-                          onClick={() => setEntryMatchSelectedBankTxnId(t.id)}
-                          title="Select suggested bank transaction"
-                        >
-                          <span className="truncate text-xs font-medium text-slate-800">{dateStr} • {t.name}</span>
-                          <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</span>
-                        </button>
-                      );
-                    })}
+                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold text-slate-900">Combine Match Summary</div>
+                    <div className="text-xs text-slate-500 tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
                   </div>
-                  <div className="mt-2 text-[11px] font-semibold text-slate-600">All eligible</div>
+
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Entry</span>
+                      <span className={`tabular-nums ${entryAmt < 0n ? "text-red-700" : "text-slate-900"}`}>{formatUsdFromCents(entryAmt)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Selected bank txns</span>
+                      <span className="tabular-nums text-slate-900">{formatUsdFromCents(selectedAbs)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Remaining Δ</span>
+                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-emerald-700" : "text-amber-700"}`}>
+                        {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-1 text-[11px] text-slate-500">Select multiple bank transactions until Remaining Δ is exactly 0. No manual amount input.</div>
                 </div>
               );
             })()}
+
+            {/* (removed duplicate combine summary block) */}
+
+            {/* (removed stray pasted code) */}
 
             <div className="rounded-md border border-slate-200 overflow-hidden">
               <div className="max-h-[44vh] overflow-y-auto">
@@ -3419,7 +3370,7 @@ return (
                         .slice(0, 200)
                         .map((t: any) => {
                           const amt = toBigIntSafe(t.amount_cents);
-                          const selected = entryMatchSelectedBankTxnId === t.id;
+                          const selected = entryMatchSelectedBankTxnIds.has(String(t.id));
                           const dateStr = (() => {
                             try {
                               const d = new Date(t.posted_date);
@@ -3433,7 +3384,15 @@ return (
                             <tr
                               key={t.id}
                               className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-emerald-50" : "hover:bg-slate-50"}`}
-                              onClick={() => setEntryMatchSelectedBankTxnId(t.id)}
+                              onClick={() => {
+                                setEntryMatchSelectedBankTxnIds((prev) => {
+                                  const next = new Set(prev);
+                                  const id = String(t.id);
+                                  if (next.has(id)) next.delete(id);
+                                  else next.add(id);
+                                  return next;
+                                });
+                              }}
                             >
                               <td className="px-2 text-xs text-slate-800">{dateStr}</td>
                               <td className="px-2 text-xs text-slate-800 font-medium truncate">{t.name}</td>
@@ -3460,25 +3419,86 @@ return (
               Cancel
             </button>
 
-            <button
-              type="button"
-              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-              disabled={entryMatchBusy || !entryMatchEntryId || !entryMatchSelectedBankTxnId}
-              title="Continue"
-              aria-label="Continue"
-              onClick={() => {
-                if (!entryMatchEntryId || !entryMatchSelectedBankTxnId) return;
+            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+              <button
+                type="button"
+                className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                disabled={(() => {
+                  if (!canWriteReconcileEffective) return true;
+                  if (entryMatchBusy) return true;
+                  if (!entryMatchEntryId) return true;
+                  if (entryMatchSelectedBankTxnIds.size === 0) return true;
 
-                setMatchBankTxnId(entryMatchSelectedBankTxnId);
-                setMatchSearch("");
-                setMatchError(null);
-                setMatchSelectedEntryIds(() => new Set([entryMatchEntryId]));
-                setOpenEntryMatch(false);
-                setOpenMatch(true);
-              }}
-            >
-              {entryMatchBusy ? "Loading…" : "Continue"}
-            </button>
+                  const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+                  const entryAbs = absBig(entry ? toBigIntSafe(entry.amount_cents) : 0n);
+
+                  let selectedAbs = 0n;
+                  for (const id of entryMatchSelectedBankTxnIds) {
+                    const t = bankByIdFast.get(String(id)) ?? null;
+                    if (!t) continue;
+                    selectedAbs += absBig(toBigIntSafe(t.amount_cents));
+                  }
+                  return selectedAbs !== entryAbs;
+                })()}
+                title="Create combine match (exact sum required)"
+                aria-label="Create combine match"
+                onClick={async () => {
+                  if (!selectedBusinessId || !selectedAccountId) return;
+                  if (!canWriteReconcileEffective) return;
+                  if (!entryMatchEntryId) return;
+
+                  const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+                  const entryAbs = absBig(entry ? toBigIntSafe(entry.amount_cents) : 0n);
+
+                  let selectedAbs = 0n;
+                  for (const id of entryMatchSelectedBankTxnIds) {
+                    const t = bankByIdFast.get(String(id)) ?? null;
+                    if (!t) continue;
+                    selectedAbs += absBig(toBigIntSafe(t.amount_cents));
+                  }
+
+                  if (selectedAbs !== entryAbs) {
+                    setEntryMatchError("Select bank transactions until Remaining Δ is exactly 0.");
+                    return;
+                  }
+
+                  setEntryMatchBusy(true);
+                  setEntryMatchError(null);
+                  try {
+                    const payloadItems = [
+                      {
+                        client_id: `combine:${entryMatchEntryId}:${Date.now()}`,
+                        bankTransactionIds: Array.from(entryMatchSelectedBankTxnIds),
+                        entryIds: [entryMatchEntryId],
+                      },
+                    ];
+
+                    const res: any = await createMatchGroupsBatch({
+                      businessId: selectedBusinessId,
+                      accountId: selectedAccountId,
+                      items: payloadItems,
+                    });
+
+                    const first = (Array.isArray(res?.results) ? res.results : [])[0];
+                    if (!first?.ok) {
+                      setEntryMatchError(String(first?.error ?? "Combine match failed"));
+                      return;
+                    }
+
+                    await refreshBankAndMatches({ preserveOnEmpty: true });
+                    await entriesQ.refetch?.();
+
+                    setOpenEntryMatch(false);
+                  } catch (e: any) {
+                    setEntryMatchError(e?.message ?? "Combine match failed");
+                  } finally {
+                    setEntryMatchBusy(false);
+                  }
+                }}
+              >
+                {entryMatchBusy ? "Saving…" : "Create match"}
+              </button>
+            </HintWrap>
           </div>
         </div>
       </AppDialog>
@@ -3495,27 +3515,24 @@ return (
             <div className="flex items-center gap-2 min-w-0">
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  reconHistoryFilter === "all" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "all" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
                 onClick={() => setReconHistoryFilter("all")}
               >
                 All ({reconAuditCounts.all})
               </button>
-            <button
-              type="button"
-              className={`h-7 px-3 text-xs rounded-md border ${
-                reconHistoryFilter === "match" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-              }`}
-              onClick={() => setReconHistoryFilter("match")}
-            >
-              Matches ({reconAuditCounts.match})
-            </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${
-                  reconHistoryFilter === "void" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "match" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
+                onClick={() => setReconHistoryFilter("match")}
+              >
+                Matches ({reconAuditCounts.match})
+              </button>
+              <button
+                type="button"
+                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "void" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                  }`}
                 onClick={() => setReconHistoryFilter("void")}
               >
                 Voids ({reconAuditCounts.void})
@@ -3532,24 +3549,24 @@ return (
 
             {reconHistoryBankTxnFilterId ? (
               <div className="text-xs text-slate-600 flex items-center gap-2">
-              <span className="whitespace-nowrap">
-                Filtered: <span className="font-medium">{shortId(reconHistoryBankTxnFilterId)}</span>
-              </span>
-              <button
-                type="button"
-                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
-                onClick={() => setReconHistoryBankTxnFilterId(null)}
-                title="Clear filter"
-              >
-                Clear
-              </button>
-            </div>
-          ) : (
-            <div />
-          )}
-        </div>
+                <span className="whitespace-nowrap">
+                  Filtered: <span className="font-medium">{shortId(reconHistoryBankTxnFilterId)}</span>
+                </span>
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  onClick={() => setReconHistoryBankTxnFilterId(null)}
+                  title="Clear filter"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <div />
+            )}
+          </div>
 
-        <div className="h-px bg-slate-200" />
+          <div className="h-px bg-slate-200" />
 
           <div className="mt-2 max-h-[64vh] overflow-y-auto overflow-x-hidden">
             {matchesLoading ? (
@@ -3582,83 +3599,87 @@ return (
                   </thead>
 
                   <tbody>
-                  {reconAuditVisible.map((ev, idx) => {
-                    const bank = ev.bankTxnId ? bankTxnById.get(ev.bankTxnId) : null;
-                    const entry = ev.entryId ? entryById.get(ev.entryId) : null;
+                    {reconAuditVisible.map((ev, idx) => {
+                      const bank = ev.bankTxnIds?.[0] ? bankTxnById.get(String(ev.bankTxnIds[0])) : null;
+                      const entry = ev.entryIds?.[0] ? entryById.get(String(ev.entryIds[0])) : null;
 
-                    const matchedAbs = absBig(toBigIntSafe(ev.matchedAmountCents));
+                      const matchedAbs = absBig(toBigIntSafe(ev.amountAbsCents));
 
-                    const whenFull = (() => {
-                      try {
-                        return new Date(ev.at).toLocaleString();
-                      } catch {
-                        return String(ev.at ?? "");
-                      }
-                    })();
+                      const whenFull = (() => {
+                        try {
+                          return new Date(ev.at).toLocaleString();
+                        } catch {
+                          return String(ev.at ?? "");
+                        }
+                      })();
 
-                    const whenCompact = (() => {
-                      try {
-                        return new Date(ev.at).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        });
-                      } catch {
-                        return whenFull;
-                      }
-                    })();
+                      const whenCompact = (() => {
+                        try {
+                          return new Date(ev.at).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          });
+                        } catch {
+                          return whenFull;
+                        }
+                      })();
 
-                    const bankLabel = bank
-                      ? `${(() => {
+                      const bankLabel = bank
+                        ? `${(() => {
                           try {
                             const d = new Date(bank.posted_date);
                             return d.toISOString().slice(0, 10);
                           } catch {
                             return String(bank.posted_date ?? "");
                           }
-                        })()} • ${String(bank.name ?? "").trim() || "—"}`
-                      : `${shortId(ev.bankTxnId)} (not in current view)`;
+                        })()} • ${String(bank.name ?? "").trim() || "—"}${(ev.bankTxnIds?.length ?? 0) > 1 ? ` (+${(ev.bankTxnIds.length - 1)} more)` : ""}`
+                        : ev.bankTxnIds?.[0]
+                          ? `${shortId(ev.bankTxnIds[0])} (not in current view)${(ev.bankTxnIds?.length ?? 0) > 1 ? ` (+${(ev.bankTxnIds.length - 1)} more)` : ""}`
+                          : "—";
 
-                    const entryLabel = entry
-                      ? `${String(entry.date ?? "")} • ${String(entry.payee ?? "").trim() || "—"}`
-                      : `${shortId(ev.entryId)} (not in current view)`;
+                      const entryLabel = entry
+                        ? `${String(entry.date ?? "")} • ${String(entry.payee ?? "").trim() || "—"}${(ev.entryIds?.length ?? 0) > 1 ? ` (+${(ev.entryIds.length - 1)} more)` : ""}`
+                        : ev.entryIds?.[0]
+                          ? `${shortId(ev.entryIds[0])} (not in current view)${(ev.entryIds?.length ?? 0) > 1 ? ` (+${(ev.entryIds.length - 1)} more)` : ""}`
+                          : "—";
 
-                    const rowTone = ev.kind === "VOID" ? " text-slate-600" : "";
-                    const chipTone = ev.kind === "MATCH" ? "success" : "default";
+                      const rowTone = ev.kind === "MATCH_GROUP_VOIDED" ? " text-slate-600" : "";
+                      const chipTone = ev.kind === "MATCH_GROUP_CREATED" ? "success" : "default";
 
-                    return (
-                      <tr
-                        key={`${ev.kind}-${ev.at}-${idx}`}
-                        className={`h-[30px] border-b border-slate-100 cursor-pointer hover:bg-slate-50${rowTone}`}
-                        onClick={() => {
-                          setSelectedReconAudit(ev);
-                          setRevertError(null);
-                          setOpenReconAuditDetail(true);
-                        }}
-                        title="View audit detail"
-                      >
-                        <td className="px-2 text-xs text-slate-800" title={whenFull}>
-                          {whenCompact}
-                        </td>
-                        <td className="px-2 text-xs">
-                          <StatusChip label={ev.kind === "MATCH" ? "Matched" : "Reverted"} tone={chipTone as any} />
-                        </td>
-                        <td className="px-2 text-xs text-slate-800 font-medium truncate" title={bankLabel}>
-                          {bankLabel}
-                        </td>
-                        <td className="px-2 text-xs text-slate-800 font-medium truncate" title={entryLabel}>
-                          {entryLabel}
-                        </td>
-                        <td className="px-2 text-xs text-right tabular-nums text-slate-800">
-                          {formatUsdFromCents(matchedAbs)}
-                        </td>
-                        <td className="px-2 text-xs text-slate-700">
-                          {ev.by ? shortId(ev.by) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                      return (
+                        <tr
+                          key={`${ev.kind}-${ev.at}-${idx}`}
+                          className={`h-[30px] border-b border-slate-100 cursor-pointer hover:bg-slate-50${rowTone}`}
+                          onClick={() => {
+                            setSelectedReconAudit(ev);
+                            setRevertError(null);
+                            setOpenReconAuditDetail(true);
+                          }}
+                          title="View audit detail"
+                        >
+                          <td className="px-2 text-xs text-slate-800" title={whenFull}>
+                            {whenCompact}
+                          </td>
+                          <td className="px-2 text-xs">
+                            <StatusChip label={ev.kind === "MATCH_GROUP_CREATED" ? "Matched" : "Reverted"} tone={chipTone as any} />
+                          </td>
+                          <td className="px-2 text-xs text-slate-800 font-medium truncate" title={bankLabel}>
+                            {bankLabel}
+                          </td>
+                          <td className="px-2 text-xs text-slate-800 font-medium truncate" title={entryLabel}>
+                            {entryLabel}
+                          </td>
+                          <td className="px-2 text-xs text-right tabular-nums text-slate-800">
+                            {formatUsdFromCents(matchedAbs)}
+                          </td>
+                          <td className="px-2 text-xs text-slate-700">
+                            {ev.by ? shortId(ev.by) : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -3685,19 +3706,15 @@ return (
       >
         <div className="p-3">
           {(() => {
-            const ev = selectedReconAudit as ReconAuditEvent | null;
-            const match = ev ? matchById.get(ev.matchId) ?? null : null;
+            const ev = selectedReconAudit as any | null;
 
-            const bankTxnId =
-              ev?.bankTxnId ?? (match?.bank_transaction_id ? String(match.bank_transaction_id) : null);
+            const groupId = ev?.groupId ? String(ev.groupId) : null;
+            const bankTxnId = ev?.bankTxnIds?.[0] ? String(ev.bankTxnIds[0]) : null;
 
             // v1 behavior: "Revert bank match" voids ALL active matches for this bank transaction.
-            const hasActiveForTxn = bankTxnId
-              ? (matches ?? []).some((x: any) => isActiveMatch(x) && String(x.bank_transaction_id) === String(bankTxnId))
-              : false;
-
-            const canRevert = Boolean(canWrite && selectedBusinessId && selectedAccountId && bankTxnId && hasActiveForTxn);
-            const alreadyVoided = bankTxnId ? !hasActiveForTxn : false;
+            const isActiveGroup = !!groupId && activeGroupByBankTxnId.has(String(bankTxnId ?? ""));
+            const canRevert = Boolean(canWrite && selectedBusinessId && selectedAccountId && groupId && isActiveGroup);
+            const alreadyVoided = !!groupId && !isActiveGroup;
 
             return (
               <div className="flex items-center justify-between mb-2">
@@ -3726,23 +3743,27 @@ return (
                     setRevertBusy(true);
                     setRevertError(null);
                     try {
-                      await unmatchBankTransaction({
+                      if (!groupId) throw new Error("Match group id unavailable");
+
+                      await voidMatchGroup({
                         businessId: selectedBusinessId,
                         accountId: selectedAccountId,
-                        bankTransactionId: bankTxnId,
+                        matchGroupId: groupId,
+                        reason: "User unmatch",
                       });
 
-                      refreshAllDebounced();
+                      await refreshBankAndMatches({ preserveOnEmpty: true });
+                      await entriesQ.refetch?.();
 
                       // Close detail after success (clean, consistent)
                       setOpenReconAuditDetail(false);
                       setSelectedReconAudit(null);
                     } catch (e: any) {
                       setRevertError(e?.message ?? "Failed to revert bank match");
-                  } finally {
-                    setRevertBusy(false);
-                  }
-                }}
+                    } finally {
+                      setRevertBusy(false);
+                    }
+                  }}
                   aria-label="Revert bank match"
                 >
                   <Undo2 className="h-3.5 w-3.5 text-slate-700" />
@@ -3756,29 +3777,27 @@ return (
 
           <div className="max-h-[60vh] overflow-y-auto">
             {(() => {
-              const ev = selectedReconAudit as ReconAuditEvent | null;
+              const ev = selectedReconAudit as any | null;
               if (!ev) return <div className="text-xs text-slate-500">No audit event selected.</div>;
 
-              const match = matchById.get(ev.matchId) ?? null;
+              const groupId = ev?.groupId ? String(ev.groupId) : null;
+              const bankTxnIds = Array.isArray(ev?.bankTxnIds) ? ev.bankTxnIds.map((x: any) => String(x)) : [];
+              const entryIds = Array.isArray(ev?.entryIds) ? ev.entryIds.map((x: any) => String(x)) : [];
 
-              const bankTxnId = ev.bankTxnId ?? (match?.bank_transaction_id ? String(match.bank_transaction_id) : null);
-              const entryId = ev.entryId ?? (match?.entry_id ? String(match.entry_id) : null);
+              const bank0Id = bankTxnIds[0] ?? null;
+              const entry0Id = entryIds[0] ?? null;
 
-              const bank = bankTxnId ? bankTxnById.get(String(bankTxnId)) : null;
-              const entry = entryId ? entryById.get(String(entryId)) : null;
+              const bank = bank0Id ? bankTxnById.get(String(bank0Id)) : null;
+              const entry = entry0Id ? entryById.get(String(entry0Id)) : null;
 
-              const matchedAbs = absBig(
-                toBigIntSafe(
-                  ev.matchedAmountCents ?? (match?.matched_amount_cents ?? 0)
-                )
-              );
+              const matchedAbs = absBig(toBigIntSafe(ev.amountAbsCents ?? 0n));
 
-              const createdAt = match?.created_at ? String(match.created_at) : null;
-              const createdBy = match?.created_by_user_id ? String(match.created_by_user_id) : null;
-              const voidedAt = match?.voided_at ? String(match.voided_at) : null;
-              const voidedBy = match?.voided_by_user_id ? String(match.voided_by_user_id) : null;
+              const createdAt = ev?.kind === "MATCH_GROUP_CREATED" ? String(ev.at ?? "") : null;
+              const createdBy = ev?.kind === "MATCH_GROUP_CREATED" ? String(ev.by ?? "") : null;
+              const voidedAt = ev?.kind === "MATCH_GROUP_VOIDED" ? String(ev.at ?? "") : null;
+              const voidedBy = ev?.kind === "MATCH_GROUP_VOIDED" ? String(ev.by ?? "") : null;
 
-              const matchType = match?.match_type ? String(match.match_type) : "—";
+              const matchType = "FULL (group)"; // full-match only
 
               const fmt = (iso: string | null) => {
                 if (!iso) return "—";
@@ -3791,14 +3810,14 @@ return (
 
               const bankSummary = bank
                 ? `${isoToYmd(String(bank.posted_date ?? ""))} • ${(bank.name ?? "—").toString().trim()} • ${formatUsdFromCents(toBigIntSafe(bank.amount_cents))}`
-                : bankTxnId
-                  ? `${bankTxnId} (not in current view)`
+                : bank0Id
+                  ? `${bank0Id} (not in current view)`
                   : "—";
 
               const entrySummary = entry
                 ? `${String(entry.date ?? "")} • ${(entry.payee ?? "—").toString().trim()} • ${formatUsdFromCents(toBigIntSafe(entry.amount_cents))}`
-                : entryId
-                  ? `${entryId} (not in current view)`
+                : entry0Id
+                  ? `${entry0Id} (not in current view)`
                   : "—";
 
               const Row = ({ label, value, mono }: { label: string; value: any; mono?: boolean }) => (
@@ -3813,9 +3832,25 @@ return (
                   <div>
                     <div className="text-[11px] font-semibold text-slate-600 mb-1">IDs</div>
                     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-                      <Row label="Bank txn ID" value={bankTxnId ?? "—"} mono />
-                      <Row label="Entry ID" value={entryId ?? "—"} mono />
-                      <Row label="Match ID" value={ev.matchId} mono />
+                      <Row label="Match group ID" value={groupId ?? "—"} mono />
+                      <Row
+                        label="Bank txns"
+                        value={
+                          bankTxnIds.length
+                            ? `${shortId(bankTxnIds[0])}${bankTxnIds.length > 1 ? ` (+${bankTxnIds.length - 1} more)` : ""}`
+                            : "—"
+                        }
+                        mono
+                      />
+                      <Row
+                        label="Entries"
+                        value={
+                          entryIds.length
+                            ? `${shortId(entryIds[0])}${entryIds.length > 1 ? ` (+${entryIds.length - 1} more)` : ""}`
+                            : "—"
+                        }
+                        mono
+                      />
                     </div>
                   </div>
 
@@ -3830,7 +3865,7 @@ return (
                   <div>
                     <div className="text-[11px] font-semibold text-slate-600 mb-1">Match</div>
                     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-                      <Row label="Action clicked" value={ev.kind === "MATCH" ? "Matched" : "Reverted"} />
+                      <Row label="Action clicked" value={ev.kind === "MATCH_GROUP_CREATED" ? "Matched" : "Reverted"} />
                       <Row label="Matched amount" value={formatUsdFromCents(matchedAbs)} />
                       <Row label="Match type" value={matchType} mono />
                     </div>
@@ -3846,11 +3881,7 @@ return (
                     </div>
                   </div>
 
-                  {!match ? (
-                    <div className="text-[11px] text-slate-500">
-                      Full match fields unavailable (match not found). This can occur if the match list is still loading or the event key did not resolve.
-                    </div>
-                  ) : null}
+                  {null}
                 </div>
               );
             })()}
@@ -3862,21 +3893,7 @@ return (
       <AppDialog open={openIssuesHub} onClose={() => setOpenIssuesHub(false)} title="Issues" size="sm">
         <div className="p-3">
           <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
-              onClick={() => {
-                setOpenIssuesHub(false);
-                setIssuesKind("partial");
-                setIssuesSearch("");
-                setOpenIssuesList(true);
-              }}
-              title="Partial bank matches"
-            >
-              <Wrench className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Partial</span>
-              <span className="text-[11px] text-slate-500">{issuesCounts.partial}</span>
-            </button>
+            {null /* Full-match only: no partial issues */}
 
             <button
               type="button"
@@ -3911,21 +3928,7 @@ return (
               <span className="text-[11px] text-slate-500">{issuesCounts.voidHeavy}</span>
             </button>
 
-            <button
-              type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
-              onClick={() => {
-                setOpenIssuesHub(false);
-                setIssuesKind("entryConflict");
-                setIssuesSearch("");
-                setOpenIssuesList(true);
-              }}
-              title="Entries with more than one active match (unexpected in v1)"
-            >
-              <GitMerge className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Conflicts</span>
-              <span className="text-[11px] text-slate-500">{issuesCounts.entryConflict}</span>
-            </button>
+            {null /* Full-match MatchGroups: conflicts are not expected (one-active-group-per-item). */}
           </div>
 
           <div className="mt-2 text-[11px] text-slate-500">
@@ -3938,26 +3941,11 @@ return (
       <AppDialog
         open={openIssuesList}
         onClose={() => setOpenIssuesList(false)}
-        title={
-          issuesKind === "partial"
-            ? "Issues: Partial"
-            : issuesKind === "notInView"
-              ? "Issues: Not in current view"
-              : issuesKind === "voidHeavy"
-                ? "Issues: Reverts"
-                : "Issues: Conflicts"
-        }
+        title={issuesKind === "notInView" ? "Issues: Not in current view" : "Issues: Reverts"}
         size="lg"
       >
         {(() => {
-          const list =
-            issuesKind === "partial"
-              ? issuesPartial
-              : issuesKind === "notInView"
-                ? issuesNotInView
-                : issuesKind === "voidHeavy"
-                  ? issuesVoidHeavy
-                  : issuesEntryConflict;
+          const list = issuesKind === "notInView" ? issuesNotInView : issuesVoidHeavy;
 
           const q = issuesSearch.trim().toLowerCase();
           const visible = q
@@ -4008,18 +3996,11 @@ return (
                       </thead>
                       <tbody>
                         {visible.map((r, idx) => {
-                          const typeLabel =
-                            r.kind === "partial"
-                              ? "Partial"
-                              : r.kind === "notInView"
-                                ? "Not in view"
-                                : r.kind === "voidHeavy"
-                                  ? "Reverts"
-                                  : "Conflict";
+                          const typeLabel = r.kind === "notInView" ? "Not in view" : "Reverts";
 
                           const handleRowClick = () => {
-                            // Partial / Reverts-heavy → open History filtered to bankTxnId
-                            if (r.kind === "partial" || r.kind === "voidHeavy") {
+                            // Reverts-heavy → open History filtered to bankTxnId
+                            if (r.kind === "voidHeavy") {
                               openHistoryFor(r.bankTxnId ?? null);
                               return;
                             }
@@ -4032,24 +4013,13 @@ return (
                               }
                               setIssuesInfoMsg(
                                 "This issue refers to a match where the bank transaction is not available in the current view. " +
-                                  "Adjust filters/date range, or open Reconciliation history without a filter to browse events."
+                                "Adjust filters/date range, or open Reconciliation history without a filter to browse events."
                               );
                               setOpenIssuesInfo(true);
                               return;
                             }
 
-                            // Conflicts → open History filtered to one bankTxnId (if available)
-                            if (r.kind === "entryConflict") {
-                              if (r.bankTxnId) {
-                                openHistoryFor(r.bankTxnId);
-                                return;
-                              }
-                              setIssuesInfoMsg(
-                                "This conflict refers to an entry with multiple active matches, but no bank transaction id was available to filter. " +
-                                  "Open Reconciliation history and search by the entry id."
-                              );
-                              setOpenIssuesInfo(true);
-                            }
+                            // no conflicts in MatchGroups full-match model
                           };
 
                           return (
@@ -4145,17 +4115,7 @@ return (
               </button>
             </HintWrap>
 
-            <button
-              type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
-              disabled={activeMatches.length === 0}
-              title={activeMatches.length === 0 ? "No matches to export" : "Export active matches (CSV)"}
-              onClick={() => exportActiveMatchesCsv()}
-            >
-              <GitMerge className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Matches</span>
-              <span className="text-[11px] text-slate-500">{activeMatches.length}</span>
-            </button>
+            {null /* Legacy BankMatch export hidden — Reconcile now uses MatchGroups */}
 
             <button
               type="button"
