@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
+// Auth is handled by AppShell
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { getBudgets, putBudgets, type BudgetRow } from "@/lib/api/budgets";
@@ -17,6 +17,10 @@ import { Input } from "@/components/ui/input";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { inputH7 } from "@/components/primitives/tokens";
+
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { PieChart, Target } from "lucide-react";
 
@@ -66,17 +70,7 @@ export default function PlanningPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
+  // Auth is handled by AppShell
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -109,11 +103,10 @@ export default function PlanningPageClient() {
   const noWriteTitle = "You don’t have permission to edit. Ask an admin for access.";
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
     if (!sp.get("businessId")) router.replace(`/planning?businessId=${selectedBusinessId}`);
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const [tab, setTab] = useState<TabKey>("budgets");
 
@@ -137,7 +130,6 @@ export default function PlanningPageClient() {
   }, [budgetRows, draftByCatId]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     let alive = true;
@@ -155,7 +147,7 @@ export default function PlanningPageClient() {
         if (!alive) return;
         setBudgetRows([]);
         setDraftByCatId({});
-        setBudgetsErr(e?.message ?? "Failed to load budgets");
+        setBudgetsErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
       } finally {
         if (alive) setBudgetsLoading(false);
       }
@@ -164,7 +156,7 @@ export default function PlanningPageClient() {
     return () => {
       alive = false;
     };
-  }, [authReady, selectedBusinessId, month]);
+  }, [selectedBusinessId, month]);
 
   async function onSaveBudgets() {
     if (!selectedBusinessId) return;
@@ -196,7 +188,7 @@ export default function PlanningPageClient() {
       for (const r of fresh.rows ?? []) nextDraft[r.category_id] = centsToInput(r.budget_cents);
       setDraftByCatId(nextDraft);
     } catch (e: any) {
-      setBudgetsErr(e?.message ?? "Save failed");
+      setBudgetsErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setSaving(false);
     }
@@ -217,7 +209,6 @@ export default function PlanningPageClient() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     let alive = true;
@@ -237,7 +228,7 @@ export default function PlanningPageClient() {
         if (!alive) return;
         setCategories([]);
         setGoalRows([]);
-        setGoalsErr(e?.message ?? "Failed to load goals");
+        setGoalsErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
       } finally {
         if (alive) setGoalsLoading(false);
       }
@@ -247,7 +238,7 @@ export default function PlanningPageClient() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, selectedBusinessId]);
+  }, [selectedBusinessId]);
 
   const goalsKpi = useMemo(() => {
     const total = goalRows.length;
@@ -288,13 +279,13 @@ export default function PlanningPageClient() {
       setCreateMonthStart(ymNow());
       setCreateMonthEnd("");
     } catch (e: any) {
-      setGoalsErr(e?.message ?? "Create failed");
+      setGoalsErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setCreating(false);
     }
   }
 
-  if (!authReady) return <Skeleton className="h-10 w-64" />;
+  // Auth handled by AppShell
 
   return (
     <div className="flex flex-col gap-2 max-w-6xl">
@@ -373,6 +364,25 @@ export default function PlanningPageClient() {
             <div className="text-xs text-slate-500">Goals summary</div>
           )}
         </div>
+
+        <div className="px-3 pb-2">
+          <InlineBanner
+            title="Can’t load planning"
+            message={appErrorMessageOrNull(businessesQ.error) || budgetsErr || goalsErr || null}
+            onRetry={() => router.refresh()}
+          />
+        </div>
+
+        {!selectedBusinessId && !businessesQ.isLoading ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No business yet"
+              description="Create a business to start using BynkBook."
+              primary={{ label: "Create business", href: "/settings?tab=business" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Goals KPIs (outside header box) */}

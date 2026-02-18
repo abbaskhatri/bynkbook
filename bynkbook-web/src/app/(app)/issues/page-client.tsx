@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
+import { fetchAuthSession } from "aws-amplify/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -16,6 +16,10 @@ import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FixIssueDialog } from "@/components/ledger/fix-issue-dialog";
+
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 
@@ -91,19 +95,8 @@ export default function IssuesPageClient() {
   const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
 
   // ================================
-  // Auth
+  // Auth is handled by AppShell
   // ================================
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
 
   // ================================
   // Business / Account selection
@@ -324,7 +317,6 @@ export default function IssuesPageClient() {
   // Trigger background scan after initial render, but only when stale (>2 minutes).
   // IMPORTANT: Do not block initial GET /issues rendering.
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId || !selectedAccountId) return;
     if (!scanKey) return;
     if (!shouldRunScan(lastScanAt)) return;
@@ -333,7 +325,7 @@ export default function IssuesPageClient() {
       void runBackgroundScan();
     });
     return () => cancelAnimationFrame(raf);
-  }, [authReady, selectedBusinessId, selectedAccountId, scanKey, lastScanAt]);
+  }, [selectedBusinessId, selectedAccountId, scanKey, lastScanAt]);
 
   // ================================
   // Entries (for display/join)
@@ -391,7 +383,7 @@ export default function IssuesPageClient() {
   // ================================
   const issuesQ = useQuery({
     queryKey: ["entryIssues", selectedBusinessId, selectedAccountId, filterStatus],
-    enabled: !!selectedBusinessId && !!selectedAccountId && authReady,
+    enabled: !!selectedBusinessId && !!selectedAccountId,
     staleTime: 10_000,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -439,6 +431,14 @@ export default function IssuesPageClient() {
     },
   });
 
+  const bannerMsg =
+    appErrorMessageOrNull(businessesQ.error) ||
+    appErrorMessageOrNull(accountsQ.error) ||
+    appErrorMessageOrNull(entriesQ.error) ||
+    appErrorMessageOrNull(categoriesQ.error) ||
+    appErrorMessageOrNull(issuesQ.error) ||
+    null;
+ 
   const openIssues = (issuesQ.data?.issues ?? []).map((it) => ({
     id: `${it.entry_id}|${it.issue_type}|${it.detected_at ?? ""}`, // synthetic id if backend doesn't provide one
     business_id: selectedBusinessId ?? "",
@@ -813,7 +813,7 @@ export default function IssuesPageClient() {
     </div>
   ) : null;
 
-  if (!authReady) return null;
+  // Auth handled by AppShell
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
@@ -849,6 +849,32 @@ export default function IssuesPageClient() {
 
         <FilterBar left={filterLeft} right={filterRight} />
 
+        <div className="px-3 py-2">
+          <InlineBanner title="Can’t load issues" message={bannerMsg} onRetry={() => router.refresh()} />
+        </div>
+
+        {!selectedBusinessId && !businessesQ.isLoading ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No business yet"
+              description="Create a business to start using BynkBook."
+              primary={{ label: "Create business", href: "/settings?tab=business" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
+
+        {selectedBusinessId && !accountsQ.isLoading && (accountsQ.data ?? []).length === 0 ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No accounts yet"
+              description="Add an account to start importing and categorizing transactions."
+              primary={{ label: "Add account", href: "/settings?tab=accounts" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
+
         <div className="h-px bg-slate-200" />
 
         <div className="px-3 py-2 flex items-center gap-4 text-xs text-slate-600">
@@ -866,6 +892,7 @@ export default function IssuesPageClient() {
         </div>
       </div>
 
+      {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-white">
         <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
           <table className="w-full table-fixed border-collapse">
@@ -905,7 +932,7 @@ export default function IssuesPageClient() {
               {issuesQ.isError ? (
                 <tr>
                   <td colSpan={8} className="p-3 text-xs text-red-600" role="alert">
-                    Failed to load issues: {(issuesQ.error as any)?.message || "Unknown error"}
+                    Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong. Try again."}
                   </td>
                 </tr>
               ) : renderRows.length === 0 ? (
@@ -1077,6 +1104,7 @@ setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" });
           </table>
         </div>
       </div>
+      ) : null}
 
       <FixIssueDialog
         open={!!fixDialog}

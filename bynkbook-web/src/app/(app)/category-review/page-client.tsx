@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
+// Auth is handled by AppShell
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -20,6 +20,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
+
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { Tags } from "lucide-react";
 
@@ -56,17 +60,7 @@ export default function CategoryReviewPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
+  // Auth is handled by AppShell
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -80,6 +74,8 @@ export default function CategoryReviewPageClient() {
 
   const accountsQ = useAccounts(selectedBusinessId);
 
+  const [err, setErr] = useState<string | null>(null);
+
   const selectedAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
     if (accountIdFromUrl) return accountIdFromUrl;
@@ -87,7 +83,6 @@ export default function CategoryReviewPageClient() {
   }, [accountsQ.data, accountIdFromUrl]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
 
@@ -102,7 +97,6 @@ export default function CategoryReviewPageClient() {
       router.replace(`/category-review?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
     }
   }, [
-    authReady,
     businessesQ.isLoading,
     selectedBusinessId,
     accountsQ.isLoading,
@@ -145,6 +139,16 @@ export default function CategoryReviewPageClient() {
     includeDeleted: false,
   });
 
+  const bannerMsg =
+    err ||
+    appErrorMessageOrNull(businessesQ.error) ||
+    appErrorMessageOrNull(accountsQ.error) ||
+    null;
+
+  // Now that entriesQ exists, include it in the banner mapping
+  const bannerMsgWithEntries =
+    bannerMsg || appErrorMessageOrNull(entriesQ.error) || null;
+
   // Categories list
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   useEffect(() => {
@@ -178,8 +182,6 @@ export default function CategoryReviewPageClient() {
     search: "",
     onlyUncategorized: true,
   });
-
-  const [err, setErr] = useState<string | null>(null);
 
   function runFilters() {
     setErr(null);
@@ -355,7 +357,7 @@ export default function CategoryReviewPageClient() {
     setSelectedIds(new Set(remaining));
   }
 
-  if (!authReady) return <Skeleton className="h-10 w-64" />;
+  // Auth handled by AppShell
 
   return (
     <div className="space-y-4 max-w-6xl">
@@ -427,6 +429,32 @@ export default function CategoryReviewPageClient() {
             }
           />
         </div>
+
+        <div className="px-3 pb-2">
+          <InlineBanner title="Can’t load category review" message={bannerMsgWithEntries} onRetry={() => router.refresh()} />
+        </div>
+
+        {!selectedBusinessId && !businessesQ.isLoading ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No business yet"
+              description="Create a business to start using BynkBook."
+              primary={{ label: "Create business", href: "/settings?tab=business" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
+
+        {selectedBusinessId && !accountsQ.isLoading && (accountsQ.data ?? []).length === 0 ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No accounts yet"
+              description="Add an account to start importing and categorizing transactions."
+              primary={{ label: "Add account", href: "/settings?tab=accounts" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Table card */}
@@ -520,9 +548,8 @@ export default function CategoryReviewPageClient() {
                             <td className="px-3 text-sm text-slate-900 truncate font-medium">{payee}</td>
 
                             <td
-                              className={`px-3 text-sm text-right tabular-nums ${
-                                Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
-                              }`}
+                              className={`px-3 text-sm text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
+                                }`}
                             >
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>

@@ -9,6 +9,10 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
+
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { FileText } from "lucide-react";
 
 import {
@@ -385,6 +389,12 @@ export default function ReportsPageClient() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const bannerMsg =
+    err ||
+    appErrorMessageOrNull(businessesQ.error) ||
+    appErrorMessageOrNull(accountsQ.error) ||
+    null;
+
   const [pnl, setPnl] = useState<any>(null);
   const [cashflow, setCashflow] = useState<any>(null);
   const [accountsSummary, setAccountsSummary] = useState<any>(null);
@@ -444,7 +454,7 @@ export default function ReportsPageClient() {
         return;
       }
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to run report");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -459,7 +469,7 @@ export default function ReportsPageClient() {
       setApVendorId(vendorId);
       setApVendorDetail(res);
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to load vendor aging detail");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -482,7 +492,7 @@ export default function ReportsPageClient() {
       setCatDetailCategoryId(categoryId);
       setCatPage(page);
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to load category detail");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }

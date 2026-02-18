@@ -53,6 +53,10 @@ import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { TotalsFooter } from "@/components/ledger/totals-footer";
 
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
 import {
@@ -676,6 +680,7 @@ export default function LedgerPageClient() {
 
   const perfLog = (...args: any[]) => {
     if (!perfOn) return;
+    if (process.env.NODE_ENV === "production") return;
     // eslint-disable-next-line no-console
     console.log(...args);
   };
@@ -857,6 +862,11 @@ export default function LedgerPageClient() {
   const canClosePeriod = myBusinessRole === "OWNER" || myBusinessRole === "ADMIN";
 
   const accountsQ = useAccounts(selectedBusinessId);
+
+  const bannerMsg =
+    appErrorMessageOrNull(businessesQ.error) ||
+    appErrorMessageOrNull(accountsQ.error) ||
+    null;
 
   const selectedAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
@@ -3737,7 +3747,35 @@ export default function LedgerPageClient() {
         <FilterBar left={filterLeft} right={filterRight} />
       </div>
 
-      <LedgerTableShell
+      <div className="px-3">
+        <InlineBanner title="Can’t load ledger" message={bannerMsg} onRetry={() => router.refresh()} />
+      </div>
+
+      {!selectedBusinessId && !businessesQ.isLoading ? (
+        <div className="px-3">
+          <EmptyStateCard
+            title="No business yet"
+            description="Create a business to start using BynkBook."
+            primary={{ label: "Create business", href: "/settings?tab=business" }}
+            secondary={{ label: "Reload", onClick: () => router.refresh() }}
+          />
+        </div>
+      ) : null}
+
+      {selectedBusinessId && !accountsQ.isLoading && (accountsQ.data ?? []).length === 0 ? (
+        <div className="px-3">
+          <EmptyStateCard
+            title="No accounts yet"
+            description="Add an account to start importing and categorizing transactions."
+            primary={{ label: "Add account", href: "/settings?tab=accounts" }}
+            secondary={{ label: "Reload", onClick: () => router.refresh() }}
+          />
+        </div>
+      ) : null}
+
+      {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
+        <LedgerTableShell
+
         colgroup={cols}
         header={headerRow}
         addRow={addRow}
@@ -3796,6 +3834,7 @@ export default function LedgerPageClient() {
           </tr>
         }
       />
+      ) : null}
 
       <FixIssueDialog
         open={!!fixDialog && fixDialog?.kind !== "MISSING_CATEGORY"}

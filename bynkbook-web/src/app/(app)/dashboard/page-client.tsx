@@ -6,7 +6,7 @@ import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { getPnlSummary, getCashflowSeries } from "@/lib/api/reports";
+import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getIssuesCount } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -16,9 +16,43 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard, ChevronRight } from "lucide-react";
 
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull, extractHttpStatus } from "@/lib/errors/app-error";
+
 export default function DashboardPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
+
+  function InlineErrorBanner({
+    title,
+    detail,
+    onRetry,
+  }: {
+    title: string;
+    detail?: string | null;
+    onRetry?: (() => void) | null;
+  }) {
+    return (
+      <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-rose-900">{title}</div>
+            {detail ? <div className="mt-0.5 text-[11px] text-rose-800/90 break-words">{detail}</div> : null}
+          </div>
+          {onRetry ? (
+            <Button size="sm" variant="outline" className="h-7" onClick={onRetry}>
+              Retry
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  function normalizeApiError(e: any): { detail: string } {
+    return { detail: appErrorMessageOrNull(e) ?? "Something went wrong. Try again." };
+  }
 
   const [authReady, setAuthReady] = useState(false);
   useEffect(() => {
@@ -53,16 +87,16 @@ export default function DashboardPageClient() {
   const accountsQ = useAccounts(selectedBusinessId);
 
   const accountIdFromUrl = sp.get("accountId"); // "all" | accountId
-const [period, setPeriod] = useState<"90d" | "30d" | "ytd">("90d");
+  const [period, setPeriod] = useState<"90d" | "30d" | "ytd">("90d");
 
-const [kpis, setKpis] = useState<{
-  income?: string;
-  expense?: string;
-  net?: string;
-  cashIn?: string;
-  cashOut?: string;
-  issues?: number;
-}>({});
+  const [kpis, setKpis] = useState<{
+    income?: string;
+    expense?: string;
+    net?: string;
+    cashIn?: string;
+    cashOut?: string;
+    issues?: number;
+  }>({});
 
   const currency = useMemo(
     () =>
@@ -110,50 +144,71 @@ const [kpis, setKpis] = useState<{
     };
   }, [currency]);
 
-  // Period window in months (UI-only Phase 3 buckets; current month on the right)
-  const months = useMemo(() => {
-    const now = new Date();
-    const d = new Date(now);
-    d.setDate(1);
+  // Real chart series from cashflow_series endpoint (monthly buckets).
+  const [cashSeries, setCashSeries] = useState<
+    Array<{ key: string; label: string; cashInCents: string; cashOutCents: string; netCents: string }>
+  >([]);
 
-    let count = 6; // default for 90d -> 6 months
-    if (period === "30d") count = 3;
-    if (period === "ytd") {
-      count = d.getMonth() + 1; // Jan..current
-      count = Math.max(3, Math.min(12, count));
+  const hasMultiMonth = useMemo(() => {
+    const uniq = new Set(cashSeries.map((r) => r.key));
+    return uniq.size >= 2;
+  }, [cashSeries]);
+
+  const { maxPosCents, maxNegAbsCents } = useMemo(() => {
+    let pos = 0n;
+    let neg = 0n;
+
+    for (const r of cashSeries) {
+      try {
+        const cashIn = BigInt(r.cashInCents); // expected >= 0
+        const cashOut = BigInt(r.cashOutCents); // expected <= 0
+        const net = BigInt(r.netCents);
+
+        if (cashIn > pos) pos = cashIn;
+
+        const outAbs = cashOut < 0n ? -cashOut : cashOut;
+        if (outAbs > neg) neg = outAbs;
+
+        if (net > 0n && net > pos) pos = net;
+        if (net < 0n && (-net) > neg) neg = -net;
+      } catch {
+        // ignore
+      }
     }
 
-    const out: { key: string; label: string }[] = [];
-    for (let i = count - 1; i >= 0; i--) {
-      const x = new Date(d);
-      x.setMonth(d.getMonth() - i);
-      const key = `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}`;
-      const label = x.toLocaleString("en-US", { month: "short" });
-      out.push({ key, label });
+    // Snap each side to a nice step so grid labels look clean
+    const step = 500000n; // $5,000.00 in cents
+    const snapUp = (v: bigint) => (v <= 0n ? step : ((v + step - 1n) / step) * step);
+
+    return {
+      maxPosCents: snapUp(pos),
+      maxNegAbsCents: snapUp(neg),
+    };
+  }, [cashSeries]);
+
+  const yTicksPosCents = useMemo(() => {
+    const half = maxPosCents / 2n;
+    return [maxPosCents, half, 0n];
+  }, [maxPosCents]);
+
+  const yTicksNegCents = useMemo(() => {
+    const half = maxNegAbsCents / 2n;
+    // negatives (as signed cents)
+    return [0n, -half, -maxNegAbsCents];
+  }, [maxNegAbsCents]);
+
+  function fmtUsdAccountingFromCentsSafe(centsStr?: string) {
+    if (!centsStr) return { text: "—", isNeg: false };
+    return fmtUsdAccountingFromCents(centsStr);
+  }
+
+  function centsToNumber(centsStr: string) {
+    try {
+      return Number(BigInt(centsStr)) / 100;
+    } catch {
+      return 0;
     }
-    return out;
-  }, [period]);
-
-  // Placeholder series (Phase 3 shell): values are per-month totals
-  const cashFlowSeries = useMemo(() => {
-    return months.map((m, i) => {
-      const cashIn = 8000 + (i % 5) * 2200 + (i % 2) * 900;
-      const cashOut = 6000 + ((i + 2) % 5) * 1800 + ((i + 1) % 2) * 700;
-      const net = cashIn - cashOut;
-      return { ...m, cashIn, cashOut, net };
-    });
-  }, [months]);
-
-  const maxAbs = useMemo(() => {
-    const max = cashFlowSeries.reduce((acc, r) => Math.max(acc, r.cashIn, r.cashOut, Math.abs(r.net)), 0);
-    const step = 5000;
-    return Math.max(step, Math.ceil(max / step) * step);
-  }, [cashFlowSeries]);
-
-  const yTicks = useMemo(() => {
-    const half = Math.round(maxAbs / 2);
-    return [maxAbs, half, 0, -half, -maxAbs];
-  }, [maxAbs]);
+  }
 
   const activeAccountOptions = useMemo(() => {
     return (accountsQ.data ?? []).filter((a) => !a.archived_at);
@@ -178,39 +233,120 @@ const [kpis, setKpis] = useState<{
     }
   }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
 
-useEffect(() => {
-  if (!selectedBusinessId) return;
+  const [dashErr, setDashErr] = useState<{ title: string; detail: string } | null>(null);
+  const [topCats, setTopCats] = useState<Array<{ label: string; cents: string; count: number }>>([]);
+  const [balancesByAccountId, setBalancesByAccountId] = useState<Record<string, string>>({});
+  const [dashLoading, setDashLoading] = useState(false);
 
-  const today = new Date();
-  const to = today.toISOString().slice(0, 10);
-  const from =
-    period === "30d"
-      ? new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10)
-      : period === "90d"
-      ? new Date(today.getTime() - 90 * 86400000).toISOString().slice(0, 10)
-      : `${today.getFullYear()}-01-01`;
+  useEffect(() => {
+    if (!selectedBusinessId) return;
 
-  (async () => {
-    try {
-      const [pnl, cashflow, issues] = await Promise.all([
-        getPnlSummary(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
-        getCashflowSeries(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
-        getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId }),
-      ]);
+    const today = new Date();
+    const to = today.toISOString().slice(0, 10);
+    const from =
+      period === "30d"
+        ? new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10)
+        : period === "90d"
+          ? new Date(today.getTime() - 90 * 86400000).toISOString().slice(0, 10)
+          : `${today.getFullYear()}-01-01`;
 
-      setKpis({
-        income: pnl.period.income_cents,
-        expense: pnl.period.expense_cents,
-        net: pnl.period.net_cents,
-        cashIn: cashflow.totals.cash_in_cents,
-        cashOut: cashflow.totals.cash_out_cents,
-        issues: issues.count,
-      });
-    } catch {
-      // silent; dashboard remains empty
-    }
-  })();
-}, [selectedBusinessId, selectedAccountId, period]);
+    let cancelled = false;
+
+    (async () => {
+      setDashLoading(true);
+      setDashErr(null);
+
+      try {
+        const [pnl, cashflow, issues, cats, acctSummary] = await Promise.all([
+          getPnlSummary(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
+          getCashflowSeries(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
+          getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId }),
+          getCategories(selectedBusinessId, { from, to, accountId: selectedAccountId }),
+          // As-of: today (dashboard is “current-ish”)
+          getAccountsSummary(selectedBusinessId, { asOf: to, accountId: "all", includeArchived: false }),
+        ]);
+
+        if (cancelled) return;
+
+        setKpis({
+          income: pnl.period.income_cents,
+          expense: pnl.period.expense_cents,
+          net: pnl.period.net_cents,
+          cashIn: cashflow.totals.cash_in_cents,
+          cashOut: cashflow.totals.cash_out_cents,
+          issues: issues.count,
+        });
+
+        // Real cashflow chart buckets (monthly)
+        const monthAbbr = (ym: string) => {
+          // ym: YYYY-MM
+          const m = Number(String(ym).slice(5, 7));
+          const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          return names[m - 1] ?? ym;
+        };
+
+        const m = (cashflow.monthly ?? []).map((r: any) => {
+          const ym = String(r.month);
+          return {
+            key: ym,
+            label: monthAbbr(ym),
+            cashInCents: String(r.cash_in_cents ?? "0"),
+            cashOutCents: String(r.cash_out_cents ?? "0"),
+            netCents: String(r.net_cents ?? "0"),
+          };
+        });
+        setCashSeries(m);
+
+        const map: Record<string, string> = {};
+        for (const r of (acctSummary?.rows ?? [])) {
+          map[String(r.account_id)] = String(r.balance_cents ?? "0");
+        }
+        setBalancesByAccountId(map);
+        // Top categories: sort by absolute amount; show signed accounting value
+        const absBig = (s: string) => {
+          try {
+            const n = BigInt(s);
+            return n < 0n ? -n : n;
+          } catch {
+            return 0n;
+          }
+        };
+
+        const rows = (cats.rows ?? [])
+          .map((r: any) => ({
+            label: String(r.category ?? "Category"),
+            cents: String(r.amount_cents ?? "0"),
+            count: Number(r.count ?? 0),
+          }))
+          .sort((a: any, b: any) => {
+            const aa = absBig(a.cents);
+            const bb = absBig(b.cents);
+            if (bb === aa) return b.count - a.count;
+            return bb > aa ? 1 : -1;
+          })
+          .slice(0, 6);
+
+        setTopCats(rows);
+      } catch (e: any) {
+        if (cancelled) return;
+
+        const detail = appErrorMessageOrNull(e) ?? "Something went wrong. Try again.";
+        const status = extractHttpStatus(e);
+
+        if (status === 401) setDashErr({ title: "Signed out", detail });
+        else if (status === 403) setDashErr({ title: "Access denied", detail });
+        else setDashErr({ title: "Dashboard failed to load", detail });
+
+        // Keep existing UI stable; just show banner.
+      } finally {
+        if (!cancelled) setDashLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId, selectedAccountId, period]);
 
   // Tooltip state (single source of truth)
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -273,8 +409,29 @@ useEffect(() => {
             );
           })()}
         </div>
-      <div className="mt-2 h-px bg-slate-200" />
-    </div>
+        <div className="mt-2 h-px bg-slate-200" />
+      </div>
+
+      {/* Explicit empty + error states */}
+      {!selectedBusinessId && !businessesQ.isLoading ? (
+        <EmptyStateCard
+          title="No business yet"
+          description="Create a business to start using BynkBook."
+          primary={{ label: "Create business", href: "/settings?tab=business" }}
+          secondary={{ label: "Reload", onClick: () => router.refresh() }}
+        />
+      ) : null}
+
+      {selectedBusinessId && !accountsQ.isLoading && activeAccountOptions.length === 0 ? (
+        <EmptyStateCard
+          title="No accounts yet"
+          description="Add an account to start importing and categorizing transactions."
+          primary={{ label: "Add account", href: "/settings?tab=accounts" }}
+          secondary={{ label: "Reload", onClick: () => router.refresh() }}
+        />
+      ) : null}
+
+      {dashErr ? <InlineBanner title={dashErr.title} message={dashErr.detail} onRetry={() => setPeriod((p) => p)} /> : null}
 
       {/* KPI tiles (Bundle 2) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -333,251 +490,313 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex">
-                    {/* Y axis */}
-                    <div className="w-14 pr-2 text-[10px] text-slate-500">
-                      <div className="h-40 flex flex-col justify-between">
-                        {yTicks.map((t) => (
-                          <div key={t} className="leading-none">
-                            {formatAxis(t)}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                {cashSeries.length >= 2 && hasMultiMonth ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-start">
+                      {/* Shared viewport: labels + plot align to the exact same 160px coordinate space */}
+                      <div className="w-14 pr-3 text-[10px] text-slate-500">
+                          {(() => {
+                            const H = 160;
 
-                    {/* Plot (single coordinate space for bars + line + dots + hover) */}
-                    <div className="flex-1 relative">
-                      {(() => {
-                        const H = 160;
-                        const half = H / 2;
-                        const scale = half / maxAbs;
+                            const posMaxDollars = Number(maxPosCents) / 100;
+                            const negMaxDollars = Number(maxNegAbsCents) / 100;
+                            const total = Math.max(1, posMaxDollars + negMaxDollars);
+                            const posPx = (H * posMaxDollars) / total;
+                            const zeroY = posPx;
 
-                        const n = cashFlowSeries.length;
-                        const W = Math.max(1, n * 100); // fixed chart width, stable every render
-                        const colW = W / n;
-                        const barW = 14;
-                        const DOT_R = 5;
+                            const positions = [
+                              { cents: maxPosCents, y: 0 },
+                              { cents: maxPosCents / 2n, y: zeroY / 2 },
+                              { cents: 0n, y: zeroY },
+                              { cents: -(maxNegAbsCents / 2n), y: zeroY + (H - zeroY) / 2 },
+                              { cents: -maxNegAbsCents, y: H },
+                            ];
 
-                        const xPx = (i: number) => (i + 0.5) * colW;
-                        const yPxNet = (net: number) => {
-                          const y = half - net * scale;
-                          return Math.max(2, Math.min(H - 2, y));
-                        };
+                            return (
+                              <div className="h-40 relative">
+                                {positions.map((p) => {
+                                  const fm = fmtUsdAccountingFromCentsSafe(p.cents.toString());
+                                  const isZero = p.cents === 0n;
 
-                        const points = cashFlowSeries.map((r, i) => ({ x: xPx(i), y: yPxNet(r.net) }));
-                        const polyPoints = points.map((p) => `${p.x},${p.y}`).join(" ");
+                                  return (
+                                    <div
+                                      key={p.cents.toString()}
+                                      className={`absolute right-2 leading-none ${p.cents === 0n ? "text-slate-600" : fm.isNeg ? "text-rose-600" : ""}`}
+                                      style={{
+                                        top: isZero ? `${p.y - 6}px` : `${p.y}px`,
+                                        transform: isZero ? "translateY(0)" : "translateY(-50%)",
+                                      }}
+                                    >
+                                      {fm.text}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                        </div>
 
-                        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+                      {/* Plot (single coordinate space for bars + line + dots + hover) */}
+                      <div className="flex-1 pl-1">
+                        {(() => {
+                          const H = 160;
 
-                        return (
-                          <div
-                            className="relative h-40"
-                            onMouseLeave={() => {
-                              setHoverIdx(null);
-                              setHoverPos(null);
-                            }}
-                            onMouseMove={(e) => {
-                              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                              const x = e.clientX - rect.left;
-                              const y = e.clientY - rect.top;
-                              setHoverPos({ x, y, w: rect.width, h: rect.height });
-                            }}
-                          >
-                            {/* Grid + 0 line */}
-                            <div className="absolute inset-0 pointer-events-none">
-                              <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: 0 }} />
-                              <div className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${H * 0.25}px` }} />
-                              <div className="absolute left-0 right-0 border-t border-slate-400" style={{ top: `${half}px` }} />
-                              <div className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${H * 0.75}px` }} />
-                              <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: `${H}px` }} />
-                            </div>
+                          const posMaxDollars = Number(maxPosCents) / 100;
+                          const negMaxDollars = Number(maxNegAbsCents) / 100;
 
-                            {/* One SVG: bars + line + dots + hit regions */}
-                            <svg
-                              className="absolute inset-0"
-                              viewBox={`0 0 ${W} ${H}`}
-                              preserveAspectRatio="none"
+                          // Allocate vertical space proportional to magnitude (smart asymmetric axis)
+                          const total = Math.max(1, posMaxDollars + negMaxDollars);
+                          const posPx = (H * posMaxDollars) / total;
+                          const negPx = H - posPx;
+
+                          const zeroY = posPx; // 0 line (bars merge here)
+
+                          const posScale = posPx / Math.max(1, posMaxDollars);
+                          const negScale = negPx / Math.max(1, negMaxDollars);
+                          const n = cashSeries.length;
+                          const W = Math.max(1, n * 100); // fixed chart width, stable every render
+                          const colW = W / n;
+                          const barW = 14;
+                          const DOT_R = 5;
+
+                          const xPx = (i: number) => (i + 0.5) * colW;
+                          const yPxNet = (net: number) => {
+                            const y = net >= 0 ? zeroY - net * posScale : zeroY - net * negScale; // net negative pushes down
+                            return Math.max(2, Math.min(H - 2, y));
+                          };
+
+                          const points = cashSeries.map((r, i) => ({ x: xPx(i), y: yPxNet(centsToNumber(r.netCents)) }));
+                          const polyPoints = points.map((p) => `${p.x},${p.y}`).join(" ");
+
+                          const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+                          return (
+                            <div
+                              className="relative h-40"
+                              onMouseLeave={() => {
+                                setHoverIdx(null);
+                                setHoverPos(null);
+                              }}
+                              onMouseMove={(e) => {
+                                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                                const x = e.clientX - rect.left;
+                                const y = e.clientY - rect.top;
+                                setHoverPos({ x, y, w: rect.width, h: rect.height });
+                              }}
                             >
-                              {/* Hit regions */}
-                              {cashFlowSeries.map((r, i) => (
-                                <rect
-                                  key={`hit-${r.key}`}
-                                  x={i * colW}
-                                  y={0}
-                                  width={colW}
-                                  height={H}
-                                  fill="transparent"
-                                  onMouseEnter={() => setHoverIdx(i)}
-                                />
-                              ))}
+                              {/* Grid + 0 line */}
+                              <div className="absolute inset-0 pointer-events-none">
+                                <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: 0 }} />
+                                <div className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${zeroY / 2}px` }} />
+                                <div className="absolute left-0 right-0 border-t border-slate-400" style={{ top: `${zeroY}px` }} />
+                                <div className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${zeroY + (H - zeroY) / 2}px` }} />
+                                <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: `${H}px` }} />
+                              </div>
 
-{/* Bars */}
-{cashFlowSeries.map((r, i) => {
-  // Calculate heights based on the 0 line (half)
-  const inPx = Math.max(0, r.cashIn * scale);
-  const outPx = Math.max(0, r.cashOut * scale);
+                              {/* One SVG: bars + line + dots + hit regions */}
+                              <svg
+                                className="absolute inset-0"
+                                viewBox={`0 0 ${W} ${H}`}
+                                preserveAspectRatio="none"
+                              >
+                                {/* Hit regions */}
+                                {cashSeries.map((r, i) => (
+                                  <rect
+                                    key={`hit-${r.key}`}
+                                    x={i * colW}
+                                    y={0}
+                                    width={colW}
+                                    height={H}
+                                    fill="transparent"
+                                    onMouseEnter={() => setHoverIdx(i)}
+                                  />
+                                ))}
 
-  const x = xPx(i) - barW / 2;
-  // Green bar starts at its top and ends at the middle (half)
-  const topY = half - inPx;
-  // Purple bar starts at the middle (half) and goes down
-  const bottomY = half;
+                                {/* Bars (true zero-axis: green up from 0, purple down from 0) */}
+                                {cashSeries.map((r, i) => {
+                                  // Use the SAME zero line as the grid/net line (do NOT override it here)
+                                  const scaleIn = posScale;
+                                  const scaleOut = negScale;
 
-  return (
-    <g key={`bars-${r.key}`}>
-      <defs>
-        {/* Combined clip path for a single rounded pill shape */}
-        <clipPath id={`pill-${r.key}`}>
-          <rect x={x} y={topY} width={barW} height={inPx + outPx} rx={6} ry={6} />
-        </clipPath>
-      </defs>
+                                  const cashIn = Math.max(0, centsToNumber(r.cashInCents)); // positive
+                                  const cashOutAbs = Math.max(0, Math.abs(centsToNumber(r.cashOutCents))); // expenses negative
 
-      {/* Background shape */}
-      <rect
-        x={x}
-        y={topY}
-        width={barW}
-        height={inPx + outPx}
-        rx={6}
-        ry={6}
-        fill="rgba(148,163,184,0.12)"
-      />
+                                  const inPx = cashIn * scaleIn;
+                                  const outPx = cashOutAbs * scaleOut;
 
-      {/* Color overlays clipped to the pill */}
-      <g clipPath={`url(#pill-${r.key})`}>
-        {/* Cash In (Green) - explicitly pinned to end at 'half' */}
-        <rect
-          x={x}
-          y={topY}
-          width={barW}
-          height={inPx}
-          fill="rgba(52,211,153,0.75)"
-        />
-        {/* Cash Out (Purple) - explicitly pinned to start at 'half' */}
-        <rect
-          x={x}
-          y={half}
-          width={barW}
-          height={outPx}
-          fill="rgba(167,139,250,0.75)"
-        />
-      </g>
-    </g>
-  );
-})}
+                                  const x = xPx(i) - barW / 2;
 
-                              {/* Net line */}
-                              <polyline
-                                fill="none"
-                                stroke="rgba(71,85,105,0.85)"
-                                strokeWidth="2"
-                                points={polyPoints}
-                                pointerEvents="none"
-                              />
+                                  // Green: from zero line up
+                                  const inTop = zeroY - inPx;
+                                  const inH = inPx;
 
-                              {/* Dots (same points) */}
-                              {points.map((p, i) => (
-                                <circle
-                                  key={`dot-${i}`}
-                                  cx={p.x}
-                                  cy={p.y}
-                                  r={DOT_R}
-                                  fill="rgb(51,65,85)"
+                                  // Purple: from zero line down
+                                  const outTop = zeroY;
+                                  const outH = outPx;
+
+                                  const rx = 6;
+
+                                  return (
+                                    <g key={`bars-${r.key}`}>
+                                      {/* Cash In (rounded top) */}
+                                      {inH > 0 ? (
+                                        <path
+                                          d={[
+                                            `M ${x} ${inTop + rx}`,
+                                            `A ${rx} ${rx} 0 0 1 ${x + rx} ${inTop}`,
+                                            `H ${x + barW - rx}`,
+                                            `A ${rx} ${rx} 0 0 1 ${x + barW} ${inTop + rx}`,
+                                            `V ${inTop + inH}`,
+                                            `H ${x}`,
+                                            `Z`,
+                                          ].join(" ")}
+                                          fill="rgba(52,211,153,0.75)"
+                                        />
+                                      ) : null}
+
+                                      {/* Cash Out (rounded bottom) */}
+                                      {outH > 0 ? (
+                                        <path
+                                          d={[
+                                            `M ${x} ${outTop}`,
+                                            `H ${x + barW}`,
+                                            `V ${outTop + outH - rx}`,
+                                            `A ${rx} ${rx} 0 0 1 ${x + barW - rx} ${outTop + outH}`,
+                                            `H ${x + rx}`,
+                                            `A ${rx} ${rx} 0 0 1 ${x} ${outTop + outH - rx}`,
+                                            `Z`,
+                                          ].join(" ")}
+                                          fill="rgba(167,139,250,0.75)"
+                                        />
+                                      ) : null}
+                                    </g>
+                                  );
+                                })}
+
+                                {/* Net line */}
+                                <polyline
+                                  fill="none"
+                                  stroke="rgba(71,85,105,0.85)"
+                                  strokeWidth="2"
+                                  points={polyPoints}
                                   pointerEvents="none"
                                 />
-                              ))}
-                            </svg>
 
-                            {/* Tooltip (to the right of cursor, clamped) */}
-                            {hoverIdx !== null && hoverPos ? (() => {
-                              const TOOLTIP_W = 220;
-                              const TOOLTIP_H = 104;
+                                {/* Dots (same points) */}
+                                {points.map((p, i) => (
+                                  <circle
+                                    key={`dot-${i}`}
+                                    cx={p.x}
+                                    cy={p.y}
+                                    r={DOT_R}
+                                    fill="rgb(51,65,85)"
+                                    pointerEvents="none"
+                                  />
+                                ))}
+                              </svg>
 
-                              // Flip behavior: right by default; if overflow, place left.
-                              const preferRight = hoverPos.x + 12;
-                              const wouldOverflow = preferRight + TOOLTIP_W + 8 > hoverPos.w;
+                              {/* Tooltip (to the right of cursor, clamped) */}
+                              {hoverIdx !== null && hoverPos ? (() => {
+                                const TOOLTIP_W = 220;
+                                const TOOLTIP_H = 104;
 
-                              const left = wouldOverflow
-                                ? clamp(hoverPos.x - 12 - TOOLTIP_W, 8, hoverPos.w - TOOLTIP_W - 8)
-                                : clamp(preferRight, 8, hoverPos.w - TOOLTIP_W - 8);
+                                // Flip behavior: right by default; if overflow, place left.
+                                const preferRight = hoverPos.x + 12;
+                                const wouldOverflow = preferRight + TOOLTIP_W + 8 > hoverPos.w;
 
-                              const top = clamp(hoverPos.y, 8, hoverPos.h - TOOLTIP_H - 8);
+                                const left = wouldOverflow
+                                  ? clamp(hoverPos.x - 12 - TOOLTIP_W, 8, hoverPos.w - TOOLTIP_W - 8)
+                                  : clamp(preferRight, 8, hoverPos.w - TOOLTIP_W - 8);
 
-                              const r = cashFlowSeries[hoverIdx];
+                                const top = clamp(hoverPos.y, 8, hoverPos.h - TOOLTIP_H - 8);
 
-                              return (
-                                <div className="absolute z-20 pointer-events-none" style={{ left, top, width: TOOLTIP_W }}>
-                                  <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-3 py-2 text-xs">
-                                    <div className="font-medium text-slate-900">{r.label}</div>
+                                const r = cashSeries[hoverIdx];
 
-                                    <div className="mt-1 flex items-center justify-between gap-3">
-                                      <span className="text-slate-600">Cash in</span>
-                                      <span className="font-medium text-emerald-700">{fmtMoney(r.cashIn)}</span>
-                                    </div>
+                                return (
+                                  <div className="absolute z-20 pointer-events-none" style={{ left, top, width: TOOLTIP_W }}>
+                                    <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-3 py-2 text-xs">
+                                      <div className="font-medium text-slate-900">{r.label}</div>
 
-                                    <div className="flex items-center justify-between gap-3">
-                                      <span className="text-slate-600">Cash out</span>
-                                      <span className="font-medium text-rose-600">({currency.format(r.cashOut)})</span>
-                                    </div>
+                                      <div className="mt-1 flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">Cash in</span>
+                                        <span className="font-medium text-emerald-700">{fmtUsdAccountingFromCentsSafe(r.cashInCents).text}</span>
+                                      </div>
 
-                                    <div className="mt-1 flex items-center justify-between gap-3">
-                                      <span className="text-slate-600">Net</span>
-                                      <span className={`font-semibold ${moneyClass(r.net)}`}>{fmtMoney(r.net)}</span>
+                                      <div className="flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">Cash out</span>
+                                        <span className="font-medium text-rose-600">{fmtUsdAccountingFromCentsSafe(r.cashOutCents).text}</span>
+                                      </div>
+
+                                      <div className="mt-1 flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">Net</span>
+                                        {(() => {
+                                          const fm = fmtUsdAccountingFromCentsSafe(r.netCents);
+                                          return <span className={`font-semibold ${fm.isNeg ? "text-rose-600" : "text-slate-900"}`}>{fm.text}</span>;
+                                        })()}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })() : null}
-                          </div>
-                        );
-                      })()}
+                                );
+                              })() : null}
+                            </div>
+                          );
+                        })()}
 
-                      {/* X axis labels */}
-                      <div className="mt-2 flex gap-1">
-                        {cashFlowSeries.map((r) => (
-                          <div key={r.key} className="flex-1 text-center text-[10px] text-slate-500">
-                            {r.label}
-                          </div>
-                        ))}
+                        {/* X axis labels */}
+                        <div className="mt-2 flex gap-1">
+                          {cashSeries.map((r) => (
+                            <div key={r.key} className="flex-1 text-center text-[10px] text-slate-500">
+                              {r.label}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="mt-2 text-[11px] text-muted-foreground">
-                    Currently entry-based; bank-based cash flow will come later.
+                    <div className="mt-2 text-[11px] text-muted-foreground">
+                      Basis: Cash (Entries). Types: Income/Expense only.
+                    </div>
                   </div>
-
-                  <div className="mt-1 text-[11px] text-muted-foreground">
-                    Phase 3 shell: placeholder monthly cash flow series with final chart structure.
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
+                    No multi-month trend for this range.
                   </div>
-                </div>
-
-                <div className="mt-3 text-[11px] text-muted-foreground">
-                  Coming soon: monthly cash flow chart will be wired when monthly buckets are available (no client aggregation).
-                </div>
+                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Top Categories */}
-          <Card>
-            <CHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-sm font-medium">Top Categories</CardTitle>
-                <div className="text-xs text-muted-foreground">Phase 3 shell</div>
-              </div>
-            </CHeader>
-
-            <CardContent className="pt-0">
-              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                <div className="px-3 py-3 text-sm text-slate-700">Coming soon</div>
-                <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
-                  Category totals are not available yet (Category Summary is disabled).
+          {/* Top Categories (real aggregate) */}
+          {topCats.length > 0 ? (
+            <Card>
+              <CHeader className="pb-2">
+                <div className="flex items-center justify-between gap-4">
+                  <CardTitle className="text-sm font-medium">Top Categories</CardTitle>
+                  <div className="text-xs text-muted-foreground">
+                    {selectedAccountLabel} •{" "}
+                    {period === "90d" ? "Last 90 days" : period === "30d" ? "Last 30 days" : "Year to date"}
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CHeader>
+
+              <CardContent className="pt-0">
+                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                  {topCats.map((c, idx) => {
+                    const fm = fmtUsdAccountingFromCentsSafe(c.cents);
+                    return (
+                      <div key={`${c.label}-${idx}`} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-slate-900 truncate">{c.label}</div>
+                          <div className="text-[11px] text-muted-foreground">{c.count} entries</div>
+                        </div>
+                        <div className={`text-sm font-semibold tabular-nums ${fm.isNeg ? "text-rose-600" : "text-slate-900"}`}>{fm.text}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
 
         {/* Right column */}
@@ -594,9 +813,18 @@ useEffect(() => {
             <CardContent className="pt-0">
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
                 {activeAccountOptions.slice(0, 5).map((a) => (
-                  <div
+                  <button
                     key={a.id}
-                    className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0"
+                    type="button"
+                    onClick={() => {
+                      if (!selectedBusinessId) return;
+                      const params = new URLSearchParams();
+                      params.set("businessId", selectedBusinessId);
+                      params.set("accountId", String(a.id));
+                      router.push(`/ledger?${params.toString()}`);
+                    }}
+                    className="w-full text-left flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0 hover:bg-slate-50"
+                    title="Open ledger"
                   >
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-slate-900 truncate">{a.name}</div>
@@ -608,11 +836,15 @@ useEffect(() => {
 
                     <div className="flex items-center gap-2">
                       <div className="text-sm font-semibold text-slate-900">
-                        {"balance_cents" in (a as any) ? currency.format(((a as any).balance_cents ?? 0) / 100) : "$—"}
+                        {(() => {
+                          const cents = balancesByAccountId[String(a.id)];
+                          const fm = fmtUsdAccountingFromCentsSafe(cents ?? "0");
+                          return fm.text;
+                        })()}
                       </div>
                       <ChevronRight className="h-4 w-4 text-slate-400" />
                     </div>
-                  </div>
+                  </button>
                 ))}
 
                 {activeAccountOptions.length === 0 ? (
@@ -620,7 +852,7 @@ useEffect(() => {
                 ) : null}
 
                 <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
-                  Phase 3: balances may be placeholders until live balance syncing is available.
+                  Balances shown reflect current app data.
                 </div>
               </div>
             </CardContent>
@@ -660,26 +892,8 @@ useEffect(() => {
             </CardContent>
           </Card>
 
-          {/* AI Insights */}
-          <Card>
-            <CHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-sm font-medium">AI Insights</CardTitle>
-              </div>
-            </CHeader>
-
-            <CardContent className="pt-0">
-              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                <div className="text-sm text-slate-800">Get AI-powered summaries and next actions for your ledger.</div>
-                <div className="mt-3 flex justify-center">
-                  <Button size="sm" className="h-7" disabled title="Coming soon">
-                    Open AI Insights
-                  </Button>
-                </div>
-                <div className="mt-2 text-[11px] text-muted-foreground">Coming soon in Phase 4.</div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* AI Insights hidden until real (no placeholders) */}
+          {null}
         </div>
       </div>
     </div>

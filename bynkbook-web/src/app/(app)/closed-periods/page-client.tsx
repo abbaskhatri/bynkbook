@@ -9,6 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Lock } from "lucide-react";
 
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { listClosedPeriods, reopenPeriod } from "@/lib/api/closedPeriods";
 
@@ -29,6 +33,9 @@ export default function ClosedPeriodsPageClient() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const bannerMsg = err || appErrorMessageOrNull(businessesQ.error) || null;
+
   const [rows, setRows] = useState<any[]>([]);
 
   async function refresh() {
@@ -39,7 +46,7 @@ export default function ClosedPeriodsPageClient() {
       const res = await listClosedPeriods(businessId);
       setRows(res.periods ?? []);
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to load closed periods");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -53,7 +60,7 @@ export default function ClosedPeriodsPageClient() {
       await reopenPeriod(businessId, m);
       await refresh();
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to reopen period");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -79,15 +86,27 @@ export default function ClosedPeriodsPageClient() {
           <FilterBar
             left={<div className="text-xs text-slate-600">Close periods from Ledger → “Close period”.</div>}
             right={
-              <>
-                <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
-                  Refresh
-                </Button>
-                {err ? <div className="text-xs text-red-600 ml-1">{err}</div> : null}
-              </>
+              <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
+                Refresh
+              </Button>
             }
           />
         </div>
+
+        <div className="px-3 pb-2">
+          <InlineBanner title="Can’t load closed periods" message={bannerMsg} onRetry={businessId ? refresh : () => {}} />
+        </div>
+
+        {!businessId && !businessesQ.isLoading ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No business yet"
+              description="Create a business to start using BynkBook."
+              primary={{ label: "Create business", href: "/settings?tab=business" }}
+              secondary={{ label: "Reload", onClick: () => window.location.reload() }}
+            />
+          </div>
+        ) : null}
       </div>
 
       <Card>

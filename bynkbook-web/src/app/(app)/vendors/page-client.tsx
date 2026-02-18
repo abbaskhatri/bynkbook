@@ -11,6 +11,10 @@ import { Input } from "@/components/ui/input";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { Building2 } from "lucide-react";
 
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { listVendors, createVendor } from "@/lib/api/vendors";
 import { getVendorsApSummary } from "@/lib/api/ap";
@@ -60,6 +64,9 @@ export default function VendorsPageClient() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const bannerMsg = err || appErrorMessageOrNull(businessesQ.error) || null;
+
   const [vendors, setVendors] = useState<any[]>([]);
   const [apByVendorId, setApByVendorId] = useState<Record<string, any>>({});
 
@@ -95,7 +102,7 @@ export default function VendorsPageClient() {
       setApByVendorId(m);
     } catch (e: any) {
       if (!mounted) return;
-      setErr(e?.message ?? "Failed to load vendors");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       if (!mounted) return;
       setLoading(false);
@@ -118,7 +125,7 @@ export default function VendorsPageClient() {
       await refresh();
       router.push(`/vendors/${res.vendor.id}?businessId=${encodeURIComponent(businessId)}`);
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to create vendor");
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -203,12 +210,26 @@ export default function VendorsPageClient() {
         {loading ? "Loading…" : "Refresh"}
       </Button>
 
-      {err ? <div className="text-xs text-red-600 ml-1">{err}</div> : null}
     </div>
   }
   right={null}
 />
         </div>
+
+        <div className="px-3 pb-2">
+          <InlineBanner title="Can’t load vendors" message={bannerMsg} onRetry={() => router.refresh()} />
+        </div>
+
+        {!businessId && !businessesQ.isLoading ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No business yet"
+              description="Create a business to start using BynkBook."
+              primary={{ label: "Create business", href: "/settings?tab=business" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
       </div>
 
       {vendors.length === 0 && !loading ? (

@@ -17,6 +17,7 @@ function debugPerfOn(): boolean {
 
 function dlog(...args: any[]) {
   if (!debugPerfOn()) return;
+  if (process.env.NODE_ENV === "production") return;
   // eslint-disable-next-line no-console
   console.log(...args);
 }

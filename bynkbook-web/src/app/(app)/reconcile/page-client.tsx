@@ -22,6 +22,10 @@ import { UploadPanel } from "@/components/uploads/UploadPanel";
 import { UploadsList } from "@/components/uploads/UploadsList";
 import { AppDialog } from "@/components/primitives/AppDialog";
 
+import { InlineBanner } from "@/components/app/inline-banner";
+import { EmptyStateCard } from "@/components/app/empty-state";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, createMatchBatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
@@ -208,6 +212,11 @@ export default function ReconcilePageClient() {
   }, [bizIdFromUrl, businessesQ.data]);
 
   const accountsQ = useAccounts(selectedBusinessId);
+
+  const bannerMsg =
+    appErrorMessageOrNull(businessesQ.error) ||
+    appErrorMessageOrNull(accountsQ.error) ||
+    null;
 
   // -------------------------
   // Phase 6A: Permission guardrails (deny-by-default)
@@ -1648,6 +1657,32 @@ export default function ReconcilePageClient() {
         <div className="px-3 py-2">
           <FilterBar left={filterLeft} right={null} />
         </div>
+
+        <div className="px-3 pb-2">
+          <InlineBanner title="Can’t load reconcile" message={bannerMsg} onRetry={() => router.refresh()} />
+        </div>
+
+        {!selectedBusinessId && !businessesQ.isLoading ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No business yet"
+              description="Create a business to start using BynkBook."
+              primary={{ label: "Create business", href: "/settings?tab=business" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
+
+        {selectedBusinessId && !accountsQ.isLoading && (accountsQ.data ?? []).length === 0 ? (
+          <div className="px-3 pb-2">
+            <EmptyStateCard
+              title="No accounts yet"
+              description="Add an account to start importing and categorizing transactions."
+              primary={{ label: "Add account", href: "/settings?tab=accounts" }}
+              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            />
+          </div>
+        ) : null}
 
         <div className="h-px bg-slate-200" />
 
