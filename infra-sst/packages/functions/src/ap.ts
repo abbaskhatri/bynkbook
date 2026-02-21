@@ -337,6 +337,10 @@ export async function handler(event: any) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) return json(400, { ok: false, error: "due_date must be YYYY-MM-DD" });
     if (amount <= 0n) return json(400, { ok: false, error: "amount_cents must be a positive integer" });
 
+    // Closed period enforcement (Bill is an accounting object -> invoice_date)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: invoice_date });
+    if (!cp.ok) return cp.response;
+
     const created = await prisma.bill.create({
       data: {
         business_id: biz,
@@ -396,10 +400,14 @@ export async function handler(event: any) {
 
     const bill = await prisma.bill.findFirst({
       where: { id: bid, business_id: biz, vendor_id: vid },
-      select: { id: true, voided_at: true },
+      select: { id: true, voided_at: true, invoice_date: true },
     });
     if (!bill) return json(404, { ok: false, error: "Bill not found" });
     if (bill.voided_at) return json(409, { ok: false, error: "Bill is voided" });
+
+    // Closed period enforcement must use the STORED invoice_date (prevents bypass)
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: bill.invoice_date });
+    if (!cp.ok) return cp.response;
 
     const data: any = { updated_at: new Date() };
 
@@ -471,10 +479,14 @@ export async function handler(event: any) {
 
     const bill = await prisma.bill.findFirst({
       where: { id: bid, business_id: biz, vendor_id: vid },
-      select: { id: true, voided_at: true },
+      select: { id: true, voided_at: true, invoice_date: true },
     });
     if (!bill) return json(404, { ok: false, error: "Bill not found" });
     if (bill.voided_at) return json(200, { ok: true, bill_id: bid, status: "VOID", already_voided: true });
+
+    // Closed period enforcement must use the STORED invoice_date
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: bill.invoice_date });
+    if (!cp.ok) return cp.response;
 
     const activeApps = await prisma.billPaymentApplication.count({
       where: { business_id: biz, bill_id: bid, is_active: true },

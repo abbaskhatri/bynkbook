@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { previewClosedPeriods, closePeriod } from "@/lib/api/closedPeriods";
+import { previewClosedPeriods, closeThroughDate } from "@/lib/api/closedPeriods";
 
 type RangeMode = "MONTH" | "WEEK" | "CUSTOM";
 
@@ -128,7 +128,7 @@ export function ClosePeriodDialog(props: {
     try {
       // Backend close is month-based; close each month explicitly
       for (const m of monthsAffected) {
-        await closePeriod(businessId, m);
+        await closeThroughDate(businessId, to);
       }
       onOpenChange(false);
     } catch (e: any) {

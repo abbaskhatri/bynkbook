@@ -1,6 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
+import { assertNotClosedPeriodForEntryIds } from "./lib/closedPeriods";
 
 function json(statusCode: number, body: any) {
   return {
@@ -354,6 +355,15 @@ export async function handler(event: any) {
     }
     const reason = (body?.reason ?? "").toString().trim();
 
+    // Closed period enforcement: void affects entry matching state -> block if ANY involved entry.date is closed
+    const mgEntries = await prisma.matchGroupEntry.findMany({
+      where: { business_id: businessId, account_id: accountId, match_group_id: matchGroupId },
+      select: { entry_id: true },
+    });
+    const entryIdsForVoid = mgEntries.map((r: any) => String(r.entry_id ?? "").trim()).filter(Boolean);
+    const cp = await assertNotClosedPeriodForEntryIds({ prisma, businessId, entryIds: entryIdsForVoid });
+    if (!cp.ok) return cp.response;
+
     const updated = await prisma.$transaction(async (tx: any) => {
       const g = await tx.matchGroup.findFirst({
         where: { id: matchGroupId, business_id: businessId, account_id: accountId },
@@ -415,6 +425,18 @@ export async function handler(event: any) {
     const items = Array.isArray(body?.items) ? body.items : [];
     if (!items.length) return json(400, { ok: false, error: "Missing items" });
 
+    // Closed period enforcement: batch must fail as a whole if ANY involved entry.date is closed
+    const allEntryIds: string[] = [];
+    for (const it of items) {
+      const ids = Array.isArray(it?.entryIds) ? it.entryIds : Array.isArray(it?.entry_ids) ? it.entry_ids : [];
+      for (const id of ids) {
+        const s = String(id ?? "").trim();
+        if (s) allEntryIds.push(s);
+      }
+    }
+    const cp = await assertNotClosedPeriodForEntryIds({ prisma, businessId, entryIds: allEntryIds });
+    if (!cp.ok) return cp.response;
+
     const results: any[] = [];
     let okN = 0;
     let failN = 0;
@@ -451,6 +473,10 @@ export async function handler(event: any) {
   }
 
   // Single create
+  const entryIdsIn = body?.entryIds ?? body?.entry_ids ?? [];
+  const cp = await assertNotClosedPeriodForEntryIds({ prisma, businessId, entryIds: entryIdsIn });
+  if (!cp.ok) return cp.response;
+
   try {
     const g = await prisma.$transaction(async (tx: any) => {
       return createGroupTx(tx, {

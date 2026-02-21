@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
+// Auth is handled by AppShell
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -184,19 +184,8 @@ export default function ReconcilePageClient() {
   const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
 
   // -------------------------
-  // Auth gate (must not return early before hooks)
+  // Auth is handled by AppShell
   // -------------------------
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
 
   // -------------------------
   // Business + account selection
@@ -217,6 +206,79 @@ export default function ReconcilePageClient() {
     appErrorMessageOrNull(businessesQ.error) ||
     appErrorMessageOrNull(accountsQ.error) ||
     null;
+
+  // -------------------------
+  // Mutation banner (single region; CLOSED_PERIOD consistency)
+  // -------------------------
+  const CLOSED_PERIOD_MSG = "This period is closed. Reopen period to modify.";
+
+  const [mutErr, setMutErr] = useState<string | null>(null);
+  const [mutErrIsClosed, setMutErrIsClosed] = useState(false);
+
+  const [pendingById, setPendingById] = useState<Record<string, boolean>>({});
+
+  function markPending(id: string) {
+    if (!id) return;
+    setPendingById((m) => ({ ...m, [id]: true }));
+  }
+
+  function clearPending(id: string) {
+    if (!id) return;
+    setPendingById((m) => {
+      if (!m[id]) return m;
+      const next = { ...m };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function isClosedPeriodError(e: any, msg: string | null): boolean {
+    if (msg === CLOSED_PERIOD_MSG) return true;
+
+    const code =
+      String(e?.code ?? e?.payload?.code ?? e?.data?.code ?? e?.response?.data?.code ?? "").toUpperCase();
+
+    if (code === "CLOSED_PERIOD") return true;
+
+    const status =
+      Number(e?.status ?? e?.statusCode ?? e?.response?.status ?? e?.payload?.status ?? NaN);
+
+    if (status === 409 && msg === CLOSED_PERIOD_MSG) return true;
+
+    return false;
+  }
+  const [mutErrTitle, setMutErrTitle] = useState<string>("");
+
+  function clearMutErr() {
+    setMutErr(null);
+    setMutErrTitle("");
+    setMutErrIsClosed(false);
+  }
+
+  function applyMutationError(e: any, fallbackTitle: string) {
+    const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Something went wrong. Try again.";
+
+    const code =
+      e?.code ||
+      e?.response?.data?.code ||
+      e?.data?.code;
+
+    const isClosed =
+      code === "CLOSED_PERIOD" ||
+      (typeof msg === "string" && msg.includes("This period is closed"));
+
+    if (isClosed) {
+      setMutErrTitle("Period closed");
+      setMutErr("This period is closed. Reopen period to modify.");
+      setMutErrIsClosed(true);
+      return { msg: "This period is closed. Reopen period to modify.", isClosed: true };
+    }
+
+    setMutErrTitle(fallbackTitle);
+    setMutErr(String(msg));
+    setMutErrIsClosed(false);
+    return { msg: String(msg), isClosed: false };
+  }
 
   // -------------------------
   // Phase 6A: Permission guardrails (deny-by-default)
@@ -260,7 +322,6 @@ export default function ReconcilePageClient() {
   const [rolePolicyLoaded, setRolePolicyLoaded] = useState(false);
 
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     let cancelled = false;
@@ -283,7 +344,7 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [authReady, selectedBusinessId]);
+  }, [selectedBusinessId]);
 
   const policyReconcileWrite = useMemo(() => {
     // OWNER must never be blocked by frontend policy hints.
@@ -315,7 +376,6 @@ export default function ReconcilePageClient() {
   }, [canWriteSnapshots, noPermTitle, policyReconcileWrite]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
 
@@ -330,7 +390,6 @@ export default function ReconcilePageClient() {
       router.replace(`/reconcile?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
     }
   }, [
-    authReady,
     businessesQ.isLoading,
     selectedBusinessId,
     accountsQ.isLoading,
@@ -352,6 +411,12 @@ export default function ReconcilePageClient() {
   // -------------------------
   const [expectedTab, setExpectedTab] = useState<"expected" | "matched">("expected");
   const [bankTab, setBankTab] = useState<"unmatched" | "matched">("unmatched");
+
+  // B2: Bulk create entries from selected bank txns (unmatched tab)
+  const [selectedBankTxnIds, setSelectedBankTxnIds] = useState<Set<string>>(new Set());
+  const [bulkCreateAutoMatch, setBulkCreateAutoMatch] = useState(false);
+  const [bulkCreateResultByBankTxnId, setBulkCreateResultByBankTxnId] = useState<Record<string, any>>({});
+  const [bulkCreateBusy, setBulkCreateBusy] = useState(false);
 
   // -------------------------
   // Data queries
@@ -489,7 +554,6 @@ export default function ReconcilePageClient() {
 
   // Load Plaid status
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
 
@@ -509,7 +573,7 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [authReady, selectedBusinessId, selectedAccountId]);
+  }, [selectedBusinessId, selectedAccountId]);
 
   function newestPostedDate(items: any[]): string {
     let max = "";
@@ -661,7 +725,7 @@ export default function ReconcilePageClient() {
   // Create-entry confirmation dialog
   const [openCreateEntry, setOpenCreateEntry] = useState(false);
   const [createEntryBankTxnId, setCreateEntryBankTxnId] = useState<string | null>(null);
-  const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(true);
+  const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(false);
 
   // Overrides
   const [createEntryMemo, setCreateEntryMemo] = useState("");
@@ -676,7 +740,6 @@ export default function ReconcilePageClient() {
 
   // Load categories once per business (used by create-entry dialog)
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     let cancelled = false;
@@ -706,11 +769,10 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [authReady, selectedBusinessId]);
+  }, [selectedBusinessId]);
 
   // Load bank txns + matches (single source of truth; no duplicate fetch)
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
 
@@ -726,12 +788,11 @@ export default function ReconcilePageClient() {
     void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
 
     refreshBankAndMatches({ preserveOnEmpty: true });
-  }, [authReady, selectedBusinessId, selectedAccountId, from, to]);
+  }, [selectedBusinessId, selectedAccountId, from, to]);
 
   // Phase 6B: Load snapshot list when dialog opens
   useEffect(() => {
     if (!openSnapshots) return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
 
@@ -757,12 +818,11 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [openSnapshots, authReady, selectedBusinessId, selectedAccountId]);
+  }, [openSnapshots, selectedBusinessId, selectedAccountId]);
 
   // Phase 6B: Load selected snapshot details
   useEffect(() => {
     if (!openSnapshots) return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
     if (!selectedSnapshotId) return;
@@ -784,7 +844,7 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [openSnapshots, authReady, selectedBusinessId, selectedAccountId, selectedSnapshotId]);
+  }, [openSnapshots, selectedBusinessId, selectedAccountId, selectedSnapshotId]);
 
   // -------------------------
   // Derived + sorting (oldest-first)
@@ -1389,6 +1449,10 @@ export default function ReconcilePageClient() {
     });
   }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
 
+  useEffect(() => {
+    setSelectedBankTxnIds(new Set());
+  }, [bankTab, selectedBusinessId, selectedAccountId]);
+
   const bankMatchedList = useMemo(() => {
     // FULL-match only: Matched tab = in ACTIVE match group
     return bankTxSorted.filter((t: any) => {
@@ -1643,7 +1707,7 @@ export default function ReconcilePageClient() {
     </span>
   );
 
-  if (!authReady) return null;
+  // Auth handled by AppShell
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
@@ -1658,9 +1722,26 @@ export default function ReconcilePageClient() {
           <FilterBar left={filterLeft} right={null} />
         </div>
 
-        <div className="px-3 pb-2">
-          <InlineBanner title="Can’t load reconcile" message={bannerMsg} onRetry={() => router.refresh()} />
-        </div>
+        {(bannerMsg || mutErr) ? (
+          <div className="px-3 pb-2">
+            {bannerMsg ? (
+              <InlineBanner title="Can’t load reconcile" message={bannerMsg} onRetry={() => router.refresh()} />
+            ) : (
+              <InlineBanner
+                title={mutErrTitle || "Can’t update reconcile"}
+                message={mutErr}
+                actionLabel={mutErrIsClosed ? "Go to Close Periods" : null}
+                actionHref={
+                  mutErrIsClosed
+                    ? selectedBusinessId
+                      ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
+                      : "/closed-periods?focus=reopen"
+                    : null
+                }
+              />
+            )}
+          </div>
+        ) : null}
 
         {!selectedBusinessId && !businessesQ.isLoading ? (
           <div className="px-3 pb-2">
@@ -1699,7 +1780,7 @@ export default function ReconcilePageClient() {
           onClose={() => {
             setOpenCreateEntry(false);
             setCreateEntryBankTxnId(null);
-            setCreateEntryAutoMatch(true);
+            setCreateEntryAutoMatch(false);
           }}
           title="Create entry"
           size="md"
@@ -1762,9 +1843,7 @@ export default function ReconcilePageClient() {
 
                     <div>
                       <div className="text-[11px] font-semibold text-slate-600 mb-1">Category</div>
-                      <div className="text-[11px] text-slate-500 mb-1">
-                        {categoriesLoading ? "Loading…" : `${(categories ?? []).length} categories`}
-                      </div>
+                      {null}
                       <div className="relative overflow-visible">
                         <input
                           className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
@@ -1814,7 +1893,6 @@ export default function ReconcilePageClient() {
                                     }}
                                   >
                                     <div className="font-medium text-slate-900 truncate">{name}</div>
-                                    <div className="text-[11px] text-slate-500 truncate">{id}</div>
                                   </button>
                                 );
                               });
@@ -1823,10 +1901,9 @@ export default function ReconcilePageClient() {
                         ) : null}
                       </div>
 
-                      {/* Selected pill */}
-                      {createEntryCategoryId ? (
+                      {createEntryCategoryName ? (
                         <div className="mt-1 text-[11px] text-slate-600">
-                          Selected: <span className="font-mono">{createEntryCategoryId}</span>{" "}
+                          Selected: <span className="font-medium">{createEntryCategoryName}</span>{" "}
                           <button
                             type="button"
                             className="ml-2 text-emerald-700 hover:text-emerald-800"
@@ -1885,10 +1962,11 @@ export default function ReconcilePageClient() {
                         if (!bankId) return;
 
                         setCreateEntryErr(null);
+                        clearMutErr();
                         setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: true }));
 
                         try {
-                          await createEntryFromBankTransaction({
+                          const created: any = await createEntryFromBankTransaction({
                             businessId: selectedBusinessId,
                             accountId: selectedAccountId,
                             bankTransactionId: bankId,
@@ -1898,12 +1976,19 @@ export default function ReconcilePageClient() {
                             category_id: createEntryCategoryId.trim() || "",
                           });
 
+                          // Auto-match after create-entry is PARKED (A): do not run any match-group creation here.
+                          // (We will revisit auto-match later.)
 
+                          // Immediate refresh so matched state updates deterministically
+                          await refreshBankAndMatches({ preserveOnEmpty: true });
+                          await entriesQ.refetch?.();
+
+                          clearMutErr();
                           setOpenCreateEntry(false);
                           setCreateEntryBankTxnId(null);
-                          refreshAllDebounced();
                         } catch (e: any) {
-                          setCreateEntryErr(e?.message ?? "Failed to create entry");
+                          applyMutationError(e, "Can’t create entry");
+                          setCreateEntryErr(null);
                         } finally {
                           setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: false }));
                         }
@@ -1957,6 +2042,114 @@ export default function ReconcilePageClient() {
                 Matched ({matchedCount})
               </button>
             </div>
+
+            {bankTab === "unmatched" && selectedBankTxnIds.size > 0 ? (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-900">
+                    {selectedBankTxnIds.size} selected
+                  </span>
+
+                  <label className="flex items-center gap-1.5 text-xs text-slate-600 select-none">
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3"
+                      checked={bulkCreateAutoMatch}
+                      onChange={(e) => setBulkCreateAutoMatch(e.target.checked)}
+                      disabled={!canWriteReconcileEffective}
+                      title={
+                        !canWriteReconcileEffective
+                          ? (reconcileWriteReason ?? noPermTitle)
+                          : "Auto-match (FULL only)"
+                      }
+                    />
+                    Auto-match
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={bulkCreateBusy || !canWriteReconcileEffective || selectedBusinessId == null || selectedAccountId == null}
+                  title={
+                    !canWriteReconcileEffective
+                      ? (reconcileWriteReason ?? noPermTitle)
+                      : "Create entries from selected bank transactions"
+                  }
+                  onClick={async () => {
+                    if (!selectedBusinessId || !selectedAccountId) return;
+                    if (!canWriteReconcileEffective) return;
+
+                    clearMutErr();
+
+                    const ids = Array.from(selectedBankTxnIds);
+                    for (const id of ids) markPending(String(id));
+
+                    // Clear previous results for selected ids
+                    setBulkCreateResultByBankTxnId((m) => {
+                      const next = { ...m };
+                      for (const id of ids) delete next[String(id)];
+                      return next;
+                    });
+
+                    try {
+                      setBulkCreateBusy(true);
+
+                      const payload = {
+                        items: ids.map((id) => ({
+                          bank_transaction_id: id,
+                          autoMatch: bulkCreateAutoMatch === true,
+                        })),
+                      };
+
+                      const res: any = await apiFetch(
+                        `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/bank-transactions/create-entries-batch`,
+                        { method: "POST", body: JSON.stringify(payload) }
+                      );
+
+                      const list = Array.isArray(res?.results) ? res.results : [];
+                      setBulkCreateResultByBankTxnId((m) => {
+                        const next = { ...m };
+                        for (const r of list) {
+                          const bid = String(r?.bank_transaction_id ?? "");
+                          if (!bid) continue;
+                          next[bid] = r;
+                        }
+                        return next;
+                      });
+
+                      // One refresh only (no storms)
+                      await refreshBankAndMatches({ preserveOnEmpty: true });
+                      await entriesQ.refetch?.();
+
+                      // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
+                      setSelectedBankTxnIds((prev) => {
+                        const next = new Set(prev);
+                        for (const r of list) {
+                          const bid = String(r?.bank_transaction_id ?? "");
+                          const st = String(r?.status ?? "");
+                          if (!bid) continue;
+                          if (st === "CREATED" || st === "SKIPPED") next.delete(bid);
+                        }
+                        return next;
+                      });
+                    } catch (e: any) {
+                      applyMutationError(e, "Can’t create entries");
+                    } finally {
+                      setBulkCreateBusy(false);
+
+                      const ids2 = Array.from(selectedBankTxnIds);
+                      for (const id of ids2) clearPending(String(id));
+                    }
+                  }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {bulkCreateBusy ? <TinySpinner /> : null}
+                    <span>{bulkCreateBusy ? "Creating…" : "Create entries"}</span>
+                  </span>
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div className="h-px bg-slate-200" />
@@ -2033,6 +2226,8 @@ export default function ReconcilePageClient() {
                           </td>
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">
+                              {pendingById[String(e.id)] ? <TinySpinner /> : null}
+
                               {expectedTab === "matched" ? (
                                 <button
                                   type="button"
@@ -2272,6 +2467,7 @@ export default function ReconcilePageClient() {
               ) : (
                 <table className="w-full table-fixed border-collapse">
                   <colgroup>
+                    <col style={{ width: 36 }} />
                     <col style={{ width: 110 }} />
                     <col />
                     <col style={{ width: 140 }} />
@@ -2280,6 +2476,25 @@ export default function ReconcilePageClient() {
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
                     <tr className="h-[28px]">
+                      <th className={thClass}>
+                        {bankTab === "unmatched" ? (
+                          <input
+                            type="checkbox"
+                            className="h-3 w-3"
+                            checked={
+                              (bankTab === "unmatched" ? bankUnmatchedList : []).length > 0 &&
+                              selectedBankTxnIds.size === bankUnmatchedList.length
+                            }
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedBankTxnIds(new Set(bankUnmatchedList.map((x: any) => String(x.id))));
+                              } else {
+                                setSelectedBankTxnIds(new Set());
+                              }
+                            }}
+                          />
+                        ) : null}
+                      </th>
                       <th className={`${thClass} pl-8.5`}>DATE</th>
                       <th className={thClass}>DESCRIPTION</th>
                       <th className={`${thClass} text-right pr-4`}>AMOUNT</th>
@@ -2289,6 +2504,9 @@ export default function ReconcilePageClient() {
 
                   <tbody>
                     {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).map((t: any) => {
+
+                      const txnId = String(t.id ?? "");
+                      const isSelected = txnId ? selectedBankTxnIds.has(txnId) : false;
 
                       const amt = toBigIntSafe(t.amount_cents);
                       const dateStr = (() => {
@@ -2332,6 +2550,28 @@ export default function ReconcilePageClient() {
                           onClick={bankTab === "matched" && isMatched ? openAuditForBankTxn : undefined}
                           title={bankTab === "matched" ? "View audit detail" : undefined}
                         >
+                          <td className={tdClass}>
+                            {bankTab === "unmatched" ? (
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setSelectedBankTxnIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (!txnId) return next;
+                                    if (checked) next.add(txnId);
+                                    else next.delete(txnId);
+                                    return next;
+                                  });
+                                }}
+                                onClick={(ev) => ev.stopPropagation()}
+                                aria-label="Select bank transaction"
+                              />
+                            ) : null}
+                          </td>
+
                           <td className={`${tdClass} text-center${deEmphasis}`}>{dateStr}</td>
                           <td className={`${tdClass} font-medium truncate${deEmphasis}`}>
                             <div className="flex items-center gap-2 min-w-0">
@@ -2367,6 +2607,17 @@ export default function ReconcilePageClient() {
 
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">
+                              {pendingById[String(t.id)] ? <TinySpinner /> : null}
+
+                              {bulkCreateResultByBankTxnId[String(t.id)] ? (
+                                <span
+                                  className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-700"
+                                  title={String(bulkCreateResultByBankTxnId[String(t.id)]?.error ?? "")}
+                                >
+                                  {String(bulkCreateResultByBankTxnId[String(t.id)]?.status ?? "")}
+                                </span>
+                              ) : null}
+
                               {bankTab === "matched" ? (
                                 <button
                                   type="button"
@@ -2468,7 +2719,7 @@ export default function ReconcilePageClient() {
 
                                     setCreateEntryErr(null);
                                     setCreateEntryBankTxnId(bankId);
-                                    setCreateEntryAutoMatch(true);
+                                    setCreateEntryAutoMatch(false);
 
                                     // Prefill overrides
                                     const defaultDesc = (t?.name ?? "").toString().trim() || "—";
@@ -3136,6 +3387,12 @@ export default function ReconcilePageClient() {
 
                   setMatchBusy(true);
                   setMatchError(null);
+                  clearMutErr();
+
+                  // Pending UI only (no logic change)
+                  const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
+                  for (const id of pendingIds) markPending(id);
+
                   try {
                     const items = Array.from(matchSelectedEntryIds).map((entryId) => {
                       const entry = allEntriesSorted.find((x: any) => x.id === entryId);
@@ -3177,11 +3434,18 @@ export default function ReconcilePageClient() {
                     await refreshBankAndMatches({ preserveOnEmpty: true });
                     await entriesQ.refetch?.();
 
+                    clearMutErr();
                     setOpenMatch(false);
 
                   } catch (e: any) {
-                    setMatchError(e?.message ?? "Match failed");
+                    const r = applyMutationError(e, "Can’t match transactions");
+                    if (!r.isClosed) setMatchError(r.msg);
+                    else setMatchError(null);
                   } finally {
+                    // Pending UI only
+                    const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
+                    for (const id of pendingIds) clearPending(id);
+
                     setMatchBusy(false);
                   }
                 }}
@@ -3248,6 +3512,7 @@ export default function ReconcilePageClient() {
 
                   setAdjustBusy(true);
                   setAdjustError(null);
+                  clearMutErr();
                   try {
                     await markEntryAdjustment({
                       businessId: selectedBusinessId,
@@ -3264,9 +3529,12 @@ export default function ReconcilePageClient() {
 
                     refreshAllDebounced();
 
+                    clearMutErr();
                     setOpenAdjust(false);
                   } catch (e: any) {
-                    setAdjustError(e?.message ?? "Failed to mark adjustment");
+                    const r = applyMutationError(e, "Can’t update adjustment");
+                    if (!r.isClosed) setAdjustError(r.msg);
+                    else setAdjustError(null);
                   } finally {
                     setAdjustBusy(false);
                   }
@@ -3400,7 +3668,7 @@ export default function ReconcilePageClient() {
                           if (bankSign !== entrySign) return false;
 
                           const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
-                          return remaining >= entryAbs;
+                          return remaining > 0n;
                         })
                         .slice(0, 200)
                         .map((t: any) => {
@@ -3499,6 +3767,12 @@ export default function ReconcilePageClient() {
 
                   setEntryMatchBusy(true);
                   setEntryMatchError(null);
+                  clearMutErr();
+
+                  // Pending UI only (no logic change)
+                  const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
+                  for (const id of pendingIds) markPending(id);
+
                   try {
                     const payloadItems = [
                       {
@@ -3523,10 +3797,17 @@ export default function ReconcilePageClient() {
                     await refreshBankAndMatches({ preserveOnEmpty: true });
                     await entriesQ.refetch?.();
 
+                    clearMutErr();
                     setOpenEntryMatch(false);
                   } catch (e: any) {
-                    setEntryMatchError(e?.message ?? "Combine match failed");
+                    const r = applyMutationError(e, "Can’t create match");
+                    if (!r.isClosed) setEntryMatchError(r.msg);
+                    else setEntryMatchError(null);
                   } finally {
+                    // Pending UI only
+                    const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
+                    for (const id of pendingIds) clearPending(id);
+
                     setEntryMatchBusy(false);
                   }
                 }}
@@ -3614,12 +3895,12 @@ export default function ReconcilePageClient() {
               <div className="mt-2 rounded-xl border border-slate-200 bg-white overflow-hidden">
                 <table className="w-full table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 190 }} />   {/* WHEN */}
-                    <col style={{ width: 120 }} />   {/* ACTION */}
-                    <col style={{ width: 320 }} />   {/* BANK TRANSACTION */}
-                    <col style={{ width: 260 }} />   {/* ENTRY */}
-                    <col style={{ width: 130 }} />   {/* AMOUNT */}
-                    <col style={{ width: 170 }} />   {/* BY */}
+                    <col style={{ width: 190 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 320 }} />
+                    <col style={{ width: 260 }} />
+                    <col style={{ width: 130 }} />
+                    <col style={{ width: 170 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -3777,6 +4058,12 @@ export default function ReconcilePageClient() {
 
                     setRevertBusy(true);
                     setRevertError(null);
+                    clearMutErr();
+
+                    // Pending UI only (no logic change)
+                    if (bankTxnId) markPending(String(bankTxnId));
+                    if (groupId) markPending(String(groupId));
+
                     try {
                       if (!groupId) throw new Error("Match group id unavailable");
 
@@ -3791,11 +4078,18 @@ export default function ReconcilePageClient() {
                       await entriesQ.refetch?.();
 
                       // Close detail after success (clean, consistent)
+                      clearMutErr();
                       setOpenReconAuditDetail(false);
                       setSelectedReconAudit(null);
                     } catch (e: any) {
-                      setRevertError(e?.message ?? "Failed to revert bank match");
+                      const r = applyMutationError(e, "Can’t revert match");
+                      if (!r.isClosed) setRevertError(r.msg);
+                      else setRevertError(null);
                     } finally {
+                      // Pending UI only
+                      if (bankTxnId) clearPending(String(bankTxnId));
+                      if (groupId) clearPending(String(groupId));
+
                       setRevertBusy(false);
                     }
                   }}

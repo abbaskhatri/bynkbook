@@ -149,6 +149,40 @@ export default function CategoryReviewPageClient() {
   const bannerMsgWithEntries =
     bannerMsg || appErrorMessageOrNull(entriesQ.error) || null;
 
+  // -------------------------
+  // Mutation banner (single region; CLOSED_PERIOD consistency)
+  // -------------------------
+  const [mutErr, setMutErr] = useState<string | null>(null);
+  const [mutErrTitle, setMutErrTitle] = useState<string>("");
+
+  function clearMutErr() {
+    setMutErr(null);
+    setMutErrTitle("");
+  }
+
+  function applyMutationError(e: any, fallbackTitle: string) {
+    const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Something went wrong. Try again.";
+
+    const code =
+      e?.code ||
+      e?.response?.data?.code ||
+      e?.data?.code;
+
+    const isClosed =
+      code === "CLOSED_PERIOD" ||
+      (typeof msg === "string" && msg.includes("This period is closed"));
+
+    if (isClosed) {
+      setMutErrTitle("Period closed");
+      setMutErr("This period is closed. Reopen period to modify.");
+      return { msg: "This period is closed. Reopen period to modify.", isClosed: true };
+    }
+
+    setMutErrTitle(fallbackTitle);
+    setMutErr(String(msg));
+    return { msg: String(msg), isClosed: false };
+  }
+
   // Categories list
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   useEffect(() => {
@@ -317,7 +351,12 @@ export default function CategoryReviewPageClient() {
           qc.setQueryData(entriesKey, next);
         }
       }
-      setFailedById((m) => ({ ...m, [entryId]: e?.message ?? "Update failed" }));
+
+      const r = applyMutationError(e, "Can’t apply category");
+      if (!r.isClosed) {
+        setFailedById((m) => ({ ...m, [entryId]: r.msg }));
+      }
+
       throw e;
     } finally {
       setPendingIds((m) => {
@@ -330,6 +369,8 @@ export default function CategoryReviewPageClient() {
 
   async function applySelectedConfirmed() {
     if (bulkCategoryId === "__NONE__") return;
+
+    clearMutErr();
 
     const categoryId = bulkCategoryId === "__UNCATEGORIZED__" ? null : bulkCategoryId;
 
@@ -350,6 +391,7 @@ export default function CategoryReviewPageClient() {
 
     const remaining = ids.filter((id) => !successes.has(id)); // failures stay selected
     if (remaining.length === 0) {
+      clearMutErr();
       clearSelection();
       return;
     }
@@ -368,11 +410,7 @@ export default function CategoryReviewPageClient() {
             icon={<Tags className="h-4 w-4" />}
             title="Category Review"
             afterTitle={capsule}
-            right={
-              <Button variant="outline" disabled className="h-7 px-2 text-xs opacity-50 cursor-not-allowed" title="Coming soon">
-                Bulk confirm (Coming soon)
-              </Button>
-            }
+            right={null}
           />
         </div>
 
@@ -416,10 +454,6 @@ export default function CategoryReviewPageClient() {
                     </label>
                   </div>
                 </div>
-
-                <div className="ml-2 text-[11px] text-slate-500 self-end">
-                  Date basis: entry date • Showing up to {entriesLimit} entries
-                </div>
               </>
             }
             right={
@@ -430,9 +464,20 @@ export default function CategoryReviewPageClient() {
           />
         </div>
 
-        <div className="px-3 pb-2">
-          <InlineBanner title="Can’t load category review" message={bannerMsgWithEntries} onRetry={() => router.refresh()} />
-        </div>
+        {(bannerMsgWithEntries || mutErr) ? (
+          <div className="px-3 pb-2">
+            {bannerMsgWithEntries ? (
+              <InlineBanner title="Can’t load category review" message={bannerMsgWithEntries} onRetry={() => router.refresh()} />
+            ) : (
+              <InlineBanner
+                title={mutErrTitle || "Can’t update category review"}
+                message={mutErr}
+                actionLabel={mutErrTitle === "Period closed" ? "Go to Close Periods" : null}
+                actionHref={mutErrTitle === "Period closed" ? "/closed-periods?focus=reopen" : null}
+              />
+            )}
+          </div>
+        ) : null}
 
         {!selectedBusinessId && !businessesQ.isLoading ? (
           <div className="px-3 pb-2">
@@ -492,8 +537,6 @@ export default function CategoryReviewPageClient() {
                       <col />
                       <col style={{ width: 160 }} />
                       <col style={{ width: 220 }} />
-                      <col style={{ width: 220 }} />
-                      <col style={{ width: 120 }} />
                     </>
                   }
                   header={
@@ -511,9 +554,7 @@ export default function CategoryReviewPageClient() {
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Payee</th>
                       <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
-                      <th className="px-3 text-center text-[11px] font-semibold text-slate-600">AI Suggestion</th>
                       <th className="px-3 text-center text-[11px] font-semibold text-slate-600">Category</th>
-                      <th className="px-3 text-center text-[11px] font-semibold text-slate-600">Apply</th>
                     </tr>
                   }
                   addRow={null}
@@ -554,12 +595,6 @@ export default function CategoryReviewPageClient() {
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>
 
-                            <td className="px-3 text-center">
-                              <Button variant="outline" disabled className="h-6 px-3 text-xs opacity-50 cursor-not-allowed" title="Coming soon">
-                                Coming soon
-                              </Button>
-                            </td>
-
                             <td className="px-3">
                               <div className="flex items-center justify-center gap-2">
                                 <div className="h-6 w-[180px] rounded-md border border-slate-200 bg-slate-50 px-2 text-xs flex items-center">
@@ -567,12 +602,6 @@ export default function CategoryReviewPageClient() {
                                 </div>
                                 {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
                               </div>
-                            </td>
-
-                            <td className="px-3 text-center">
-                              <Button className="h-6 px-4 text-xs min-w-[72px]" disabled title="Use bulk apply below">
-                                Apply
-                              </Button>
                             </td>
                           </tr>
                         );

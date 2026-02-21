@@ -178,13 +178,154 @@ export async function handler(event: any) {
     });
   }
 
+  // -------------------------
+  // Helpers (string-based; UTC-safe)
+  // -------------------------
+  function todayYmd() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function isLeapYear(y: number) {
+    return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  }
+
+  function monthEndYmd(month: string) {
+    // month: YYYY-MM
+    const y = parseInt(month.slice(0, 4), 10);
+    const m = parseInt(month.slice(5, 7), 10);
+    const days = [31, isLeapYear(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    const d = days[Math.max(1, Math.min(12, m)) - 1] ?? 30;
+    return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  function addMonth(month: string, delta: number) {
+    let y = parseInt(month.slice(0, 4), 10);
+    let m = parseInt(month.slice(5, 7), 10);
+    m += delta;
+    while (m > 12) {
+      m -= 12;
+      y += 1;
+    }
+    while (m < 1) {
+      m += 12;
+      y -= 1;
+    }
+    return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`;
+  }
+
+  function monthsBetweenMonth(a: string, b: string) {
+    // inclusive, a <= b
+    const ay = parseInt(a.slice(0, 4), 10);
+    const am = parseInt(a.slice(5, 7), 10);
+    const by = parseInt(b.slice(0, 4), 10);
+    const bm = parseInt(b.slice(5, 7), 10);
+
+    const out: string[] = [];
+    let y = ay, m = am;
+    while (y < by || (y === by && m <= bm)) {
+      out.push(`${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}`);
+      m += 1;
+      if (m === 13) { m = 1; y += 1; }
+    }
+    return out;
+  }
+
+  // -------------------------
+  // POST close-through (strict “close through date”, no client loops)
+  // -------------------------
+  if (method === "POST" && path.endsWith("/closed-periods/close-through")) {
+    if (!isOwnerOrAdmin(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const body = readBody(event);
+    const through_date = String(body?.through_date ?? "").trim(); // YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(through_date)) {
+      return json(400, { ok: false, error: "through_date is required (YYYY-MM-DD)" });
+    }
+
+    const targetMonth = through_date.slice(0, 7);
+    const end = monthEndYmd(targetMonth);
+
+    // Prevent closing beyond today (month-end must be <= today)
+    const server_today = todayYmd();
+    if (end > server_today) {
+      return json(409, {
+        ok: false,
+        code: "CANNOT_CLOSE_BEYOND_TODAY",
+        error: "Cannot close beyond today.",
+        server_today,                 // YYYY-MM-DD (server basis)
+        requested_through_date: through_date,
+        requested_month_end: end,     // YYYY-MM-DD (computed month-end for the through month)
+      });
+    }
+
+    // Determine current max closed month
+    const existing = await prisma.closedPeriod.findMany({
+      where: { business_id: biz },
+      orderBy: [{ month: "desc" }],
+      select: { month: true },
+      take: 1,
+    });
+    const currentMax = existing?.[0]?.month ? String(existing[0].month) : null;
+
+    // Close from (currentMax+1) through targetMonth; if target already closed, no-op
+    const startMonth = currentMax ? addMonth(String(currentMax), 1) : targetMonth;
+    const monthsToClose = startMonth <= targetMonth ? monthsBetweenMonth(startMonth, targetMonth) : [];
+
+    if (monthsToClose.length) {
+      await prisma.$transaction(async (tx: any) => {
+        for (const m of monthsToClose) {
+          const row = await tx.closedPeriod.findFirst({
+            where: { business_id: biz, month: m },
+            select: { month: true },
+          });
+
+          if (!row) {
+            await tx.closedPeriod.create({
+              data: { business_id: biz, month: m, closed_by_user_id: sub },
+              select: { month: true },
+            });
+          }
+        }
+
+        await logActivity(tx, {
+          businessId: biz,
+          actorUserId: sub,
+          eventType: "CLOSED_PERIOD_CLOSED",
+          payloadJson: { through_date, through_month: targetMonth, months_closed: monthsToClose },
+          scopeAccountId: null,
+        });
+      });
+    }
+
+    // Return current periods + derived closed_through_date
+    const periods = await prisma.closedPeriod.findMany({
+      where: { business_id: biz },
+      orderBy: [{ month: "desc" }],
+      select: { month: true, closed_at: true, closed_by_user_id: true },
+    });
+    const closed_through_month = periods?.[0]?.month ? String(periods[0].month) : null;
+    const closed_through_date = closed_through_month ? monthEndYmd(closed_through_month) : null;
+
+    return json(200, {
+      ok: true,
+      through_date,
+      closed_through_month,
+      closed_through_date,
+      periods,
+    });
+  }
+
   if (method === "GET") {
     const rows = await prisma.closedPeriod.findMany({
       where: { business_id: biz },
       orderBy: [{ month: "desc" }],
       select: { month: true, closed_at: true, closed_by_user_id: true },
     });
-    return json(200, { ok: true, periods: rows });
+
+    const closed_through_month = rows?.[0]?.month ? String(rows[0].month) : null;
+    const closed_through_date = closed_through_month ? monthEndYmd(closed_through_month) : null;
+
+    return json(200, { ok: true, periods: rows, closed_through_month, closed_through_date });
   }
 
   if (method === "POST") {

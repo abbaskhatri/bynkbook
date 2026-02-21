@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser, fetchAuthSession } from "aws-amplify/auth";
+import { fetchAuthSession } from "aws-amplify/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UploadPanel } from "@/components/uploads/UploadPanel";
 
@@ -829,18 +829,7 @@ export default function LedgerPageClient() {
     return () => window.removeEventListener("bynk:ledger-open-apply", handler as any);
   }, []);
 
-  // Auth
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
+  // Auth is handled by AppShell
 
   // Business/account
   const businessesQ = useBusinesses();
@@ -1553,7 +1542,9 @@ export default function LedgerPageClient() {
     },
     onError: (e: any, _ids: any, ctx: any) => {
       if (ctx?.prev) qc.setQueryData(entriesKey, ctx.prev);
-      setErr(e?.message || "Bulk delete failed");
+      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Bulk delete failed";
+      setMutErr(msg);
+      setMutErrIsClosed(isClosedPeriodError(e, msg));
     },
     onSuccess: (res) => {
       if (res.failed > 0) setBulkMsg(`Deleted with ${res.failed} failures`);
@@ -1579,6 +1570,42 @@ export default function LedgerPageClient() {
 
   const [draftAmount, setDraftAmount] = useState("0.00");
   const [err, setErr] = useState<string | null>(null);
+
+  // Mutation-level errors (CLOSED_PERIOD etc.)
+  const CLOSED_PERIOD_MSG = "This period is closed. Reopen period to modify.";
+
+  const [mutErr, setMutErr] = useState<string | null>(null);
+  const [mutErrIsClosed, setMutErrIsClosed] = useState(false);
+
+  // Ledger row-level pending state (memo/category optimistic saves)
+  const [pendingById, setPendingById] = useState<Record<string, boolean>>({});
+
+  function markRowPending(entryId: string) {
+    if (!entryId) return;
+    setPendingById((m) => ({ ...m, [entryId]: true }));
+  }
+
+  function clearRowPending(entryId: string) {
+    if (!entryId) return;
+    setPendingById((m) => {
+      if (!m[entryId]) return m;
+      const next = { ...m };
+      delete next[entryId];
+      return next;
+    });
+  }
+
+  function isClosedPeriodError(e: any, msg: string | null): boolean {
+    if (msg === CLOSED_PERIOD_MSG) return true;
+    const code =
+      String(e?.code ?? e?.payload?.code ?? e?.data?.code ?? e?.response?.data?.code ?? "").toUpperCase();
+    if (code === "CLOSED_PERIOD") return true;
+
+    const status = Number(e?.status ?? e?.statusCode ?? e?.response?.status ?? e?.payload?.status ?? NaN);
+    if (status === 409 && msg === CLOSED_PERIOD_MSG) return true;
+
+    return false;
+  }
 
   const [vendorsForBusiness, setVendorsForBusiness] = useState<any[]>([]);
 
@@ -1733,9 +1760,8 @@ export default function LedgerPageClient() {
   const amountInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!authReady) return;
     requestAnimationFrame(() => payeeInputRef.current?.focus());
-  }, [authReady]);
+  }, []);
 
   const [typeOpen, setTypeOpen] = useState(false);
   const [methodOpen, setMethodOpen] = useState(false);
@@ -1927,9 +1953,13 @@ export default function LedgerPageClient() {
       perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
       if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-      setErr(e?.message || "Create failed");
+      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Create failed";
+      setMutErr(msg);
+      setMutErrIsClosed(isClosedPeriodError(e, msg));
     },
     onSuccess: async (_data: any, vars: any, ctx: any) => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
       // Track last created entry so we can show a post-save suggestion pill
       const createdId =
         (_data?.entry?.id as string | undefined) ||
@@ -1987,6 +2017,16 @@ export default function LedgerPageClient() {
       perfLog(`${mark} click→onMutate start`);
 
       setErr(null);
+      setMutErr(null);
+      setMutErrIsClosed(false);
+
+      const u = p?.updates ?? {};
+      const affectsMemo =
+        Object.prototype.hasOwnProperty.call(u, "memo") && u.memo !== undefined;
+      const affectsCategory =
+        Object.prototype.hasOwnProperty.call(u, "category_id") && u.category_id !== undefined;
+      const shouldShowPending = affectsMemo || affectsCategory;
+
       void qc.cancelQueries({ queryKey: entriesKey });
 
       const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
@@ -2000,8 +2040,8 @@ export default function LedgerPageClient() {
       const prevRow = previous[idx];
       const nextRow: Entry = {
         ...prevRow,
-        ...p.updates,
-        memo: p.updates.memo ?? prevRow.memo,
+        ...u,
+        memo: u.memo ?? prevRow.memo,
         updated_at: new Date().toISOString(),
       };
 
@@ -2011,6 +2051,10 @@ export default function LedgerPageClient() {
       // NOTE: Intentionally avoid sorting here to reduce onMutate CPU spikes.
       // Display ordering is handled by existing memoized sorting logic.
       qc.setQueryData(entriesKey, next);
+
+      if (shouldShowPending && p?.entryId) {
+        markRowPending(p.entryId);
+      }
 
       const t1 = performance.now();
       perfLog(`${mark} onMutate end (optimistic applied) in ${(t1 - t0).toFixed(1)}ms`);
@@ -2025,9 +2069,19 @@ export default function LedgerPageClient() {
       perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
       if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-      setErr("Update failed");
+
+      if (vars?.entryId) clearRowPending(vars.entryId);
+
+      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Update failed";
+      setMutErr(msg);
+      setMutErrIsClosed(isClosedPeriodError(e, msg));
     },
     onSuccess: async (_data, vars: any, ctx: any) => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
+
+      if (vars?.entryId) clearRowPending(vars.entryId);
+
       const mark = ctx?.__perf?.mark || `[PERF][update][${vars?.entryId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
       const tOk = performance.now();
@@ -2109,9 +2163,13 @@ export default function LedgerPageClient() {
         setErr(null);
         return;
       }
-      setErr("Delete failed");
+      const msg3 = appErrorMessageOrNull(e) ?? e?.message ?? "Delete failed";
+      setMutErr(msg3);
+      setMutErrIsClosed(isClosedPeriodError(e, msg3));
     },
     onSuccess: async (_data: any, p: any, ctx: any) => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
       const id = p?.entryId;
       setDeletingId(null);
       const mark = ctx?.__perf?.mark || `[PERF][delete][${id || "noid"}]`;
@@ -2183,9 +2241,13 @@ export default function LedgerPageClient() {
       perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
       if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-      setErr("Restore failed");
+      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Restore failed";
+      setMutErr(msg);
+      setMutErrIsClosed(isClosedPeriodError(e, msg));
     },
     onSuccess: async (_data: any, p: any, ctx: any) => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
       const entryId = p?.entryId;
       if (entryId) {
         setLinkedVendorByEntryId((m) => {
@@ -2250,9 +2312,14 @@ export default function LedgerPageClient() {
       perfLog(`${mark} server error after ${(tErr - t0).toFixed(1)}ms`, e);
 
       if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
-      setErr("Hard delete failed");
+      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Hard delete failed";
+      setMutErr(msg);
+      setMutErrIsClosed(isClosedPeriodError(e, msg));
     },
     onSuccess: async (_data: any, entryId: any, ctx: any) => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
+
       const mark = ctx?.__perf?.mark || `[PERF][hardDelete][${entryId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
       const tOk = performance.now();
@@ -3265,6 +3332,12 @@ export default function LedgerPageClient() {
                   </>
                 ) : null}
 
+                {pendingById[r.id] ? (
+                  <span className="inline-flex items-center" title="Saving…">
+                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                  </span>
+                ) : null}
+
                 {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
               </div>
             )}
@@ -3605,7 +3678,9 @@ export default function LedgerPageClient() {
 
                                   scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "unapplyDeletePayment");
                                 } catch (e: any) {
-                                  setErr(e?.message ?? "Unapply+Delete failed");
+                                  const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+Delete failed";
+                                  setMutErr(msg);
+                                  setMutErrIsClosed(isClosedPeriodError(e, msg));
                                 }
                               }}
                               title="Explicit: unapply all allocations then delete payment"
@@ -3669,7 +3744,7 @@ export default function LedgerPageClient() {
     });
   }, [pageRows, menuOpenId, editingId, editDraft, selectedIds, editedIds, editTypeOpen, editMethodOpen, showDeleted]);
 
-  if (!authReady) return null;
+  // Auth handled by AppShell
 
   const accountCapsuleEl = (
     <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
@@ -3747,8 +3822,25 @@ export default function LedgerPageClient() {
         <FilterBar left={filterLeft} right={filterRight} />
       </div>
 
-      <div className="px-3">
+      <div className="px-3 space-y-2">
         <InlineBanner title="Can’t load ledger" message={bannerMsg} onRetry={() => router.refresh()} />
+
+        <InlineBanner
+          title={mutErrIsClosed ? "Period closed" : "Can’t save changes"}
+          message={mutErr}
+          onRetry={() => {
+            setMutErr(null);
+            setMutErrIsClosed(false);
+          }}
+          actionLabel={mutErrIsClosed ? "Go to Close Periods" : null}
+          actionHref={
+            mutErrIsClosed
+              ? selectedBusinessId
+                ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
+                : "/closed-periods?focus=reopen"
+              : null
+          }
+        />
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
@@ -3776,64 +3868,64 @@ export default function LedgerPageClient() {
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
         <LedgerTableShell
 
-        colgroup={cols}
-        header={headerRow}
-        addRow={addRow}
-        body={bodyRows}
-        footer={
-          <tr>
-            <td colSpan={13} className="p-0 border-t border-slate-200 bg-slate-50">
-              <TotalsFooter
-                rowsPerPage={rowsPerPage}
-                setRowsPerPage={setRowsPerPage}
-                page={page}
-                setPage={setPage}
-                totalPages={totalPages}
-                canPrev={canPrev}
-                canNext={canNext}
-                incomeText={
-                  entriesQ.isLoading ? (
-                    "…"
-                  ) : (
-                    <span className="text-emerald-700 font-semibold">
-                      {formatUsdFromCents(footerTotals.income)}
-                    </span>
-                  )
-                }
-                expenseText={
-                  entriesQ.isLoading ? (
-                    "…"
-                  ) : (
-                    <span className={footerTotals.expense < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
-                      {formatUsdFromCents(footerTotals.expense)}
-                    </span>
-                  )
-                }
-                netText={
-                  entriesQ.isLoading ? (
-                    "…"
-                  ) : (
-                    <span className={footerTotals.net < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
-                      {formatUsdFromCents(footerTotals.net)}
-                    </span>
-                  )
-                }
-                balanceText={
-                  entriesQ.isLoading ? (
-                    "…"
-                  ) : footerTotals.balanceStr === "—" ? (
-                    "—"
-                  ) : (
-                    <span className={footerTotals.balanceCents < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
-                      {footerTotals.balanceStr}
-                    </span>
-                  )
-                }
-              />
-            </td>
-          </tr>
-        }
-      />
+          colgroup={cols}
+          header={headerRow}
+          addRow={addRow}
+          body={bodyRows}
+          footer={
+            <tr>
+              <td colSpan={13} className="p-0 border-t border-slate-200 bg-slate-50">
+                <TotalsFooter
+                  rowsPerPage={rowsPerPage}
+                  setRowsPerPage={setRowsPerPage}
+                  page={page}
+                  setPage={setPage}
+                  totalPages={totalPages}
+                  canPrev={canPrev}
+                  canNext={canNext}
+                  incomeText={
+                    entriesQ.isLoading ? (
+                      "…"
+                    ) : (
+                      <span className="text-emerald-700 font-semibold">
+                        {formatUsdFromCents(footerTotals.income)}
+                      </span>
+                    )
+                  }
+                  expenseText={
+                    entriesQ.isLoading ? (
+                      "…"
+                    ) : (
+                      <span className={footerTotals.expense < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
+                        {formatUsdFromCents(footerTotals.expense)}
+                      </span>
+                    )
+                  }
+                  netText={
+                    entriesQ.isLoading ? (
+                      "…"
+                    ) : (
+                      <span className={footerTotals.net < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                        {formatUsdFromCents(footerTotals.net)}
+                      </span>
+                    )
+                  }
+                  balanceText={
+                    entriesQ.isLoading ? (
+                      "…"
+                    ) : footerTotals.balanceStr === "—" ? (
+                      "—"
+                    ) : (
+                      <span className={footerTotals.balanceCents < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                        {footerTotals.balanceStr}
+                      </span>
+                    )
+                  }
+                />
+              </td>
+            </tr>
+          }
+        />
       ) : null}
 
       <FixIssueDialog
@@ -3905,10 +3997,10 @@ export default function LedgerPageClient() {
 
                   setPaymentDeleteDialog(null);
                 } catch (e: any) {
-                  const msg = String(e?.message ?? "");
+                  const rawMsg = String(e?.message ?? "");
 
                   // Idempotent: if already deleted, treat as success
-                  if (msg.includes("404") || msg.includes("Entry not found")) {
+                  if (rawMsg.includes("404") || rawMsg.includes("Entry not found")) {
                     markEntryDeletedInCache(selectedBusinessId, selectedAccountId, paymentDeleteDialog.id);
                     setLinkedVendorByEntryId((m) => {
                       const next = { ...m };
@@ -3919,7 +4011,9 @@ export default function LedgerPageClient() {
                     return;
                   }
 
-                  setErr(e?.message ?? "Unapply+Delete failed");
+                  const msg2 = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+Delete failed";
+                  setMutErr(msg2);
+                  setMutErrIsClosed(isClosedPeriodError(e, msg2));
                 }
               }}
               title="Explicit: unapply all allocations then delete payment"
@@ -4065,7 +4159,9 @@ export default function LedgerPageClient() {
                     scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "applyPayment");
                     setLedgerApplyOpen(false);
                   } catch (e: any) {
-                    setErr(e?.message ?? "Apply failed");
+                    const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Apply failed";
+                    setMutErr(msg);
+                    setMutErrIsClosed(isClosedPeriodError(e, msg));
                   }
                 }}
               >

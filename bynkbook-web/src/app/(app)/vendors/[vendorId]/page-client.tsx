@@ -9,7 +9,9 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2 } from "lucide-react";
+import { Building2, Loader2 } from "lucide-react";
+
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -164,8 +166,11 @@ export default function VendorDetailPageClient() {
 
   const canWrite = ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(myRole);
 
+  const CLOSED_PERIOD_MSG = "This period is closed. Reopen period to modify.";
+
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [errIsClosed, setErrIsClosed] = useState(false);
   const [vendor, setVendor] = useState<any>(null);
 
   const [bills, setBills] = useState<any[]>([]);
@@ -176,6 +181,49 @@ export default function VendorDetailPageClient() {
   const [apTab, setApTab] = useState<"bills" | "payments">("bills");
   const [vendorPayments, setVendorPayments] = useState<any[]>([]);
   const [paymentsErr, setPaymentsErr] = useState<string | null>(null);
+  const [paymentsErrIsClosed, setPaymentsErrIsClosed] = useState(false);
+
+  // Row-level pending state (never feels stuck)
+  const [pendingBillById, setPendingBillById] = useState<Record<string, boolean>>({});
+  const [pendingPaymentByEntryId, setPendingPaymentByEntryId] = useState<Record<string, boolean>>({});
+  const [applyActionLoading, setApplyActionLoading] = useState(false);
+
+  function isClosedPeriodError(e: any, msg: string | null): boolean {
+    if (msg === CLOSED_PERIOD_MSG) return true;
+    const code = String(e?.code ?? e?.payload?.code ?? e?.data?.code ?? e?.response?.data?.code ?? "").toUpperCase();
+    if (code === "CLOSED_PERIOD") return true;
+    const status = Number(e?.status ?? e?.statusCode ?? e?.response?.status ?? e?.payload?.status ?? NaN);
+    if (status === 409 && msg === CLOSED_PERIOD_MSG) return true;
+    return false;
+  }
+
+  function markBillPending(billId: string) {
+    if (!billId) return;
+    setPendingBillById((m) => ({ ...m, [billId]: true }));
+  }
+  function clearBillPending(billId: string) {
+    if (!billId) return;
+    setPendingBillById((m) => {
+      if (!m[billId]) return m;
+      const next = { ...m };
+      delete next[billId];
+      return next;
+    });
+  }
+
+  function markPaymentPending(entryId: string) {
+    if (!entryId) return;
+    setPendingPaymentByEntryId((m) => ({ ...m, [entryId]: true }));
+  }
+  function clearPaymentPending(entryId: string) {
+    if (!entryId) return;
+    setPendingPaymentByEntryId((m) => {
+      if (!m[entryId]) return m;
+      const next = { ...m };
+      delete next[entryId];
+      return next;
+    });
+  }
 
   // Vendor credit (derived from payments-summary totals.total_unapplied_cents)
   const [vendorCreditCents, setVendorCreditCents] = useState<bigint>(0n);
@@ -560,7 +608,25 @@ export default function VendorDetailPageClient() {
                 <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
                   Refresh
                 </Button>
-                {err ? <div className="text-xs text-red-600 ml-1">{err}</div> : null}
+
+                {err ? (
+                  <div className="text-xs text-red-600 ml-1">
+                    <div>{err}</div>
+
+                    {errIsClosed ? (
+                      <a
+                        className="mt-1 inline-flex text-[11px] underline text-slate-700 hover:text-slate-900"
+                        href={
+                          businessId
+                            ? `/closed-periods?businessId=${encodeURIComponent(businessId)}&focus=reopen`
+                            : "/closed-periods?focus=reopen"
+                        }
+                      >
+                        Go to Close Periods
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             }
           />
@@ -778,6 +844,12 @@ export default function VendorDetailPageClient() {
                             </td>
                             <td className="px-3 text-right">
                               <div className="inline-flex items-center gap-2">
+                                {pendingBillById[String(b.id)] ? (
+                                  <span className="inline-flex items-center" title="Saving…">
+                                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                  </span>
+                                ) : null}
+
                                 <button
                                   type="button"
                                   className="text-xs text-slate-700 hover:underline disabled:opacity-50"
@@ -793,8 +865,41 @@ export default function VendorDetailPageClient() {
                                 <button
                                   type="button"
                                   className="text-xs text-red-700 hover:underline disabled:opacity-50"
-                                  disabled={!canWrite || isVoid}
-                                  onClick={() => voidBill({ businessId: businessId!, vendorId, billId: String(b.id) })}
+                                  disabled={!canWrite || isVoid || pendingBillById[String(b.id)]}
+                                  onClick={async () => {
+                                    if (!businessId) return;
+
+                                    setErr(null);
+                                    setErrIsClosed(false);
+
+                                    const billId = String(b.id);
+                                    const prevBill = b;
+
+                                    markBillPending(billId);
+
+                                    // optimistic: mark VOID immediately (safe UI feedback)
+                                    setBills((prev) =>
+                                      prev.map((x: any) => (String(x.id) === billId ? { ...x, status: "VOID" } : x))
+                                    );
+
+                                    try {
+                                      await voidBill({ businessId, vendorId, billId });
+
+                                      const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
+                                      setApSummary(sumRes?.summary ?? null);
+                                    } catch (e: any) {
+                                      // rollback ONLY this row (snapshot)
+                                      setBills((prev) =>
+                                        prev.map((x: any) => (String(x.id) === billId ? { ...x, ...prevBill } : x))
+                                      );
+
+                                      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Void failed";
+                                      setErr(msg);
+                                      setErrIsClosed(isClosedPeriodError(e, msg));
+                                    } finally {
+                                      clearBillPending(billId);
+                                    }
+                                  }}
                                   title="Cannot void if applied—must unapply first"
                                 >
                                   Void
@@ -831,7 +936,20 @@ export default function VendorDetailPageClient() {
                     {paymentsErr ? (
                       <tr>
                         <td className="px-3 py-4 text-sm text-red-700" colSpan={4}>
-                          {paymentsErr}
+                          <div>{paymentsErr}</div>
+
+                          {paymentsErrIsClosed ? (
+                            <a
+                              className="mt-1 inline-flex text-[11px] underline text-slate-700 hover:text-slate-900"
+                              href={
+                                businessId
+                                  ? `/closed-periods?businessId=${encodeURIComponent(businessId)}&focus=reopen`
+                                  : "/closed-periods?focus=reopen"
+                              }
+                            >
+                              Go to Close Periods
+                            </a>
+                          ) : null}
                         </td>
                       </tr>
                     ) : vendorPayments.length === 0 ? (
@@ -841,11 +959,20 @@ export default function VendorDetailPageClient() {
                         </td>
                       </tr>
                     ) : (
-                      vendorPayments.map((p: any) => (
-                        <tr key={String(p.entry_id ?? p.id ?? "")} className="h-9 border-b border-slate-100 hover:bg-slate-50">
-                          <td className="px-3 text-sm tabular-nums">{String(p.date ?? "").slice(0, 10)}</td>
-                          <td className="px-3 text-sm">{p.payee}</td>
-                          <td className="px-3 text-xs">
+                      vendorPayments.map((p: any) => {
+                        const entryId = String(p.entry_id ?? p.id ?? "");
+                        const isPending = !!pendingPaymentByEntryId[entryId];
+
+                        return (
+                          <tr key={entryId} className="h-9 border-b border-slate-100 hover:bg-slate-50">
+                            <td className="px-3 text-sm tabular-nums">{String(p.date ?? "").slice(0, 10)}</td>
+                            <td className="px-3 text-sm">
+                              <span className="inline-flex items-center gap-2">
+                                {isPending ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
+                                <span>{p.payee}</span>
+                              </span>
+                            </td>
+                            <td className="px-3 text-xs">
                             {Array.isArray(p.applied_bills) && p.applied_bills.length ? (
                               <div className="flex flex-wrap gap-1.5">
                                 {p.applied_bills.slice(0, 6).map((x: any) => (
@@ -893,7 +1020,8 @@ export default function VendorDetailPageClient() {
                             </div>
                           </td>
                         </tr>
-                      ))
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -1017,6 +1145,7 @@ export default function VendorDetailPageClient() {
                   if (!businessId || !vendorId) return;
 
                   setErr(null);
+                  setErrIsClosed(false);
 
                   const amtNum = Number(String(billAmount).trim());
                   if (!Number.isFinite(amtNum) || amtNum <= 0) {
@@ -1025,14 +1154,37 @@ export default function VendorDetailPageClient() {
                   }
                   const amount_cents = Math.round(amtNum * 100);
 
+                  // EDIT: optimistic patch the single bill row immediately (safe) + row-snapshot rollback on error
+                  const editingId = billEditId ? String(billEditId) : null;
+                  const prevBill = editingId ? bills.find((x: any) => String(x.id) === editingId) ?? null : null;
+
+                  if (editingId && prevBill) {
+                    markBillPending(editingId);
+
+                    setBills((prev) =>
+                      prev.map((x: any) =>
+                        String(x.id) === editingId
+                          ? {
+                              ...x,
+                              invoice_date: billInvoiceDate,
+                              due_date: billDueDate,
+                              amount_cents,
+                              memo: billMemo,
+                              terms: billTerms,
+                            }
+                          : x
+                      )
+                    );
+                  }
+
                   try {
                     setLoading(true);
 
-                    if (billEditId) {
+                    if (editingId) {
                       const res: any = await updateBill({
                         businessId,
                         vendorId,
-                        billId: billEditId,
+                        billId: editingId,
                         invoice_date: billInvoiceDate,
                         due_date: billDueDate,
                         amount_cents,
@@ -1042,7 +1194,9 @@ export default function VendorDetailPageClient() {
 
                       const updated = res?.bill ?? null;
                       if (updated?.id) {
-                        setBills((prev) => prev.map((b: any) => (String(b.id) === String(updated.id) ? { ...b, ...updated } : b)));
+                        setBills((prev) =>
+                          prev.map((x: any) => (String(x.id) === String(updated.id) ? { ...x, ...updated } : x))
+                        );
                       }
                     } else {
                       const res: any = await createBill({
@@ -1067,8 +1221,16 @@ export default function VendorDetailPageClient() {
                     setBillDialogOpen(false);
                     setBillEditId(null);
                   } catch (e: any) {
-                    setErr(e?.message ?? "Save bill failed");
+                    // rollback only the edited row
+                    if (editingId && prevBill) {
+                      setBills((prev) => prev.map((x: any) => (String(x.id) === editingId ? { ...x, ...prevBill } : x)));
+                    }
+
+                    const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Save bill failed";
+                    setErr(msg);
+                    setErrIsClosed(isClosedPeriodError(e, msg));
                   } finally {
+                    if (editingId) clearBillPending(editingId);
                     setLoading(false);
                   }
                 }}
@@ -1475,9 +1637,16 @@ export default function VendorDetailPageClient() {
                 <Button
                   variant="outline"
                   className="h-7 px-3 text-xs"
-                  disabled={!businessId || !applyAccountId || !paymentEntryId}
+                  disabled={applyActionLoading || !businessId || !applyAccountId || !paymentEntryId}
                   onClick={async () => {
                     if (!businessId || !applyAccountId || !paymentEntryId) return;
+
+                    setErr(null);
+                    setErrIsClosed(false);
+
+                    setApplyActionLoading(true);
+                    markPaymentPending(String(paymentEntryId));
+
                     try {
                       await unapplyVendorPayment({
                         businessId,
@@ -1488,7 +1657,12 @@ export default function VendorDetailPageClient() {
                       });
                       await refresh();
                     } catch (e: any) {
-                      setErr(e?.message ?? "Unapply failed");
+                      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply failed";
+                      setErr(msg);
+                      setErrIsClosed(isClosedPeriodError(e, msg));
+                    } finally {
+                      clearPaymentPending(String(paymentEntryId));
+                      setApplyActionLoading(false);
                     }
                   }}
                   title="Auditable unapply of all allocations for this payment"
@@ -1502,6 +1676,13 @@ export default function VendorDetailPageClient() {
                   disabled={!businessId || !applyAccountId || !paymentEntryId}
                   onClick={async () => {
                     if (!businessId || !applyAccountId || !paymentEntryId) return;
+
+                    setErr(null);
+                    setErrIsClosed(false);
+
+                    setApplyActionLoading(true);
+                    markPaymentPending(String(paymentEntryId));
+
                     try {
                       await apiFetch(
                         `/v1/businesses/${businessId}/accounts/${applyAccountId}/entries/${paymentEntryId}/ap/unapply-and-delete`,
@@ -1511,7 +1692,12 @@ export default function VendorDetailPageClient() {
                       window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
                       setApplyOpen(false);
                     } catch (e: any) {
-                      setErr(e?.message ?? "Unapply+delete failed");
+                      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+delete failed";
+                      setErr(msg);
+                      setErrIsClosed(isClosedPeriodError(e, msg));
+                    } finally {
+                      clearPaymentPending(String(paymentEntryId));
+                      setApplyActionLoading(false);
                     }
                   }}
                   title="Explicit action: unapply all allocations then soft delete the payment entry"

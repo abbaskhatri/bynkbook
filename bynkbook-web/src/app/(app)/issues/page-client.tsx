@@ -198,6 +198,7 @@ export default function IssuesPageClient() {
     if (!selectedBusinessId || !selectedAccountId) return;
 
     setScanErr(null);
+    clearMutErr();
     setScanBusy(true);
 
     try {
@@ -249,7 +250,9 @@ export default function IssuesPageClient() {
       }
       setLastScanAt(nowIso);
     } catch (e: any) {
-      setScanErr(e?.message || "Scan failed");
+      const r = applyMutationError(e, "Can’t scan issues");
+      if (!r.isClosed) setScanErr(r.msg);
+      else setScanErr(null);
     } finally {
       setScanBusy(false);
     }
@@ -438,6 +441,40 @@ export default function IssuesPageClient() {
     appErrorMessageOrNull(categoriesQ.error) ||
     appErrorMessageOrNull(issuesQ.error) ||
     null;
+
+  // -------------------------
+  // Mutation banner (single region; CLOSED_PERIOD consistency)
+  // -------------------------
+  const [mutErr, setMutErr] = useState<string | null>(null);
+  const [mutErrTitle, setMutErrTitle] = useState<string>("");
+
+  function clearMutErr() {
+    setMutErr(null);
+    setMutErrTitle("");
+  }
+
+  function applyMutationError(e: any, fallbackTitle: string) {
+    const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Something went wrong. Try again.";
+
+    const code =
+      e?.code ||
+      e?.response?.data?.code ||
+      e?.data?.code;
+
+    const isClosed =
+      code === "CLOSED_PERIOD" ||
+      (typeof msg === "string" && msg.includes("This period is closed"));
+
+    if (isClosed) {
+      setMutErrTitle("Period closed");
+      setMutErr("This period is closed. Reopen period to modify.");
+      return { msg: "This period is closed. Reopen period to modify.", isClosed: true };
+    }
+
+    setMutErrTitle(fallbackTitle);
+    setMutErr(String(msg));
+    return { msg: String(msg), isClosed: false };
+  }
  
   const openIssues = (issuesQ.data?.issues ?? []).map((it) => ({
     id: `${it.entry_id}|${it.issue_type}|${it.detected_at ?? ""}`, // synthetic id if backend doesn't provide one
@@ -530,16 +567,9 @@ export default function IssuesPageClient() {
   const checkboxClass =
     "h-4 w-4 rounded border border-slate-300 bg-white checked:bg-slate-900 checked:border-slate-900";
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
-  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
   function clearSelection() {
     setSelectedIds({});
-    setBulkMsg(null);
-  }
-
-  function runBulkAction(label: string) {
-    setBulkMsg(`${label} (not connected yet)`);
-    setTimeout(() => setBulkMsg(null), 2200);
   }
 
   // ================================
@@ -700,7 +730,11 @@ export default function IssuesPageClient() {
       });
     },
     onSuccess: async () => {
+      clearMutErr();
       void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId] });
+    },
+    onError: (e: any) => {
+      applyMutationError(e, "Can’t update entry");
     },
   });
 
@@ -776,31 +810,9 @@ export default function IssuesPageClient() {
 
         {selectedCount > 0 ? (
           <div className="ml-2 flex items-center gap-2 shrink-0">
-            <span className="text-xs text-slate-600 whitespace-nowrap">
-              Selected: <span className="font-medium text-slate-900">{selectedCount}</span>
-            </span>
-
-            <Button
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              onClick={() => runBulkAction("Mark legitimate")}
-            >
-              Mark legitimate
-            </Button>
-
-            <Button
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              onClick={() => runBulkAction("Acknowledge stale")}
-            >
-              Acknowledge stale
-            </Button>
-
             <Button variant="outline" className="h-7 px-2 text-xs" onClick={clearSelection}>
-              Clear
+              Clear selection
             </Button>
-
-            {bulkMsg ? <div className="text-xs text-slate-600 whitespace-nowrap">{bulkMsg}</div> : null}
           </div>
         ) : null}
       </div>
@@ -849,9 +861,20 @@ export default function IssuesPageClient() {
 
         <FilterBar left={filterLeft} right={filterRight} />
 
-        <div className="px-3 py-2">
-          <InlineBanner title="Can’t load issues" message={bannerMsg} onRetry={() => router.refresh()} />
-        </div>
+        {(bannerMsg || mutErr) ? (
+          <div className="px-3 py-2">
+            {bannerMsg ? (
+              <InlineBanner title="Can’t load issues" message={bannerMsg} onRetry={() => router.refresh()} />
+            ) : (
+              <InlineBanner
+                title={mutErrTitle || "Can’t update issues"}
+                message={mutErr}
+                actionLabel={mutErrTitle === "Period closed" ? "Go to Close Periods" : null}
+                actionHref={mutErrTitle === "Period closed" ? "/closed-periods?focus=reopen" : null}
+              />
+            )}
+          </div>
+        ) : null}
 
         {!selectedBusinessId && !businessesQ.isLoading ? (
           <div className="px-3 pb-2">

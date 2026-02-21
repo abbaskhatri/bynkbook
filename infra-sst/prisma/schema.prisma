@@ -133,6 +133,9 @@ model Entry {
   // Durable upload→entry linkage (one upload creates at most one entry)
   sourceUploadId String? @map("source_upload_id") @db.Uuid
 
+  // Bank transaction → entry linkage (idempotency key for create-entry)
+  sourceBankTransactionId String? @map("source_bank_transaction_id") @db.Uuid
+
   // Transfers
   transfer Transfer? @relation("TransferEntries", fields: [transfer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
@@ -161,6 +164,7 @@ model Entry {
   matchGroupEntries MatchGroupEntry[]
 
   @@unique([business_id, sourceUploadId], map: "u_entry_scope_source_upload")
+  @@index([business_id, account_id, sourceBankTransactionId], map: "idx_entry_scope_source_bank_txn")
   @@index([business_id, account_id, date, created_at], map: "idx_entry_business_account_date_created")
   @@index([business_id, account_id, deleted_at], map: "idx_entry_business_account_deleted")
   @@index([business_id, category_id], map: "idx_entry_business_category")

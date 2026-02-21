@@ -27,13 +27,36 @@ export function extractHttpStatus(e: unknown): number | null {
   return null;
 }
 
+function extractApiCode(e: unknown): string | null {
+  const anyE: any = e as any;
+  return (
+    anyE?.code ??
+    anyE?.payload?.code ??
+    (typeof anyE?.message === "string" && anyE.message.includes("CLOSED_PERIOD") ? "CLOSED_PERIOD" : null) ??
+    null
+  );
+}
+
 export function appErrorMessageOrNull(e: unknown): string | null {
   if (!e) return null;
 
+  const anyE: any = e as any;
   const status = extractHttpStatus(e);
+  const code = extractApiCode(e);
 
   if (status === 401) return "Session expired. Please sign in again.";
   if (status === 403) return "You don’t have access to this business.";
+
+  // CPA-clean, consistent message everywhere
+  if (status === 409 && code === "CLOSED_PERIOD") {
+    return "This period is closed. Reopen period to modify.";
+  }
+
+  // Debuggable close-through guard
+  if (status === 409 && code === "CANNOT_CLOSE_BEYOND_TODAY") {
+    const st = anyE?.payload?.server_today ? ` (Server today: ${anyE.payload.server_today})` : "";
+    return `Cannot close beyond today.${st}`;
+  }
 
   return "Something went wrong. Try again.";
 }

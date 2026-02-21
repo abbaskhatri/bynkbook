@@ -42,8 +42,19 @@ export async function apiFetch(path: string, init?: RequestInit) {
     }
 
     if (res.status === 409 && payload?.code === "CLOSED_PERIOD") {
-      const month = payload?.month ? ` (${payload.month})` : "";
-      throw new Error(`This period is closed${month}. Reopen it in Closed Periods.`);
+      const err: any = new Error(payload?.error || "This period is closed. Reopen period to modify.");
+      err.status = 409;
+      err.code = "CLOSED_PERIOD";
+      err.payload = payload;
+      throw err;
+    }
+
+    if (res.status === 409 && payload?.code === "CANNOT_CLOSE_BEYOND_TODAY") {
+      const err: any = new Error(payload?.error || "Cannot close beyond today.");
+      err.status = 409;
+      err.code = "CANNOT_CLOSE_BEYOND_TODAY";
+      err.payload = payload;
+      throw err;
     }
 
     if (!text) {

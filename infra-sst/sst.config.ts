@@ -356,6 +356,13 @@ const bankTxHandler = {
 
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions", bankTxHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// Best-effort batch create entries from selected bank txns (B2)
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/create-entries-batch",
+  bankTxHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
 // ---------- Matches (Phase 4D v1) ----------
 const matchesHandler = {
   ...bizHandler,
@@ -491,6 +498,7 @@ api.route("GET /v1/businesses/{businessId}/reports/categories/detail", reportsHa
 api.route("GET /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/closed-periods/preview", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/closed-periods", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/closed-periods/close-through", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("DELETE /v1/businesses/{businessId}/closed-periods/{month}", closedPeriodsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 api.route("GET /v1/businesses/{businessId}/vendors", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });

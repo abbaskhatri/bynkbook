@@ -6,14 +6,19 @@ export type ClosedPeriodRow = {
   closed_by_user_id: string;
 };
 
-export async function listClosedPeriods(businessId: string): Promise<{ ok: true; periods: ClosedPeriodRow[] }> {
+export async function listClosedPeriods(businessId: string): Promise<{
+  ok: true;
+  periods: ClosedPeriodRow[];
+  closed_through_month?: string | null;
+  closed_through_date?: string | null;
+}> {
   return apiFetch(`/v1/businesses/${businessId}/closed-periods`);
 }
 
-export async function closePeriod(businessId: string, month: string): Promise<any> {
-  return apiFetch(`/v1/businesses/${businessId}/closed-periods`, {
+export async function closeThroughDate(businessId: string, through_date: string): Promise<any> {
+  return apiFetch(`/v1/businesses/${businessId}/closed-periods/close-through`, {
     method: "POST",
-    body: JSON.stringify({ month }),
+    body: JSON.stringify({ through_date }),
   });
 }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
+// Auth is handled by AppShell
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -54,17 +54,7 @@ export default function DashboardPageClient() {
     return { detail: appErrorMessageOrNull(e) ?? "Something went wrong. Try again." };
   }
 
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
+  // Auth is handled by AppShell
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -76,13 +66,10 @@ export default function DashboardPageClient() {
   }, [bizIdFromUrl, businessesQ.data]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
     if (!sp.get("businessId")) router.replace(`/dashboard?businessId=${selectedBusinessId}`);
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
-
-
+  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const accountsQ = useAccounts(selectedBusinessId);
 
@@ -225,13 +212,12 @@ export default function DashboardPageClient() {
   }, [selectedAccountId, activeAccountOptions]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
     if (!sp.get("accountId")) {
       router.replace(`/dashboard?businessId=${selectedBusinessId}&accountId=all`);
     }
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const [dashErr, setDashErr] = useState<{ title: string; detail: string } | null>(null);
   const [topCats, setTopCats] = useState<Array<{ label: string; cents: string; count: number }>>([]);
@@ -352,7 +338,7 @@ export default function DashboardPageClient() {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
-  if (!authReady) return <Skeleton className="h-10 w-64" />;
+  // Auth handled by AppShell
 
   return (
     <div className="space-y-6 max-w-6xl">
