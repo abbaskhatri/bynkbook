@@ -17,10 +17,16 @@ import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { StatusChip } from "@/components/primitives/StatusChip";
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { inputH7 } from "@/components/primitives/tokens";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UploadPanel } from "@/components/uploads/UploadPanel";
 import { UploadsList } from "@/components/uploads/UploadsList";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { BusyButton } from "@/components/primitives/BusyButton";
+import { DialogFooter } from "@/components/primitives/DialogFooter";
+import { PillToggle } from "@/components/primitives/PillToggle";
+import { ringFocus } from "@/components/primitives/tokens";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -43,6 +49,7 @@ import {
   type ReconcileSnapshotListItem,
   type ReconcileSnapshot,
 } from "@/lib/api/reconcileSnapshots";
+import { getTeam } from "@/lib/api/team";
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
 import { AutoReconcileDialog } from "@/components/reconcile/auto-reconcile-dialog";
@@ -346,6 +353,36 @@ export default function ReconcilePageClient() {
     };
   }, [selectedBusinessId]);
 
+  // Team map for audit display (UI only)
+  useEffect(() => {
+    if (!selectedBusinessId) {
+      setTeamEmailByUserId(new Map());
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getTeam(selectedBusinessId);
+        if (cancelled) return;
+
+        const m = new Map<string, string>();
+        for (const member of res?.members ?? []) {
+          const uid = String((member as any)?.user_id ?? "").trim();
+          const email = String((member as any)?.email ?? "").trim();
+          if (uid && email) m.set(uid, email);
+        }
+        setTeamEmailByUserId(m);
+      } catch {
+        if (!cancelled) setTeamEmailByUserId(new Map());
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId]);
+
   const policyReconcileWrite = useMemo(() => {
     // OWNER must never be blocked by frontend policy hints.
     if (selectedBusinessRole === "OWNER") return null;
@@ -512,6 +549,12 @@ export default function ReconcilePageClient() {
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [snapshot, setSnapshot] = useState<ReconcileSnapshot | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
+
+  // Snapshot downloads busy state (UI only)
+  const [snapshotDownloadBusyByKey, setSnapshotDownloadBusyByKey] = useState<Record<string, boolean>>({});
+
+  // Team map (UI only): never show raw user IDs
+  const [teamEmailByUserId, setTeamEmailByUserId] = useState<Map<string, string>>(new Map());
 
   // Disable Create when selected month already exists in list
   const existingSnapshotForMonth = useMemo(() => {
@@ -1113,6 +1156,13 @@ export default function ReconcilePageClient() {
     return `${s.slice(0, 6)}…${s.slice(-4)}`;
   }
 
+  function auditUserLabel(userId: any) {
+    const s = String(userId ?? "").trim();
+    if (!s) return "System";
+    const email = teamEmailByUserId.get(s);
+    return email ? email : "Unknown user";
+  }
+
   const bankTxnById = useMemo(() => {
     const m = new Map<string, any>();
     for (const t of bankTxSorted ?? []) m.set(String(t.id), t);
@@ -1598,8 +1648,7 @@ export default function ReconcilePageClient() {
     </div>
   );
 
-  const inputClass =
-    "h-7 w-full px-2 py-0 text-xs leading-none bg-white border border-slate-200 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 focus-visible:ring-offset-0";
+  const inputClass = inputH7;
 
   // Plaid balance display (must be declared before differenceBar usage)
   const balanceText = useMemo(() => {
@@ -1609,18 +1658,18 @@ export default function ReconcilePageClient() {
 
   const filterLeft = (
     <div className="flex items-center gap-2 flex-wrap">
-      <div className="w-[120px]">
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputClass} />
+      <div className="w-[170px]">
+        <AppDatePicker value={from} onChange={setFrom} ariaLabel="From date" />
       </div>
-      <div className="w-[120px]">
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} />
+      <div className="w-[170px]">
+        <AppDatePicker value={to} onChange={setTo} ariaLabel="To date" />
       </div>
       <div className="w-[220px]">
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} className={inputClass} placeholder="Search…" />
       </div>
       <button
         type="button"
-        className="h-7 px-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 rounded-md"
+        className="h-7 px-1.5 text-xs font-medium text-violet-700 hover:text-violet-800 hover:bg-violet-50 rounded-md"
         onClick={() => {
           setFrom("");
           setTo("");
@@ -1784,6 +1833,84 @@ export default function ReconcilePageClient() {
           }}
           title="Create entry"
           size="md"
+          footer={
+            <DialogFooter
+              left={
+                <PillToggle
+                  label="Auto-match (FULL only)"
+                  checked={createEntryAutoMatch}
+                  onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
+                  disabled={!canWriteReconcileEffective}
+                />
+              }
+              right={
+                <>
+                  <BusyButton
+                    variant="secondary"
+                    size="md"
+                    onClick={() => setOpenCreateEntry(false)}
+                    disabled={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
+                  >
+                    Cancel
+                  </BusyButton>
+
+                  <HintWrap
+                    disabled={!canWriteReconcileEffective}
+                    reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
+                  >
+                    <BusyButton
+                      variant="primary"
+                      size="md"
+                      busy={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
+                      busyLabel="Creating…"
+                      disabled={!canWriteReconcileEffective || !createEntryBankTxnId}
+                      onClick={async () => {
+                        if (!selectedBusinessId || !selectedAccountId) return;
+                        if (!canWriteReconcileEffective) return;
+
+                        const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
+                        if (!bankId) return;
+
+                        setCreateEntryErr(null);
+                        clearMutErr();
+                        setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: true }));
+
+                        // Row-level pending (UI only)
+                        markPending(bankId);
+
+                        try {
+                          await createEntryFromBankTransaction({
+                            businessId: selectedBusinessId,
+                            accountId: selectedAccountId,
+                            bankTransactionId: bankId,
+                            autoMatch: !!createEntryAutoMatch,
+                            memo: createEntryMemo,
+                            method: createEntryMethod,
+                            category_id: createEntryCategoryId.trim() || "",
+                          });
+
+                          await refreshBankAndMatches({ preserveOnEmpty: true });
+                          await entriesQ.refetch?.();
+
+                          clearMutErr();
+                          setOpenCreateEntry(false);
+                          setCreateEntryBankTxnId(null);
+                        } catch (e: any) {
+                          applyMutationError(e, "Can’t create entry");
+                          setCreateEntryErr(null);
+                        } finally {
+                          clearPending(bankId);
+                          setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: false }));
+                        }
+                      }}
+                    >
+                      Create entry
+                    </BusyButton>
+                  </HintWrap>
+                </>
+              }
+            />
+          }
         >
           {(() => {
             const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
@@ -1825,7 +1952,10 @@ export default function ReconcilePageClient() {
                     <div>
                       <div className="text-[11px] font-semibold text-slate-600 mb-1">Method</div>
                       <select
-                        className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                        className={[
+                          "h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white",
+                          ringFocus,
+                        ].join(" ")}
                         value={createEntryMethod}
                         onChange={(e) => setCreateEntryMethod(e.target.value)}
                       >
@@ -1846,7 +1976,10 @@ export default function ReconcilePageClient() {
                       {null}
                       <div className="relative overflow-visible">
                         <input
-                          className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                          className={[
+                            "h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white",
+                            ringFocus,
+                          ].join(" ")}
                           placeholder={categoriesLoading ? "Loading categories…" : "Search categories…"}
                           value={categoryQuery || createEntryCategoryName}
                           onChange={(e) => {
@@ -1923,7 +2056,10 @@ export default function ReconcilePageClient() {
                   <div className="mt-3">
                     <div className="text-[11px] font-semibold text-slate-600 mb-1">Memo</div>
                     <textarea
-                      className="min-h-[70px] w-full px-2 py-1 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                      className={[
+                        "min-h-[70px] w-full px-2 py-1 text-xs rounded-md border border-slate-200 bg-white",
+                        ringFocus,
+                      ].join(" ")}
                       value={createEntryMemo}
                       onChange={(e) => setCreateEntryMemo(e.target.value)}
                     />
@@ -1931,79 +2067,7 @@ export default function ReconcilePageClient() {
 
                 </div>
 
-                <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
-                  <label className="flex items-center gap-2 text-xs text-slate-700 select-none">
-                    <input
-                      type="checkbox"
-                      checked={createEntryAutoMatch}
-                      onChange={(e) => setCreateEntryAutoMatch(e.target.checked)}
-                      className="h-4 w-4"
-                    />
-                    Auto-match (FULL only)
-                  </label>
-
-                  <button
-                    type="button"
-                    className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-                    onClick={() => setOpenCreateEntry(false)}
-                    disabled={busy}
-                  >
-                    Cancel
-                  </button>
-
-                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
-                    <button
-                      type="button"
-                      className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 inline-flex items-center gap-2"
-                      disabled={!canWriteReconcileEffective || !bankId || busy}
-                      onClick={async () => {
-                        if (!selectedBusinessId || !selectedAccountId) return;
-                        if (!canWriteReconcileEffective) return;
-                        if (!bankId) return;
-
-                        setCreateEntryErr(null);
-                        clearMutErr();
-                        setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: true }));
-
-                        try {
-                          const created: any = await createEntryFromBankTransaction({
-                            businessId: selectedBusinessId,
-                            accountId: selectedAccountId,
-                            bankTransactionId: bankId,
-                            autoMatch: !!createEntryAutoMatch,
-                            memo: createEntryMemo,
-                            method: createEntryMethod,
-                            category_id: createEntryCategoryId.trim() || "",
-                          });
-
-                          // Auto-match after create-entry is PARKED (A): do not run any match-group creation here.
-                          // (We will revisit auto-match later.)
-
-                          // Immediate refresh so matched state updates deterministically
-                          await refreshBankAndMatches({ preserveOnEmpty: true });
-                          await entriesQ.refetch?.();
-
-                          clearMutErr();
-                          setOpenCreateEntry(false);
-                          setCreateEntryBankTxnId(null);
-                        } catch (e: any) {
-                          applyMutationError(e, "Can’t create entry");
-                          setCreateEntryErr(null);
-                        } finally {
-                          setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: false }));
-                        }
-                      }}
-                    >
-                      {busy ? (
-                        <>
-                          <TinySpinner /> Creating…
-                        </>
-                      ) : (
-                        "Create entry"
-                      )}
-                    </button>
-                  </HintWrap>
-                </div>
+                {null}
               </div>
             );
           })()}
@@ -2050,104 +2114,99 @@ export default function ReconcilePageClient() {
                     {selectedBankTxnIds.size} selected
                   </span>
 
-                  <label className="flex items-center gap-1.5 text-xs text-slate-600 select-none">
-                    <input
-                      type="checkbox"
-                      className="h-3 w-3"
-                      checked={bulkCreateAutoMatch}
-                      onChange={(e) => setBulkCreateAutoMatch(e.target.checked)}
-                      disabled={!canWriteReconcileEffective}
-                      title={
-                        !canWriteReconcileEffective
-                          ? (reconcileWriteReason ?? noPermTitle)
-                          : "Auto-match (FULL only)"
-                      }
-                    />
-                    Auto-match
-                  </label>
+                  <PillToggle
+                    label="Auto-match (FULL only)"
+                    checked={bulkCreateAutoMatch}
+                    onCheckedChange={(next) => setBulkCreateAutoMatch(next)}
+                    disabled={!canWriteReconcileEffective}
+                  />
                 </div>
 
-                <button
-                  type="button"
-                  className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={bulkCreateBusy || !canWriteReconcileEffective || selectedBusinessId == null || selectedAccountId == null}
-                  title={
-                    !canWriteReconcileEffective
-                      ? (reconcileWriteReason ?? noPermTitle)
-                      : "Create entries from selected bank transactions"
-                  }
-                  onClick={async () => {
-                    if (!selectedBusinessId || !selectedAccountId) return;
-                    if (!canWriteReconcileEffective) return;
+                <HintWrap
+                  disabled={!canWriteReconcileEffective}
+                  reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
+                >
+                  <BusyButton
+                    variant="primary"
+                    size="sm"
+                    busy={bulkCreateBusy}
+                    busyLabel="Creating…"
+                    disabled={bulkCreateBusy || !canWriteReconcileEffective || selectedBusinessId == null || selectedAccountId == null}
+                    title={
+                      !canWriteReconcileEffective
+                        ? (reconcileWriteReason ?? noPermTitle)
+                        : "Create entries from selected bank transactions"
+                    }
+                    onClick={async () => {
+                      if (!selectedBusinessId || !selectedAccountId) return;
+                      if (!canWriteReconcileEffective) return;
 
-                    clearMutErr();
+                      clearMutErr();
 
-                    const ids = Array.from(selectedBankTxnIds);
-                    for (const id of ids) markPending(String(id));
+                      const ids = Array.from(selectedBankTxnIds);
+                      for (const id of ids) markPending(String(id));
 
-                    // Clear previous results for selected ids
-                    setBulkCreateResultByBankTxnId((m) => {
-                      const next = { ...m };
-                      for (const id of ids) delete next[String(id)];
-                      return next;
-                    });
-
-                    try {
-                      setBulkCreateBusy(true);
-
-                      const payload = {
-                        items: ids.map((id) => ({
-                          bank_transaction_id: id,
-                          autoMatch: bulkCreateAutoMatch === true,
-                        })),
-                      };
-
-                      const res: any = await apiFetch(
-                        `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/bank-transactions/create-entries-batch`,
-                        { method: "POST", body: JSON.stringify(payload) }
-                      );
-
-                      const list = Array.isArray(res?.results) ? res.results : [];
+                      // Clear previous results for selected ids
                       setBulkCreateResultByBankTxnId((m) => {
                         const next = { ...m };
-                        for (const r of list) {
-                          const bid = String(r?.bank_transaction_id ?? "");
-                          if (!bid) continue;
-                          next[bid] = r;
-                        }
+                        for (const id of ids) delete next[String(id)];
                         return next;
                       });
 
-                      // One refresh only (no storms)
-                      await refreshBankAndMatches({ preserveOnEmpty: true });
-                      await entriesQ.refetch?.();
+                      try {
+                        setBulkCreateBusy(true);
 
-                      // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
-                      setSelectedBankTxnIds((prev) => {
-                        const next = new Set(prev);
-                        for (const r of list) {
-                          const bid = String(r?.bank_transaction_id ?? "");
-                          const st = String(r?.status ?? "");
-                          if (!bid) continue;
-                          if (st === "CREATED" || st === "SKIPPED") next.delete(bid);
-                        }
-                        return next;
-                      });
-                    } catch (e: any) {
-                      applyMutationError(e, "Can’t create entries");
-                    } finally {
-                      setBulkCreateBusy(false);
+                        const payload = {
+                          items: ids.map((id) => ({
+                            bank_transaction_id: id,
+                            autoMatch: bulkCreateAutoMatch === true,
+                          })),
+                        };
 
-                      const ids2 = Array.from(selectedBankTxnIds);
-                      for (const id of ids2) clearPending(String(id));
-                    }
-                  }}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {bulkCreateBusy ? <TinySpinner /> : null}
-                    <span>{bulkCreateBusy ? "Creating…" : "Create entries"}</span>
-                  </span>
-                </button>
+                        const res: any = await apiFetch(
+                          `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/bank-transactions/create-entries-batch`,
+                          { method: "POST", body: JSON.stringify(payload) }
+                        );
+
+                        const list = Array.isArray(res?.results) ? res.results : [];
+                        setBulkCreateResultByBankTxnId((m) => {
+                          const next = { ...m };
+                          for (const r of list) {
+                            const bid = String(r?.bank_transaction_id ?? "");
+                            if (!bid) continue;
+                            next[bid] = r;
+                          }
+                          return next;
+                        });
+
+                        // One refresh only (no storms)
+                        await refreshBankAndMatches({ preserveOnEmpty: true });
+                        await entriesQ.refetch?.();
+
+                        // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
+                        setSelectedBankTxnIds((prev) => {
+                          const next = new Set(prev);
+                          for (const r of list) {
+                            const bid = String(r?.bank_transaction_id ?? "");
+                            const st = String(r?.status ?? "");
+                            if (!bid) continue;
+                            if (st === "CREATED" || st === "SKIPPED") next.delete(bid);
+                          }
+                          return next;
+                        });
+                      } catch (e: any) {
+                        applyMutationError(e, "Can’t create entries");
+                      } finally {
+                        setBulkCreateBusy(false);
+
+                        const ids2 = Array.from(selectedBankTxnIds);
+                        for (const id of ids2) clearPending(String(id));
+                      }
+                    }}
+                  >
+                    Create entries
+                  </BusyButton>
+                </HintWrap>
               </div>
             ) : null}
           </div>
@@ -2231,7 +2290,7 @@ export default function ReconcilePageClient() {
                               {expectedTab === "matched" ? (
                                 <button
                                   type="button"
-                                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
                                   onClick={(ev) => {
                                     ev.stopPropagation();
                                     openAuditForEntry();
@@ -2246,7 +2305,7 @@ export default function ReconcilePageClient() {
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
                                         }`}
                                       disabled={!canWriteReconcileEffective}
                                       title={canWriteReconcileEffective ? "Match entry" : (reconcileWriteReason ?? noPermTitle)}
@@ -2267,7 +2326,7 @@ export default function ReconcilePageClient() {
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
                                         }`}
                                       disabled={!canWriteReconcileEffective}
                                       onClick={() => {
@@ -2478,15 +2537,14 @@ export default function ReconcilePageClient() {
                     <tr className="h-[28px]">
                       <th className={thClass}>
                         {bankTab === "unmatched" ? (
-                          <input
-                            type="checkbox"
-                            className="h-3 w-3"
+                          <PillToggle
+                            label=""
                             checked={
-                              (bankTab === "unmatched" ? bankUnmatchedList : []).length > 0 &&
+                              bankUnmatchedList.length > 0 &&
                               selectedBankTxnIds.size === bankUnmatchedList.length
                             }
-                            onChange={(e) => {
-                              if (e.target.checked) {
+                            onCheckedChange={(checked) => {
+                              if (checked) {
                                 setSelectedBankTxnIds(new Set(bankUnmatchedList.map((x: any) => String(x.id))));
                               } else {
                                 setSelectedBankTxnIds(new Set());
@@ -2621,7 +2679,7 @@ export default function ReconcilePageClient() {
                               {bankTab === "matched" ? (
                                 <button
                                   type="button"
-                                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
                                   onClick={(ev) => {
                                     ev.stopPropagation();
                                     openAuditForBankTxn();
@@ -2635,7 +2693,7 @@ export default function ReconcilePageClient() {
                                 <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                   <button
                                     type="button"
-                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
                                       }`}
                                     disabled={!canWriteReconcileEffective}
                                     title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
@@ -2694,7 +2752,7 @@ export default function ReconcilePageClient() {
                               <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                 <button
                                   type="button"
-                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
                                     }`}
                                   disabled={
                                     !canWriteReconcileEffective ||
@@ -2751,7 +2809,7 @@ export default function ReconcilePageClient() {
                                   return (
                                     <button
                                       type="button"
-                                      className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                                      className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
                                       onClick={(ev) => {
                                         ev.stopPropagation();
                                         openAuditForBankTxn();
@@ -2785,6 +2843,20 @@ export default function ReconcilePageClient() {
         }}
         title="Snapshots"
         size="lg"
+        footer={
+          <DialogFooter
+            left={
+              <BusyButton
+                variant="secondary"
+                size="md"
+                onClick={() => setOpenSnapshots(false)}
+              >
+                Close
+              </BusyButton>
+            }
+            right={null}
+          />
+        }
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Left: list */}
@@ -2811,7 +2883,7 @@ export default function ReconcilePageClient() {
                       <button
                         key={s.id}
                         type="button"
-                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${selected ? "bg-emerald-50" : "bg-white"
+                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${selected ? "bg-violet-50" : "bg-white"
                           }`}
                         onClick={() => setSelectedSnapshotId(s.id)}
                         title="View snapshot"
@@ -2852,7 +2924,10 @@ export default function ReconcilePageClient() {
                 <div className="flex items-center gap-2">
                   <input
                     type="month"
-                    className="h-8 px-2 text-xs border border-slate-200 rounded-md bg-white"
+                    className={[
+                      "h-8 px-2 text-xs border border-slate-200 rounded-md bg-white",
+                      ringFocus,
+                    ].join(" ")}
                     value={snapshotMonth}
                     onChange={(e) => setSnapshotMonth(e.target.value)}
                   />
@@ -2861,13 +2936,12 @@ export default function ReconcilePageClient() {
                     disabled={!canWriteSnapshotsEffective}
                     reason={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : null}
                   >
-                    <button
-                      type="button"
-                      className={`h-8 px-3 text-xs rounded-md border ${canWriteSnapshotsEffective
-                        ? "border-slate-200 bg-white hover:bg-slate-50"
-                        : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
-                        }`}
-                      disabled={!canWriteSnapshotsEffective || snapshotCreateBusy || monthAlreadyExists}
+                    <BusyButton
+                      variant="primary"
+                      size="md"
+                      busy={snapshotCreateBusy}
+                      busyLabel="Creating…"
+                      disabled={!canWriteSnapshotsEffective || monthAlreadyExists}
                       title={
                         !canWriteSnapshotsEffective
                           ? (snapshotWriteReason ?? noPermTitle)
@@ -2928,7 +3002,7 @@ export default function ReconcilePageClient() {
                       }}
                     >
                       {monthAlreadyExists ? "Exists" : snapshotCreateBusy ? "Creating…" : "Create"}
-                    </button>
+                    </BusyButton>
                   </HintWrap>
                 </div>
 
@@ -3008,26 +3082,42 @@ export default function ReconcilePageClient() {
                             disabled={!canWriteSnapshotsEffective}
                             reason={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : null}
                           >
-                            <button
-                              type="button"
-                              className={`h-8 px-3 text-xs rounded-md border ${canWriteSnapshotsEffective
-                                ? "border-slate-200 bg-white hover:bg-slate-50"
-                                : "border-slate-200 bg-white opacity-50 cursor-not-allowed"
-                                }`}
-                              disabled={!canWriteSnapshotsEffective}
-                              title={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : "Download"}
-                              onClick={async () => {
-                                if (!selectedBusinessId || !selectedAccountId || !snapshot?.id) return;
-                                try {
-                                  const res = await getReconcileSnapshotExportUrl(selectedBusinessId, selectedAccountId, snapshot.id, k);
-                                  if (res?.url) window.open(res.url, "_blank");
-                                } catch {
-                                  // ignore
-                                }
-                              }}
-                            >
-                              {label}
-                            </button>
+                            {(() => {
+                              const busyKey = snapshot?.id ? `${snapshot.id}:${k}` : `none:${k}`;
+                              const dlBusy = !!snapshotDownloadBusyByKey[busyKey];
+
+                              return (
+                                <BusyButton
+                                  variant="secondary"
+                                  size="md"
+                                  busy={dlBusy}
+                                  busyLabel="Downloading…"
+                                  disabled={!canWriteSnapshotsEffective || !snapshot?.id}
+                                  title={!canWriteSnapshotsEffective ? (snapshotWriteReason ?? noPermTitle) : "Download"}
+                                  onClick={async () => {
+                                    if (!selectedBusinessId || !selectedAccountId || !snapshot?.id) return;
+
+                                    const key = `${snapshot.id}:${k}`;
+                                    setSnapshotDownloadBusyByKey((m) => ({ ...m, [key]: true }));
+                                    try {
+                                      const res = await getReconcileSnapshotExportUrl(
+                                        selectedBusinessId,
+                                        selectedAccountId,
+                                        snapshot.id,
+                                        k
+                                      );
+                                      if (res?.url) window.open(res.url, "_blank");
+                                    } catch {
+                                      // ignore
+                                    } finally {
+                                      setSnapshotDownloadBusyByKey((m) => ({ ...m, [key]: false }));
+                                    }
+                                  }}
+                                >
+                                  {label}
+                                </BusyButton>
+                              );
+                            })()}
                           </HintWrap>
                         );
                       })}
@@ -3053,6 +3143,128 @@ export default function ReconcilePageClient() {
         }}
         title="Match bank transaction"
         size="lg"
+        footer={
+          <DialogFooter
+            left={null}
+            right={
+              <>
+                <BusyButton
+                  variant="secondary"
+                  size="md"
+                  onClick={() => {
+                    setOpenMatch(false);
+                    setMatchError(null);
+                    setMatchBusy(false);
+                    setMatchSearch("");
+                    setMatchSelectedEntryIds(new Set());
+                    setMatchBankTxnId(null);
+                  }}
+                  disabled={matchBusy}
+                >
+                  Cancel
+                </BusyButton>
+
+                <HintWrap
+                  disabled={!canWriteReconcileEffective}
+                  reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
+                >
+                  <BusyButton
+                    variant="primary"
+                    size="md"
+                    busy={matchBusy}
+                    busyLabel="Matching…"
+                    disabled={(() => {
+                      if (!canWriteReconcileEffective) return true;
+                      if (matchBusy) return true;
+                      if (!matchBankTxnId) return true;
+                      if (matchSelectedEntryIds.size === 0) return true;
+
+                      const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                      const bankAbs = absBig(bank ? toBigIntSafe(bank.amount_cents) : 0n);
+
+                      let selectedAbs = 0n;
+                      for (const id of matchSelectedEntryIds) {
+                        const e = allEntriesSorted.find((x: any) => x.id === id);
+                        if (!e) continue;
+                        selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+                      }
+                      return bankAbs !== selectedAbs;
+                    })()}
+                    onClick={async () => {
+                      if (!canWriteReconcileEffective) return;
+                      if (!selectedBusinessId || !selectedAccountId) return;
+                      if (!matchBankTxnId) return;
+
+                      const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
+                      const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
+                      const bankAbs = absBig(bankAmt);
+
+                      let selectedAbs = 0n;
+                      for (const id of matchSelectedEntryIds) {
+                        const e = allEntriesSorted.find((x: any) => x.id === id);
+                        if (!e) continue;
+                        selectedAbs += absBig(toBigIntSafe(e.amount_cents));
+                      }
+                      if (selectedAbs !== bankAbs) {
+                        setMatchError("Select entries until Remaining Δ is exactly 0.");
+                        return;
+                      }
+
+                      setMatchBusy(true);
+                      setMatchError(null);
+                      clearMutErr();
+
+                      const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
+                      for (const id of pendingIds) markPending(id);
+
+                      try {
+                        const payloadItems = [
+                          {
+                            client_id: `manual:${matchBankTxnId}:${Date.now()}`,
+                            bankTransactionIds: [matchBankTxnId],
+                            entryIds: Array.from(matchSelectedEntryIds),
+                          },
+                        ];
+
+                        const res: any = await createMatchGroupsBatch({
+                          businessId: selectedBusinessId,
+                          accountId: selectedAccountId,
+                          items: payloadItems,
+                        });
+
+                        const results = Array.isArray(res?.results) ? res.results : [];
+                        const first = results[0];
+
+                        if (!first?.ok) {
+                          setMatchError(String(first?.error ?? "Match failed"));
+                          return;
+                        }
+
+                        await refreshBankAndMatches({ preserveOnEmpty: true });
+                        await entriesQ.refetch?.();
+
+                        clearMutErr();
+                        setOpenMatch(false);
+                      } catch (e: any) {
+                        const r = applyMutationError(e, "Can’t match transactions");
+                        if (!r.isClosed) setMatchError(r.msg);
+                        else setMatchError(null);
+                      } finally {
+                        const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
+                        for (const id of pendingIds) clearPending(id);
+                        setMatchBusy(false);
+                      }
+                    }}
+                    title={matchBusy ? "Matching…" : "Match selected entries (exact sum required)"}
+                    aria-label="Match selected entries"
+                  >
+                    {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
+                  </BusyButton>
+                </HintWrap>
+              </>
+            }
+          />
+        }
       >
         <div className="flex flex-col max-h-[70vh]">
           {/* Body (scroll only this area) */}
@@ -3332,130 +3544,7 @@ export default function ReconcilePageClient() {
             </div>
           </div>
 
-          {/* Footer (fixed) */}
-          <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
-            <button
-              type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-              onClick={() => setOpenMatch(false)}
-              disabled={matchBusy}
-              title="Cancel"
-              aria-label="Cancel"
-            >
-              Cancel
-            </button>
-
-            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
-              <button
-                type="button"
-                className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-                disabled={(() => {
-                  if (!canWriteReconcileEffective) return true;
-                  if (matchBusy) return true;
-                  if (!matchBankTxnId) return true;
-                  if (matchSelectedEntryIds.size === 0) return true;
-
-                  const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
-                  const bankAbs = absBig(bank ? toBigIntSafe(bank.amount_cents) : 0n);
-
-                  let selectedAbs = 0n;
-                  for (const id of matchSelectedEntryIds) {
-                    const e = allEntriesSorted.find((x: any) => x.id === id);
-                    if (!e) continue;
-                    selectedAbs += absBig(toBigIntSafe(e.amount_cents));
-                  }
-                  return bankAbs !== selectedAbs;
-                })()}
-                onClick={async () => {
-                  if (!selectedBusinessId || !selectedAccountId) return;
-                  if (!matchBankTxnId) return;
-
-                  const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
-                  const bankAmt = bank ? toBigIntSafe(bank.amount_cents) : 0n;
-                  const bankAbs = absBig(bankAmt);
-
-                  let selectedAbs = 0n;
-                  for (const id of matchSelectedEntryIds) {
-                    const e = allEntriesSorted.find((x: any) => x.id === id);
-                    if (!e) continue;
-                    selectedAbs += absBig(toBigIntSafe(e.amount_cents));
-                  }
-                  if (selectedAbs !== bankAbs) {
-                    setMatchError("Select entries until Remaining Δ is exactly 0.");
-                    return;
-                  }
-
-                  setMatchBusy(true);
-                  setMatchError(null);
-                  clearMutErr();
-
-                  // Pending UI only (no logic change)
-                  const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
-                  for (const id of pendingIds) markPending(id);
-
-                  try {
-                    const items = Array.from(matchSelectedEntryIds).map((entryId) => {
-                      const entry = allEntriesSorted.find((x: any) => x.id === entryId);
-                      return entry
-                        ? {
-                          client_id: `manual:${matchBankTxnId}:${entryId}`,
-                          bankTransactionId: matchBankTxnId,
-                          entryId,
-                          matchType: "FULL" as const,
-                          matchedAmountCents: String(entry.amount_cents),
-                        }
-                        : null;
-                    }).filter(Boolean) as any[];
-
-                    const payloadItems = [
-                      {
-                        client_id: `manual:${matchBankTxnId}:${Date.now()}`,
-                        bankTransactionIds: [matchBankTxnId],
-                        entryIds: Array.from(matchSelectedEntryIds),
-                        // direction optional; backend derives from bank and validates if provided
-                      },
-                    ];
-
-                    const res: any = await createMatchGroupsBatch({
-                      businessId: selectedBusinessId,
-                      accountId: selectedAccountId,
-                      items: payloadItems,
-                    });
-
-                    const results = Array.isArray(res?.results) ? res.results : [];
-                    const first = results[0];
-
-                    if (!first?.ok) {
-                      setMatchError(String(first?.error ?? "Match failed"));
-                      return;
-                    }
-
-                    // Refresh once (no storms)
-                    await refreshBankAndMatches({ preserveOnEmpty: true });
-                    await entriesQ.refetch?.();
-
-                    clearMutErr();
-                    setOpenMatch(false);
-
-                  } catch (e: any) {
-                    const r = applyMutationError(e, "Can’t match transactions");
-                    if (!r.isClosed) setMatchError(r.msg);
-                    else setMatchError(null);
-                  } finally {
-                    // Pending UI only
-                    const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
-                    for (const id of pendingIds) clearPending(id);
-
-                    setMatchBusy(false);
-                  }
-                }}
-                title={matchBusy ? "Matching…" : "Match selected entries (exact sum required)"}
-                aria-label="Match selected entries"
-              >
-                {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
-              </button>
-            </HintWrap>
-          </div>
+          {null}
         </div>
       </AppDialog>
 
@@ -3471,80 +3560,92 @@ export default function ReconcilePageClient() {
         }}
         title="Mark adjustment"
         size="md"
+        footer={
+          <DialogFooter
+            left={
+              <BusyButton
+                variant="secondary"
+                size="md"
+                onClick={() => setOpenAdjust(false)}
+                disabled={adjustBusy}
+              >
+                Cancel
+              </BusyButton>
+            }
+            right={
+              <HintWrap
+                disabled={!canWriteReconcileEffective}
+                reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
+              >
+                <BusyButton
+                  variant="danger"
+                  size="md"
+                  busy={adjustBusy}
+                  busyLabel="Saving…"
+                  disabled={!canWriteReconcileEffective || !adjustEntryId || !adjustReason.trim()}
+                  onClick={async () => {
+                    if (!canWriteReconcileEffective) return;
+                    if (!selectedBusinessId || !selectedAccountId) return;
+                    if (!adjustEntryId) return;
+
+                    setAdjustBusy(true);
+                    setAdjustError(null);
+                    clearMutErr();
+                    markPending(String(adjustEntryId));
+
+                    try {
+                      await markEntryAdjustment({
+                        businessId: selectedBusinessId,
+                        accountId: selectedAccountId,
+                        entryId: adjustEntryId,
+                        reason: adjustReason.trim(),
+                      });
+
+                      setLocallyAdjusted((prev) => {
+                        const next = new Set(prev);
+                        next.add(adjustEntryId);
+                        return next;
+                      });
+
+                      refreshAllDebounced();
+                      clearMutErr();
+                      setOpenAdjust(false);
+                    } catch (e: any) {
+                      const r = applyMutationError(e, "Can’t update adjustment");
+                      if (!r.isClosed) setAdjustError(r.msg);
+                      else setAdjustError(null);
+                    } finally {
+                      clearPending(String(adjustEntryId));
+                      setAdjustBusy(false);
+                    }
+                  }}
+                >
+                  Mark adjustment
+                </BusyButton>
+              </HintWrap>
+            }
+          />
+        }
       >
         <div className="flex flex-col max-h-[55vh]">
           <div className="flex-1 overflow-y-auto">
-            <div className="text-xs text-slate-600 mb-2">Marking an entry as an adjustment is ledger-only and reversible later.</div>
+            <div className="text-xs text-slate-600 mb-2">
+              Marking an entry as an adjustment is ledger-only and reversible later.
+            </div>
 
             <div className="mb-2">
               <label className="text-xs text-slate-600">Reason (required)</label>
               <textarea
-                className="mt-1 w-full min-h-[90px] p-2 text-xs border border-slate-200 rounded-md"
+                className={[
+                  "mt-1 w-full min-h-[90px] p-2 text-xs border border-slate-200 rounded-md bg-white",
+                  ringFocus,
+                ].join(" ")}
                 value={adjustReason}
                 onChange={(e) => setAdjustReason(e.target.value)}
               />
             </div>
 
             {adjustError ? <div className="text-xs text-red-700 mb-2">{adjustError}</div> : null}
-          </div>
-
-          <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
-            <button
-              type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-              onClick={() => setOpenAdjust(false)}
-              disabled={adjustBusy}
-              title="Cancel"
-              aria-label="Cancel"
-            >
-              Cancel
-            </button>
-
-            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
-              <button
-                type="button"
-                className="h-8 px-3 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-                disabled={!canWriteReconcileEffective || adjustBusy || !adjustEntryId || !adjustReason.trim()}
-                onClick={async () => {
-                  if (!canWriteReconcileEffective) return;
-                  if (!selectedBusinessId || !selectedAccountId) return;
-                  if (!adjustEntryId) return;
-
-                  setAdjustBusy(true);
-                  setAdjustError(null);
-                  clearMutErr();
-                  try {
-                    await markEntryAdjustment({
-                      businessId: selectedBusinessId,
-                      accountId: selectedAccountId,
-                      entryId: adjustEntryId,
-                      reason: adjustReason.trim(),
-                    });
-
-                    setLocallyAdjusted((prev) => {
-                      const next = new Set(prev);
-                      next.add(adjustEntryId);
-                      return next;
-                    });
-
-                    refreshAllDebounced();
-
-                    clearMutErr();
-                    setOpenAdjust(false);
-                  } catch (e: any) {
-                    const r = applyMutationError(e, "Can’t update adjustment");
-                    if (!r.isClosed) setAdjustError(r.msg);
-                    else setAdjustError(null);
-                  } finally {
-                    setAdjustBusy(false);
-                  }
-                }}
-                title={adjustBusy ? "Saving…" : "Mark adjustment"}
-                aria-label="Mark adjustment"
-              >
-                {adjustBusy ? "Saving…" : "Mark adjustment"}
-              </button>
-            </HintWrap>
           </div>
         </div>
       </AppDialog>
@@ -3562,6 +3663,123 @@ export default function ReconcilePageClient() {
         }}
         title="Match entry"
         size="lg"
+        footer={
+          <DialogFooter
+            left={null}
+            right={
+              <>
+                <BusyButton
+                  variant="secondary"
+                  size="md"
+                  onClick={() => {
+                    setOpenEntryMatch(false);
+                    setEntryMatchBusy(false);
+                    setEntryMatchError(null);
+                    setEntryMatchSearch("");
+                    setEntryMatchEntryId(null);
+                    setEntryMatchSelectedBankTxnIds(new Set());
+                  }}
+                  disabled={entryMatchBusy}
+                >
+                  Cancel
+                </BusyButton>
+
+                <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                  <BusyButton
+                    variant="primary"
+                    size="md"
+                    busy={entryMatchBusy}
+                    busyLabel="Saving…"
+                    disabled={(() => {
+                      if (!canWriteReconcileEffective) return true;
+                      if (entryMatchBusy) return true;
+                      if (!entryMatchEntryId) return true;
+                      if (entryMatchSelectedBankTxnIds.size === 0) return true;
+
+                      const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+                      const entryAbs = absBig(entry ? toBigIntSafe(entry.amount_cents) : 0n);
+
+                      let selectedAbs = 0n;
+                      for (const id of entryMatchSelectedBankTxnIds) {
+                        const t = bankByIdFast.get(String(id)) ?? null;
+                        if (!t) continue;
+                        selectedAbs += absBig(toBigIntSafe(t.amount_cents));
+                      }
+                      return selectedAbs !== entryAbs;
+                    })()}
+                    title="Create combine match (exact sum required)"
+                    aria-label="Create combine match"
+                    onClick={async () => {
+                      if (!selectedBusinessId || !selectedAccountId) return;
+                      if (!canWriteReconcileEffective) return;
+                      if (!entryMatchEntryId) return;
+
+                      const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+                      const entryAbs = absBig(entry ? toBigIntSafe(entry.amount_cents) : 0n);
+
+                      let selectedAbs = 0n;
+                      for (const id of entryMatchSelectedBankTxnIds) {
+                        const t = bankByIdFast.get(String(id)) ?? null;
+                        if (!t) continue;
+                        selectedAbs += absBig(toBigIntSafe(t.amount_cents));
+                      }
+
+                      if (selectedAbs !== entryAbs) {
+                        setEntryMatchError("Select bank transactions until Remaining Δ is exactly 0.");
+                        return;
+                      }
+
+                      setEntryMatchBusy(true);
+                      setEntryMatchError(null);
+                      clearMutErr();
+
+                      const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
+                      for (const id of pendingIds) markPending(id);
+
+                      try {
+                        const payloadItems = [
+                          {
+                            client_id: `combine:${entryMatchEntryId}:${Date.now()}`,
+                            bankTransactionIds: Array.from(entryMatchSelectedBankTxnIds).map(String),
+                            entryIds: [entryMatchEntryId],
+                          },
+                        ];
+
+                        const res: any = await createMatchGroupsBatch({
+                          businessId: selectedBusinessId,
+                          accountId: selectedAccountId,
+                          items: payloadItems,
+                        });
+
+                        const first = (Array.isArray(res?.results) ? res.results : [])[0];
+                        if (!first?.ok) {
+                          setEntryMatchError(String(first?.error ?? "Combine match failed"));
+                          return;
+                        }
+
+                        await refreshBankAndMatches({ preserveOnEmpty: true });
+                        await entriesQ.refetch?.();
+
+                        clearMutErr();
+                        setOpenEntryMatch(false);
+                      } catch (e: any) {
+                        const r = applyMutationError(e, "Can’t create match");
+                        if (!r.isClosed) setEntryMatchError(r.msg);
+                        else setEntryMatchError(null);
+                      } finally {
+                        const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
+                        for (const id of pendingIds) clearPending(id);
+                        setEntryMatchBusy(false);
+                      }
+                    }}
+                  >
+                    {entryMatchBusy ? "Saving…" : "Create match"}
+                  </BusyButton>
+                </HintWrap>
+              </>
+            }
+          />
+        }
       >
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
@@ -3710,112 +3928,7 @@ export default function ReconcilePageClient() {
             </div>
           </div>
 
-          <div className="shrink-0 pt-3 flex items-center justify-between border-t border-slate-200 mt-3">
-            <button
-              type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-              onClick={() => setOpenEntryMatch(false)}
-              disabled={entryMatchBusy}
-              title="Cancel"
-              aria-label="Cancel"
-            >
-              Cancel
-            </button>
-
-            <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-              <button
-                type="button"
-                className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
-                disabled={(() => {
-                  if (!canWriteReconcileEffective) return true;
-                  if (entryMatchBusy) return true;
-                  if (!entryMatchEntryId) return true;
-                  if (entryMatchSelectedBankTxnIds.size === 0) return true;
-
-                  const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
-                  const entryAbs = absBig(entry ? toBigIntSafe(entry.amount_cents) : 0n);
-
-                  let selectedAbs = 0n;
-                  for (const id of entryMatchSelectedBankTxnIds) {
-                    const t = bankByIdFast.get(String(id)) ?? null;
-                    if (!t) continue;
-                    selectedAbs += absBig(toBigIntSafe(t.amount_cents));
-                  }
-                  return selectedAbs !== entryAbs;
-                })()}
-                title="Create combine match (exact sum required)"
-                aria-label="Create combine match"
-                onClick={async () => {
-                  if (!selectedBusinessId || !selectedAccountId) return;
-                  if (!canWriteReconcileEffective) return;
-                  if (!entryMatchEntryId) return;
-
-                  const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
-                  const entryAbs = absBig(entry ? toBigIntSafe(entry.amount_cents) : 0n);
-
-                  let selectedAbs = 0n;
-                  for (const id of entryMatchSelectedBankTxnIds) {
-                    const t = bankByIdFast.get(String(id)) ?? null;
-                    if (!t) continue;
-                    selectedAbs += absBig(toBigIntSafe(t.amount_cents));
-                  }
-
-                  if (selectedAbs !== entryAbs) {
-                    setEntryMatchError("Select bank transactions until Remaining Δ is exactly 0.");
-                    return;
-                  }
-
-                  setEntryMatchBusy(true);
-                  setEntryMatchError(null);
-                  clearMutErr();
-
-                  // Pending UI only (no logic change)
-                  const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
-                  for (const id of pendingIds) markPending(id);
-
-                  try {
-                    const payloadItems = [
-                      {
-                        client_id: `combine:${entryMatchEntryId}:${Date.now()}`,
-                        bankTransactionIds: Array.from(entryMatchSelectedBankTxnIds),
-                        entryIds: [entryMatchEntryId],
-                      },
-                    ];
-
-                    const res: any = await createMatchGroupsBatch({
-                      businessId: selectedBusinessId,
-                      accountId: selectedAccountId,
-                      items: payloadItems,
-                    });
-
-                    const first = (Array.isArray(res?.results) ? res.results : [])[0];
-                    if (!first?.ok) {
-                      setEntryMatchError(String(first?.error ?? "Combine match failed"));
-                      return;
-                    }
-
-                    await refreshBankAndMatches({ preserveOnEmpty: true });
-                    await entriesQ.refetch?.();
-
-                    clearMutErr();
-                    setOpenEntryMatch(false);
-                  } catch (e: any) {
-                    const r = applyMutationError(e, "Can’t create match");
-                    if (!r.isClosed) setEntryMatchError(r.msg);
-                    else setEntryMatchError(null);
-                  } finally {
-                    // Pending UI only
-                    const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
-                    for (const id of pendingIds) clearPending(id);
-
-                    setEntryMatchBusy(false);
-                  }
-                }}
-              >
-                {entryMatchBusy ? "Saving…" : "Create match"}
-              </button>
-            </HintWrap>
-          </div>
+          {null}
         </div>
       </AppDialog>
 
@@ -3855,7 +3968,7 @@ export default function ReconcilePageClient() {
               </button>
 
               <input
-                className="h-7 w-[200px] px-2 text-xs border border-slate-200 rounded-md bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                className={["h-7 w-[200px] px-2 text-xs border border-slate-200 rounded-md bg-white", ringFocus].join(" ")}
                 placeholder="Search history…"
                 value={reconHistorySearch}
                 onChange={(e) => setReconHistorySearch(e.target.value)}
@@ -3991,7 +4104,7 @@ export default function ReconcilePageClient() {
                             {formatUsdFromCents(matchedAbs)}
                           </td>
                           <td className="px-2 text-xs text-slate-700">
-                            {ev.by ? shortId(ev.by) : "—"}
+                            {auditUserLabel(ev.by)}
                           </td>
                         </tr>
                       );
@@ -4019,6 +4132,91 @@ export default function ReconcilePageClient() {
         }}
         title="Audit detail"
         size="md"
+        footer={
+          (() => {
+            const ev = selectedReconAudit as any | null;
+            const groupId = ev?.groupId ? String(ev.groupId) : null;
+            const bankTxnId = ev?.bankTxnIds?.[0] ? String(ev.bankTxnIds[0]) : null;
+
+            const isActiveGroup = !!groupId && activeGroupByBankTxnId.has(String(bankTxnId ?? ""));
+            const canRevert = Boolean(canWrite && selectedBusinessId && selectedAccountId && groupId && isActiveGroup);
+
+            return (
+              <DialogFooter
+                left={
+                  <BusyButton
+                    variant="secondary"
+                    size="md"
+                    onClick={() => {
+                      setOpenReconAuditDetail(false);
+                      setSelectedReconAudit(null);
+                      setRevertBusy(false);
+                      setRevertError(null);
+                    }}
+                    disabled={revertBusy}
+                  >
+                    Close
+                  </BusyButton>
+                }
+                right={
+                  <BusyButton
+                    variant="danger"
+                    size="md"
+                    busy={revertBusy}
+                    busyLabel="Reverting…"
+                    disabled={!canRevert}
+                    title={!canWrite ? noPermTitle : "Revert bank match (void all active matches for this bank transaction)"}
+                    aria-label="Revert bank match"
+                    onClick={async () => {
+                      if (!selectedBusinessId || !selectedAccountId) return;
+                      if (!bankTxnId) return;
+
+                      const ok = window.confirm(
+                        "Revert bank match?\n\nThis will VOID (unmatch) ALL active matches for this bank transaction.\nThis action is recorded in history and can be re-matched later."
+                      );
+                      if (!ok) return;
+
+                      setRevertBusy(true);
+                      setRevertError(null);
+                      clearMutErr();
+
+                      if (bankTxnId) markPending(String(bankTxnId));
+                      if (groupId) markPending(String(groupId));
+
+                      try {
+                        if (!groupId) throw new Error("Match group id unavailable");
+
+                        await voidMatchGroup({
+                          businessId: selectedBusinessId,
+                          accountId: selectedAccountId,
+                          matchGroupId: groupId,
+                          reason: "User unmatch",
+                        });
+
+                        await refreshBankAndMatches({ preserveOnEmpty: true });
+                        await entriesQ.refetch?.();
+
+                        clearMutErr();
+                        setOpenReconAuditDetail(false);
+                        setSelectedReconAudit(null);
+                      } catch (e: any) {
+                        const r = applyMutationError(e, "Can’t revert match");
+                        if (!r.isClosed) setRevertError(r.msg);
+                        else setRevertError(null);
+                      } finally {
+                        if (bankTxnId) clearPending(String(bankTxnId));
+                        if (groupId) clearPending(String(groupId));
+                        setRevertBusy(false);
+                      }
+                    }}
+                  >
+                    Revert bank match
+                  </BusyButton>
+                }
+              />
+            );
+          })()
+        }
       >
         <div className="p-3">
           {(() => {
@@ -4033,71 +4231,12 @@ export default function ReconcilePageClient() {
             const alreadyVoided = !!groupId && !isActiveGroup;
 
             return (
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[11px] text-slate-500">
-                  {bankTxnId ? (
-                    alreadyVoided ? "No active bank matches to revert." : "Revert will void all active matches for this bank transaction."
-                  ) : (
-                    "Bank transaction id unavailable."
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 inline-flex items-center gap-1"
-                  disabled={!canRevert || revertBusy}
-                  title={!canWrite ? noPermTitle : "Revert bank match (void all active matches for this bank transaction)"}
-                  onClick={async () => {
-                    if (!selectedBusinessId || !selectedAccountId) return;
-                    if (!bankTxnId) return;
-
-                    const ok = window.confirm(
-                      "Revert bank match?\n\nThis will VOID (unmatch) ALL active matches for this bank transaction.\nThis action is recorded in history and can be re-matched later."
-                    );
-                    if (!ok) return;
-
-                    setRevertBusy(true);
-                    setRevertError(null);
-                    clearMutErr();
-
-                    // Pending UI only (no logic change)
-                    if (bankTxnId) markPending(String(bankTxnId));
-                    if (groupId) markPending(String(groupId));
-
-                    try {
-                      if (!groupId) throw new Error("Match group id unavailable");
-
-                      await voidMatchGroup({
-                        businessId: selectedBusinessId,
-                        accountId: selectedAccountId,
-                        matchGroupId: groupId,
-                        reason: "User unmatch",
-                      });
-
-                      await refreshBankAndMatches({ preserveOnEmpty: true });
-                      await entriesQ.refetch?.();
-
-                      // Close detail after success (clean, consistent)
-                      clearMutErr();
-                      setOpenReconAuditDetail(false);
-                      setSelectedReconAudit(null);
-                    } catch (e: any) {
-                      const r = applyMutationError(e, "Can’t revert match");
-                      if (!r.isClosed) setRevertError(r.msg);
-                      else setRevertError(null);
-                    } finally {
-                      // Pending UI only
-                      if (bankTxnId) clearPending(String(bankTxnId));
-                      if (groupId) clearPending(String(groupId));
-
-                      setRevertBusy(false);
-                    }
-                  }}
-                  aria-label="Revert bank match"
-                >
-                  <Undo2 className="h-3.5 w-3.5 text-slate-700" />
-                  {revertBusy ? "Reverting…" : "Revert bank match"}
-                </button>
+              <div className="mb-2 text-[11px] text-slate-500">
+                {bankTxnId
+                  ? alreadyVoided
+                    ? "No active bank matches to revert."
+                    : "Use “Revert bank match” below to void all active matches for this bank transaction."
+                  : "Bank transaction id unavailable."}
               </div>
             );
           })()}
@@ -4204,9 +4343,9 @@ export default function ReconcilePageClient() {
                     <div className="text-[11px] font-semibold text-slate-600 mb-1">Lifecycle</div>
                     <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
                       <Row label="Created" value={fmt(createdAt)} />
-                      <Row label="Created by" value={createdBy ?? "—"} mono />
+                      <Row label="Created by" value={auditUserLabel(createdBy)} />
                       <Row label="Voided" value={fmt(voidedAt)} />
-                      <Row label="Voided by" value={voidedBy ?? "—"} mono />
+                      <Row label="Voided by" value={auditUserLabel(voidedBy)} />
                     </div>
                   </div>
 
@@ -4219,14 +4358,19 @@ export default function ReconcilePageClient() {
       </AppDialog>
 
       {/* Issues Hub (Phase 5C, read-only) */}
-      <AppDialog open={openIssuesHub} onClose={() => setOpenIssuesHub(false)} title="Issues" size="sm">
+      <AppDialog
+        open={openIssuesHub}
+        onClose={() => setOpenIssuesHub(false)}
+        title="Issues"
+        size="sm"
+      >
         <div className="p-3">
           <div className="grid grid-cols-2 gap-3">
             {null /* Full-match only: no partial issues */}
 
             <button
               type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
+              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
               onClick={() => {
                 setOpenIssuesHub(false);
                 setIssuesKind("notInView");
@@ -4242,7 +4386,7 @@ export default function ReconcilePageClient() {
 
             <button
               type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-1"
+              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-1", ringFocus].join(" ")}
               onClick={() => {
                 setOpenIssuesHub(false);
                 setIssuesKind("voidHeavy");
@@ -4295,7 +4439,7 @@ export default function ReconcilePageClient() {
                   {visible.length} shown
                 </div>
                 <input
-                  className="h-7 w-[240px] px-2 text-xs border border-slate-200 rounded-md bg-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
+                  className={["h-7 w-[240px] px-2 text-xs border border-slate-200 rounded-md bg-white", ringFocus].join(" ")}
                   placeholder="Search issues…"
                   value={issuesSearch}
                   onChange={(e) => setIssuesSearch(e.target.value)}
@@ -4397,7 +4541,12 @@ export default function ReconcilePageClient() {
       </AppDialog>
 
       {/* Issues info (Phase 5C-2, read-only) */}
-      <AppDialog open={openIssuesInfo} onClose={() => setOpenIssuesInfo(false)} title="Info" size="sm">
+      <AppDialog
+        open={openIssuesInfo}
+        onClose={() => setOpenIssuesInfo(false)}
+        title="Info"
+        size="sm"
+      >
         <div className="p-3">
           <div className="text-xs text-slate-700 leading-relaxed">{issuesInfoMsg}</div>
           <div className="mt-3 flex justify-end">
@@ -4413,13 +4562,18 @@ export default function ReconcilePageClient() {
       </AppDialog>
 
       {/* Export Hub (Phase 5D, read-only) */}
-      <AppDialog open={openExportHub} onClose={() => setOpenExportHub(false)} title="Export" size="sm">
+      <AppDialog
+        open={openExportHub}
+        onClose={() => setOpenExportHub(false)}
+        title="Export"
+        size="sm"
+      >
         <div className="p-3">
           <div className="grid grid-cols-2 gap-3">
             <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
               <button
                 type="button"
-                className="h-24 w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
+                className={["h-24 w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
                 disabled={
                   !canWriteReconcileEffective ||
                   (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
@@ -4448,7 +4602,7 @@ export default function ReconcilePageClient() {
 
             <button
               type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2 col-span-2"
+              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-2 col-span-2", ringFocus].join(" ")}
               disabled={reconAuditVisible.length === 0}
               title={reconAuditVisible.length === 0 ? "No audit events to export" : "Export audit events (CSV) — respects current filters"}
               onClick={() => exportAuditEventsCsv()}
@@ -4466,12 +4620,17 @@ export default function ReconcilePageClient() {
       </AppDialog>
 
       {/* History Hub (keeps Bank header clean) */}
-      <AppDialog open={openHistoryHub} onClose={() => setOpenHistoryHub(false)} title="History" size="sm">
+      <AppDialog
+        open={openHistoryHub}
+        onClose={() => setOpenHistoryHub(false)}
+        title="History"
+        size="sm"
+      >
         <div className="p-3">
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
+              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
               onClick={() => {
                 setOpenHistoryHub(false);
                 setOpenStatementHistory(true);
@@ -4483,7 +4642,7 @@ export default function ReconcilePageClient() {
 
             <button
               type="button"
-              className="h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 flex flex-col items-center justify-center gap-2"
+              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
               onClick={() => {
                 setOpenHistoryHub(false);
                 setOpenReconciliationHistory(true);
@@ -4497,7 +4656,12 @@ export default function ReconcilePageClient() {
       </AppDialog>
 
       {/* Statement history dialog */}
-      <AppDialog open={openStatementHistory} onClose={() => setOpenStatementHistory(false)} title="Statement history" size="lg">
+      <AppDialog
+        open={openStatementHistory}
+        onClose={() => setOpenStatementHistory(false)}
+        title="Statement history"
+        size="lg"
+      >
         <UploadsList
           title="Bank statement history"
           businessId={selectedBusinessId ?? ""}

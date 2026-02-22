@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { PillToggle } from "@/components/primitives/PillToggle";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -422,12 +424,16 @@ export default function CategoryReviewPageClient() {
               <>
                 <div className="space-y-1">
                   <div className="text-[11px] text-slate-600">From</div>
-                  <Input type="date" className="h-7 w-[160px] text-xs" value={from} onChange={(e) => setFrom(e.target.value)} />
+                  <div className="w-[160px]">
+                    <AppDatePicker value={from} onChange={setFrom} ariaLabel="From date" />
+                  </div>
                 </div>
 
                 <div className="space-y-1">
                   <div className="text-[11px] text-slate-600">To</div>
-                  <Input type="date" className="h-7 w-[160px] text-xs" value={to} onChange={(e) => setTo(e.target.value)} />
+                  <div className="w-[160px]">
+                    <AppDatePicker value={to} onChange={setTo} ariaLabel="To date" />
+                  </div>
                 </div>
 
                 <div className="space-y-1">
@@ -443,15 +449,11 @@ export default function CategoryReviewPageClient() {
                 <div className="ml-2 space-y-1">
                   <div className="text-[11px] text-slate-600">&nbsp;</div>
                   <div className="h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center">
-                    <label className="inline-flex items-center gap-2 text-xs text-slate-700 leading-none">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={onlyUncategorized}
-                        onChange={(e) => setOnlyUncategorized(e.target.checked)}
-                      />
-                      Uncategorized only
-                    </label>
+                    <PillToggle
+                      label="Uncategorized only"
+                      checked={onlyUncategorized}
+                      onCheckedChange={(next) => setOnlyUncategorized(next)}
+                    />
                   </div>
                 </div>
               </>

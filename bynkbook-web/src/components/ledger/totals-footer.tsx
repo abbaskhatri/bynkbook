@@ -10,10 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-
-const inputH7 =
-  "h-7 w-full px-2 py-1 text-xs leading-tight bg-white border border-slate-200 rounded-md " +
-  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 focus-visible:ring-offset-0";
+import { inputH7, iconButtonH7 } from "@/components/primitives/tokens";
 
 export function TotalsFooter(props: {
   rowsPerPage: number;
@@ -45,9 +42,7 @@ export function TotalsFooter(props: {
     balanceText,
   } = props;
 
-  const navBtnClass =
-    "h-7 w-8 rounded-md " +
-    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 focus-visible:ring-offset-0";
+  const navBtnClass = iconButtonH7;
 
   return (
     <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">

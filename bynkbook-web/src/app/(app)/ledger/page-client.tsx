@@ -49,7 +49,9 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { FixIssueDialog } from "@/components/ledger/fix-issue-dialog";
 import { StatusChip } from "@/components/primitives/StatusChip";
-import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { PillToggle } from "@/components/primitives/PillToggle";
+import { ringFocus, inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { TotalsFooter } from "@/components/ledger/totals-footer";
 
@@ -2553,12 +2555,9 @@ export default function LedgerPageClient() {
 
       {/* Date */}
       <td className={td}>
-        <input
-          className={inputH7}
-          type="date"
-          value={draftDate}
-          onChange={(e) => setDraftDate(e.target.value)}
-        />
+        <div className="w-[140px]">
+          <AppDatePicker value={draftDate} onChange={setDraftDate} ariaLabel="Entry date" />
+        </div>
       </td>
 
       {/* Ref */}
@@ -2829,7 +2828,7 @@ export default function LedgerPageClient() {
               className={[
                 "h-7 px-1.5 text-xs font-medium rounded-md shrink-0 inline-flex items-center border",
                 showAdvancedFilters
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  ? "bg-violet-50 text-violet-700 border-violet-200"
                   : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900",
               ].join(" ")}
               onClick={() => setShowAdvancedFilters((v) => !v)}
@@ -2912,40 +2911,24 @@ export default function LedgerPageClient() {
 
             {/* Deleted toggle (last) */}
             <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">Deleted</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showDeleted}
-              aria-label="Show deleted entries"
-              title="Show/hide deleted entries"
-              onClick={() => {
-                setShowDeleted((v) => !v);
+            <PillToggle
+              label=""
+              checked={showDeleted}
+              onCheckedChange={(next) => {
+                setShowDeleted(next);
                 setPage(1);
                 qc.invalidateQueries({ queryKey: entriesKey, exact: false });
               }}
-              className={[
-                "relative inline-flex items-center rounded-full transition-colors shrink-0",
-                "h-[16px] w-[30px]",
-                showDeleted ? "bg-emerald-600" : "bg-slate-200",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "inline-block rounded-full bg-white shadow transition-transform",
-                  "h-[12px] w-[12px]",
-                  showDeleted ? "translate-x-[16px]" : "translate-x-[2px]",
-                ].join(" ")}
-              />
-            </button>
+            />
 
             {err ? (
               <div className="text-sm text-red-600 whitespace-nowrap shrink-0" role="alert">
                 {err}
               </div>
             ) : null}
-          </div>
         </div>
       </div>
+    </div>
 
       {/* Expanded advanced area (inside same box) */}
       {showAdvancedFilters ? (
@@ -2956,24 +2939,24 @@ export default function LedgerPageClient() {
             {/* Date range */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-600">From</span>
-              <input
-                className={[inputH7, "w-[132px]"].join(" ")}
-                type="date"
-                value={filterFrom}
-                onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }}
-                title="From"
-              />
+              <div className="w-[150px]">
+                <AppDatePicker
+                  value={filterFrom}
+                  onChange={(next) => { setFilterFrom(next); setPage(1); }}
+                  ariaLabel="From date"
+                />
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-600">To</span>
-              <input
-                className={[inputH7, "w-[132px]"].join(" ")}
-                type="date"
-                value={filterTo}
-                onChange={(e) => { setFilterTo(e.target.value); setPage(1); }}
-                title="To"
-              />
+              <div className="w-[150px]">
+                <AppDatePicker
+                  value={filterTo}
+                  onChange={(next) => { setFilterTo(next); setPage(1); }}
+                  ariaLabel="To date"
+                />
+              </div>
             </div>
 
             <div className="h-6 w-px bg-slate-200 mx-1" />
@@ -3019,1242 +3002,1242 @@ export default function LedgerPageClient() {
       ) : null}
     </div>
   ), [
-    searchPayee,
-    filterType,
-    filterMethod,
-    filterCategory,
-    showAdvancedFilters,
-    filterFrom,
-    filterTo,
-    filterAmountMin,
-    filterAmountMax,
-    filterAmountExact,
-    selectedCount,
-    allPageSelected,
-    scanBusy,
-    showDeleted,
-    lastScanAt,
-    bulkMsg,
-  ]);
+  searchPayee,
+  filterType,
+  filterMethod,
+  filterCategory,
+  showAdvancedFilters,
+  filterFrom,
+  filterTo,
+  filterAmountMin,
+  filterAmountMax,
+  filterAmountExact,
+  selectedCount,
+  allPageSelected,
+  scanBusy,
+  showDeleted,
+  lastScanAt,
+  bulkMsg,
+]);
 
-  const filterRight = null;
+const filterRight = null;
 
-  // Delete confirm dialog
-  const [deleteDialog, setDeleteDialog] = useState<{
+// Delete confirm dialog
+const [deleteDialog, setDeleteDialog] = useState<{
+  id: string;
+  mode: "soft" | "hard";
+  isTransfer?: boolean;
+  transferId?: string | null;
+} | null>(null);
+
+// Payment delete confirm (explicit action)
+const [paymentDeleteDialog, setPaymentDeleteDialog] = useState<{
+  id: string;
+  isApplied: boolean;
+} | null>(null);
+
+// Stage 2A: Close period dialog
+const [closePeriodOpen, setClosePeriodOpen] = useState(false);
+
+// FixIssue dialog (reusable; Ledger + Issues page)
+// NOTE: Missing category is now inline (no dialog).
+const [fixDialog, setFixDialog] = useState<
+
+  | {
     id: string;
-    mode: "soft" | "hard";
-    isTransfer?: boolean;
-    transferId?: string | null;
-  } | null>(null);
+    kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+  }
+  | null
+>(null);
 
-  // Payment delete confirm (explicit action)
-  const [paymentDeleteDialog, setPaymentDeleteDialog] = useState<{
-    id: string;
-    isApplied: boolean;
-  } | null>(null);
+// Quick-fix: Missing Category inline (no dialog)
+const [quickCatEntryId, setQuickCatEntryId] = useState<string | null>(null);
+const [quickCatValue, setQuickCatValue] = useState<string>("");
+const [quickCatBusy, setQuickCatBusy] = useState(false);
+const [quickCatErr, setQuickCatErr] = useState<string | null>(null);
 
-  // Stage 2A: Close period dialog
-  const [closePeriodOpen, setClosePeriodOpen] = useState(false);
+const cancelQuickCat = () => {
+  setQuickCatEntryId(null);
+  setQuickCatValue("");
+  setQuickCatBusy(false);
+  setQuickCatErr(null);
+};
 
-  // FixIssue dialog (reusable; Ledger + Issues page)
-  // NOTE: Missing category is now inline (no dialog).
-  const [fixDialog, setFixDialog] = useState<
+const saveQuickCat = async () => {
+  if (!selectedBusinessId || !selectedAccountId) return;
+  if (!quickCatEntryId) return;
 
-    | {
-      id: string;
-      kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+  const name = normalizeCategoryName(quickCatValue || "");
+  if (!name) {
+    setQuickCatErr("Category is required.");
+    return;
+  }
+
+  setQuickCatBusy(true);
+  setQuickCatErr(null);
+
+  try {
+    // Resolve/create category id deterministically
+    let catId = categoryIdByNormName.get(normKey(name)) ?? null;
+
+    if (!catId) {
+      const res = await createCategory(selectedBusinessId, name);
+      catId = res?.row?.id ?? null;
+
+      // ensure category list updates (so suggestions are fresh)
+      void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
     }
-    | null
-  >(null);
 
-  // Quick-fix: Missing Category inline (no dialog)
-  const [quickCatEntryId, setQuickCatEntryId] = useState<string | null>(null);
-  const [quickCatValue, setQuickCatValue] = useState<string>("");
-  const [quickCatBusy, setQuickCatBusy] = useState(false);
-  const [quickCatErr, setQuickCatErr] = useState<string | null>(null);
+    if (!catId) throw new Error("Failed to resolve category");
 
-  const cancelQuickCat = () => {
-    setQuickCatEntryId(null);
-    setQuickCatValue("");
+    // Update the entry (category_id only)
+    await (updateMut as any).mutateAsync({
+      entryId: quickCatEntryId,
+      updates: { category_id: catId },
+    });
+
+    // Refresh issues immediately (so missing icon disappears)
+    void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+    void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+
+    cancelQuickCat();
+  } catch (e: any) {
+    setQuickCatErr(e?.message ?? "Fix category failed");
+  } finally {
     setQuickCatBusy(false);
-    setQuickCatErr(null);
-  };
+  }
+};
 
-  const saveQuickCat = async () => {
-    if (!selectedBusinessId || !selectedAccountId) return;
-    if (!quickCatEntryId) return;
+// Quick-fix: Missing Category inline (no dialog)
 
-    const name = normalizeCategoryName(quickCatValue || "");
-    if (!name) {
-      setQuickCatErr("Category is required.");
-      return;
-    }
+// Body rows (memoized so add-row typing doesn't rebuild the full table body)
+const bodyRows = useMemo(() => {
 
-    setQuickCatBusy(true);
-    setQuickCatErr(null);
+  return pageRows.map((r) => {
+    const menuOpen = menuOpenId === r.id;
+    const isEditing = editingId === r.id;
+    const deletedRow = r.isDeleted;
+    const deletedText = deletedRow ? "line-through" : "";
 
-    try {
-      // Resolve/create category id deterministically
-      let catId = categoryIdByNormName.get(normKey(name)) ?? null;
+    const rowClass =
+      "h-[24px] border-b border-slate-200 " +
+      (deletedRow ? "bg-slate-50 text-slate-400 " : "") +
+      (!deletedRow && r.hasDup
+        ? "bg-yellow-50 hover:bg-yellow-100 "
+        : !deletedRow && r.hasStale
+          ? "bg-blue-50 hover:bg-blue-100 "
+          : "hover:bg-slate-50");
 
-      if (!catId) {
-        const res = await createCategory(selectedBusinessId, name);
-        catId = res?.row?.id ?? null;
+    const onEditKeyDown = (e: any) => {
+      if (e.key === "Escape") cancelEdit();
+      if (e.key === "Enter") triggerSaveEdit(r.id);
+    };
 
-        // ensure category list updates (so suggestions are fresh)
-        void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
-      }
+    return (
+      <tr key={r.id} className={rowClass}>
+        <td className={td + " " + center}>
+          {r.id !== "opening_balance" && !deletedRow ? (
+            <input
+              type="checkbox"
+              className={checkboxClass}
+              checked={!!selectedIds[r.id]}
+              onChange={() => toggleRow(r.id)}
+              aria-label={`Select row: ${r.payee || "Unknown payee"} (${r.date})`}
+            />
+          ) : null}
+        </td>
 
-      if (!catId) throw new Error("Failed to resolve category");
-
-      // Update the entry (category_id only)
-      await (updateMut as any).mutateAsync({
-        entryId: quickCatEntryId,
-        updates: { category_id: catId },
-      });
-
-      // Refresh issues immediately (so missing icon disappears)
-      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
-
-      cancelQuickCat();
-    } catch (e: any) {
-      setQuickCatErr(e?.message ?? "Fix category failed");
-    } finally {
-      setQuickCatBusy(false);
-    }
-  };
-
-  // Quick-fix: Missing Category inline (no dialog)
-
-  // Body rows (memoized so add-row typing doesn't rebuild the full table body)
-  const bodyRows = useMemo(() => {
-
-    return pageRows.map((r) => {
-      const menuOpen = menuOpenId === r.id;
-      const isEditing = editingId === r.id;
-      const deletedRow = r.isDeleted;
-      const deletedText = deletedRow ? "line-through" : "";
-
-      const rowClass =
-        "h-[24px] border-b border-slate-200 " +
-        (deletedRow ? "bg-slate-50 text-slate-400 " : "") +
-        (!deletedRow && r.hasDup
-          ? "bg-yellow-50 hover:bg-yellow-100 "
-          : !deletedRow && r.hasStale
-            ? "bg-blue-50 hover:bg-blue-100 "
-            : "hover:bg-slate-50");
-
-      const onEditKeyDown = (e: any) => {
-        if (e.key === "Escape") cancelEdit();
-        if (e.key === "Enter") triggerSaveEdit(r.id);
-      };
-
-      return (
-        <tr key={r.id} className={rowClass}>
-          <td className={td + " " + center}>
-            {r.id !== "opening_balance" && !deletedRow ? (
-              <input
-                type="checkbox"
-                className={checkboxClass}
-                checked={!!selectedIds[r.id]}
-                onChange={() => toggleRow(r.id)}
-                aria-label={`Select row: ${r.payee || "Unknown payee"} (${r.date})`}
-              />
-            ) : null}
-          </td>
-
-          {/* Date */}
-          <td className={td + " " + trunc + " " + deletedText}>
-            {isEditing && editDraft ? (
-              <input
-                className={inputH7}
-                type="date"
+        {/* Date */}
+        <td className={td + " " + trunc + " " + deletedText}>
+          {isEditing && editDraft ? (
+            <div className="w-[140px]">
+              <AppDatePicker
                 value={editDraft.date}
-                onChange={(e) => setEditDraft({ ...editDraft, date: e.target.value })}
-                onKeyDown={onEditKeyDown}
+                onChange={(next) => setEditDraft({ ...editDraft, date: next })}
+                ariaLabel="Edit date"
               />
-            ) : (
-              r.date
-            )}
-          </td>
+            </div>
+          ) : (
+            r.date
+          )}
+        </td>
 
-          {/* Ref */}
-          <td className={td + " " + trunc + " text-slate-500 " + deletedText}>
-            {isEditing && editDraft ? (
+        {/* Ref */}
+        <td className={td + " " + trunc + " text-slate-500 " + deletedText}>
+          {isEditing && editDraft ? (
+            <input
+              ref={editRefRef}
+              className={inputH7}
+              value={editDraft.ref}
+              onChange={(e) => setEditDraft({ ...editDraft, ref: e.target.value })}
+              onKeyDown={onEditKeyDown}
+            />
+          ) : (
+            r.ref
+          )}
+        </td>
+
+        {/* Payee */}
+        <td className={td + " min-w-0"}>
+          {isEditing && editDraft ? (
+            <div className="min-w-0">
               <input
-                ref={editRefRef}
+                ref={editPayeeRef}
                 className={inputH7}
-                value={editDraft.ref}
-                onChange={(e) => setEditDraft({ ...editDraft, ref: e.target.value })}
+                value={editDraft.payee}
+                onChange={(e) => setEditDraft({ ...editDraft, payee: e.target.value })}
                 onKeyDown={onEditKeyDown}
               />
-            ) : (
-              r.ref
-            )}
-          </td>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={trunc + " font-medium " + deletedText + " min-w-0"}>{r.payee}</span>
 
-          {/* Payee */}
-          <td className={td + " min-w-0"}>
-            {isEditing && editDraft ? (
-              <div className="min-w-0">
-                <input
-                  ref={editPayeeRef}
-                  className={inputH7}
-                  value={editDraft.payee}
-                  onChange={(e) => setEditDraft({ ...editDraft, payee: e.target.value })}
-                  onKeyDown={onEditKeyDown}
-                />
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={trunc + " font-medium " + deletedText + " min-w-0"}>{r.payee}</span>
+              {/* Single-line vendor indicator (persisted) */}
+              {!deletedRow && (r.vendorName || linkedVendorByEntryId[r.id]) ? (
+                <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700 max-w-[180px] shrink-0">
+                  {/* vendor icon */}
+                  <BookOpen className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
 
-                {/* Single-line vendor indicator (persisted) */}
-                {!deletedRow && (r.vendorName || linkedVendorByEntryId[r.id]) ? (
-                  <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700 max-w-[180px] shrink-0">
-                    {/* vendor icon */}
-                    <BookOpen className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
-
-                    {/* vendor name (truncate with …) */}
-                    <span
-                      className="font-semibold truncate min-w-0"
-                      title={r.vendorName ?? linkedVendorByEntryId[r.id]}
-                    >
-                      {(() => {
-                        const full = (r.vendorName ?? linkedVendorByEntryId[r.id] ?? "").trim();
-                        const first = full.split(/\s+/)[0] || "";
-                        return first ? `${first}...` : "";
-                      })()}
-
-                    </span>
-
-                    {/* unlink */}
-                    <button
-                      type="button"
-                      className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-100 shrink-0"
-                      title="Unlink vendor"
-                      onClick={async () => {
-                        try {
-                          await apiFetch(
-                            `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
-                            { method: "PATCH", body: JSON.stringify({ vendor_id: null, entry_kind: "GENERAL" }) }
-                          );
-
-                          setLinkedVendorByEntryId((m) => {
-                            const next = { ...m };
-                            delete next[r.id];
-                            return next;
-                          });
-
-                          scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorUnlink");
-                        } catch {
-                          // non-blocking
-                        }
-                      }}
-                    >
-                      <X className="h-3.5 w-3.5 text-emerald-700" />
-                    </button>
-                  </span>
-
-                ) : r.id === lastCreatedEntryId && (r.rawType || "").toString().toUpperCase() === "EXPENSE" ? (
-                  <VendorSuggestPill
-                    businessId={selectedBusinessId ?? ""}
-                    accountId={selectedAccountId ?? ""}
-                    entryId={r.id}
-                    payee={r.payee}
-                    onLinked={(v) => {
-                      setLinkedVendorByEntryId((m) => ({ ...m, [r.id]: v.name }));
-                      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorLink");
-                      setLastCreatedEntryId(null);
-                    }}
-                    onDismiss={() => setLastCreatedEntryId(null)}
-                  />
-                ) : null}
-
-                {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
-                  <>
+                  {/* vendor name (truncate with …) */}
+                  <span
+                    className="font-semibold truncate min-w-0"
+                    title={r.vendorName ?? linkedVendorByEntryId[r.id]}
+                  >
                     {(() => {
-                      const t = apTotalsByEntryId[r.id];
-                      const applied = t ? BigInt(String(t.applied_cents ?? "0")) : 0n;
-                      const unapplied = t ? BigInt(String(t.unapplied_cents ?? "0")) : 0n;
-                      const absAmt = t ? BigInt(String(t.amount_abs_cents ?? "0")) : 0n;
-
-                      let label = "Unapplied";
-                      let cls = "bg-slate-100 text-slate-700";
-
-                      if (applied > 0n && unapplied === 0n && absAmt > 0n) {
-                        label = "Applied";
-                        cls = "bg-emerald-50 text-emerald-700";
-                      } else if (applied > 0n && unapplied > 0n) {
-                        label = "Partial";
-                        cls = "bg-amber-50 text-amber-700";
-                      } else if (applied === 0n && unapplied > 0n && absAmt > 0n) {
-                        label = "Unapplied credit";
-                        cls = "bg-slate-100 text-slate-700";
-                      }
-
-                      return (
-                        <span className={"inline-flex h-6 items-center rounded-full px-2 text-[11px] shrink-0 " + cls} title="Payment status">
-                          {label}
-                        </span>
-                      );
+                      const full = (r.vendorName ?? linkedVendorByEntryId[r.id] ?? "").trim();
+                      const first = full.split(/\s+/)[0] || "";
+                      return first ? `${first}...` : "";
                     })()}
 
-                    <button
-                      type="button"
-                      className="inline-flex h-6 items-center rounded-full bg-slate-900 px-2 text-[11px] text-white shrink-0"
-                      title="Apply this vendor payment"
-                      onClick={() => {
-                        if (!selectedBusinessId || !selectedAccountId || !r.vendorId) return;
-
-                        window.dispatchEvent(
-                          new CustomEvent("bynk:ledger-open-apply", {
-                            detail: {
-                              vendorId: r.vendorId,
-                              vendorName: r.vendorName ?? linkedVendorByEntryId[r.id] ?? "",
-                              entryId: r.id,
-                              entry: {
-                                id: r.id,
-                                date: String(r.date ?? "").slice(0, 10),
-                                payee: String(r.payee ?? ""),
-                                method: String(r.rawMethod ?? r.methodDisplay ?? "OTHER"),
-                                amountCentsAbs: String(Math.abs(Number(r.amountCents ?? 0))),
-                                memo: String((rowModels.find((x) => x.id === r.id) as any)?.memo ?? ""),
-                              },
-                            },
-                          })
-                        );
-                      }}
-                    >
-                      Apply payment
-                    </button>
-                  </>
-                ) : null}
-
-                {pendingById[r.id] ? (
-                  <span className="inline-flex items-center" title="Saving…">
-                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
                   </span>
-                ) : null}
 
-                {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
-              </div>
-            )}
-          </td>
+                  {/* unlink */}
+                  <button
+                    type="button"
+                    className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-100 shrink-0"
+                    title="Unlink vendor"
+                    onClick={async () => {
+                      try {
+                        await apiFetch(
+                          `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
+                          { method: "PATCH", body: JSON.stringify({ vendor_id: null, entry_kind: "GENERAL" }) }
+                        );
 
-          {/* Type */}
-          <td className={td + " " + trunc + " " + deletedText}>
-            {isEditing && editDraft ? (
-              <Select
-                open={editTypeOpen}
-                onOpenChange={setEditTypeOpen}
-                value={editDraft.type}
-                onValueChange={(v) => setEditDraft({ ...editDraft, type: v as UiType })}
-              >
-                <SelectTrigger className={selectTriggerClass}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent side="bottom" align="start">
-                  <SelectItem value="INCOME">Income</SelectItem>
-                  <SelectItem value="EXPENSE">Expense</SelectItem>
-                  <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
-                  <SelectItem value="TRANSFER">Transfer</SelectItem>
-                </SelectContent>
-              </Select>
-            ) : (
-              r.typeDisplay
-            )}
-          </td>
+                        setLinkedVendorByEntryId((m) => {
+                          const next = { ...m };
+                          delete next[r.id];
+                          return next;
+                        });
 
-          {/* Method */}
-          <td className={td + " " + trunc + " " + deletedText}>
-            {isEditing && editDraft ? (
-              <Select
-                open={editMethodOpen}
-                onOpenChange={setEditMethodOpen}
-                value={editDraft.method}
-                onValueChange={(v) => setEditDraft({ ...editDraft, method: v as UiMethod })}
-              >
-                <SelectTrigger className={selectTriggerClass}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent side="bottom" align="start">
-                  <SelectItem value="CASH">Cash</SelectItem>
-                  <SelectItem value="CARD">Card</SelectItem>
-                  <SelectItem value="ACH">ACH</SelectItem>
-                  <SelectItem value="WIRE">Wire</SelectItem>
-                  <SelectItem value="CHECK">Check</SelectItem>
-                  <SelectItem value="DIRECT_DEPOSIT">DD (Direct Deposit)</SelectItem>
-                  <SelectItem value="ZELLE">Zelle</SelectItem>
-                  <SelectItem value="TRANSFER">Transfer</SelectItem>
-                  <SelectItem value="OTHER">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            ) : (
-              r.methodDisplay
-            )}
-          </td>
+                        scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorUnlink");
+                      } catch {
+                        // non-blocking
+                      }
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5 text-emerald-700" />
+                  </button>
+                </span>
 
-          {/* Category */}
-          <td className={td + " min-w-0 " + deletedText}>
-            {isEditing && editDraft ? (
-              <input
-                className={inputH7}
-                value={editDraft.category}
-                onChange={(e) => setEditDraft({ ...editDraft, category: e.target.value })}
-                onKeyDown={onEditKeyDown}
-              />
-            ) : quickCatEntryId === r.id ? (
-              <div className="flex flex-col gap-1">
-                <AutoInput
-                  value={quickCatValue}
-                  onValueChange={(v) => setQuickCatValue(v)}
-                  options={categoryOptions}
-                  placeholder="Category"
-                  inputClassName={inputH7}
-                  allowCreate
-                  onCreate={(name) => setQuickCatValue(name)}
-                  onSubmit={saveQuickCat}
+              ) : r.id === lastCreatedEntryId && (r.rawType || "").toString().toUpperCase() === "EXPENSE" ? (
+                <VendorSuggestPill
+                  businessId={selectedBusinessId ?? ""}
+                  accountId={selectedAccountId ?? ""}
+                  entryId={r.id}
+                  payee={r.payee}
+                  onLinked={(v) => {
+                    setLinkedVendorByEntryId((m) => ({ ...m, [r.id]: v.name }));
+                    scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorLink");
+                    setLastCreatedEntryId(null);
+                  }}
+                  onDismiss={() => setLastCreatedEntryId(null)}
                 />
+              ) : null}
 
-                <div className="flex items-center justify-end gap-2">
+              {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
+                <>
+                  {(() => {
+                    const t = apTotalsByEntryId[r.id];
+                    const applied = t ? BigInt(String(t.applied_cents ?? "0")) : 0n;
+                    const unapplied = t ? BigInt(String(t.unapplied_cents ?? "0")) : 0n;
+                    const absAmt = t ? BigInt(String(t.amount_abs_cents ?? "0")) : 0n;
+
+                    let label = "Unapplied";
+                    let cls = "bg-slate-100 text-slate-700";
+
+                    if (applied > 0n && unapplied === 0n && absAmt > 0n) {
+                      label = "Applied";
+                      cls = "bg-emerald-50 text-emerald-700";
+                    } else if (applied > 0n && unapplied > 0n) {
+                      label = "Partial";
+                      cls = "bg-amber-50 text-amber-700";
+                    } else if (applied === 0n && unapplied > 0n && absAmt > 0n) {
+                      label = "Unapplied credit";
+                      cls = "bg-slate-100 text-slate-700";
+                    }
+
+                    return (
+                      <span className={"inline-flex h-6 items-center rounded-full px-2 text-[11px] shrink-0 " + cls} title="Payment status">
+                        {label}
+                      </span>
+                    );
+                  })()}
+
                   <button
                     type="button"
-                    className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-[11px]"
-                    onClick={cancelQuickCat}
-                    disabled={quickCatBusy}
-                    title="Cancel"
-                    aria-label="Cancel"
-                  >
-                    <X className="h-4 w-4 mr-1" />
-                    Cancel
-                  </button>
-
-                  <button
-                    type="button"
-                    className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 text-[11px]"
-                    onClick={saveQuickCat}
-                    disabled={quickCatBusy || !quickCatValue.trim()}
-                    title="Save"
-                    aria-label="Save"
-                  >
-                    <Check className="h-4 w-4 mr-1" />
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <span
-                className="block max-w-full truncate"
-                title={r.categoryTooltip ? r.categoryTooltip : r.category}
-              >
-                {r.category}
-              </span>
-            )}
-
-            {quickCatEntryId === r.id && quickCatErr ? (
-              <div className="mt-1 text-[11px] text-red-700">{quickCatErr}</div>
-            ) : null}
-          </td>
-
-          {/* Amount */}
-          <td
-            className={
-              td +
-              " " +
-              num +
-              " font-semibold " +
-              deletedText +
-              (r.amountNeg ? " text-red-700" : "")
-            }
-          >
-            {isEditing && editDraft ? (
-              <input
-                ref={editAmountRef}
-                className={inputH7 + " text-right tabular-nums"}
-                value={editDraft.amountStr}
-                onChange={(e) => setEditDraft({ ...editDraft, amountStr: e.target.value })}
-                onKeyDown={onEditKeyDown}
-              />
-            ) : (
-              r.amountStr
-            )}
-          </td>
-
-          {/* Balance */}
-          <td className={td + " " + num + " " + deletedText + (r.balanceNeg ? " text-red-700" : "")}>
-            {r.balanceStr}
-          </td>
-
-          {/* Status */}
-          <td className={td + " " + center}>
-            <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
-          </td>
-
-          {/* DUP column (tight padding) */}
-          <td className={td + " " + center + " px-0.5"}>
-            {!deletedRow && (r.hasDup || r.hasStale) ? (
-              <HoverTooltip
-                text={[r.hasDup ? r.dupTooltip : "", r.hasStale ? r.staleTooltip : ""].filter(Boolean).join("\n")}
-              >
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center"
-                  onClick={() => {
-                    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                    setFixDialog({
-                      id: r.id,
-                      kind: r.hasDup ? "DUPLICATE" : "STALE_CHECK",
-                    });
-                  }}
-                  title="Fix issue"
-                >
-                  <AlertTriangle className={"h-4 w-4 " + (r.hasDup ? "text-amber-500" : "text-sky-600")} />
-                </button>
-              </HoverTooltip>
-            ) : null}
-          </td>
-
-          {/* CAT column (tight padding) */}
-          <td className={td + " " + center + " px-0.5"}>
-            {!deletedRow &&
-              r.hasMissing &&
-              (() => {
-                const t = (r.rawType || "").toString().toUpperCase();
-                return t !== "TRANSFER" && t !== "ADJUSTMENT" && t !== "OPENING";
-              })() ? (
-              <HoverTooltip text={r.missingTooltip}>
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center"
-                  onClick={() => {
-                    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-
-                    setQuickCatEntryId(r.id);
-                    setQuickCatValue("");
-                    setQuickCatErr(null);
-                    setQuickCatBusy(false);
-                  }}
-                  title="Fix category"
-                >
-                  <Info className="h-4 w-4 text-violet-500" />
-                </button>
-              </HoverTooltip>
-            ) : null}
-          </td>
-
-          {/* Actions */}
-          <td className={td + " text-right pr-1"}>
-            <div className="relative inline-flex items-center justify-end gap-1 w-[88px]" data-rowmenu={r.id}>
-              {deletedRow ? (
-                <>
-                  <Button
-                    variant="outline"
-                    className="h-6 w-8 p-0"
-                    title="Restore"
+                    className="inline-flex h-6 items-center rounded-full bg-slate-900 px-2 text-[11px] text-white shrink-0"
+                    title="Apply this vendor payment"
                     onClick={() => {
-                      if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                      restoreMut.mutate({
-                        entryId: r.id,
-                        isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
-                        transferId: r.transferId ?? null,
-                      });
-                    }}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-6 w-8 p-0"
-                    title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
-                    disabled={deletingId === r.id || hardDeleteMut.isPending}
-                    onClick={() => {
-                      if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                      setDeleteDialog({ id: r.id, mode: "hard" });
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4 text-red-600" />
-                  </Button>
-                </>
-              ) : isEditing ? (
-                <>
-                  <Button variant="outline" className="h-6 w-8 p-0" title="Cancel edit" onClick={cancelEdit}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                  <Button className="h-6 w-8 p-0" title="Save edit" onClick={() => triggerSaveEdit(r.id)}>
-                    <Check className="h-4 w-4" />
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {r.id !== "opening_balance" ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        className="h-6 w-8 p-0"
-                        title="Actions"
-                        onClick={() => setMenuOpenId(menuOpen ? null : r.id)}
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
+                      if (!selectedBusinessId || !selectedAccountId || !r.vendorId) return;
 
-                      {menuOpen ? (
-                        <div className="absolute right-0 top-full mt-1 w-44 rounded-md border bg-white shadow-md z-50 p-1">
-                          <button
-                            type="button"
-                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2"
-                            onMouseDown={(ev) => {
-                              ev.preventDefault();
-                              setMenuOpenId(null);
-
-                              if (r.id === "opening_balance") {
-                                setErr("Opening balance cannot be edited.");
-                                return;
-                              }
-
-                              setEditingId(r.id);
-                              setEditDraft({
-                                date: r.date,
-                                ref: r.ref || "",
-                                payee: r.payee,
-                                type: uiTypeFromRaw(r.rawType),
-                                method: uiMethodFromRaw(r.rawMethod),
-                                category: r.category || "",
-                                amountStr: stripMoneyDisplay(r.amountStr),
-                              });
-                              requestAnimationFrame(() => editPayeeRef.current?.focus());
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-
-                          <button
-                            type="button"
-                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 disabled:opacity-50"
-                            disabled={(r.rawType || "").toString().toUpperCase() === "TRANSFER"}
-                            onMouseDown={(ev) => {
-                              ev.preventDefault();
-                              setMenuOpenId(null);
-
-                              // Transfers are linked double-entry pairs and require selecting the other account.
-                              if ((r.rawType || "").toString().toUpperCase() === "TRANSFER") {
-                                setErr("Duplicate is not available for transfers.");
-                                return;
-                              }
-
-                              createMut.mutate({
-                                tempId: `dup_${Date.now()}`,
-                                date: r.date,
-                                ref: "",
-                                payee: r.payee,
-                                type: uiTypeFromRaw(r.rawType),
-                                method: uiMethodFromRaw(r.rawMethod),
-                                categoryName: r.category || "",
-                                categoryId: r.categoryId ?? null,
-                                amountStr: stripMoneyDisplay(r.amountStr),
-                                afterCreateEdit: true,
-                              });
-                            }}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Duplicate
-                          </button>
-
-                          {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
-                            <button
-                              type="button"
-                              className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 text-red-700"
-                              onMouseDown={async (ev) => {
-                                ev.preventDefault();
-                                setMenuOpenId(null);
-
-                                try {
-                                  await apiFetch(
-                                    `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}/ap/unapply-and-delete`,
-                                    { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
-                                  );
-
-                                  scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "unapplyDeletePayment");
-                                } catch (e: any) {
-                                  const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+Delete failed";
-                                  setMutErr(msg);
-                                  setMutErrIsClosed(isClosedPeriodError(e, msg));
-                                }
-                              }}
-                              title="Explicit: unapply all allocations then delete payment"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Unapply+Delete payment
-                            </button>
-                          ) : null}
-
-                        </div>
-                      ) : null}
-
-                      <Button
-                        variant="outline"
-                        className="h-6 w-8 p-0"
-                        title={r.entryKind === "VENDOR_PAYMENT" ? "Delete payment" : "Move to Deleted"}
-                        disabled={deletingId === r.id || deleteMut.isPending}
-                        onClick={() => {
-                          if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
-                          if (deletingId === r.id || deleteMut.isPending) return;
-
-                          // Payments must use explicit Unapply+Delete (no normal delete).
-                          const memo = String((rowModels.find((x) => x.id === r.id) as any)?.memo ?? "");
-                          const memoSaysApplied = memo.includes(" — Applied to: ");
-
-                          const catIsPurchase = String(r.category ?? "").trim().toLowerCase() === "purchase";
-                          const vendorLinked = !!r.vendorId || !!linkedVendorByEntryId[r.id];
-
-                          const isVendorPaymentRow =
-                            r.entryKind === "VENDOR_PAYMENT" ||
-                            (vendorLinked && catIsPurchase) ||
-                            memoSaysApplied;
-
-                          if (isVendorPaymentRow) {
-                            setPaymentDeleteDialog({ id: r.id, isApplied: memoSaysApplied });
-                            return;
-                          }
-
-                          setDeleteDialog({
-                            id: r.id,
-                            mode: "soft",
-                            isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
-                            transferId: r.transferId ?? null,
-                          });
-                        }}
-                      >
-                        {deletingId === r.id || deleteMut.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </td>
-        </tr>
-      );
-    });
-  }, [pageRows, menuOpenId, editingId, editDraft, selectedIds, editedIds, editTypeOpen, editMethodOpen, showDeleted]);
-
-  // Auth handled by AppShell
-
-  const accountCapsuleEl = (
-    <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
-      <CapsuleSelect
-        variant="flat"
-        loading={accountsQ.isLoading}
-        value={selectedAccountId || ""}
-        onValueChange={(v) => {
-          setPage(1);
-          router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${v}`);
-        }}
-        options={(accountsQ.data ?? [])
-          .filter((a) => !a.archived_at)
-          .map((a) => ({ value: a.id, label: a.name }))}
-        placeholder="Select account"
-      />
-    </div>
-  );
-
-  return (
-    <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
-      {/* Unified header + filters container (old app style) */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="px-3 pt-2">
-          <PageHeader
-            icon={<BookOpen className="h-4 w-4" />}
-            title="Ledger"
-            afterTitle={accountCapsuleEl}
-            right={
-              <div className="flex items-center gap-2">
-                {uncategorizedCount > 0 ? (
-                  <button
-                    type="button"
-                    className="h-7 px-2 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-800 inline-flex items-center gap-1"
-                    title="Review uncategorized entries"
-                    onClick={() => {
-                      if (!selectedBusinessId || !selectedAccountId) return;
-                      router.push(
-                        `/category-review?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`
+                      window.dispatchEvent(
+                        new CustomEvent("bynk:ledger-open-apply", {
+                          detail: {
+                            vendorId: r.vendorId,
+                            vendorName: r.vendorName ?? linkedVendorByEntryId[r.id] ?? "",
+                            entryId: r.id,
+                            entry: {
+                              id: r.id,
+                              date: String(r.date ?? "").slice(0, 10),
+                              payee: String(r.payee ?? ""),
+                              method: String(r.rawMethod ?? r.methodDisplay ?? "OTHER"),
+                              amountCentsAbs: String(Math.abs(Number(r.amountCents ?? 0))),
+                              memo: String((rowModels.find((x) => x.id === r.id) as any)?.memo ?? ""),
+                            },
+                          },
+                        })
                       );
                     }}
                   >
-                    Uncategorized: <span className="font-semibold">{uncategorizedCount}</span>
+                    Apply payment
                   </button>
-                ) : null}
+                </>
+              ) : null}
 
+              {pendingById[r.id] ? (
+                <span className="inline-flex items-center" title="Saving…">
+                  <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                </span>
+              ) : null}
+
+              {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
+            </div>
+          )}
+        </td>
+
+        {/* Type */}
+        <td className={td + " " + trunc + " " + deletedText}>
+          {isEditing && editDraft ? (
+            <Select
+              open={editTypeOpen}
+              onOpenChange={setEditTypeOpen}
+              value={editDraft.type}
+              onValueChange={(v) => setEditDraft({ ...editDraft, type: v as UiType })}
+            >
+              <SelectTrigger className={selectTriggerClass}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent side="bottom" align="start">
+                <SelectItem value="INCOME">Income</SelectItem>
+                <SelectItem value="EXPENSE">Expense</SelectItem>
+                <SelectItem value="ADJUSTMENT">Adjustment</SelectItem>
+                <SelectItem value="TRANSFER">Transfer</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            r.typeDisplay
+          )}
+        </td>
+
+        {/* Method */}
+        <td className={td + " " + trunc + " " + deletedText}>
+          {isEditing && editDraft ? (
+            <Select
+              open={editMethodOpen}
+              onOpenChange={setEditMethodOpen}
+              value={editDraft.method}
+              onValueChange={(v) => setEditDraft({ ...editDraft, method: v as UiMethod })}
+            >
+              <SelectTrigger className={selectTriggerClass}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent side="bottom" align="start">
+                <SelectItem value="CASH">Cash</SelectItem>
+                <SelectItem value="CARD">Card</SelectItem>
+                <SelectItem value="ACH">ACH</SelectItem>
+                <SelectItem value="WIRE">Wire</SelectItem>
+                <SelectItem value="CHECK">Check</SelectItem>
+                <SelectItem value="DIRECT_DEPOSIT">DD (Direct Deposit)</SelectItem>
+                <SelectItem value="ZELLE">Zelle</SelectItem>
+                <SelectItem value="TRANSFER">Transfer</SelectItem>
+                <SelectItem value="OTHER">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            r.methodDisplay
+          )}
+        </td>
+
+        {/* Category */}
+        <td className={td + " min-w-0 " + deletedText}>
+          {isEditing && editDraft ? (
+            <input
+              className={inputH7}
+              value={editDraft.category}
+              onChange={(e) => setEditDraft({ ...editDraft, category: e.target.value })}
+              onKeyDown={onEditKeyDown}
+            />
+          ) : quickCatEntryId === r.id ? (
+            <div className="flex flex-col gap-1">
+              <AutoInput
+                value={quickCatValue}
+                onValueChange={(v) => setQuickCatValue(v)}
+                options={categoryOptions}
+                placeholder="Category"
+                inputClassName={inputH7}
+                allowCreate
+                onCreate={(name) => setQuickCatValue(name)}
+                onSubmit={saveQuickCat}
+              />
+
+              <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
-                  onClick={() => {
-                    setOpenUpload(true);
-                  }}
+                  className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-[11px]"
+                  onClick={cancelQuickCat}
+                  disabled={quickCatBusy}
+                  title="Cancel"
+                  aria-label="Cancel"
                 >
-                  Upload Receipt
+                  <X className="h-4 w-4 mr-1" />
+                  Cancel
                 </button>
 
-                {/* Upload Invoice lives on Vendor page only */}
-
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
-                  disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
-                  title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
-                  onClick={() => setClosePeriodOpen(true)}
+                  className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 text-[11px]"
+                  onClick={saveQuickCat}
+                  disabled={quickCatBusy || !quickCatValue.trim()}
+                  title="Save"
+                  aria-label="Save"
                 >
-                  Close period
+                  <Check className="h-4 w-4 mr-1" />
+                  Save
                 </button>
               </div>
-            }
-          />
-        </div>
+            </div>
+          ) : (
+            <span
+              className="block max-w-full truncate"
+              title={r.categoryTooltip ? r.categoryTooltip : r.category}
+            >
+              {r.category}
+            </span>
+          )}
 
-        <div className="mt-2 h-px bg-slate-200" />
+          {quickCatEntryId === r.id && quickCatErr ? (
+            <div className="mt-1 text-[11px] text-red-700">{quickCatErr}</div>
+          ) : null}
+        </td>
 
-        <FilterBar left={filterLeft} right={filterRight} />
-      </div>
+        {/* Amount */}
+        <td
+          className={
+            td +
+            " " +
+            num +
+            " font-semibold " +
+            deletedText +
+            (r.amountNeg ? " text-red-700" : "")
+          }
+        >
+          {isEditing && editDraft ? (
+            <input
+              ref={editAmountRef}
+              className={inputH7 + " text-right tabular-nums"}
+              value={editDraft.amountStr}
+              onChange={(e) => setEditDraft({ ...editDraft, amountStr: e.target.value })}
+              onKeyDown={onEditKeyDown}
+            />
+          ) : (
+            r.amountStr
+          )}
+        </td>
 
-      <div className="px-3 space-y-2">
-        <InlineBanner title="Can’t load ledger" message={bannerMsg} onRetry={() => router.refresh()} />
+        {/* Balance */}
+        <td className={td + " " + num + " " + deletedText + (r.balanceNeg ? " text-red-700" : "")}>
+          {r.balanceStr}
+        </td>
 
-        <InlineBanner
-          title={mutErrIsClosed ? "Period closed" : "Can’t save changes"}
-          message={mutErr}
-          onRetry={() => {
-            setMutErr(null);
-            setMutErrIsClosed(false);
-          }}
-          actionLabel={mutErrIsClosed ? "Go to Close Periods" : null}
-          actionHref={
-            mutErrIsClosed
-              ? selectedBusinessId
-                ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
-                : "/closed-periods?focus=reopen"
-              : null
+        {/* Status */}
+        <td className={td + " " + center}>
+          <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
+        </td>
+
+        {/* DUP column (tight padding) */}
+        <td className={td + " " + center + " px-0.5"}>
+          {!deletedRow && (r.hasDup || r.hasStale) ? (
+            <HoverTooltip
+              text={[r.hasDup ? r.dupTooltip : "", r.hasStale ? r.staleTooltip : ""].filter(Boolean).join("\n")}
+            >
+              <button
+                type="button"
+                className="inline-flex items-center justify-center"
+                onClick={() => {
+                  if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+                  setFixDialog({
+                    id: r.id,
+                    kind: r.hasDup ? "DUPLICATE" : "STALE_CHECK",
+                  });
+                }}
+                title="Fix issue"
+              >
+                <AlertTriangle className={"h-4 w-4 " + (r.hasDup ? "text-amber-500" : "text-sky-600")} />
+              </button>
+            </HoverTooltip>
+          ) : null}
+        </td>
+
+        {/* CAT column (tight padding) */}
+        <td className={td + " " + center + " px-0.5"}>
+          {!deletedRow &&
+            r.hasMissing &&
+            (() => {
+              const t = (r.rawType || "").toString().toUpperCase();
+              return t !== "TRANSFER" && t !== "ADJUSTMENT" && t !== "OPENING";
+            })() ? (
+            <HoverTooltip text={r.missingTooltip}>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center"
+                onClick={() => {
+                  if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+
+                  setQuickCatEntryId(r.id);
+                  setQuickCatValue("");
+                  setQuickCatErr(null);
+                  setQuickCatBusy(false);
+                }}
+                title="Fix category"
+              >
+                <Info className="h-4 w-4 text-violet-500" />
+              </button>
+            </HoverTooltip>
+          ) : null}
+        </td>
+
+        {/* Actions */}
+        <td className={td + " text-right pr-1"}>
+          <div className="relative inline-flex items-center justify-end gap-1 w-[88px]" data-rowmenu={r.id}>
+            {deletedRow ? (
+              <>
+                <Button
+                  variant="outline"
+                  className="h-6 w-8 p-0"
+                  title="Restore"
+                  onClick={() => {
+                    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+                    restoreMut.mutate({
+                      entryId: r.id,
+                      isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
+                      transferId: r.transferId ?? null,
+                    });
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-6 w-8 p-0"
+                  title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
+                  disabled={deletingId === r.id || hardDeleteMut.isPending}
+                  onClick={() => {
+                    if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+                    setDeleteDialog({ id: r.id, mode: "hard" });
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                </Button>
+              </>
+            ) : isEditing ? (
+              <>
+                <Button variant="outline" className="h-6 w-8 p-0" title="Cancel edit" onClick={cancelEdit}>
+                  <X className="h-4 w-4" />
+                </Button>
+                <Button className="h-6 w-8 p-0" title="Save edit" onClick={() => triggerSaveEdit(r.id)}>
+                  <Check className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <>
+                {r.id !== "opening_balance" ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      className="h-6 w-8 p-0"
+                      title="Actions"
+                      onClick={() => setMenuOpenId(menuOpen ? null : r.id)}
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+
+                    {menuOpen ? (
+                      <div className="absolute right-0 top-full mt-1 w-44 rounded-md border bg-white shadow-md z-50 p-1">
+                        <button
+                          type="button"
+                          className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2"
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            setMenuOpenId(null);
+
+                            if (r.id === "opening_balance") {
+                              setErr("Opening balance cannot be edited.");
+                              return;
+                            }
+
+                            setEditingId(r.id);
+                            setEditDraft({
+                              date: r.date,
+                              ref: r.ref || "",
+                              payee: r.payee,
+                              type: uiTypeFromRaw(r.rawType),
+                              method: uiMethodFromRaw(r.rawMethod),
+                              category: r.category || "",
+                              amountStr: stripMoneyDisplay(r.amountStr),
+                            });
+                            requestAnimationFrame(() => editPayeeRef.current?.focus());
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 disabled:opacity-50"
+                          disabled={(r.rawType || "").toString().toUpperCase() === "TRANSFER"}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            setMenuOpenId(null);
+
+                            // Transfers are linked double-entry pairs and require selecting the other account.
+                            if ((r.rawType || "").toString().toUpperCase() === "TRANSFER") {
+                              setErr("Duplicate is not available for transfers.");
+                              return;
+                            }
+
+                            createMut.mutate({
+                              tempId: `dup_${Date.now()}`,
+                              date: r.date,
+                              ref: "",
+                              payee: r.payee,
+                              type: uiTypeFromRaw(r.rawType),
+                              method: uiMethodFromRaw(r.rawMethod),
+                              categoryName: r.category || "",
+                              categoryId: r.categoryId ?? null,
+                              amountStr: stripMoneyDisplay(r.amountStr),
+                              afterCreateEdit: true,
+                            });
+                          }}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          Duplicate
+                        </button>
+
+                        {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
+                          <button
+                            type="button"
+                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 text-red-700"
+                            onMouseDown={async (ev) => {
+                              ev.preventDefault();
+                              setMenuOpenId(null);
+
+                              try {
+                                await apiFetch(
+                                  `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}/ap/unapply-and-delete`,
+                                  { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
+                                );
+
+                                scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "unapplyDeletePayment");
+                              } catch (e: any) {
+                                const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+Delete failed";
+                                setMutErr(msg);
+                                setMutErrIsClosed(isClosedPeriodError(e, msg));
+                              }
+                            }}
+                            title="Explicit: unapply all allocations then delete payment"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Unapply+Delete payment
+                          </button>
+                        ) : null}
+
+                      </div>
+                    ) : null}
+
+                    <Button
+                      variant="outline"
+                      className="h-6 w-8 p-0"
+                      title={r.entryKind === "VENDOR_PAYMENT" ? "Delete payment" : "Move to Deleted"}
+                      disabled={deletingId === r.id || deleteMut.isPending}
+                      onClick={() => {
+                        if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
+                        if (deletingId === r.id || deleteMut.isPending) return;
+
+                        // Payments must use explicit Unapply+Delete (no normal delete).
+                        const memo = String((rowModels.find((x) => x.id === r.id) as any)?.memo ?? "");
+                        const memoSaysApplied = memo.includes(" — Applied to: ");
+
+                        const catIsPurchase = String(r.category ?? "").trim().toLowerCase() === "purchase";
+                        const vendorLinked = !!r.vendorId || !!linkedVendorByEntryId[r.id];
+
+                        const isVendorPaymentRow =
+                          r.entryKind === "VENDOR_PAYMENT" ||
+                          (vendorLinked && catIsPurchase) ||
+                          memoSaysApplied;
+
+                        if (isVendorPaymentRow) {
+                          setPaymentDeleteDialog({ id: r.id, isApplied: memoSaysApplied });
+                          return;
+                        }
+
+                        setDeleteDialog({
+                          id: r.id,
+                          mode: "soft",
+                          isTransfer: (r.rawType || "").toString().toUpperCase() === "TRANSFER",
+                          transferId: r.transferId ?? null,
+                        });
+                      }}
+                    >
+                      {deletingId === r.id || deleteMut.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </>
+                ) : null}
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  });
+}, [pageRows, menuOpenId, editingId, editDraft, selectedIds, editedIds, editTypeOpen, editMethodOpen, showDeleted]);
+
+// Auth handled by AppShell
+
+const accountCapsuleEl = (
+  <div className="h-6 px-1.5 rounded-lg border border-violet-200 bg-violet-50 flex items-center">
+    <CapsuleSelect
+      variant="flat"
+      loading={accountsQ.isLoading}
+      value={selectedAccountId || ""}
+      onValueChange={(v) => {
+        setPage(1);
+        router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${v}`);
+      }}
+      options={(accountsQ.data ?? [])
+        .filter((a) => !a.archived_at)
+        .map((a) => ({ value: a.id, label: a.name }))}
+      placeholder="Select account"
+    />
+  </div>
+);
+
+return (
+  <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
+    {/* Unified header + filters container (old app style) */}
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="px-3 pt-2">
+        <PageHeader
+          icon={<BookOpen className="h-4 w-4" />}
+          title="Ledger"
+          afterTitle={accountCapsuleEl}
+          right={
+            <div className="flex items-center gap-2">
+              {uncategorizedCount > 0 ? (
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-800 inline-flex items-center gap-1"
+                  title="Review uncategorized entries"
+                  onClick={() => {
+                    if (!selectedBusinessId || !selectedAccountId) return;
+                    router.push(
+                      `/category-review?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`
+                    );
+                  }}
+                >
+                  Uncategorized: <span className="font-semibold">{uncategorizedCount}</span>
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                onClick={() => {
+                  setOpenUpload(true);
+                }}
+              >
+                Upload Receipt
+              </button>
+
+              {/* Upload Invoice lives on Vendor page only */}
+
+              <button
+                type="button"
+                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
+                title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
+                onClick={() => setClosePeriodOpen(true)}
+              >
+                Close period
+              </button>
+            </div>
           }
         />
       </div>
 
-      {!selectedBusinessId && !businessesQ.isLoading ? (
-        <div className="px-3">
-          <EmptyStateCard
-            title="No business yet"
-            description="Create a business to start using BynkBook."
-            primary={{ label: "Create business", href: "/settings?tab=business" }}
-            secondary={{ label: "Reload", onClick: () => router.refresh() }}
-          />
-        </div>
-      ) : null}
+      <div className="mt-2 h-px bg-slate-200" />
 
-      {selectedBusinessId && !accountsQ.isLoading && (accountsQ.data ?? []).length === 0 ? (
-        <div className="px-3">
-          <EmptyStateCard
-            title="No accounts yet"
-            description="Add an account to start importing and categorizing transactions."
-            primary={{ label: "Add account", href: "/settings?tab=accounts" }}
-            secondary={{ label: "Reload", onClick: () => router.refresh() }}
-          />
-        </div>
-      ) : null}
+      <FilterBar left={filterLeft} right={filterRight} />
+    </div>
 
-      {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
-        <LedgerTableShell
+    <div className="px-3 space-y-2">
+      <InlineBanner title="Can’t load ledger" message={bannerMsg} onRetry={() => router.refresh()} />
 
-          colgroup={cols}
-          header={headerRow}
-          addRow={addRow}
-          body={bodyRows}
-          footer={
-            <tr>
-              <td colSpan={13} className="p-0 border-t border-slate-200 bg-slate-50">
-                <TotalsFooter
-                  rowsPerPage={rowsPerPage}
-                  setRowsPerPage={setRowsPerPage}
-                  page={page}
-                  setPage={setPage}
-                  totalPages={totalPages}
-                  canPrev={canPrev}
-                  canNext={canNext}
-                  incomeText={
-                    entriesQ.isLoading ? (
-                      "…"
-                    ) : (
-                      <span className="text-emerald-700 font-semibold">
-                        {formatUsdFromCents(footerTotals.income)}
-                      </span>
-                    )
-                  }
-                  expenseText={
-                    entriesQ.isLoading ? (
-                      "…"
-                    ) : (
-                      <span className={footerTotals.expense < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
-                        {formatUsdFromCents(footerTotals.expense)}
-                      </span>
-                    )
-                  }
-                  netText={
-                    entriesQ.isLoading ? (
-                      "…"
-                    ) : (
-                      <span className={footerTotals.net < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
-                        {formatUsdFromCents(footerTotals.net)}
-                      </span>
-                    )
-                  }
-                  balanceText={
-                    entriesQ.isLoading ? (
-                      "…"
-                    ) : footerTotals.balanceStr === "—" ? (
-                      "—"
-                    ) : (
-                      <span className={footerTotals.balanceCents < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
-                        {footerTotals.balanceStr}
-                      </span>
-                    )
-                  }
-                />
-              </td>
-            </tr>
-          }
-        />
-      ) : null}
-
-      <FixIssueDialog
-        open={!!fixDialog && fixDialog?.kind !== "MISSING_CATEGORY"}
-        onOpenChange={(open) => {
-          if (!open) setFixDialog(null);
+      <InlineBanner
+        title={mutErrIsClosed ? "Period closed" : "Can’t save changes"}
+        message={mutErr}
+        onRetry={() => {
+          setMutErr(null);
+          setMutErrIsClosed(false);
         }}
-        businessId={selectedBusinessId ?? ""}
-        accountId={selectedAccountId ?? ""}
-        kind={fixDialog?.kind ?? null}
-        entryId={fixDialog?.id ?? null}
-        issues={openIssues}
-        rowsById={Object.fromEntries(
-          rowModels.map((r) => [
-            r.id,
-            {
-              id: r.id,
-              date: r.date,
-              payee: r.payee,
-              amountStr: r.amountStr,
-              methodDisplay: r.methodDisplay,
-              category: r.category || "",
-              categoryId: r.categoryId,
-            },
-          ])
-        )}
-        categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
-        onDidMutate={() => {
-          // refresh issues + entries after resolution
-          if (selectedBusinessId && selectedAccountId) {
-            void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-            void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
-            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
-          }
-        }}
+        actionLabel={mutErrIsClosed ? "Go to Close Periods" : null}
+        actionHref={
+          mutErrIsClosed
+            ? selectedBusinessId
+              ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
+              : "/closed-periods?focus=reopen"
+            : null
+        }
       />
+    </div>
 
-      <AppDialog
-        open={!!paymentDeleteDialog}
-        onClose={() => setPaymentDeleteDialog(null)}
-        title="Delete vendor payment"
-        size="md"
+    {!selectedBusinessId && !businessesQ.isLoading ? (
+      <div className="px-3">
+        <EmptyStateCard
+          title="No business yet"
+          description="Create a business to start using BynkBook."
+          primary={{ label: "Create business", href: "/settings?tab=business" }}
+          secondary={{ label: "Reload", onClick: () => router.refresh() }}
+        />
+      </div>
+    ) : null}
+
+    {selectedBusinessId && !accountsQ.isLoading && (accountsQ.data ?? []).length === 0 ? (
+      <div className="px-3">
+        <EmptyStateCard
+          title="No accounts yet"
+          description="Add an account to start importing and categorizing transactions."
+          primary={{ label: "Add account", href: "/settings?tab=accounts" }}
+          secondary={{ label: "Reload", onClick: () => router.refresh() }}
+        />
+      </div>
+    ) : null}
+
+    {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
+      <LedgerTableShell
+
+        colgroup={cols}
+        header={headerRow}
+        addRow={addRow}
+        body={bodyRows}
         footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={() => setPaymentDeleteDialog(null)}>
-              Cancel
-            </Button>
+          <tr>
+            <td colSpan={13} className="p-0 border-t border-slate-200 bg-slate-50">
+              <TotalsFooter
+                rowsPerPage={rowsPerPage}
+                setRowsPerPage={setRowsPerPage}
+                page={page}
+                setPage={setPage}
+                totalPages={totalPages}
+                canPrev={canPrev}
+                canNext={canNext}
+                incomeText={
+                  entriesQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className="text-emerald-700 font-semibold">
+                      {formatUsdFromCents(footerTotals.income)}
+                    </span>
+                  )
+                }
+                expenseText={
+                  entriesQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className={footerTotals.expense < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
+                      {formatUsdFromCents(footerTotals.expense)}
+                    </span>
+                  )
+                }
+                netText={
+                  entriesQ.isLoading ? (
+                    "…"
+                  ) : (
+                    <span className={footerTotals.net < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                      {formatUsdFromCents(footerTotals.net)}
+                    </span>
+                  )
+                }
+                balanceText={
+                  entriesQ.isLoading ? (
+                    "…"
+                  ) : footerTotals.balanceStr === "—" ? (
+                    "—"
+                  ) : (
+                    <span className={footerTotals.balanceCents < ZERO ? "text-red-700 font-semibold" : "text-emerald-700 font-semibold"}>
+                      {footerTotals.balanceStr}
+                    </span>
+                  )
+                }
+              />
+            </td>
+          </tr>
+        }
+      />
+    ) : null}
 
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (!paymentDeleteDialog || !selectedBusinessId || !selectedAccountId) return;
+    <FixIssueDialog
+      open={!!fixDialog && fixDialog?.kind !== "MISSING_CATEGORY"}
+      onOpenChange={(open) => {
+        if (!open) setFixDialog(null);
+      }}
+      businessId={selectedBusinessId ?? ""}
+      accountId={selectedAccountId ?? ""}
+      kind={fixDialog?.kind ?? null}
+      entryId={fixDialog?.id ?? null}
+      issues={openIssues}
+      rowsById={Object.fromEntries(
+        rowModels.map((r) => [
+          r.id,
+          {
+            id: r.id,
+            date: r.date,
+            payee: r.payee,
+            amountStr: r.amountStr,
+            methodDisplay: r.methodDisplay,
+            category: r.category || "",
+            categoryId: r.categoryId,
+          },
+        ])
+      )}
+      categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
+      onDidMutate={() => {
+        // refresh issues + entries after resolution
+        if (selectedBusinessId && selectedAccountId) {
+          void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+          void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
+          void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+        }
+      }}
+    />
 
-                try {
-                  await apiFetch(
-                    `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${paymentDeleteDialog.id}/ap/unapply-and-delete`,
-                    { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
-                  );
+    <AppDialog
+      open={!!paymentDeleteDialog}
+      onClose={() => setPaymentDeleteDialog(null)}
+      title="Delete vendor payment"
+      size="md"
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={() => setPaymentDeleteDialog(null)}>
+            Cancel
+          </Button>
 
-                  // Instant UI update (no 15s delay)
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (!paymentDeleteDialog || !selectedBusinessId || !selectedAccountId) return;
+
+              try {
+                await apiFetch(
+                  `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${paymentDeleteDialog.id}/ap/unapply-and-delete`,
+                  { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
+                );
+
+                // Instant UI update (no 15s delay)
+                markEntryDeletedInCache(selectedBusinessId, selectedAccountId, paymentDeleteDialog.id);
+
+                // Clear optimistic vendor badge immediately (backend clears vendor_id too)
+                setLinkedVendorByEntryId((m) => {
+                  const next = { ...m };
+                  delete next[paymentDeleteDialog.id];
+                  return next;
+                });
+
+                setPaymentDeleteDialog(null);
+              } catch (e: any) {
+                const rawMsg = String(e?.message ?? "");
+
+                // Idempotent: if already deleted, treat as success
+                if (rawMsg.includes("404") || rawMsg.includes("Entry not found")) {
                   markEntryDeletedInCache(selectedBusinessId, selectedAccountId, paymentDeleteDialog.id);
-
-                  // Clear optimistic vendor badge immediately (backend clears vendor_id too)
                   setLinkedVendorByEntryId((m) => {
                     const next = { ...m };
                     delete next[paymentDeleteDialog.id];
                     return next;
                   });
-
                   setPaymentDeleteDialog(null);
-                } catch (e: any) {
-                  const rawMsg = String(e?.message ?? "");
-
-                  // Idempotent: if already deleted, treat as success
-                  if (rawMsg.includes("404") || rawMsg.includes("Entry not found")) {
-                    markEntryDeletedInCache(selectedBusinessId, selectedAccountId, paymentDeleteDialog.id);
-                    setLinkedVendorByEntryId((m) => {
-                      const next = { ...m };
-                      delete next[paymentDeleteDialog.id];
-                      return next;
-                    });
-                    setPaymentDeleteDialog(null);
-                    return;
-                  }
-
-                  const msg2 = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+Delete failed";
-                  setMutErr(msg2);
-                  setMutErrIsClosed(isClosedPeriodError(e, msg2));
+                  return;
                 }
-              }}
-              title="Explicit: unapply all allocations then delete payment"
-            >
-              Unapply+Delete payment
-            </Button>
-          </div>
-        }
-      >
-        <div className="text-sm text-slate-700 space-y-2">
-          {paymentDeleteDialog?.isApplied ? (
-            <div>
-              This payment is <span className="font-semibold">applied to bills</span>. It cannot be deleted normally.
-              Use <span className="font-semibold">Unapply+Delete</span> (auditable).
-            </div>
-          ) : (
-            <div>
-              This is a vendor payment. To delete it, use <span className="font-semibold">Unapply+Delete</span> (auditable).
-            </div>
-          )}
-        </div>
-      </AppDialog>
 
-      <AppDialog
-        open={!!deleteDialog}
-        onClose={() => setDeleteDialog(null)}
-        title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
-        size="md"
-        disableOverlayClose={false}
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={() => setDeleteDialog(null)}>
-              Cancel
+                const msg2 = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+Delete failed";
+                setMutErr(msg2);
+                setMutErrIsClosed(isClosedPeriodError(e, msg2));
+              }
+            }}
+            title="Explicit: unapply all allocations then delete payment"
+          >
+            Unapply+Delete payment
+          </Button>
+        </div>
+      }
+    >
+      <div className="text-sm text-slate-700 space-y-2">
+        {paymentDeleteDialog?.isApplied ? (
+          <div>
+            This payment is <span className="font-semibold">applied to bills</span>. It cannot be deleted normally.
+            Use <span className="font-semibold">Unapply+Delete</span> (auditable).
+          </div>
+        ) : (
+          <div>
+            This is a vendor payment. To delete it, use <span className="font-semibold">Unapply+Delete</span> (auditable).
+          </div>
+        )}
+      </div>
+    </AppDialog>
+
+    <AppDialog
+      open={!!deleteDialog}
+      onClose={() => setDeleteDialog(null)}
+      title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
+      size="md"
+      disableOverlayClose={false}
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={() => setDeleteDialog(null)}>
+            Cancel
+          </Button>
+
+          <Button
+            variant={deleteDialog?.mode === "hard" ? "destructive" : "default"}
+            onClick={() => {
+              if (!deleteDialog) return;
+
+              // Guard: opening balance cannot be deleted (soft or hard)
+              if (deleteDialog.id === "opening_balance") {
+                setErr("Opening balance cannot be deleted.");
+                setDeleteDialog(null);
+                return;
+              }
+
+              // Guard: optimistic temp rows are not yet server-backed (avoid DELETE against temp ids)
+              if (deleteDialog.id.startsWith("temp_")) {
+                setErr("Still syncing—try again in a moment.");
+                setDeleteDialog(null);
+                return;
+              }
+
+              // HARD delete: never route to payment dialog
+              if (deleteDialog.mode === "hard") {
+                hardDeleteMut.mutate(deleteDialog.id);
+                setDeleteDialog(null);
+                return;
+              }
+
+              // SOFT delete: if this is a vendor payment row, use payment delete dialog instead
+              const row = rowModels.find((x) => x.id === deleteDialog.id);
+              const memo = String((rowModels.find((x) => x.id === deleteDialog.id) as any)?.memo ?? "");
+              const memoSaysApplied = memo.includes(" — Applied to: ");
+
+              const catIsPurchase = String((row as any)?.category ?? "").trim().toLowerCase() === "purchase";
+              const vendorLinked = !!(row as any)?.vendorId || !!linkedVendorByEntryId[deleteDialog.id];
+
+              const isVendorPaymentRow =
+                (row as any)?.entryKind === "VENDOR_PAYMENT" ||
+                (vendorLinked && catIsPurchase) ||
+                memoSaysApplied;
+
+              if (isVendorPaymentRow) {
+                setPaymentDeleteDialog({ id: deleteDialog.id, isApplied: memoSaysApplied });
+                setDeleteDialog(null);
+                return;
+              }
+
+              deleteMut.mutate({
+                entryId: deleteDialog.id,
+                isTransfer: !!deleteDialog.isTransfer,
+                transferId: deleteDialog.transferId ?? null,
+              });
+
+              setDeleteDialog(null);
+            }}
+          >
+            {deleteDialog?.mode === "hard" ? "Delete permanently" : "Move to Deleted"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="text-sm text-slate-700">
+        {deleteDialog?.mode === "hard"
+          ? "This will permanently delete the entry. This action is irreversible."
+          : "This will move the entry to Deleted. You can restore it later (reversible)."}
+      </div>
+    </AppDialog>
+
+    <AppDialog
+      open={ledgerApplyOpen}
+      onClose={() => setLedgerApplyOpen(false)}
+      title="Apply payment"
+      size="lg"
+      footer={
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-slate-600">
+            Vendor: <span className="font-medium">{ledgerApplyVendor?.name ?? "—"}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setLedgerApplyOpen(false)}>
+              Close
             </Button>
 
             <Button
-              variant={deleteDialog?.mode === "hard" ? "destructive" : "default"}
-              onClick={() => {
-                if (!deleteDialog) return;
+              className="h-7 px-3 text-xs"
+              disabled={!ledgerApplyEntryId || ledgerBills.length === 0}
+              onClick={async () => {
+                if (!selectedBusinessId || !selectedAccountId || !ledgerApplyEntryId) return;
 
-                // Guard: opening balance cannot be deleted (soft or hard)
-                if (deleteDialog.id === "opening_balance") {
-                  setErr("Opening balance cannot be deleted.");
-                  setDeleteDialog(null);
+                const apps: Array<{ bill_id: string; applied_amount_cents: number }> = [];
+                for (const b of ledgerBills) {
+                  const key = String(b.id);
+                  const cents = centsFromDollarsInput(ledgerAlloc[key] || "");
+                  if (cents > 0) apps.push({ bill_id: key, applied_amount_cents: cents });
+                }
+
+                if (!apps.length) {
+                  setErr("Enter amounts to apply.");
                   return;
                 }
 
-                // Guard: optimistic temp rows are not yet server-backed (avoid DELETE against temp ids)
-                if (deleteDialog.id.startsWith("temp_")) {
-                  setErr("Still syncing—try again in a moment.");
-                  setDeleteDialog(null);
-                  return;
+                try {
+                  await apiFetch(
+                    `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${ledgerApplyEntryId}/ap/apply`,
+                    { method: "POST", body: JSON.stringify({ applications: apps }) }
+                  );
+
+                  // Refresh ledger + close
+                  scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "applyPayment");
+                  setLedgerApplyOpen(false);
+                } catch (e: any) {
+                  const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Apply failed";
+                  setMutErr(msg);
+                  setMutErrIsClosed(isClosedPeriodError(e, msg));
                 }
-
-                // HARD delete: never route to payment dialog
-                if (deleteDialog.mode === "hard") {
-                  hardDeleteMut.mutate(deleteDialog.id);
-                  setDeleteDialog(null);
-                  return;
-                }
-
-                // SOFT delete: if this is a vendor payment row, use payment delete dialog instead
-                const row = rowModels.find((x) => x.id === deleteDialog.id);
-                const memo = String((rowModels.find((x) => x.id === deleteDialog.id) as any)?.memo ?? "");
-                const memoSaysApplied = memo.includes(" — Applied to: ");
-
-                const catIsPurchase = String((row as any)?.category ?? "").trim().toLowerCase() === "purchase";
-                const vendorLinked = !!(row as any)?.vendorId || !!linkedVendorByEntryId[deleteDialog.id];
-
-                const isVendorPaymentRow =
-                  (row as any)?.entryKind === "VENDOR_PAYMENT" ||
-                  (vendorLinked && catIsPurchase) ||
-                  memoSaysApplied;
-
-                if (isVendorPaymentRow) {
-                  setPaymentDeleteDialog({ id: deleteDialog.id, isApplied: memoSaysApplied });
-                  setDeleteDialog(null);
-                  return;
-                }
-
-                deleteMut.mutate({
-                  entryId: deleteDialog.id,
-                  isTransfer: !!deleteDialog.isTransfer,
-                  transferId: deleteDialog.transferId ?? null,
-                });
-
-                setDeleteDialog(null);
               }}
             >
-              {deleteDialog?.mode === "hard" ? "Delete permanently" : "Move to Deleted"}
+              Apply
             </Button>
           </div>
-        }
-      >
-        <div className="text-sm text-slate-700">
-          {deleteDialog?.mode === "hard"
-            ? "This will permanently delete the entry. This action is irreversible."
-            : "This will move the entry to Deleted. You can restore it later (reversible)."}
         </div>
-      </AppDialog>
-
-      <AppDialog
-        open={ledgerApplyOpen}
-        onClose={() => setLedgerApplyOpen(false)}
-        title="Apply payment"
-        size="lg"
-        footer={
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-600">
-              Vendor: <span className="font-medium">{ledgerApplyVendor?.name ?? "—"}</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setLedgerApplyOpen(false)}>
-                Close
-              </Button>
-
-              <Button
-                className="h-7 px-3 text-xs"
-                disabled={!ledgerApplyEntryId || ledgerBills.length === 0}
-                onClick={async () => {
-                  if (!selectedBusinessId || !selectedAccountId || !ledgerApplyEntryId) return;
-
-                  const apps: Array<{ bill_id: string; applied_amount_cents: number }> = [];
-                  for (const b of ledgerBills) {
-                    const key = String(b.id);
-                    const cents = centsFromDollarsInput(ledgerAlloc[key] || "");
-                    if (cents > 0) apps.push({ bill_id: key, applied_amount_cents: cents });
-                  }
-
-                  if (!apps.length) {
-                    setErr("Enter amounts to apply.");
-                    return;
-                  }
-
-                  try {
-                    await apiFetch(
-                      `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${ledgerApplyEntryId}/ap/apply`,
-                      { method: "POST", body: JSON.stringify({ applications: apps }) }
-                    );
-
-                    // Refresh ledger + close
-                    scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "applyPayment");
-                    setLedgerApplyOpen(false);
-                  } catch (e: any) {
-                    const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Apply failed";
-                    setMutErr(msg);
-                    setMutErrIsClosed(isClosedPeriodError(e, msg));
-                  }
-                }}
-              >
-                Apply
-              </Button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="text-[11px] text-slate-600">Payment details</div>
+          <div className="mt-1 grid grid-cols-4 gap-2 text-xs">
+            <div><span className="text-slate-600">Date:</span> <span className="font-medium">{ledgerApplyEntry?.date ?? "—"}</span></div>
+            <div><span className="text-slate-600">Payee:</span> <span className="font-medium">{ledgerApplyEntry?.payee ?? "—"}</span></div>
+            <div><span className="text-slate-600">Method:</span> <span className="font-medium">{ledgerApplyEntry?.method ?? "—"}</span></div>
+            <div className="text-right">
+              <span className="text-slate-600">Amount:</span>{" "}
+              <span className="font-semibold tabular-nums">{ledgerApplyEntry ? formatUsdFromCents(ledgerApplyEntry.amountCentsAbs) : "—"}</span>
             </div>
           </div>
-        }
-      >
-        <div className="space-y-3">
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <div className="text-[11px] text-slate-600">Payment details</div>
-            <div className="mt-1 grid grid-cols-4 gap-2 text-xs">
-              <div><span className="text-slate-600">Date:</span> <span className="font-medium">{ledgerApplyEntry?.date ?? "—"}</span></div>
-              <div><span className="text-slate-600">Payee:</span> <span className="font-medium">{ledgerApplyEntry?.payee ?? "—"}</span></div>
-              <div><span className="text-slate-600">Method:</span> <span className="font-medium">{ledgerApplyEntry?.method ?? "—"}</span></div>
-              <div className="text-right">
-                <span className="text-slate-600">Amount:</span>{" "}
-                <span className="font-semibold tabular-nums">{ledgerApplyEntry ? formatUsdFromCents(ledgerApplyEntry.amountCentsAbs) : "—"}</span>
-              </div>
+          {ledgerApplyEntry?.memo ? (
+            <div className="mt-2 text-xs text-slate-600 truncate" title={ledgerApplyEntry.memo}>
+              <span className="text-slate-600">Memo:</span> {ledgerApplyEntry.memo}
             </div>
-            {ledgerApplyEntry?.memo ? (
-              <div className="mt-2 text-xs text-slate-600 truncate" title={ledgerApplyEntry.memo}>
-                <span className="text-slate-600">Memo:</span> {ledgerApplyEntry.memo}
-              </div>
-            ) : null}
+          ) : null}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
+            <div className="text-xs font-semibold text-slate-900">Allocate to open bills</div>
+            <div className="text-[11px] text-slate-600">Enter amounts per bill (USD).</div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 overflow-hidden">
-            <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-              <div className="text-xs font-semibold text-slate-900">Allocate to open bills</div>
-              <div className="text-[11px] text-slate-600">Enter amounts per bill (USD).</div>
-            </div>
-
-            <div className="max-h-[420px] overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-white border-b border-slate-200">
-                  <tr className="h-9">
-                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
-                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
-                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Apply</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ledgerApplyLoading ? (
-                    <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>Loading…</td></tr>
-                  ) : ledgerBills.length === 0 ? (
-                    <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>No open bills.</td></tr>
-                  ) : (
-                    ledgerBills.map((b: any) => (
-                      <tr key={b.id} className="h-9 border-b border-slate-100">
-                        <td className="px-3 text-sm tabular-nums">
-                          {String(b.invoice_date ?? "").slice(0, 10)}{" "}
-                          <span className="text-xs text-slate-500">({b.memo ?? "—"})</span>
-                        </td>
-                        <td className="px-3 text-right text-sm tabular-nums font-semibold">
-                          {formatUsdFromCents(toBigIntSafe(b.outstanding_cents))}
-                        </td>
-                        <td className="px-3 text-right">
-                          <input
-                            className="h-7 w-[120px] text-right text-xs rounded-md border border-slate-200 bg-white px-2 tabular-nums"
-                            placeholder="0.00"
-                            value={ledgerAlloc[String(b.id)] ?? ""}
-                            onChange={(e) => setLedgerAlloc((m) => ({ ...m, [String(b.id)]: e.target.value }))}
-                          />
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+          <div className="max-h-[420px] overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white border-b border-slate-200">
+                <tr className="h-9">
+                  <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Apply</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledgerApplyLoading ? (
+                  <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>Loading…</td></tr>
+                ) : ledgerBills.length === 0 ? (
+                  <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>No open bills.</td></tr>
+                ) : (
+                  ledgerBills.map((b: any) => (
+                    <tr key={b.id} className="h-9 border-b border-slate-100">
+                      <td className="px-3 text-sm tabular-nums">
+                        {String(b.invoice_date ?? "").slice(0, 10)}{" "}
+                        <span className="text-xs text-slate-500">({b.memo ?? "—"})</span>
+                      </td>
+                      <td className="px-3 text-right text-sm tabular-nums font-semibold">
+                        {formatUsdFromCents(toBigIntSafe(b.outstanding_cents))}
+                      </td>
+                      <td className="px-3 text-right">
+                        <input
+                          className="h-7 w-[120px] text-right text-xs rounded-md border border-slate-200 bg-white px-2 tabular-nums"
+                          placeholder="0.00"
+                          value={ledgerAlloc[String(b.id)] ?? ""}
+                          onChange={(e) => setLedgerAlloc((m) => ({ ...m, [String(b.id)]: e.target.value }))}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      </AppDialog>
+      </div>
+    </AppDialog>
 
-      <UploadPanel
-        open={openUpload}
-        onClose={() => setOpenUpload(false)}
-        type={uploadType}
-        ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
-        allowMultiple={true}
+    <UploadPanel
+      open={openUpload}
+      onClose={() => setOpenUpload(false)}
+      type={uploadType}
+      ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
+      allowMultiple={true}
+    />
+
+    {selectedBusinessId && selectedAccountId ? (
+      <ClosePeriodDialog
+        open={closePeriodOpen}
+        onOpenChange={setClosePeriodOpen}
+        businessId={selectedBusinessId}
+        accountId={selectedAccountId}
+        accountName={selectedAccount?.name ?? null}
       />
-
-      {selectedBusinessId && selectedAccountId ? (
-        <ClosePeriodDialog
-          open={closePeriodOpen}
-          onOpenChange={setClosePeriodOpen}
-          businessId={selectedBusinessId}
-          accountId={selectedAccountId}
-          accountName={selectedAccount?.name ?? null}
-        />
-      ) : null}
-    </div>
-  );
+    ) : null}
+  </div>
+);
 }

@@ -6,6 +6,11 @@ import { useParams, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { PillToggle } from "@/components/primitives/PillToggle";
+import { BusyButton } from "@/components/primitives/BusyButton";
+import { DialogFooter } from "@/components/primitives/DialogFooter";
+import { ringFocus } from "@/components/primitives/tokens";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -521,7 +526,7 @@ export default function VendorDetailPageClient() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  className={["h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
                   onClick={() => {
                     if (!businessId) return;
                     window.location.href = `/vendors?businessId=${encodeURIComponent(businessId)}`;
@@ -532,7 +537,7 @@ export default function VendorDetailPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  className={["h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
                   onClick={() => setOpenUpload(true)}
                 >
                   Upload Invoice
@@ -1244,21 +1249,19 @@ export default function VendorDetailPageClient() {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">Invoice date</div>
-                <input
-                  type="date"
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                <AppDatePicker
                   value={billInvoiceDate}
-                  onChange={(e) => setBillInvoiceDate(e.target.value)}
+                  onChange={setBillInvoiceDate}
+                  ariaLabel="Invoice date"
                 />
               </div>
 
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">Due date</div>
-                <input
-                  type="date"
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                <AppDatePicker
                   value={billDueDate}
-                  onChange={(e) => setBillDueDate(e.target.value)}
+                  onChange={setBillDueDate}
+                  ariaLabel="Due date"
                 />
               </div>
             </div>
@@ -1445,11 +1448,10 @@ export default function VendorDetailPageClient() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <div className="text-[11px] text-slate-600">Date</div>
-                  <input
-                    type="date"
-                    className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                  <AppDatePicker
                     value={vendorPayDate}
-                    onChange={(e) => setVendorPayDate(e.target.value)}
+                    onChange={setVendorPayDate}
+                    ariaLabel="Payment date"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1513,30 +1515,25 @@ export default function VendorDetailPageClient() {
                   <div className="text-[11px] text-slate-600">Auto-apply or enter amounts per bill.</div>
                 </div>
 
-                <label className="inline-flex items-center gap-2 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={vendorPayAutoApply}
-                    onChange={(e) => {
-                      const on = e.target.checked;
-                      setVendorPayAutoApply(on);
+                <PillToggle
+                  label="Auto-apply oldest first"
+                  checked={vendorPayAutoApply}
+                  onCheckedChange={(on) => {
+                    setVendorPayAutoApply(on);
 
-                      if (!on) return;
+                    if (!on) return;
 
-                      const n = Number(vendorPayAmount);
-                      if (!Number.isFinite(n) || n <= 0) {
-                        setApplyAmounts({});
-                        return;
-                      }
+                    const n = Number(vendorPayAmount);
+                    if (!Number.isFinite(n) || n <= 0) {
+                      setApplyAmounts({});
+                      return;
+                    }
 
-                      const totalCents = BigInt(Math.round(n * 100));
-                      const { map } = computeAutoAllocationMap(totalCents);
-                      setApplyAmounts(map);
-                    }}
-                  />
-                  Auto-apply oldest first
-                </label>
+                    const totalCents = BigInt(Math.round(n * 100));
+                    const { map } = computeAutoAllocationMap(totalCents);
+                    setApplyAmounts(map);
+                  }}
+                />
               </div>
 
               <div className="max-h-[320px] overflow-auto">
@@ -2056,21 +2053,19 @@ export default function VendorDetailPageClient() {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">From</div>
-                <input
-                  type="date"
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-50"
+                <AppDatePicker
                   value={statementFrom}
-                  onChange={(e) => setStatementFrom(e.target.value)}
+                  onChange={setStatementFrom}
+                  ariaLabel="Statement from"
                   disabled={statementPreset !== "custom"}
                 />
               </div>
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">To</div>
-                <input
-                  type="date"
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-50"
+                <AppDatePicker
                   value={statementTo}
-                  onChange={(e) => setStatementTo(e.target.value)}
+                  onChange={setStatementTo}
+                  ariaLabel="Statement to"
                   disabled={statementPreset !== "custom"}
                 />
               </div>

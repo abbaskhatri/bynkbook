@@ -41,7 +41,7 @@ function toBigIntSafe(v: unknown): bigint {
     if (typeof v === "bigint") return v;
     if (typeof v === "number") return BigInt(Math.trunc(v));
     if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch {}
+  } catch { }
   return ZERO;
 }
 
@@ -475,7 +475,7 @@ export default function IssuesPageClient() {
     setMutErr(String(msg));
     return { msg: String(msg), isClosed: false };
   }
- 
+
   const openIssues = (issuesQ.data?.issues ?? []).map((it) => ({
     id: `${it.entry_id}|${it.issue_type}|${it.detected_at ?? ""}`, // synthetic id if backend doesn't provide one
     business_id: selectedBusinessId ?? "",
@@ -712,9 +712,9 @@ export default function IssuesPageClient() {
   // ================================
   const [fixDialog, setFixDialog] = useState<
     | {
-        id: string;
-        kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
-      }
+      id: string;
+      kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+    }
     | null
   >(null);
 
@@ -739,7 +739,7 @@ export default function IssuesPageClient() {
   });
 
   const accountCapsuleEl = (
-    <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
+    <div className="h-6 px-1.5 rounded-lg border border-violet-200 bg-violet-50 flex items-center">
       <CapsuleSelect
         variant="flat"
         loading={accountsQ.isLoading}
@@ -916,116 +916,188 @@ export default function IssuesPageClient() {
       </div>
 
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
-      <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-white">
-        <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
-          <table className="w-full table-fixed border-collapse">
-            <colgroup>
-              <col style={{ width: 36 }} />
-              <col style={{ width: 180 }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 120 }} />
-              <col />
-              <col style={{ width: 110 }} />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 120 }} />
-            </colgroup>
+        <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-white">
+          <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+            <table className="w-full table-fixed border-collapse">
+              <colgroup>
+                <col style={{ width: 36 }} />
+                <col style={{ width: 180 }} />
+                <col style={{ width: 120 }} />
+                <col style={{ width: 120 }} />
+                <col />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 120 }} />
+              </colgroup>
 
-            <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
-              <tr className="h-[28px]">
-                <th className="px-2 text-center text-xs font-medium text-slate-600">
-                  <input
-                    type="checkbox"
-                    className={checkboxClass}
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    aria-label="Select all"
-                  />
-                </th>
-                <th className="px-2 text-left text-xs font-medium text-slate-600">TYPE</th>
-                <th className="px-2 text-left text-xs font-medium text-slate-600">PAYEE</th>
-                <th className="px-2 text-right text-xs font-medium text-slate-600">AMOUNT</th>
-                <th className="px-2 text-left text-xs font-medium text-slate-600">DETAILS</th>
-                <th className="px-2 text-right text-xs font-medium text-slate-600">SEVERITY</th>
-                <th className="px-2 text-right text-xs font-medium text-slate-600">STATUS</th>
-                <th className="px-2 text-right text-xs font-medium text-slate-600">ACTIONS</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {issuesQ.isError ? (
-                <tr>
-                  <td colSpan={8} className="p-3 text-xs text-red-600" role="alert">
-                    Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong. Try again."}
-                  </td>
+              <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+                <tr className="h-[28px]">
+                  <th className="px-2 text-center text-xs font-medium text-slate-600">
+                    <input
+                      type="checkbox"
+                      className={checkboxClass}
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all"
+                    />
+                  </th>
+                  <th className="px-2 text-left text-xs font-medium text-slate-600">TYPE</th>
+                  <th className="px-2 text-left text-xs font-medium text-slate-600">PAYEE</th>
+                  <th className="px-2 text-right text-xs font-medium text-slate-600">AMOUNT</th>
+                  <th className="px-2 text-left text-xs font-medium text-slate-600">DETAILS</th>
+                  <th className="px-2 text-right text-xs font-medium text-slate-600">SEVERITY</th>
+                  <th className="px-2 text-right text-xs font-medium text-slate-600">STATUS</th>
+                  <th className="px-2 text-right text-xs font-medium text-slate-600">ACTIONS</th>
                 </tr>
-              ) : renderRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-3 text-xs text-slate-500">
-                    {lastScanAt
-                      ? `No open issues. Last scan: ${formatScanLabel(lastScanAt)}.`
-                      : "No issues yet. Run Scan to generate issues."}
-                  </td>
-                </tr>
-              ) : null}
+              </thead>
 
-              {renderRows.map((row) => {
-                const pill =
-                  "inline-flex items-center justify-center h-5 rounded-full border px-2 text-[11px] font-semibold leading-none";
-                const severityPill = pill + " border-yellow-200 bg-yellow-50 text-yellow-800";
-                const statusPill = pill + " border-slate-200 bg-white text-slate-700";
+              <tbody>
+                {issuesQ.isError ? (
+                  <tr>
+                    <td colSpan={8} className="p-3 text-xs text-red-600" role="alert">
+                      Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong. Try again."}
+                    </td>
+                  </tr>
+                ) : renderRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-3 text-xs text-slate-500">
+                      {lastScanAt
+                        ? `No open issues. Last scan: ${formatScanLabel(lastScanAt)}.`
+                        : "No issues yet. Run Scan to generate issues."}
+                    </td>
+                  </tr>
+                ) : null}
 
-                if (row.rowType === "GROUP") {
-                  const g = row;
-                  const head = g.head;
+                {renderRows.map((row) => {
+                  const pill =
+                    "inline-flex items-center justify-center h-5 rounded-full border px-2 text-[11px] font-semibold leading-none";
+                  const severityPill = pill + " border-yellow-200 bg-yellow-50 text-yellow-800";
+                  const statusPill = pill + " border-slate-200 bg-white text-slate-700";
 
-                  const typeLabel = `Duplicate (${g.count})`;
+                  if (row.rowType === "GROUP") {
+                    const g = row;
+                    const head = g.head;
+
+                    const typeLabel = `Duplicate (${g.count})`;
+                    const severityLabel = "Warning";
+                    const statusLabel = head.status === "RESOLVED" ? "Resolved" : "Open";
+
+                    const isExpanded = !!expandedGroups[g.groupKey];
+
+                    return (
+                      <tr key={`group|${g.groupKey}`} className="h-[24px] border-b border-slate-200">
+                        <td className="px-2 py-0.5 text-center">
+                          <input
+                            type="checkbox"
+                            className={checkboxClass}
+                            checked={g.members.every((m) => !!selectedIds[`${m.id}|${m.kind}`])}
+                            onChange={() => toggleGroupSelection(g.groupKey, g.members)}
+                            aria-label={`Select group: ${head.payee || "Unknown payee"} (${g.count} entries)`}
+                          />
+                        </td>
+
+                        <td className="px-2 py-0.5 align-middle">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <button
+                              type="button"
+                              className="h-5 w-5 rounded hover:bg-slate-100 inline-flex items-center justify-center shrink-0"
+                              onClick={() => toggleGroup(g.groupKey)}
+                              aria-label={isExpanded ? "Collapse group" : "Expand group"}
+                              title={isExpanded ? "Collapse" : "Expand"}
+                            >
+                              <span className="text-xs">{isExpanded ? "▾" : "▸"}</span>
+                            </button>
+
+                            <span className={pill + " border-amber-200 bg-amber-50 text-amber-800"}>{typeLabel}</span>
+
+                            {g.hasStale ? (
+                              <span className={pill + " border-sky-200 bg-sky-50 text-sky-800"}>Stale</span>
+                            ) : null}
+                          </div>
+                        </td>
+
+                        <td className="px-2 py-0.5 text-xs font-medium text-slate-900 truncate">{head.payee || "—"}</td>
+
+                        <td className="px-2 py-0.5 text-xs text-right tabular-nums">
+                          <span className={head.amountStr.startsWith("(") ? "text-red-600" : "text-slate-900"}>
+                            {head.amountStr}
+                          </span>
+                        </td>
+
+                        <td className="px-2 py-0.5 text-xs text-slate-700 truncate">
+                          {head.details} • {g.count} entries • {head.date} • {head.methodDisplay || "—"}
+                        </td>
+
+                        <td className="px-2 py-0.5 text-right">
+                          <span className={severityPill}>{severityLabel}</span>
+                        </td>
+
+                        <td className="px-2 py-0.5 text-right">
+                          <span className={statusPill}>{statusLabel}</span>
+                        </td>
+
+                        <td className="px-2 py-0.5">
+                          <div className="flex items-center justify-end">
+                            <Button
+                              className="h-6 px-4 text-xs min-w-[72px]"
+                              onClick={() => {
+                                setFixDialog({ id: head.id, kind: "DUPLICATE" });
+                              }}
+                            >
+                              Fix
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const r = row.item;
+                  const isDup = r.kind === "DUPLICATE";
+                  const isStale = r.kind === "STALE_CHECK";
+                  const typeLabel = isDup ? "Duplicate" : isStale ? "Stale check" : "Issue";
                   const severityLabel = "Warning";
-                  const statusLabel = head.status === "RESOLVED" ? "Resolved" : "Open";
-
-                  const isExpanded = !!expandedGroups[g.groupKey];
+                  const statusLabel = r.status === "RESOLVED" ? "Resolved" : "Open";
+                  const rowKey = row.rowKey;
 
                   return (
-                    <tr key={`group|${g.groupKey}`} className="h-[24px] border-b border-slate-200">
+                    <tr key={rowKey} className="h-[24px] border-b border-slate-200">
                       <td className="px-2 py-0.5 text-center">
                         <input
                           type="checkbox"
                           className={checkboxClass}
-                          checked={g.members.every((m) => !!selectedIds[`${m.id}|${m.kind}`])}
-                          onChange={() => toggleGroupSelection(g.groupKey, g.members)}
-                          aria-label={`Select group: ${head.payee || "Unknown payee"} (${g.count} entries)`}
+                          checked={!!selectedIds[rowKey]}
+                          onChange={() => toggleRow(rowKey)}
+                          aria-label={`Select row: ${r.payee || "Unknown payee"} (${typeLabel})`}
                         />
                       </td>
 
-                      <td className="px-2 py-0.5 align-middle">
-                        <div className="flex items-center gap-1 whitespace-nowrap">
-                          <button
-                            type="button"
-                            className="h-5 w-5 rounded hover:bg-slate-100 inline-flex items-center justify-center shrink-0"
-                            onClick={() => toggleGroup(g.groupKey)}
-                            aria-label={isExpanded ? "Collapse group" : "Expand group"}
-                            title={isExpanded ? "Collapse" : "Expand"}
-                          >
-                            <span className="text-xs">{isExpanded ? "▾" : "▸"}</span>
-                          </button>
-
-                          <span className={pill + " border-amber-200 bg-amber-50 text-amber-800"}>{typeLabel}</span>
-
-                          {g.hasStale ? (
-                            <span className={pill + " border-sky-200 bg-sky-50 text-sky-800"}>Stale</span>
-                          ) : null}
-                        </div>
+                      <td className={"px-2 py-0.5 align-middle " + (row.isChild ? "pl-8" : "")}>
+                        <span
+                          className={
+                            pill +
+                            " " +
+                            (isDup
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : isStale
+                                ? "border-sky-200 bg-sky-50 text-sky-800"
+                                : "border-slate-200 bg-white text-slate-800")
+                          }
+                        >
+                          {typeLabel}
+                        </span>
                       </td>
 
-                      <td className="px-2 py-0.5 text-xs font-medium text-slate-900 truncate">{head.payee || "—"}</td>
+                      <td className="px-2 py-0.5 text-xs font-medium text-slate-900 truncate">{r.payee || "—"}</td>
 
                       <td className="px-2 py-0.5 text-xs text-right tabular-nums">
-                        <span className={head.amountStr.startsWith("(") ? "text-red-600" : "text-slate-900"}>
-                          {head.amountStr}
+                        <span className={r.amountStr.startsWith("(") ? "text-red-600" : "text-slate-900"}>
+                          {r.amountStr}
                         </span>
                       </td>
 
                       <td className="px-2 py-0.5 text-xs text-slate-700 truncate">
-                        {head.details} • {g.count} entries • {head.date} • {head.methodDisplay || "—"}
+                        {r.details} • {r.date} • {r.methodDisplay || "—"}
                       </td>
 
                       <td className="px-2 py-0.5 text-right">
@@ -1041,7 +1113,7 @@ export default function IssuesPageClient() {
                           <Button
                             className="h-6 px-4 text-xs min-w-[72px]"
                             onClick={() => {
-setFixDialog({ id: head.id, kind: "DUPLICATE" });
+                              setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" });
                             }}
                           >
                             Fix
@@ -1050,83 +1122,11 @@ setFixDialog({ id: head.id, kind: "DUPLICATE" });
                       </td>
                     </tr>
                   );
-                }
-
-                const r = row.item;
-                const isDup = r.kind === "DUPLICATE";
-                const isStale = r.kind === "STALE_CHECK";
-                const typeLabel = isDup ? "Duplicate" : isStale ? "Stale check" : "Issue";
-                const severityLabel = "Warning";
-                const statusLabel = r.status === "RESOLVED" ? "Resolved" : "Open";
-                const rowKey = row.rowKey;
-
-                return (
-                  <tr key={rowKey} className="h-[24px] border-b border-slate-200">
-                    <td className="px-2 py-0.5 text-center">
-                      <input
-                        type="checkbox"
-                        className={checkboxClass}
-                        checked={!!selectedIds[rowKey]}
-                        onChange={() => toggleRow(rowKey)}
-                        aria-label={`Select row: ${r.payee || "Unknown payee"} (${typeLabel})`}
-                      />
-                    </td>
-
-                    <td className={"px-2 py-0.5 align-middle " + (row.isChild ? "pl-8" : "")}>
-                      <span
-                        className={
-                          pill +
-                          " " +
-                          (isDup
-                            ? "border-amber-200 bg-amber-50 text-amber-800"
-                            : isStale
-                              ? "border-sky-200 bg-sky-50 text-sky-800"
-                              : "border-slate-200 bg-white text-slate-800")
-                        }
-                      >
-                        {typeLabel}
-                      </span>
-                    </td>
-
-                    <td className="px-2 py-0.5 text-xs font-medium text-slate-900 truncate">{r.payee || "—"}</td>
-
-                    <td className="px-2 py-0.5 text-xs text-right tabular-nums">
-                      <span className={r.amountStr.startsWith("(") ? "text-red-600" : "text-slate-900"}>
-                        {r.amountStr}
-                      </span>
-                    </td>
-
-                    <td className="px-2 py-0.5 text-xs text-slate-700 truncate">
-                      {r.details} • {r.date} • {r.methodDisplay || "—"}
-                    </td>
-
-                    <td className="px-2 py-0.5 text-right">
-                      <span className={severityPill}>{severityLabel}</span>
-                    </td>
-
-                    <td className="px-2 py-0.5 text-right">
-                      <span className={statusPill}>{statusLabel}</span>
-                    </td>
-
-                    <td className="px-2 py-0.5">
-                      <div className="flex items-center justify-end">
-                        <Button
-                          className="h-6 px-4 text-xs min-w-[72px]"
-                          onClick={() => {
-setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" });
-                          }}
-                        >
-                          Fix
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
       ) : null}
 
       <FixIssueDialog

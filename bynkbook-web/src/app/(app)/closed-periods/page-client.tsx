@@ -400,7 +400,9 @@ export default function ClosedPeriodsPageClient() {
                     className="grid grid-cols-[140px_1fr_220px] px-3 h-9 items-center border-b border-slate-100 text-sm"
                   >
                     <div className="tabular-nums">{r.month}</div>
-                    <div className="truncate text-slate-600">{r.closed_by_user_id}</div>
+                    <div className="truncate text-slate-600">
+                      {r.closed_by_user_id ? "Closed by team member" : "System"}
+                    </div>
                     <div className="flex justify-end">
                       <Button
                         variant="outline"

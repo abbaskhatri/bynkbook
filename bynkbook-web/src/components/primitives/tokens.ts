@@ -10,7 +10,7 @@ export const surfaceCardSoft =
   "rounded-xl border border-slate-200 bg-white shadow-sm";
 
 export const ringFocus =
-  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 focus-visible:ring-offset-0";
+  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-500 focus-visible:ring-offset-0";
 
 // Canonical input height + focus style (Ledger standard)
 export const inputH7 =
