@@ -222,7 +222,7 @@ export default function CategoryMigrationPageClient() {
   if (!authReady) return null;
 
   const accountCapsule = (
-    <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
+    <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
       <CapsuleSelect
         variant="flat"
         loading={accountsQ.isLoading}

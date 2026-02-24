@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,6 +10,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
+import { applyCategoryBatch, getCategorySuggestions } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
@@ -22,12 +23,13 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
+import { BusyButton } from "@/components/primitives/BusyButton";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
-import { Tags } from "lucide-react";
+import { Tags, Loader2 } from "lucide-react";
 
 function formatUsdAccountingFromCents(raw: unknown) {
   const n = Number(raw);
@@ -62,6 +64,9 @@ export default function CategoryReviewPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
+  // Prevent infinite router.replace loops (Next searchParams can cause repeated effects)
+  const didSyncUrlRef = useRef(false);
+
   // Auth is handled by AppShell
 
   const businessesQ = useBusinesses();
@@ -84,41 +89,73 @@ export default function CategoryReviewPageClient() {
     return list.find((a) => !a.archived_at)?.id ?? "";
   }, [accountsQ.data, accountIdFromUrl]);
 
+  // Local selection state to prevent SelectTrigger/router feedback loops
+  const [accountSelectId, setAccountSelectId] = useState<string>("");
+
+  // Keep local selection in sync with derived selectedAccountId (only when changed)
+  useEffect(() => {
+    if (!selectedAccountId) return;
+    setAccountSelectId((prev) => (prev === selectedAccountId ? prev : selectedAccountId));
+  }, [selectedAccountId]);
+
+  // Allow URL sync to run again when scope changes
+  // (removed: this caused router.replace loops in dev)
+
   useEffect(() => {
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
+    if (accountsQ.isLoading) return;
 
-    if (!sp.get("businessId")) {
+    // Only sync once per scope (prevents infinite loops)
+    if (didSyncUrlRef.current) return;
+
+    const hasBiz = !!bizIdFromUrl;
+    const hasAcct = !!accountIdFromUrl;
+
+    // If URL missing businessId, add it (and stop)
+    if (!hasBiz) {
+      didSyncUrlRef.current = true;
       router.replace(`/category-review?businessId=${selectedBusinessId}`);
       return;
     }
 
-    if (accountsQ.isLoading) return;
-
-    if (selectedAccountId && !accountIdFromUrl) {
+    // If URL missing accountId, add it (and stop)
+    if (selectedAccountId && !hasAcct) {
+      didSyncUrlRef.current = true;
       router.replace(`/category-review?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
+      return;
     }
+
+    // URL already complete; mark synced so we never loop
+    didSyncUrlRef.current = true;
   }, [
     businessesQ.isLoading,
-    selectedBusinessId,
     accountsQ.isLoading,
+    selectedBusinessId,
     selectedAccountId,
-    accountIdFromUrl,
     router,
-    sp,
   ]);
-
   const opts = (accountsQ.data ?? [])
     .filter((a) => !a.archived_at)
     .map((a) => ({ value: a.id, label: a.name }));
 
   const capsule = (
-    <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
+    <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
       <CapsuleSelect
         variant="flat"
         loading={accountsQ.isLoading}
-        value={selectedAccountId || (opts[0]?.value ?? "")}
-        onValueChange={(v) => router.replace(`/category-review?businessId=${selectedBusinessId}&accountId=${v}`)}
+        value={accountSelectId || (opts[0]?.value ?? "")}
+        onValueChange={(v) => {
+          // Update local state for UI stability
+          setAccountSelectId(v);
+
+          // Navigate only if it truly changed (prevents SelectTrigger loops)
+          if (!selectedBusinessId) return;
+          const current = sp.get("accountId") ?? "";
+          if (current === v) return;
+
+          router.replace(`/category-review?businessId=${selectedBusinessId}&accountId=${v}`);
+        }}
         options={opts}
         placeholder="Select account"
       />
@@ -155,7 +192,16 @@ export default function CategoryReviewPageClient() {
   // Mutation banner (single region; CLOSED_PERIOD consistency)
   // -------------------------
   const [mutErr, setMutErr] = useState<string | null>(null);
-  const [mutErrTitle, setMutErrTitle] = useState<string>("");
+  const [mutErrTitle, setMutErrTitle] = useState<string | null>(null);
+
+  // Phase F2: suggestions (batch) + selection + bulk apply
+  const [sugLoading, setSugLoading] = useState(false);
+  const [sugByEntryId, setSugByEntryId] = useState<Record<string, any[]>>({});
+  const [selectedSuggestionByEntryId, setSelectedSuggestionByEntryId] = useState<Record<string, string>>({});
+
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applySummary, setApplySummary] = useState<{ applied: number; blocked: number } | null>(null);
 
   function clearMutErr() {
     setMutErr(null);
@@ -259,6 +305,79 @@ export default function CategoryReviewPageClient() {
     });
   }, [allEntries, applied]);
 
+  // Stable suggestion target key (prevents useEffect loops)
+  const suggestionTargetIds = useMemo(() => {
+    return (visibleRows ?? [])
+      .filter((r: any) => !r?.category_id)
+      .slice(0, 200)
+      .map((r: any) => String(r.id))
+      .join("|");
+  }, [visibleRows]);
+
+  // -------------------------
+  // Phase F2: batch suggestions (single request for up to 200 visible uncategorized rows)
+  // -------------------------
+  const lastSugKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    // If the target set hasn't changed, do nothing (prevents loops)
+    if (!suggestionTargetIds) {
+      setSugByEntryId({});
+      setSugLoading(false);
+      lastSugKeyRef.current = "";
+      return;
+    }
+
+    const cacheKey = `${selectedBusinessId}|${selectedAccountId}|${suggestionTargetIds}`;
+    if (lastSugKeyRef.current === cacheKey) return;
+    lastSugKeyRef.current = cacheKey;
+
+    const targets = (visibleRows ?? []).filter((r: any) => !r?.category_id).slice(0, 200);
+
+    let cancelled = false;
+
+    (async () => {
+      setSugLoading(true);
+
+      try {
+        const items = targets.map((r: any) => ({
+          kind: "ENTRY" as const,
+          id: String(r.id),
+          date: String(r.date ?? "").slice(0, 10),
+          amount_cents: r.amount_cents,
+          payee_or_name: String(r.payee ?? ""),
+          memo: String(r.memo ?? ""),
+        }));
+
+        const res: any = await getCategorySuggestions({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          items,
+          limitPerItem: 3,
+        });
+
+        const next: Record<string, any[]> = {};
+        for (const it of items) {
+          const id = it.id;
+          const s = res?.suggestionsById?.[id] ?? [];
+          next[id] = Array.isArray(s) ? s : [];
+        }
+
+        if (!cancelled) setSugByEntryId(next);
+      } catch {
+        if (!cancelled) setSugByEntryId({});
+      } finally {
+        if (!cancelled) setSugLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId, selectedAccountId, suggestionTargetIds]);
+
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedCount = selectedIds.size;
@@ -313,6 +432,54 @@ export default function CategoryReviewPageClient() {
   // Per-row status
   const [pendingIds, setPendingIds] = useState<Record<string, boolean>>({});
   const [failedById, setFailedById] = useState<Record<string, string>>({});
+
+  // F7a (session-local): AI attribution + undo (suggestion-pill applies only; dropdown does NOT set AI)
+  const [aiAppliedById, setAiAppliedById] = useState<Record<string, boolean>>({});
+  const [undoByEntryId, setUndoByEntryId] = useState<
+    Record<string, { prevCategoryId: string | null; nextCategoryId: string | null; expiresAt: number }>
+  >({});
+  const undoTimerByEntryIdRef = useRef<Record<string, number>>({});
+
+  const clearUndoTimer = (entryId: string) => {
+    const t = undoTimerByEntryIdRef.current[entryId];
+    if (t) {
+      window.clearTimeout(t);
+      delete undoTimerByEntryIdRef.current[entryId];
+    }
+  };
+
+  const setUndoWindow = (entryId: string, prevCategoryId: string | null, nextCategoryId: string | null) => {
+    clearUndoTimer(entryId);
+    const expiresAt = Date.now() + 10_000;
+
+    setUndoByEntryId((m) => ({
+      ...m,
+      [entryId]: { prevCategoryId, nextCategoryId, expiresAt },
+    }));
+
+    undoTimerByEntryIdRef.current[entryId] = window.setTimeout(() => {
+      setUndoByEntryId((m) => {
+        if (!m[entryId]) return m;
+        const next = { ...m };
+        delete next[entryId];
+        return next;
+      });
+      clearUndoTimer(entryId);
+    }, 10_000);
+  };
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      const map = undoTimerByEntryIdRef.current;
+      for (const k of Object.keys(map)) {
+        window.clearTimeout(map[k]);
+      }
+      undoTimerByEntryIdRef.current = {};
+    };
+  }, []);
+
+  // Per-row category changes apply immediately (dropdown onChange + suggestion pill click)
 
   async function applyCategoryToEntry(entryId: string, categoryId: string | null) {
     if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
@@ -402,7 +569,14 @@ export default function CategoryReviewPageClient() {
   }
 
   // Auth handled by AppShell
-
+  const selectedApplyItems = useMemo(() => {
+    const out: Array<{ entryId: string; category_id: string }> = [];
+    for (const [entryId, category_id] of Object.entries(selectedSuggestionByEntryId)) {
+      if (!category_id) continue;
+      out.push({ entryId, category_id });
+    }
+    return out.slice(0, 200);
+  }, [selectedSuggestionByEntryId]);
   return (
     <div className="space-y-4 max-w-6xl">
       {/* Unified header container (match Ledger/Issues) */}
@@ -466,6 +640,23 @@ export default function CategoryReviewPageClient() {
           />
         </div>
 
+        {applySummary ? (
+          <div className="px-3 pb-2">
+            <InlineBanner
+              title="Suggestions applied"
+              message={`Applied ${applySummary.applied}. Blocked ${applySummary.blocked}.`}
+              actionLabel={applySummary.blocked > 0 ? "Go to Close Periods" : null}
+              actionHref={
+                applySummary.blocked > 0
+                  ? selectedBusinessId
+                    ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
+                    : "/closed-periods?focus=reopen"
+                  : null
+              }
+            />
+          </div>
+        ) : null}
+
         {(bannerMsgWithEntries || mutErr) ? (
           <div className="px-3 pb-2">
             {bannerMsgWithEntries ? (
@@ -475,7 +666,13 @@ export default function CategoryReviewPageClient() {
                 title={mutErrTitle || "Can’t update category review"}
                 message={mutErr}
                 actionLabel={mutErrTitle === "Period closed" ? "Go to Close Periods" : null}
-                actionHref={mutErrTitle === "Period closed" ? "/closed-periods?focus=reopen" : null}
+                actionHref={
+                  mutErrTitle === "Period closed"
+                    ? selectedBusinessId
+                      ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
+                      : "/closed-periods?focus=reopen"
+                    : null
+                }
               />
             )}
           </div>
@@ -510,7 +707,7 @@ export default function CategoryReviewPageClient() {
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="inline-flex items-center gap-2">
               Uncategorized
-              <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-violet-50 px-1.5 text-[11px] font-semibold text-violet-800 border border-violet-200">
+              <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
                 {visibleRows.filter((e: any) => !e.category_id).length}
               </span>
             </CardTitle>
@@ -530,21 +727,21 @@ export default function CategoryReviewPageClient() {
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="h-[calc(100vh-340px)] overflow-y-auto">
+              <div className="max-h-[calc(100vh-340px)] overflow-y-auto">
                 <LedgerTableShell
                   colgroup={
                     <>
-                      <col style={{ width: 44 }} />
-                      <col style={{ width: 120 }} />
+                      <col style={{ width: 36 }} />
+                      <col style={{ width: 98 }} />
                       <col />
-                      <col style={{ width: 160 }} />
-                      <col style={{ width: 220 }} />
+                      <col style={{ width: 120 }} />
+                      <col style={{ width: 360 }} />
                     </>
                   }
                   header={
-                    <tr className="h-8">
+                    <tr className="h-7">
                       <th className="px-0 text-center align-middle">
-                        <div className="flex h-8 items-center justify-center">
+                        <div className="flex h-7 items-center justify-center">
                           <input
                             type="checkbox"
                             className="h-4 w-4"
@@ -553,10 +750,10 @@ export default function CategoryReviewPageClient() {
                           />
                         </div>
                       </th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Payee</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
-                      <th className="px-3 text-center text-[11px] font-semibold text-slate-600">Category</th>
+                      <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Date</th>
+                      <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Payee</th>
+                      <th className="px-2 text-right text-[10px] font-semibold text-slate-600">Amount</th>
+                      <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Category</th>
                     </tr>
                   }
                   addRow={null}
@@ -574,9 +771,9 @@ export default function CategoryReviewPageClient() {
                           : "Uncategorized";
 
                         return (
-                          <tr key={id} className={`h-8 border-b border-slate-100 ${isSelected ? "bg-emerald-50/40" : ""}`}>
+                          <tr key={id} className={`h-7 border-b border-slate-100 ${isSelected ? "bg-accent" : ""}`}>
                             <td className="px-0 text-center align-middle">
-                              <div className="flex h-8 items-center justify-center">
+                              <div className="flex h-7 items-center justify-center">
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4"
@@ -586,23 +783,231 @@ export default function CategoryReviewPageClient() {
                               </div>
                             </td>
 
-                            <td className="px-3 text-sm text-slate-700 whitespace-nowrap">{dateYmd}</td>
+                            <td className="px-2 text-xs text-slate-700 whitespace-nowrap">{dateYmd}</td>
 
-                            <td className="px-3 text-sm text-slate-900 truncate font-medium">{payee}</td>
+                            <td className="px-2 text-xs text-slate-900 truncate font-medium">{payee}</td>
 
                             <td
-                              className={`px-3 text-sm text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
+                              className={`px-2 text-xs text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
                                 }`}
                             >
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>
 
-                            <td className="px-3">
-                              <div className="flex items-center justify-center gap-2">
-                                <div className="h-6 w-[180px] rounded-md border border-slate-200 bg-slate-50 px-2 text-xs flex items-center">
-                                  <span className="truncate">{categoryLabel}</span>
-                                </div>
+                            <td className="px-2">
+                              <div className="flex items-center justify-start gap-1.5">
+                                {null}
+
+                                {/* Per-row category dropdown (applies immediately on change) */}
+                                <select
+                                  className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+                                  value={e.category_id ? String(e.category_id) : ""}
+                                  disabled={!!pendingIds[id]}
+                                  onChange={async (ev) => {
+                                    if (!selectedBusinessId || !selectedAccountId) return;
+
+                                    const v = ev.target.value;
+                                    const nextCategoryId = v ? v : null;
+
+                                    // Prevent double-submit while row is applying
+                                    if (pendingIds[id]) return;
+
+                                    clearMutErr();
+
+                                    // Manual override should NOT be attributed to AI.
+                                    // If it fails, restore prior session-local AI/undo state.
+                                    const hadAi = !!aiAppliedById[id];
+                                    const undoSnap = undoByEntryId[id] ?? null;
+
+                                    if (hadAi) {
+                                      setAiAppliedById((m) => {
+                                        const next = { ...m };
+                                        delete next[id];
+                                        return next;
+                                      });
+                                    }
+                                    if (undoSnap) {
+                                      setUndoByEntryId((m) => {
+                                        const next = { ...m };
+                                        delete next[id];
+                                        return next;
+                                      });
+                                      clearUndoTimer(id);
+                                    }
+
+                                    try {
+                                      await applyCategoryToEntry(id, nextCategoryId);
+                                    } catch {
+                                      // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
+                                      // Restore session-local state if the manual change failed.
+                                      if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                      if (undoSnap) {
+                                        setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
+                                        // restore timer with remaining time (best-effort)
+                                        const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
+                                        if (remaining > 0) {
+                                          clearUndoTimer(id);
+                                          undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
+                                            setUndoByEntryId((m) => {
+                                              if (!m[id]) return m;
+                                              const next = { ...m };
+                                              delete next[id];
+                                              return next;
+                                            });
+                                            clearUndoTimer(id);
+                                          }, remaining);
+                                        }
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <option value="">Uncategorized</option>
+                                  {categories.map((c) => (
+                                    <option key={String(c.id)} value={String(c.id)}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                {/* Row-level pending spinner */}
+                                {pendingIds[id] ? (
+                                  <span className="inline-flex items-center" title="Applying…">
+                                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                  </span>
+                                ) : null}
+
                                 {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
+
+                                {/* F7a: session-local AI attribution + Undo (only for suggestion-pill applies) */}
+                                {aiAppliedById[id] ? (
+                                  <span
+                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center"
+                                    title="Applied via AI suggestion"
+                                  >
+                                    AI
+                                  </span>
+                                ) : null}
+
+                                {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
+                                  <button
+                                    type="button"
+                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
+                                    title="Undo"
+                                    disabled={!!pendingIds[id]}
+                                    onClick={async () => {
+                                      if (pendingIds[id]) return;
+
+                                      const snapAi = !!aiAppliedById[id];
+                                      const snapUndo = undoByEntryId[id] ?? null;
+                                      if (!snapUndo) return;
+
+                                      clearMutErr();
+
+                                      try {
+                                        await applyCategoryToEntry(id, snapUndo.prevCategoryId);
+
+                                        // Guardrail: clear undo state only on SUCCESS
+                                        setUndoByEntryId((m) => {
+                                          const next = { ...m };
+                                          delete next[id];
+                                          return next;
+                                        });
+                                        clearUndoTimer(id);
+
+                                        // Since undo is a manual action, remove AI attribution on success
+                                        if (snapAi) {
+                                          setAiAppliedById((m) => {
+                                            const next = { ...m };
+                                            delete next[id];
+                                            return next;
+                                          });
+                                        }
+                                      } catch {
+                                        // Guardrail: restore undo state if undo fails
+                                        if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                        if (snapUndo) {
+                                          setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
+                                          const remaining = Math.max(0, (snapUndo.expiresAt ?? 0) - Date.now());
+                                          if (remaining > 0) {
+                                            clearUndoTimer(id);
+                                            undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
+                                              setUndoByEntryId((m) => {
+                                                if (!m[id]) return m;
+                                                const next = { ...m };
+                                                delete next[id];
+                                                return next;
+                                              });
+                                              clearUndoTimer(id);
+                                            }, remaining);
+                                          }
+                                        }
+                                      }
+                                    }}
+                                  >
+                                    Undo
+                                  </button>
+                                ) : null}
+
+                                {/* Compact suggestions (top 2 + +more); click applies immediately */}
+                                {!e.category_id ? (
+                                  <div className="flex items-center gap-1 overflow-hidden">
+                                    {(() => {
+                                      const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
+                                      const top = list.slice(0, 2);
+                                      const more = Math.max(0, list.length - top.length);
+
+                                      return (
+                                        <>
+                                          {top.map((s: any) => {
+                                            const catId = String(s?.category_id ?? "");
+                                            const name = String(s?.category_name ?? "—");
+                                            const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+
+                                            return (
+                                              <button
+                                                key={catId || name}
+                                                type="button"
+                                                className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
+                                                title={String(s?.reason ?? "")}
+                                                disabled={!!pendingIds[id]}
+                                                onClick={async () => {
+                                                  if (!catId) return;
+
+                                                  // Auto-apply immediately (explicit click on suggestion)
+                                                  if (!selectedBusinessId || !selectedAccountId) return;
+
+                                                  // Prevent double-submit
+                                                  if (pendingIds[id]) return;
+
+                                                  clearMutErr();
+
+                                                  // Snapshot previous category for undo (session-local)
+                                                  const prevCategoryId = e.category_id ? String(e.category_id) : null;
+
+                                                  try {
+                                                    await applyCategoryToEntry(id, catId);
+
+                                                    // SUCCESS: mark AI attribution + start undo window (10s)
+                                                    setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                                    setUndoWindow(id, prevCategoryId, catId);
+                                                  } catch {
+                                                    // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
+                                                  }
+                                                }}
+                                              >
+                                                <span className="font-semibold truncate max-w-[88px]">{name}</span>
+                                                <span className="text-primary">{conf}%</span>
+                                              </button>
+                                            );
+                                          })}
+
+                                          {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
+                                          {sugLoading && !list.length ? <span className="text-[10px] text-slate-400">Loading</span> : null}
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                ) : null}
                               </div>
                             </td>
                           </tr>
@@ -631,6 +1036,22 @@ export default function CategoryReviewPageClient() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <BusyButton
+                    variant="primary"
+                    size="sm"
+                    busy={applyBusy}
+                    busyLabel="Applying…"
+                    disabled={
+                      applyBusy ||
+                      !Object.keys(selectedSuggestionByEntryId).some((k) => !!selectedSuggestionByEntryId[k])
+                    }
+                    onClick={() => {
+                      setApplySummary(null);
+                      setApplyOpen(true);
+                    }}
+                  >
+                    Apply selected suggestions
+                  </BusyButton>
                   <select
                     className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs"
                     value={bulkCategoryId}
@@ -657,26 +1078,76 @@ export default function CategoryReviewPageClient() {
             </div>
           ) : null}
 
+          {/* Phase F2: Apply selected suggestions (explicit confirm) */}
           <AppDialog
-            open={confirmOpen}
-            onClose={() => setConfirmOpen(false)}
-            title="Confirm bulk apply"
+            open={applyOpen}
+            onClose={() => {
+              if (applyBusy) return;
+              setApplyOpen(false);
+            }}
+            title="Apply suggestions"
             size="md"
-            disableOverlayClose={false}
             footer={
               <div className="flex items-center justify-end gap-2">
-                <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+                <Button variant="outline" onClick={() => setApplyOpen(false)} disabled={applyBusy}>
                   Cancel
                 </Button>
-                <Button onClick={applySelectedConfirmed} disabled={bulkCategoryId === "__NONE__" || Object.keys(pendingIds).length > 0}>
+
+                <BusyButton
+                  variant="primary"
+                  size="md"
+                  busy={applyBusy}
+                  busyLabel="Applying…"
+                  disabled={applyBusy || selectedApplyItems.length === 0}
+                  onClick={async () => {
+                    if (!selectedBusinessId || !selectedAccountId) return;
+
+                    setApplyBusy(true);
+                    clearMutErr();
+
+                    try {
+                      const res: any = await applyCategoryBatch({
+                        businessId: selectedBusinessId,
+                        accountId: selectedAccountId,
+                        items: selectedApplyItems,
+                      });
+
+                      const applied = Number(res?.applied ?? 0) || 0;
+                      const blocked = Number(res?.blocked ?? 0) || 0;
+
+                      setApplySummary({ applied, blocked });
+
+                      // Remove successful selections; keep blocked ones so user can retry later
+                      const results = Array.isArray(res?.results) ? res.results : [];
+                      setSelectedSuggestionByEntryId((prev) => {
+                        const next = { ...prev };
+                        for (const r of results) {
+                          const id = String(r?.entryId ?? "");
+                          if (!id) continue;
+                          if (r?.ok === true) delete next[id];
+                        }
+                        return next;
+                      });
+
+                      await entriesQ.refetch?.();
+                      setApplyOpen(false);
+                    } catch (e: any) {
+                      applyMutationError(e, "Can’t apply suggestions");
+                    } finally {
+                      setApplyBusy(false);
+                    }
+                  }}
+                >
                   Apply
-                </Button>
+                </BusyButton>
               </div>
             }
           >
             <div className="text-sm text-slate-700">
-              Apply the selected category to <span className="font-medium">{selectedCount}</span> entries?
-              <div className="mt-2 text-[11px] text-slate-500">This is explicit and will not run automatically.</div>
+              Apply category changes to <span className="font-medium">{selectedApplyItems.length}</span> entries?
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500">
+              Entries in closed periods will be blocked and counted separately.
             </div>
           </AppDialog>
         </CardContent>

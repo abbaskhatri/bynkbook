@@ -38,7 +38,7 @@ export function PillToggle({ label, checked, onCheckedChange, disabled = false, 
         }}
         className={[
           "relative inline-flex h-6 w-11 items-center rounded-full border transition-colors",
-          checked ? "bg-violet-600 border-violet-600" : "bg-slate-200 border-slate-200",
+          checked ? "bg-primary/10 text-primary border-primary/20" : "bg-slate-200 border-slate-200",
           disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
           ringFocus,
         ].join(" ")}

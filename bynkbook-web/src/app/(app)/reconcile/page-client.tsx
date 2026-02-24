@@ -81,7 +81,7 @@ function safeHost(u: string): string {
 function EnvBadge({ label, tooltip }: { label: "DEV" | "PROD"; tooltip: string }) {
   const cls =
     label === "PROD"
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      ? "bg-primary/10 text-primary border-primary/20"
       : "bg-amber-50 text-amber-800 border-amber-200";
 
   return (
@@ -776,6 +776,11 @@ export default function ReconcilePageClient() {
   const [createEntryCategoryId, setCreateEntryCategoryId] = useState<string>("");
   const [createEntryCategoryName, setCreateEntryCategoryName] = useState<string>("");
 
+  // Phase F1: heuristic category suggestions (suggestion-only; user must click)
+  const [createEntrySugLoading, setCreateEntrySugLoading] = useState(false);
+  const [createEntrySugErr, setCreateEntrySugErr] = useState<string | null>(null);
+  const [createEntrySuggestions, setCreateEntrySuggestions] = useState<Array<any>>([]);
+
   // Categories (for dropdown suggestions)
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -813,6 +818,64 @@ export default function ReconcilePageClient() {
       cancelled = true;
     };
   }, [selectedBusinessId]);
+
+  // Phase F1: fetch top 3 category suggestions when Create Entry dialog opens (single batch request)
+  useEffect(() => {
+    if (!openCreateEntry) return;
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
+    if (!bankId) {
+      setCreateEntrySuggestions([]);
+      setCreateEntrySugErr(null);
+      setCreateEntrySugLoading(false);
+      return;
+    }
+
+    // IMPORTANT: bankTxSorted is declared later in this file; avoid TDZ by using bankTx (state) here.
+    const t = (bankTx ?? []).find((x: any) => String(x.id) === bankId);
+    const desc = (t?.name ?? "").toString().trim();
+
+    let cancelled = false;
+
+    (async () => {
+      setCreateEntrySugLoading(true);
+      setCreateEntrySugErr(null);
+
+      try {
+        const { getCategorySuggestions } = await import("@/lib/api/ai");
+        const res: any = await getCategorySuggestions({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          items: [
+            {
+              kind: "BANK_TXN",
+              id: bankId,
+              date: t?.posted_date ? String(t.posted_date).slice(0, 10) : undefined,
+              amount_cents: t?.amount_cents,
+              payee_or_name: desc,
+              memo: "",
+            },
+          ],
+          limitPerItem: 3,
+        });
+
+        const s = res?.suggestionsById?.[bankId] ?? [];
+        if (!cancelled) setCreateEntrySuggestions(Array.isArray(s) ? s : []);
+      } catch (e: any) {
+        if (!cancelled) {
+          setCreateEntrySuggestions([]);
+          setCreateEntrySugErr(e?.message ?? "Failed to load suggestions");
+        }
+      } finally {
+        if (!cancelled) setCreateEntrySugLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [openCreateEntry, createEntryBankTxnId, selectedBusinessId, selectedAccountId, bankTx]);
 
   // Load bank txns + matches (single source of truth; no duplicate fetch)
   useEffect(() => {
@@ -1556,7 +1619,7 @@ export default function ReconcilePageClient() {
     .map((a) => ({ value: a.id, label: a.name }));
 
   const accountCapsule = (
-    <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
+    <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
       <CapsuleSelect
         variant="flat"
         loading={accountsQ.isLoading}
@@ -1669,7 +1732,7 @@ export default function ReconcilePageClient() {
       </div>
       <button
         type="button"
-        className="h-7 px-1.5 text-xs font-medium text-violet-700 hover:text-violet-800 hover:bg-violet-50 rounded-md"
+        className="h-7 px-1.5 text-xs font-medium text-primary hover:bg-primary/10 rounded-md"
         onClick={() => {
           setFrom("");
           setTo("");
@@ -1973,7 +2036,66 @@ export default function ReconcilePageClient() {
 
                     <div>
                       <div className="text-[11px] font-semibold text-slate-600 mb-1">Category</div>
-                      {null}
+
+                      {/* Phase F1: suggestion-only category chips (top 3) */}
+                      <div className="mb-2">
+                        {createEntrySugLoading ? (
+                          <div className="flex flex-wrap gap-2">
+                            <div className="h-6 w-24 rounded-full bg-slate-100 animate-pulse" />
+                            <div className="h-6 w-28 rounded-full bg-slate-100 animate-pulse" />
+                            <div className="h-6 w-20 rounded-full bg-slate-100 animate-pulse" />
+                          </div>
+                        ) : createEntrySuggestions.length ? (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex flex-wrap gap-2">
+                              {createEntrySuggestions.slice(0, 3).map((s: any) => {
+                                const id = String(s?.category_id ?? "");
+                                const name = String(s?.category_name ?? "—");
+                                const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+                                const selected = createEntryCategoryId && createEntryCategoryId === id;
+
+                                return (
+                                  <button
+                                    key={id || name}
+                                    type="button"
+                                    className={[
+                                      "h-6 px-2 rounded-full border text-[11px] inline-flex items-center gap-2",
+                                      selected
+                                        ? "border-primary/20 bg-primary/10 text-primary"
+                                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                                      ringFocus,
+                                    ].join(" ")}
+                                    onClick={() => {
+                                      if (!id) return;
+                                      setCreateEntryCategoryId(id);
+                                      setCreateEntryCategoryName(name);
+                                      setCategoryQuery("");
+                                    }}
+                                  >
+                                    <span className="font-medium truncate max-w-[160px]">{name}</span>
+                                    <span className={selected ? "text-primary" : "text-slate-500"}>{conf}%</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <div className="text-[11px] text-slate-500">
+                              {String(createEntrySuggestions?.[0]?.reason ?? "").trim() ? (
+                                <span title={String(createEntrySuggestions?.[0]?.reason ?? "")}>
+                                  Why: {String(createEntrySuggestions?.[0]?.reason ?? "")}
+                                </span>
+                              ) : (
+                                <span>Why: Based on your history</span>
+                              )}
+                            </div>
+                          </div>
+                        ) : createEntrySugErr ? (
+                          <div className="text-[11px] text-slate-500">Suggestions unavailable</div>
+                        ) : (
+                          <div className="text-[11px] text-slate-500">Suggestions will appear based on your history</div>
+                        )}
+                      </div>
+
                       <div className="relative overflow-visible">
                         <input
                           className={[
@@ -2039,7 +2161,7 @@ export default function ReconcilePageClient() {
                           Selected: <span className="font-medium">{createEntryCategoryName}</span>{" "}
                           <button
                             type="button"
-                            className="ml-2 text-emerald-700 hover:text-emerald-800"
+                            className="ml-2 text-primary hover:text-primary"
                             onClick={() => {
                               setCreateEntryCategoryId("");
                               setCreateEntryCategoryName("");
@@ -2248,7 +2370,7 @@ export default function ReconcilePageClient() {
 
                       const isMatched = matchedEntryIdSet.has(e.id);
 
-                      const rowTone = isMatched ? " bg-emerald-50" : "";
+                      const rowTone = isMatched ? " bg-primary/10" : "";
 
                       const deEmphasis = expectedTab === "matched" ? " text-slate-600" : "";
 
@@ -2577,7 +2699,7 @@ export default function ReconcilePageClient() {
                       })();
 
                       const isMatched = activeGroupByBankTxnId.has(String(t.id));
-                      const rowTone = isMatched ? " bg-emerald-50" : "";
+                      const rowTone = isMatched ? " bg-primary/10" : "";
 
                       const deEmphasis = bankTab === "matched" ? " text-slate-600" : "";
 
@@ -2883,7 +3005,7 @@ export default function ReconcilePageClient() {
                       <button
                         key={s.id}
                         type="button"
-                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${selected ? "bg-violet-50" : "bg-white"
+                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${selected ? "bg-accent" : "bg-white"
                           }`}
                         onClick={() => setSelectedSnapshotId(s.id)}
                         title="View snapshot"
@@ -3312,7 +3434,7 @@ export default function ReconcilePageClient() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Remaining Δ</span>
-                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-emerald-700" : "text-amber-700"}`}>
+                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-amber-700"}`}>
                         {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
                       </span>
                     </div>
@@ -3393,7 +3515,7 @@ export default function ReconcilePageClient() {
                         <button
                           key={e.id}
                           type="button"
-                          className={`w-full text-left h-10 px-2 rounded-md border ${selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                          className={`w-full text-left h-10 px-2 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"
                             } flex items-center justify-between gap-2`}
                           onClick={() => {
                             setMatchSelectedEntryIds((prev) => {
@@ -3504,7 +3626,7 @@ export default function ReconcilePageClient() {
                         return (
                           <tr
                             key={e.id}
-                            className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-emerald-50" : "hover:bg-slate-50"}`}
+                            className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-slate-50"}`}
                             onClick={() => {
                               setMatchSelectedEntryIds((prev) => {
                                 const next = new Set(prev);
@@ -3833,7 +3955,7 @@ export default function ReconcilePageClient() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Remaining Δ</span>
-                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-emerald-700" : "text-amber-700"}`}>
+                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-amber-700"}`}>
                         {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
                       </span>
                     </div>
@@ -3904,7 +4026,7 @@ export default function ReconcilePageClient() {
                           return (
                             <tr
                               key={t.id}
-                              className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-emerald-50" : "hover:bg-slate-50"}`}
+                              className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-slate-50"}`}
                               onClick={() => {
                                 setEntryMatchSelectedBankTxnIds((prev) => {
                                   const next = new Set(prev);

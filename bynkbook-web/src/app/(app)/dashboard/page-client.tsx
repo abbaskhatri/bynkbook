@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
+import { getDashboardInsights } from "@/lib/api/ai";
 import { getIssuesCount } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -100,7 +101,7 @@ export default function DashboardPageClient() {
     return n < 0 ? `(${currency.format(Math.abs(n))})` : currency.format(n);
   }
   function moneyClass(n: number) {
-    return n < 0 ? "text-rose-600" : "text-emerald-700";
+    return n < 0 ? "text-rose-600" : "text-slate-900";
   }
 
   function fmtUsdAccountingFromCents(centsStr?: string) {
@@ -224,6 +225,24 @@ export default function DashboardPageClient() {
   const [balancesByAccountId, setBalancesByAccountId] = useState<Record<string, string>>({});
   const [dashLoading, setDashLoading] = useState(false);
 
+  type DashboardInsight = {
+    id: string;
+    type: string;
+    title: string;
+    value: any;
+    unit: "PCT" | "TEXT" | string;
+    severity?: "LOW" | "MED" | "HIGH" | string;
+    reason?: string;
+    drilldown?: { href?: string };
+  };
+
+  // Phase F4: Dashboard insights (computed, non-hallucinated)
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insights, setInsights] = useState<DashboardInsight[]>([]);
+  const [insightsErr, setInsightsErr] = useState<string | null>(null);
+
+  // (removed stray pasted Promise.all block)
+
   useEffect(() => {
     if (!selectedBusinessId) return;
 
@@ -242,14 +261,17 @@ export default function DashboardPageClient() {
       setDashLoading(true);
       setDashErr(null);
 
+      setInsightsLoading(true);
+      setInsightsErr(null);
+
       try {
-        const [pnl, cashflow, issues, cats, acctSummary] = await Promise.all([
+        const [pnl, cashflow, issues, cats, acctSummary, ins] = await Promise.all([
           getPnlSummary(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
           getCashflowSeries(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
           getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId }),
           getCategories(selectedBusinessId, { from, to, accountId: selectedAccountId }),
-          // As-of: today (dashboard is “current-ish”)
           getAccountsSummary(selectedBusinessId, { asOf: to, accountId: "all", includeArchived: false }),
+          getDashboardInsights({ businessId: selectedBusinessId, from, to }),
         ]);
 
         if (cancelled) return;
@@ -288,6 +310,11 @@ export default function DashboardPageClient() {
           map[String(r.account_id)] = String(r.balance_cents ?? "0");
         }
         setBalancesByAccountId(map);
+
+        // Insights
+        const insList: DashboardInsight[] = Array.isArray(ins?.insights) ? (ins.insights as DashboardInsight[]) : [];
+        setInsights(insList);
+        setInsightsErr(null);
         // Top categories: sort by absolute amount; show signed accounting value
         const absBig = (s: string) => {
           try {
@@ -322,10 +349,15 @@ export default function DashboardPageClient() {
         if (status === 401) setDashErr({ title: "Signed out", detail });
         else if (status === 403) setDashErr({ title: "Access denied", detail });
         else setDashErr({ title: "Dashboard failed to load", detail });
+        setInsights([]);
+        setInsightsErr("Insights unavailable");
 
         // Keep existing UI stable; just show banner.
       } finally {
-        if (!cancelled) setDashLoading(false);
+        if (!cancelled) {
+          setDashLoading(false);
+          setInsightsLoading(false);
+        }
       }
     })();
 
@@ -351,7 +383,7 @@ export default function DashboardPageClient() {
             ];
 
             const accountCapsule = (
-              <div className="h-6 px-1.5 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center">
+              <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
                 <CapsuleSelect
                   variant="flat"
                   loading={accountsQ.isLoading}
@@ -463,11 +495,11 @@ export default function DashboardPageClient() {
                 {/* Legend */}
                 <div className="flex items-center gap-4 text-xs text-slate-700 mb-3">
                   <div className="inline-flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-sm bg-emerald-400" />
+                    <span className="h-2 w-2 rounded-sm bg-primary" />
                     Cash in
                   </div>
                   <div className="inline-flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-sm bg-violet-400" />
+                    <span className="h-2 w-2 rounded-sm bg-rose-400" />
                     Cash out
                   </div>
                   <div className="inline-flex items-center gap-1.5">
@@ -481,46 +513,46 @@ export default function DashboardPageClient() {
                     <div className="flex items-start">
                       {/* Shared viewport: labels + plot align to the exact same 160px coordinate space */}
                       <div className="w-14 pr-3 text-[10px] text-slate-500">
-                          {(() => {
-                            const H = 160;
+                        {(() => {
+                          const H = 160;
 
-                            const posMaxDollars = Number(maxPosCents) / 100;
-                            const negMaxDollars = Number(maxNegAbsCents) / 100;
-                            const total = Math.max(1, posMaxDollars + negMaxDollars);
-                            const posPx = (H * posMaxDollars) / total;
-                            const zeroY = posPx;
+                          const posMaxDollars = Number(maxPosCents) / 100;
+                          const negMaxDollars = Number(maxNegAbsCents) / 100;
+                          const total = Math.max(1, posMaxDollars + negMaxDollars);
+                          const posPx = (H * posMaxDollars) / total;
+                          const zeroY = posPx;
 
-                            const positions = [
-                              { cents: maxPosCents, y: 0 },
-                              { cents: maxPosCents / 2n, y: zeroY / 2 },
-                              { cents: 0n, y: zeroY },
-                              { cents: -(maxNegAbsCents / 2n), y: zeroY + (H - zeroY) / 2 },
-                              { cents: -maxNegAbsCents, y: H },
-                            ];
+                          const positions = [
+                            { cents: maxPosCents, y: 0 },
+                            { cents: maxPosCents / 2n, y: zeroY / 2 },
+                            { cents: 0n, y: zeroY },
+                            { cents: -(maxNegAbsCents / 2n), y: zeroY + (H - zeroY) / 2 },
+                            { cents: -maxNegAbsCents, y: H },
+                          ];
 
-                            return (
-                              <div className="h-40 relative">
-                                {positions.map((p) => {
-                                  const fm = fmtUsdAccountingFromCentsSafe(p.cents.toString());
-                                  const isZero = p.cents === 0n;
+                          return (
+                            <div className="h-40 relative">
+                              {positions.map((p) => {
+                                const fm = fmtUsdAccountingFromCentsSafe(p.cents.toString());
+                                const isZero = p.cents === 0n;
 
-                                  return (
-                                    <div
-                                      key={p.cents.toString()}
-                                      className={`absolute right-2 leading-none ${p.cents === 0n ? "text-slate-600" : fm.isNeg ? "text-rose-600" : ""}`}
-                                      style={{
-                                        top: isZero ? `${p.y - 6}px` : `${p.y}px`,
-                                        transform: isZero ? "translateY(0)" : "translateY(-50%)",
-                                      }}
-                                    >
-                                      {fm.text}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })()}
-                        </div>
+                                return (
+                                  <div
+                                    key={p.cents.toString()}
+                                    className={`absolute right-2 leading-none ${p.cents === 0n ? "text-slate-600" : fm.isNeg ? "text-rose-600" : ""}`}
+                                    style={{
+                                      top: isZero ? `${p.y - 6}px` : `${p.y}px`,
+                                      transform: isZero ? "translateY(0)" : "translateY(-50%)",
+                                    }}
+                                  >
+                                    {fm.text}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
 
                       {/* Plot (single coordinate space for bars + line + dots + hover) */}
                       <div className="flex-1 pl-1">
@@ -705,7 +737,7 @@ export default function DashboardPageClient() {
 
                                       <div className="mt-1 flex items-center justify-between gap-3">
                                         <span className="text-slate-600">Cash in</span>
-                                        <span className="font-medium text-emerald-700">{fmtUsdAccountingFromCentsSafe(r.cashInCents).text}</span>
+                                        <span className="font-medium text-primary">{fmtUsdAccountingFromCentsSafe(r.cashInCents).text}</span>
                                       </div>
 
                                       <div className="flex items-center justify-between gap-3">
@@ -878,8 +910,46 @@ export default function DashboardPageClient() {
             </CardContent>
           </Card>
 
-          {/* AI Insights hidden until real (no placeholders) */}
-          {null}
+          {/* AI Insights */}
+          <Card>
+            <CHeader className="pb-2">
+              <div className="flex items-center justify-between gap-4">
+                <CardTitle className="text-sm font-medium">Insights</CardTitle>
+              </div>
+            </CHeader>
+
+            <CardContent className="pt-0">
+              {insightsLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : insightsErr ? (
+                <div className="text-xs text-muted-foreground">Insights unavailable</div>
+              ) : insights.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No insights for this period.</div>
+              ) : (
+                <div className="space-y-2">
+                  {insights.map((it: DashboardInsight) => (
+                    <button
+                      key={String(it.id)}
+                      type="button"
+                      onClick={() => router.push(it.drilldown?.href ?? "#")}
+                      className="w-full text-left rounded-lg border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50"
+                    >
+                      <div className="text-[11px] font-semibold text-slate-900">{it.title}</div>
+                      <div className="mt-1 text-xs text-slate-700">
+                        {it.unit === "PCT" ? `${it.value}%` : it.value}
+                      </div>
+                      <div className="mt-1 text-[11px] text-muted-foreground truncate">
+                        {it.reason}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

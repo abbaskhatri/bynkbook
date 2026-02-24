@@ -27,6 +27,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/app/pill";
+import GlobalSearch from "@/components/app/global-search";
 
 function navVariant(active: boolean) {
   return active ? "default" : "outline";
@@ -519,7 +520,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                             ) : null}
 
                             {showUncat ? (
-                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-violet-50 px-1 text-[10px] font-semibold text-violet-800 border border-violet-200">
+                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-primary/10 px-1 text-[10px] font-semibold text-primary border border-primary/20">
                                 {attnUncat}
                               </span>
                             ) : null}
@@ -547,7 +548,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                           ) : null}
 
                           {item.label === "Category Review" && attnUncat > 0 ? (
-                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-violet-50 px-1.5 text-[11px] font-semibold text-violet-800 border border-violet-200">
+                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
                               {attnUncat}
                             </span>
                           ) : null}
@@ -589,12 +590,26 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             </Pill>
           </div>
 
-          {/* Center: Search bar is intentionally hidden until Step I (AI/search is real). */}
+          {/* Center spacer */}
           <div className="flex-1" />
 
-          {/* Right: Icon buttons + user menu */}
+          {/* Right: Global search + bell + user menu */}
           <div className="flex items-center gap-2">
-            {/* Placeholder icon buttons removed (no non-functional UI). */}
+            {businessId ? (
+              <GlobalSearch
+                businessId={businessId}
+                accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
+              />
+            ) : null}
+
+            <button
+              type="button"
+              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+              title="Activity"
+              onClick={() => router.push("/settings?tab=activity")}
+            >
+              <Bell className="h-4 w-4" />
+            </button>
 
             <div className="relative" ref={userMenuRef}>
               <button

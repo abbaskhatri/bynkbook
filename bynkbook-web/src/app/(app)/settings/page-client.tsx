@@ -1305,7 +1305,7 @@ export default function SettingsPageClient() {
                             const label2 = value === "FULL" ? "Full" : value === "VIEW" ? "View" : "None";
                             const cls =
                               value === "FULL"
-                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                ? "bg-primary/10 text-primary border-primary/20"
                                 : value === "VIEW"
                                   ? "bg-slate-50 text-slate-800 border-slate-200"
                                   : "bg-slate-50 text-slate-500 border-slate-200";
@@ -1452,7 +1452,7 @@ export default function SettingsPageClient() {
 
                   <button
                     type="button"
-                    className={`h-6 w-10 rounded-full border ${bkAutoSuggest ? "bg-emerald-500 border-emerald-600" : "bg-slate-200 border-slate-300"} relative`}
+                    className={`h-6 w-10 rounded-full border ${bkAutoSuggest ? "bg-primary border-primary" : "bg-slate-200 border-slate-300"} relative`}
                     onClick={() => setBkAutoSuggest((v) => !v)}
                     aria-label="Toggle auto-suggest"
                   >
@@ -2240,7 +2240,7 @@ export default function SettingsPageClient() {
                           </TableCell>
 
                           <TableCell className="py-2 text-right">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isArchived ? "bg-slate-100 text-slate-700" : "bg-emerald-50 text-emerald-700"}`}>
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isArchived ? "bg-slate-100 text-slate-700" : "bg-primary/10 text-primary"}`}>
                               {isArchived ? "Archived" : "Active"}
                             </span>
                           </TableCell>
@@ -2261,7 +2261,7 @@ export default function SettingsPageClient() {
                                 Not connected
                               </span>
                             ) : st?.connected ? (
-                              <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-medium">
+                              <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[11px] font-medium">
                                 Connected
                               </span>
                             ) : (
@@ -2518,7 +2518,7 @@ export default function SettingsPageClient() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-medium">
+                  <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[11px] font-medium">
                     {roleLabel(selectedBusinessRole)}
                   </span>
 

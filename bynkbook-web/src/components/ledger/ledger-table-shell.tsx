@@ -44,7 +44,7 @@ export function LedgerTableShell(props: {
 
           <tbody>
             {addRowChildren ? (
-              <tr className="sticky top-[28px] z-30 bg-emerald-50 border-b-2 border-emerald-200">
+              <tr className="sticky top-[28px] z-30 bg-primary/10 border-b-2 border-primary/20">
                 {addRowChildren}
               </tr>
             ) : null}

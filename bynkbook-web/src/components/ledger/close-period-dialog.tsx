@@ -242,7 +242,7 @@ export function ClosePeriodDialog(props: {
         <div className="rounded-md border border-slate-200 overflow-hidden">
           <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
             <div className="text-xs font-semibold text-slate-700">Reconciliation</div>
-            <div className={`text-xs font-semibold ${preview ? (isClean ? "text-emerald-700" : "text-amber-700") : "text-slate-500"}`}>
+            <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-amber-700") : "text-slate-500"}`}>
               {preview ? (isClean ? "Clean (recommended)" : "Not clean") : "Run preview"}
             </div>
           </div>

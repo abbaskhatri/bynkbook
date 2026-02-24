@@ -464,6 +464,22 @@ const vendorsHandler = {
   handler: "packages/functions/src/vendors.handler",
 } satisfies ApiHandler;
 
+// ---------- Phase F: AI (heuristics-only) + Insights + Search ----------
+const aiCategorySuggestionsHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/aiCategorySuggestions.handler",
+} satisfies ApiHandler;
+
+const insightsDashboardHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/insightsDashboard.handler",
+} satisfies ApiHandler;
+
+const searchQueryHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/searchQuery.handler",
+} satisfies ApiHandler;
+
 api.route("GET /v1/businesses/{businessId}/budgets", budgetsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PUT /v1/businesses/{businessId}/budgets", budgetsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
@@ -475,6 +491,27 @@ api.route("GET /v1/businesses/{businessId}/categories", categoriesHandler, { aut
 api.route("POST /v1/businesses/{businessId}/categories", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PATCH /v1/businesses/{businessId}/categories/{categoryId}", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("DELETE /v1/businesses/{businessId}/categories/{categoryId}", categoriesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// Phase F1/F2: heuristic category suggestions (batch-only)
+api.route(
+  "POST /v1/businesses/{businessId}/ai/category-suggestions",
+  aiCategorySuggestionsHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+// Phase F4: dashboard insights (computed; non-hallucinated)
+api.route(
+  "GET /v1/businesses/{businessId}/insights/dashboard",
+  insightsDashboardHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+// Phase F5: global search (structured parse + scoped querying; no reindex yet)
+api.route(
+  "POST /v1/businesses/{businessId}/search/query",
+  searchQueryHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
 
 api.route("GET /v1/businesses/{businessId}/bookkeeping/preferences", bookkeepingPreferencesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PUT /v1/businesses/{businessId}/bookkeeping/preferences", bookkeepingPreferencesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
@@ -607,6 +644,13 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
     api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/restore", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+    // Phase F2: apply category suggestions in bulk (per-item results; CLOSED_PERIOD per row)
+    api.route(
+      "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/apply-category-batch",
+      entryHandler,
+      { auth: { jwt: { authorizer: authorizer.id } } }
+    );
 
     // ---------- Transfers ----------
     const transferHandler = {

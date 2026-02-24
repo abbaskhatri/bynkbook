@@ -178,7 +178,7 @@ function ComboBarLineChart({
 
         <div className="flex items-center gap-4 text-[11px] text-slate-600">
           <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-sm bg-emerald-600" />
+            <span className="inline-block h-2 w-2 rounded-sm bg-primary" />
             <span>In: <span className="text-slate-900">{lastA.text}</span></span>
           </div>
           <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ function ComboBarLineChart({
             const b = B[i];
             return (
               <g key={`bars-${i}`}>
-                {barRect(xc - barW * 0.35, a, "fill-emerald-600/80", `a-${i}`)}
+                {barRect(xc - barW * 0.35, a, "fill-primary/80", `a-${i}`)}
                 {barRect(xc + barW * 0.35, b, "fill-red-500/70", `b-${i}`)}
               </g>
             );
@@ -273,9 +273,9 @@ function DonutBreakdown({
     "stroke-slate-500",
     "stroke-slate-400",
     "stroke-slate-300",
-    "stroke-emerald-600",
-    "stroke-emerald-500",
-    "stroke-emerald-400",
+    "stroke-primary",
+    "stroke-primary",
+    "stroke-primary",
     "stroke-slate-200",
   ];
 
@@ -327,7 +327,7 @@ function DonutBreakdown({
               return (
                 <div key={`${r.label}-${i}`} className="flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0 flex items-center gap-2">
-                    <span className={`inline-block h-2 w-2 rounded-sm ${i % 2 === 0 ? "bg-slate-700" : "bg-emerald-600"}`} />
+                    <span className={`inline-block h-2 w-2 rounded-sm ${i % 2 === 0 ? "bg-slate-700" : "bg-primary"}`} />
                     <span className="truncate text-slate-700">{r.label}</span>
                     <span className="text-[11px] text-slate-500">{pct}%</span>
                   </div>
@@ -513,7 +513,7 @@ export default function ReportsPageClient() {
             icon={<FileText className="h-4 w-4" />}
             title="Reports"
             afterTitle={
-              <div className="h-6 px-1.5 rounded-lg border border-violet-200 bg-violet-50 flex items-center">
+              <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
                 <CapsuleSelect
                   variant="flat"
                   loading={accountsQ.isLoading}

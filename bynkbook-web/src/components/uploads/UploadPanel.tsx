@@ -176,7 +176,7 @@ function VendorPicker(props: {
       ) : null}
 
       {!value && canCreate ? (
-        <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={createVendor}>
+        <button type="button" className="text-xs text-primary hover:underline" onClick={createVendor}>
           Create vendor “{query.trim()}”
         </button>
       ) : null}
@@ -669,7 +669,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   status === "PARSING"
                                     ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                     : status === "PARSED"
-                                    ? "inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5"
+                                    ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
                                     : status === "NEEDS_REVIEW"
                                     ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
                                     : status === "FAILED"
@@ -682,7 +682,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   entryCreateStatus[it.uploadId]?.state === "creating" ? (
                                     <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
-                                    <span className="ml-2 text-[11px] text-emerald-700">Created</span>
+                                    <span className="ml-2 text-[11px] text-primary">Created</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
                                     <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
@@ -708,7 +708,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   it.status !== "COMPLETED"
                                     ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                     : status === "PARSED"
-                                    ? "inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5"
+                                    ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
                                     : status === "NEEDS_REVIEW"
                                     ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
                                     : status === "FAILED"
@@ -729,7 +729,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   entryCreateStatus[it.uploadId]?.state === "creating" ? (
                                     <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
-                                    <span className="ml-2 text-[11px] text-emerald-700">Created</span>
+                                    <span className="ml-2 text-[11px] text-primary">Created</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
                                     <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
@@ -946,7 +946,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
                       <div className="flex items-center gap-2">
                         {it.status === "UPLOADED" || it.status === "COMPLETED" ? (
-                          <div className="inline-flex items-center gap-1 text-xs text-emerald-700">
+                          <div className="inline-flex items-center gap-1 text-xs text-primary">
                             <CheckCircle2 className="h-4 w-4" /> Uploaded
                           </div>
                         ) : it.status === "FAILED" ? (
@@ -981,7 +981,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
                     <div className="mt-2">
                       <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div className="h-full bg-emerald-500" style={{ width: `${it.progress}%` }} />
+                        <div className="h-full bg-primary" style={{ width: `${it.progress}%` }} />
                       </div>
                       <div className="mt-1 text-[11px] text-slate-500">{it.progress}%</div>
                     </div>

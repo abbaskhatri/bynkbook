@@ -45,7 +45,7 @@ export function CapsuleSelect(props: {
     <Select value={value} onValueChange={onValueChange}>
       <SelectTrigger className={capsuleTriggerClass}>
         <div className="flex items-center gap-2 min-w-0">
-          {variant === "flat" ? <Wallet className="h-4 w-4 text-emerald-700 shrink-0" /> : null}
+          {variant === "flat" ? <Wallet className="h-4 w-4 text-primary shrink-0" /> : null}
           <div className="min-w-0">
             <SelectValue placeholder={loading ? "Loading..." : placeholder} />
           </div>

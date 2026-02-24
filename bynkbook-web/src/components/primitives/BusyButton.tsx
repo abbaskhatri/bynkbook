@@ -33,7 +33,7 @@ const sizeClass: Record<BusyButtonSize, string> = {
 
 const variantClass: Record<BusyButtonVariant, string> = {
   primary:
-    "border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100 disabled:bg-violet-50",
+    "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15",
   secondary:
     "border-slate-200 bg-white text-slate-900 hover:bg-slate-50 disabled:bg-white",
   danger:

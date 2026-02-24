@@ -254,7 +254,7 @@ export function PlaidConnectButton(props: Props) {
             BynkBook uses Plaid to connect securely to your bank. We do not store your bank password.
           </div>
 
-          <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          <div className="mt-3 rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
             Bank-level encryption • Read-only access • No password stored
           </div>
 
@@ -290,7 +290,7 @@ export function PlaidConnectButton(props: Props) {
 
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 inline-flex items-center gap-2"
+              className="h-8 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50 inline-flex items-center gap-2"
               disabled={!consented || busy || connecting}
               onClick={async () => {
                 setOpenConsent(false);
@@ -349,7 +349,7 @@ export function PlaidConnectButton(props: Props) {
           <div className="mt-4">
             <div className="text-[11px] font-semibold text-slate-600 mb-1">History to fetch</div>
             <select
-              className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+              className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-ring"
               value={historyPreset}
               onChange={(e) => setHistoryPreset(e.target.value as any)}
             >
@@ -365,7 +365,7 @@ export function PlaidConnectButton(props: Props) {
                 <div className="text-[11px] text-slate-600 mb-1">Start date (end date is today)</div>
                 <input
                   type="date"
-                  className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-emerald-500"
+                  className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-ring"
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
                   max={endDate}
@@ -390,7 +390,7 @@ export function PlaidConnectButton(props: Props) {
 
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+              className="h-8 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50"
               disabled={busy || !pendingPublicToken || !selectedPlaidAccountId}
               onClick={async () => {
                 if (!pendingPublicToken || !selectedPlaidAccountId) return;
@@ -543,7 +543,7 @@ export function PlaidConnectButton(props: Props) {
           <div className="mt-4 flex flex-col gap-2">
             <button
               type="button"
-              className="h-9 px-3 text-xs rounded-md border border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 disabled:opacity-50 text-left"
+              className="h-9 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50 text-left"
               disabled={openingChoiceBusy || openingPreview?.suggestedOpeningCents == null}
               onClick={async () => {
                 setOpeningChoiceBusy(true);
@@ -577,7 +577,7 @@ export function PlaidConnectButton(props: Props) {
               }}
             >
               <div className="font-semibold">A) Use Plaid suggested opening</div>
-              <div className="text-[11px] text-emerald-900/70">
+              <div className="text-[11px] text-slate-600">
                 Updates the single canonical opening entry and updates account opening fields.
               </div>
             </button>

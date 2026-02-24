@@ -286,9 +286,9 @@ export function AppDatePicker({
                                                 className={[
                                                     "h-10 w-10 rounded-xl text-sm flex items-center justify-center",
                                                     inMonth ? "text-slate-900" : "text-slate-300",
-                                                    !disabled ? "hover:bg-violet-50" : "",
-                                                    isToday ? "bg-violet-50 ring-1 ring-violet-200" : "",
-                                                    isSelected ? "bg-violet-600 text-white hover:bg-violet-600" : "",
+                                                    !disabled ? "hover:bg-primary/10" : "",
+                                                    isToday ? "bg-primary/10 ring-1 ring-primary/20" : "",
+                                                    isSelected ? "bg-primary text-primary-foreground hover:bg-primary" : "",
                                                     ringFocus,
                                                 ].join(" ")}
                                                 disabled={disabled}

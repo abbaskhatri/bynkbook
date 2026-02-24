@@ -98,7 +98,7 @@ export function TotalsFooter(props: {
       <div className="flex items-center gap-6 text-xs tabular-nums">
         <div>
           <span className="mr-1">Income:</span>
-          <span className="font-semibold text-emerald-700">{incomeText}</span>
+          <span className="font-semibold text-slate-900">{incomeText}</span>
         </div>
 
         <div>

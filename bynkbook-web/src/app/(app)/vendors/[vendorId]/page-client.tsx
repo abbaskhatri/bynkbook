@@ -759,8 +759,8 @@ export default function VendorDetailPageClient() {
           {apTab === "bills" ? (
             <div className="space-y-2">
               {vendorCreditCents > 0n ? (
-                <div className="rounded-lg border border-slate-200 bg-emerald-50 px-3 py-2 flex items-center justify-between">
-                  <div className="text-xs text-emerald-800">
+                <div className="rounded-lg border border-slate-200 bg-primary/10 px-3 py-2 flex items-center justify-between">
+                  <div className="text-xs text-primary">
                     Vendor credit available: <span className="font-semibold tabular-nums">{formatUsdFromCents(vendorCreditCents)}</span>
                   </div>
 
@@ -822,7 +822,7 @@ export default function VendorDetailPageClient() {
                             data-bill-row={String(b.id)}
                             className={
                               "h-9 border-b border-slate-100 hover:bg-slate-50 " +
-                              (highlightBillId === String(b.id) ? "bg-emerald-50" : "")
+                              (highlightBillId === String(b.id) ? "bg-accent" : "")
                             }
                           >
                             <td className="px-3 text-sm tabular-nums">{String(b.invoice_date ?? "").slice(0, 10)}</td>
@@ -840,7 +840,7 @@ export default function VendorDetailPageClient() {
                                   (isVoid
                                     ? "bg-slate-100 text-slate-600"
                                     : st === "PAID"
-                                      ? "bg-emerald-50 text-emerald-700"
+                                      ? "bg-primary/10 text-primary"
                                       : "bg-amber-50 text-amber-700")
                                 }
                               >

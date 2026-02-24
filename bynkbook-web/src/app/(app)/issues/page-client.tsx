@@ -739,7 +739,7 @@ export default function IssuesPageClient() {
   });
 
   const accountCapsuleEl = (
-    <div className="h-6 px-1.5 rounded-lg border border-violet-200 bg-violet-50 flex items-center">
+    <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
       <CapsuleSelect
         variant="flat"
         loading={accountsQ.isLoading}
@@ -870,7 +870,13 @@ export default function IssuesPageClient() {
                 title={mutErrTitle || "Can’t update issues"}
                 message={mutErr}
                 actionLabel={mutErrTitle === "Period closed" ? "Go to Close Periods" : null}
-                actionHref={mutErrTitle === "Period closed" ? "/closed-periods?focus=reopen" : null}
+                actionHref={
+                  mutErrTitle === "Period closed"
+                    ? selectedBusinessId
+                      ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
+                      : "/closed-periods?focus=reopen"
+                    : null
+                }
               />
             )}
           </div>

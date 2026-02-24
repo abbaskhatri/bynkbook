@@ -94,7 +94,7 @@ function norm(s: any) {
 function badge(text: string, tone: "default" | "success" | "danger" = "default", title?: string) {
   const cls =
     tone === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      ? "border-primary/20 bg-primary/10 text-primary"
       : tone === "danger"
         ? "border-red-200 bg-red-50 text-red-700"
         : "border-slate-200 bg-white text-slate-700";

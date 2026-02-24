@@ -56,6 +56,207 @@ export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
 
+  // -------------------------
+  // Phase F2: bulk apply category suggestions
+  // POST /v1/businesses/{businessId}/accounts/{accountId}/entries/apply-category-batch
+  // Returns per-item results (including CLOSED_PERIOD per row)
+  // -------------------------
+  const isApplyCategoryBatch =
+    method === "POST" &&
+    typeof path === "string" &&
+    path.includes("/entries/apply-category-batch");
+
+  if (isApplyCategoryBatch) {
+    const claims = getClaims(event);
+    const sub = claims.sub as string | undefined;
+    if (!sub) return json(401, { ok: false, error: "Unauthorized" });
+
+    const { businessId = "", accountId = "" } = pp(event);
+    const biz = businessId.toString().trim();
+    const acct = accountId.toString().trim();
+
+    if (!biz || !acct) return json(400, { ok: false, error: "Missing businessId/accountId" });
+
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      body = {};
+    }
+
+    type ApplyItem = { entryId: string; category_id: string };
+
+    const itemsIn: unknown[] = Array.isArray(body?.items) ? body.items : [];
+    const items: ApplyItem[] = itemsIn
+      .slice(0, 200)
+      .map((x: any): ApplyItem => ({
+        entryId: String(x?.entryId ?? "").trim(),
+        category_id: String(x?.category_id ?? "").trim(),
+      }))
+      .filter((x: ApplyItem) => !!x.entryId);
+
+    if (!items.length) return json(200, { ok: true, results: [], applied: 0, blocked: 0 });
+
+    const prisma = await getPrisma();
+
+    const role = await requireMembership(prisma, biz, sub);
+    if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+
+    const acctOk = await requireAccountInBusiness(prisma, biz, acct);
+    if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
+
+    if (!canWrite(role)) {
+      return json(403, { ok: false, error: "Insufficient permissions" });
+    }
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "category.review.bulk.apply",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/apply-category-batch",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "category.review.bulk.apply",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
+    const entryIds: string[] = Array.from(new Set(items.map((x: ApplyItem) => x.entryId)));
+
+    const rows = await prisma.entry.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        id: { in: entryIds },
+        deleted_at: null,
+      },
+      select: { id: true, date: true },
+    });
+
+    const dateById = new Map<string, any>();
+    const months = new Set<string>();
+    for (const r of rows) {
+      const id = String(r?.id ?? "").trim();
+      if (!id) continue;
+      dateById.set(id, r?.date);
+
+      // Use closedPeriods helpers without per-row DB calls:
+      // compute YYYY-MM from ISO date string (safe)
+      try {
+        const ymd = new Date(r.date).toISOString().slice(0, 10);
+        const month = ymd.slice(0, 7);
+        if (month) months.add(month);
+      } catch {
+        // ignore
+      }
+    }
+
+    const closedRows = months.size
+      ? await prisma.closedPeriod.findMany({
+          where: { business_id: biz, month: { in: Array.from(months) } },
+          select: { month: true },
+        })
+      : [];
+
+    const closedMonths = new Set<string>(closedRows.map((x: any) => String(x?.month ?? "").trim()).filter(Boolean));
+
+    // Validate categories exist (and not archived) for this business
+    const isUuid = (s: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(s ?? "").trim());
+
+    const catIdsRaw = Array.from(new Set(items.map((x) => x.category_id).filter(Boolean)));
+    const catIds = catIdsRaw.filter((id) => isUuid(String(id)));
+
+    const catRows = catIds.length
+      ? await prisma.category.findMany({
+          where: { business_id: biz, id: { in: catIds }, archived_at: null },
+          select: { id: true, name: true },
+        })
+      : [];
+
+    const validCat = new Set<string>(catRows.map((c: any) => String(c?.id ?? "").trim()).filter(Boolean));
+
+    const results: any[] = [];
+    let applied = 0;
+    let blocked = 0;
+
+    for (const it of items) {
+      const entryId = it.entryId;
+      const categoryId = it.category_id;
+
+      if (!dateById.has(entryId)) {
+        results.push({ entryId, ok: false, code: "NOT_FOUND", error: "Entry not found" });
+        blocked++;
+        continue;
+      }
+
+      if (!categoryId || !isUuid(categoryId) || !validCat.has(categoryId)) {
+        results.push({ entryId, ok: false, code: "INVALID_CATEGORY", error: "Invalid category" });
+        blocked++;
+        continue;
+      }
+
+      // CLOSED_PERIOD per row: check entry.date month
+      let month = "";
+      try {
+        const ymd = new Date(dateById.get(entryId)).toISOString().slice(0, 10);
+        month = ymd.slice(0, 7);
+      } catch {
+        month = "";
+      }
+
+      if (month && closedMonths.has(month)) {
+        results.push({
+          entryId,
+          ok: false,
+          code: "CLOSED_PERIOD",
+          error: "This period is closed. Reopen period to modify.",
+          month,
+        });
+        blocked++;
+        continue;
+      }
+
+      try {
+        await prisma.entry.update({
+          where: { id: entryId },
+          data: { category_id: categoryId },
+        });
+
+        applied++;
+        results.push({ entryId, ok: true });
+      } catch (e: any) {
+        results.push({ entryId, ok: false, code: "UPDATE_FAILED", error: e?.message ?? "Update failed" });
+        blocked++;
+      }
+    }
+
+    // Single activity log (bulk)
+    try {
+      await logActivity(prisma, {
+        businessId: biz,
+        actorUserId: sub,
+        scopeAccountId: acct,
+        eventType: "CATEGORY_REVIEW_BULK_APPLY" as any,
+        payloadJson: { applied, blocked, count: items.length },
+      });
+    } catch {
+      // non-fatal
+    }
+
+    return json(200, { ok: true, results, applied, blocked });
+  }
+
   const claims = getClaims(event);
   const sub = claims.sub as string | undefined;
   if (!sub) return json(401, { ok: false, error: "Unauthorized" });
