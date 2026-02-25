@@ -63,6 +63,7 @@ function firstOfThisMonth() {
 export default function CategoryReviewPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
+  const qc = useQueryClient();
 
   // Prevent infinite router.replace loops (Next searchParams can cause repeated effects)
   const didSyncUrlRef = useRef(false);
@@ -162,7 +163,11 @@ export default function CategoryReviewPageClient() {
     </div>
   );
 
-  const qc = useQueryClient();
+  function retryCategoryReview() {
+    void entriesQ.refetch?.();
+    void categoriesQ.refetch();
+    void suggestionsQ.refetch();
+  }
 
   // Entries (single fetch via hook; filters only apply after Run)
   const entriesLimit = 500;
@@ -599,9 +604,9 @@ export default function CategoryReviewPageClient() {
 
                 <div className="ml-2 space-y-1">
                   <div className="text-[11px] text-slate-600">&nbsp;</div>
-                  <div className="h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center">
+                  <div className="h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center gap-2">
+                    <span className="text-xs text-slate-600 whitespace-nowrap">Uncategorized only</span>
                     <PillToggle
-                      label="Uncategorized only"
                       checked={onlyUncategorized}
                       onCheckedChange={(next) => setOnlyUncategorized(next)}
                     />
@@ -637,7 +642,7 @@ export default function CategoryReviewPageClient() {
         {(bannerMsgWithEntries || mutErr) ? (
           <div className="px-3 pb-2">
             {bannerMsgWithEntries ? (
-              <InlineBanner title="Can’t load category review" message={bannerMsgWithEntries} onRetry={() => router.refresh()} />
+              <InlineBanner title="Can’t load category review" message={bannerMsgWithEntries} onRetry={() => retryCategoryReview()} />
             ) : (
               <InlineBanner
                 title={mutErrTitle || "Can’t update category review"}
@@ -661,7 +666,7 @@ export default function CategoryReviewPageClient() {
               title="No business yet"
               description="Create a business to start using BynkBook."
               primary={{ label: "Create business", href: "/settings?tab=business" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => retryCategoryReview() }}
             />
           </div>
         ) : null}
@@ -672,7 +677,7 @@ export default function CategoryReviewPageClient() {
               title="No accounts yet"
               description="Add an account to start importing and categorizing transactions."
               primary={{ label: "Add account", href: "/settings?tab=accounts" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => retryCategoryReview() }}
             />
           </div>
         ) : null}

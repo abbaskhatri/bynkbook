@@ -3077,7 +3077,6 @@ export default function LedgerPageClient() {
             {/* Deleted toggle (last) */}
             <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">Deleted</span>
             <PillToggle
-              label=""
               checked={showDeleted}
               onCheckedChange={(next) => {
                 setShowDeleted(next);
@@ -3308,7 +3307,7 @@ export default function LedgerPageClient() {
       const deletedText = deletedRow ? "line-through" : "";
 
       const rowClass =
-        "h-[24px] border-b border-slate-200 " +
+        "h-[24px] border-b border-slate-200 bg-white " +
         (deletedRow ? "bg-slate-50 text-slate-400 " : "") +
         (!deletedRow && r.hasDup
           ? "bg-yellow-50 hover:bg-yellow-100 "

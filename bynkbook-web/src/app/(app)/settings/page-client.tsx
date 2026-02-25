@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +41,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow 
 import { Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off } from "lucide-react";
 import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
+import { PillToggle } from "@/components/primitives/PillToggle";
 
 function todayYmd() {
   const d = new Date();
@@ -330,6 +331,13 @@ export default function SettingsPageClient() {
   const [editOpeningBalance, setEditOpeningBalance] = useState("0.00");
   const [editOpeningDate, setEditOpeningDate] = useState(todayYmd());
   const [editBusy, setEditBusy] = useState(false);
+    // Delete account confirmation (AppDialog; no window.confirm)
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
+  const [deleteAccountName, setDeleteAccountName] = useState<string>("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [deleteSuggestArchive, setDeleteSuggestArchive] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
 
   // Business profile form
@@ -970,37 +978,45 @@ export default function SettingsPageClient() {
                         try { return new Date(it.created_at).toLocaleString(); } catch { return String(it.created_at); }
                       })();
 
-                      const humanize = (t: string) => String(t ?? "").replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+                      const humanize = (t: string) =>
+                        String(t ?? "")
+                          .replace(/_/g, " ")
+                          .toLowerCase()
+                          .replace(/\b\w/g, (c) => c.toUpperCase());
+
+                      const open = actDetailsId === it.id;
 
                       return (
-                        <TableRow key={it.id} className="hover:bg-slate-50">
-                          <TableCell className="py-2 text-slate-700 text-xs whitespace-nowrap">{when}</TableCell>
-                          <TableCell className="py-2 text-slate-900 text-xs font-medium">{humanize(it.event_type)}</TableCell>
-                          <TableCell className="py-2 text-slate-700 text-xs">
-                            {currentUserId && String(it.actor_user_id) === String(currentUserId) ? "You" : "Member"}
-                          </TableCell>
-                          <TableCell className="py-2 text-right">
-                            <button
-                              type="button"
-                              className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
-                              onClick={() => setActDetailsId((cur) => (cur === it.id ? null : it.id))}
-                            >
-                              {actDetailsId === it.id ? "Hide" : "View"}
-                            </button>
-                          </TableCell>
-                        </TableRow>
+                        <Fragment key={it.id}>
+                          <TableRow className="hover:bg-slate-50">
+                            <TableCell className="py-2 text-slate-700 text-xs whitespace-nowrap">{when}</TableCell>
+                            <TableCell className="py-2 text-slate-900 text-xs font-medium">{humanize(it.event_type)}</TableCell>
+                            <TableCell className="py-2 text-slate-700 text-xs">
+                              {currentUserId && String(it.actor_user_id) === String(currentUserId) ? "You" : "Member"}
+                            </TableCell>
+                            <TableCell className="py-2 text-right">
+                              <button
+                                type="button"
+                                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                                onClick={() => setActDetailsId((cur) => (cur === it.id ? null : it.id))}
+                              >
+                                {open ? "Hide" : "View"}
+                              </button>
+                            </TableCell>
+                          </TableRow>
+
+                          {open ? (
+                            <TableRow className="bg-slate-50">
+                              <TableCell colSpan={4} className="py-2">
+                                <pre className="text-[11px] whitespace-pre-wrap break-words bg-white border border-slate-200 rounded-md p-2">
+                                  {JSON.stringify(it.payload_json ?? {}, null, 2)}
+                                </pre>
+                              </TableCell>
+                            </TableRow>
+                          ) : null}
+                        </Fragment>
                       );
                     })}
-
-                    {actDetailsId ? (
-                      <TableRow className="bg-slate-50">
-                        <TableCell colSpan={4} className="py-2">
-                          <pre className="text-[11px] whitespace-pre-wrap break-words bg-white border border-slate-200 rounded-md p-2">
-                            {JSON.stringify(actItems.find((x) => x.id === actDetailsId)?.payload_json ?? {}, null, 2)}
-                          </pre>
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
                   </TableBody>
                 </Table>
               </div>
@@ -1430,12 +1446,9 @@ export default function SettingsPageClient() {
             </CardHeader>
 
             <CardContent className="space-y-4">
-              {catError ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 flex items-center justify-between gap-3">
-                  <span>{catError}</span>
-                  <Button type="button" variant="outline" className="h-7 px-3 text-xs" disabled={catLoading} onClick={retryCategories}>
-                    Retry
-                  </Button>
+              {bkError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {bkError}
                 </div>
               ) : null}
 
@@ -1475,16 +1488,9 @@ export default function SettingsPageClient() {
                     <div className="text-[11px] text-muted-foreground">Automatically suggest categories based on payee history and rules.</div>
                   </div>
 
-                  <button
-                    type="button"
-                    className={`h-6 w-10 rounded-full border ${bkAutoSuggest ? "bg-primary border-primary" : "bg-slate-200 border-slate-300"} relative`}
-                    onClick={() => setBkAutoSuggest((v) => !v)}
-                    aria-label="Toggle auto-suggest"
-                  >
-                    <span
-                      className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all ${bkAutoSuggest ? "left-[18px]" : "left-0.5"}`}
-                    />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <PillToggle checked={bkAutoSuggest} onCheckedChange={(next) => setBkAutoSuggest(next)} />
+                  </div>
                 </div>
               </div>
 
@@ -2093,6 +2099,110 @@ export default function SettingsPageClient() {
                 </AppDialog>
 
                 <AppDialog
+                  open={deleteOpen}
+                  onClose={() => {
+                    setDeleteOpen(false);
+                    setDeleteAccountId(null);
+                    setDeleteAccountName("");
+                    setDeleteErr(null);
+                    setDeleteSuggestArchive(false);
+                    setDeleteBusy(false);
+                  }}
+                  title="Delete account"
+                  size="sm"
+                  footer={
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setDeleteOpen(false);
+                          setDeleteAccountId(null);
+                          setDeleteAccountName("");
+                          setDeleteErr(null);
+                          setDeleteSuggestArchive(false);
+                          setDeleteBusy(false);
+                        }}
+                        disabled={deleteBusy}
+                      >
+                        Cancel
+                      </Button>
+
+                      {deleteSuggestArchive ? (
+                        <Button
+                          variant="secondary"
+                          disabled={deleteBusy || !deleteAccountId || !selectedBusinessId}
+                          onClick={async () => {
+                            if (!selectedBusinessId || !deleteAccountId) return;
+                            setDeleteBusy(true);
+                            setDeleteErr(null);
+                            try {
+                              await archiveAccount(selectedBusinessId, deleteAccountId);
+                              qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                              setDeleteOpen(false);
+                              setDeleteAccountId(null);
+                              setDeleteAccountName("");
+                              setDeleteSuggestArchive(false);
+                            } catch (e: any) {
+                              setDeleteErr(e?.message ?? "Archive failed");
+                            } finally {
+                              setDeleteBusy(false);
+                            }
+                          }}
+                        >
+                          {deleteBusy ? "Archiving…" : "Archive instead"}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="destructive"
+                          disabled={deleteBusy || !deleteAccountId || !selectedBusinessId}
+                          onClick={async () => {
+                            if (!selectedBusinessId || !deleteAccountId) return;
+
+                            setDeleteBusy(true);
+                            setDeleteErr(null);
+                            setDeleteSuggestArchive(false);
+
+                            try {
+                              await deleteAccount(selectedBusinessId, deleteAccountId);
+                              qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                              setDeleteOpen(false);
+                              setDeleteAccountId(null);
+                              setDeleteAccountName("");
+                            } catch (e: any) {
+                              const msg = String(e?.message ?? "");
+                              // Backend: 409 { ok:false, error:"Account has related rows; archive instead", related_total: ... }
+                              if (msg.includes("Account has related rows") || msg.includes("archive instead") || msg.includes('"related_total"')) {
+                                setDeleteErr("This account has related records. You can’t delete it. Archive it instead.");
+                                setDeleteSuggestArchive(true);
+                              } else {
+                                setDeleteErr(msg || "Delete failed");
+                              }
+                            } finally {
+                              setDeleteBusy(false);
+                            }
+                          }}
+                        >
+                          {deleteBusy ? "Deleting…" : "Delete"}
+                        </Button>
+                      )}
+                    </div>
+                  }
+                >
+                  <div className="text-sm text-slate-700">
+                    <div className="font-medium text-slate-900">{deleteAccountName || "This account"}</div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      Deleting an account cannot be undone.
+                    </div>
+
+                    {deleteErr ? (
+                      <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                        {deleteErr}
+                      </div>
+                    ) : null}
+                  </div>
+                </AppDialog>
+
+                <AppDialog
                   open={editOpen}
                   onClose={() => setEditOpen(false)}
                   title="Edit account"
@@ -2510,10 +2620,12 @@ export default function SettingsPageClient() {
                                     onClick={async () => {
                                       if (disabled) return;
                                       if (!selectedBusinessId) return;
-                                      const ok = window.confirm("Delete this account? This cannot be undone.");
-                                      if (!ok) return;
-                                      await deleteAccount(selectedBusinessId, a.id);
-                                      qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+
+                                      setDeleteErr(null);
+                                      setDeleteSuggestArchive(false);
+                                      setDeleteAccountId(String(a.id));
+                                      setDeleteAccountName(String(a.name ?? "This account"));
+                                      setDeleteOpen(true);
                                     }}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />

@@ -2,6 +2,40 @@ import { fetchAuthSession } from "aws-amplify/auth";
 import { metrics } from "@/lib/perf/metrics";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+// Phase 2 Performance: in-memory token cache + coalescing
+let cachedToken: string | null = null;
+let tokenExpiresAt = 0;
+let tokenPromise: Promise<string | null> | null = null;
+
+async function getAuthToken(): Promise<string | null> {
+  const now = Date.now();
+
+  // Valid cached token
+  if (cachedToken && now < tokenExpiresAt) {
+    return cachedToken;
+  }
+
+  // If a token fetch is already in-flight, reuse it
+  if (tokenPromise) return tokenPromise;
+
+  tokenPromise = (async () => {
+    try {
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken?.toString();
+      const idToken = session.tokens?.idToken?.toString();
+      const token = accessToken ?? idToken ?? null;
+
+      cachedToken = token;
+      tokenExpiresAt = Date.now() + 60_000; // 60s cache window
+
+      return token;
+    } finally {
+      tokenPromise = null;
+    }
+  })();
+
+  return tokenPromise;
+}
 
 if (!API_BASE && process.env.NODE_ENV !== "production") {
   throw new Error("Missing NEXT_PUBLIC_API_URL. Set it in .env.local (see .env.example).");
@@ -10,10 +44,7 @@ if (!API_BASE && process.env.NODE_ENV !== "production") {
 export async function apiFetch(path: string, init?: RequestInit) {
   const t0 = performance.now();
 
-  const session = await fetchAuthSession();
-  const accessToken = session.tokens?.accessToken?.toString();
-  const idToken = session.tokens?.idToken?.toString();
-  const token = accessToken ?? idToken;
+const token = await getAuthToken();
 
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");

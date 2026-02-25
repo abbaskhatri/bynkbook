@@ -22,7 +22,7 @@ import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
-import { PieChart, Target } from "lucide-react";
+import { PieChart, Target, ChevronLeft, ChevronRight } from "lucide-react";
 
 type TabKey = "budgets" | "goals";
 
@@ -351,12 +351,12 @@ export default function PlanningPageClient() {
           {tab === "budgets" ? (
             <div className="flex items-center gap-2">
               <div className="text-xs text-slate-600">Month</div>
-              <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, -1))}>
-                ‹
+              <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, -1))} title="Previous month">
+                <ChevronLeft className="h-5 w-5" />
               </Button>
               <div className="text-xs text-slate-700 tabular-nums">{month}</div>
-              <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, 1))}>
-                ›
+              <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, 1))} title="Next month">
+                <ChevronRight className="h-4 w-4" />
               </Button>
               <div className="ml-2 text-[11px] text-slate-500">Expense budgets only</div>
             </div>
@@ -365,13 +365,15 @@ export default function PlanningPageClient() {
           )}
         </div>
 
-        <div className="px-3 pb-2">
-          <InlineBanner
-            title="Can’t load planning"
-            message={appErrorMessageOrNull(businessesQ.error) || budgetsErr || goalsErr || null}
-            onRetry={() => router.refresh()}
-          />
-        </div>
+        {(appErrorMessageOrNull(businessesQ.error) || budgetsErr || goalsErr) ? (
+          <div className="px-3 pb-2">
+            <InlineBanner
+              title="Can’t load planning"
+              message={appErrorMessageOrNull(businessesQ.error) || budgetsErr || goalsErr || null}
+              onRetry={() => router.refresh()}
+            />
+          </div>
+        ) : null}
 
         {!selectedBusinessId && !businessesQ.isLoading ? (
           <div className="px-3 pb-2">

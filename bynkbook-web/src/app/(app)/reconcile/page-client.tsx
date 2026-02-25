@@ -443,11 +443,18 @@ export default function ReconcilePageClient() {
   const [to, setTo] = useState("");
   const [search, setSearch] = useState("");
 
-  // -------------------------
   // Tabs (Phase 4D polish)
-  // -------------------------
   const [expectedTab, setExpectedTab] = useState<"expected" | "matched">("expected");
   const [bankTab, setBankTab] = useState<"unmatched" | "matched">("unmatched");
+
+  // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
+  const PAGE_CHUNK = 200;
+
+  const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
+  const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
+
+  const [bankUnmatchedVisibleN, setBankUnmatchedVisibleN] = useState(PAGE_CHUNK);
+  const [bankMatchedVisibleN, setBankMatchedVisibleN] = useState(PAGE_CHUNK);
 
   // B2: Bulk create entries from selected bank txns (unmatched tab)
   const [selectedBankTxnIds, setSelectedBankTxnIds] = useState<Set<string>>(new Set());
@@ -458,7 +465,7 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Data queries
   // -------------------------
-  const entriesQ = useEntries({ businessId: selectedBusinessId, accountId: selectedAccountId, limit: 200 });
+  const entriesQ = useEntries({ businessId: selectedBusinessId, accountId: selectedAccountId, limit: 1000 });
 
   const [bankTxLoading, setBankTxLoading] = useState(false);
   const [bankTx, setBankTx] = useState<any[]>([]);
@@ -940,8 +947,6 @@ export default function ReconcilePageClient() {
         q.queryKey[1] === selectedBusinessId &&
         q.queryKey[2] === selectedAccountId,
     });
-
-    void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
 
     void refreshBankAndMatches({ preserveOnEmpty: true });
   }, [selectedBusinessId, selectedAccountId, from, to]);
@@ -1568,68 +1573,122 @@ export default function ReconcilePageClient() {
   // Local search (filters visible rows only; instant-fast)
   const searchQ = useMemo(() => search.trim().toLowerCase(), [search]);
 
+  // Phase 2 Performance: when tab/search changes, reset visible limits (so we don't render thousands immediately)
+  useEffect(() => {
+    setExpectedVisibleN(PAGE_CHUNK);
+    setMatchedVisibleN(PAGE_CHUNK);
+  }, [expectedTab, searchQ]);
+
+  useEffect(() => {
+    setBankUnmatchedVisibleN(PAGE_CHUNK);
+    setBankMatchedVisibleN(PAGE_CHUNK);
+  }, [bankTab, searchQ]);
+
   const matchesRowSearch = (hay: string) => {
     if (!searchQ) return true;
     return (hay ?? "").toLowerCase().includes(searchQ);
   };
 
-  // Tabs: Expected Entries
+  // Tabs: Expected Entries (Phase 2: cap rendered rows for instant tab switches)
   const entriesExpectedList = useMemo(() => {
-    // Expected tab shows only: unmatched AND not adjusted
-    return allEntriesSorted.filter((e: any) => {
-      if (matchedEntryIdSet.has(e.id)) return false;
-      if (isAdjustedEntry(e)) return false;
+    const out: any[] = [];
+    for (const e of allEntriesSorted) {
+      if (matchedEntryIdSet.has(e.id)) continue;
+      if (isAdjustedEntry(e)) continue;
 
-      // search: payee + date + amount
       const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
-      return matchesRowSearch(hay);
-    });
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ]);
+      if (!matchesRowSearch(hay)) continue;
+
+      out.push(e);
+      if (out.length >= expectedVisibleN) break;
+    }
+    return out;
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN]);
 
   const entriesMatchedList = useMemo(() => {
-    // Matched tab shows: matched (includes adjusted-if-matched)
-    return allEntriesSorted.filter((e: any) => {
-      if (!matchedEntryIdSet.has(e.id)) return false;
+    const out: any[] = [];
+    for (const e of allEntriesSorted) {
+      if (!matchedEntryIdSet.has(e.id)) continue;
 
       const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
-      return matchesRowSearch(hay);
-    });
+      if (!matchesRowSearch(hay)) continue;
+
+      out.push(e);
+      if (out.length >= matchedVisibleN) break;
+    }
+    return out;
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ, matchedVisibleN]);
+
+  // Counts (uncapped) for tab labels — computed cheaply in one pass
+  const { expectedCount, matchedCount } = useMemo(() => {
+    let exp = 0;
+    let mat = 0;
+    for (const e of allEntriesSorted) {
+      const isMat = matchedEntryIdSet.has(e.id);
+      if (!isMat && isAdjustedEntry(e)) continue;
+
+      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
+      if (!matchesRowSearch(hay)) continue;
+
+      if (isMat) mat++;
+      else exp++;
+    }
+    return { expectedCount: exp, matchedCount: mat };
   }, [allEntriesSorted, matchedEntryIdSet, searchQ]);
 
-  const expectedCount = entriesExpectedList.length;
-  const matchedCount = entriesMatchedList.length;
-
-  // Tabs: Bank Transactions
+  // Tabs: Bank Transactions (Phase 2: cap rendered rows for instant tab switches)
   const bankUnmatchedList = useMemo(() => {
-    // FULL-match only: Unmatched tab = not in ACTIVE match group
-    return bankTxSorted.filter((t: any) => {
+    const out: any[] = [];
+    for (const t of bankTxSorted) {
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
-      if (!matchesRowSearch(hay)) return false;
+      if (!matchesRowSearch(hay)) continue;
 
       const id = String(t.id ?? "");
-      if (!id) return false;
-      return !activeGroupByBankTxnId.has(id);
-    });
-  }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
+      if (!id) continue;
+      if (activeGroupByBankTxnId.has(id)) continue;
+
+      out.push(t);
+      if (out.length >= bankUnmatchedVisibleN) break;
+    }
+    return out;
+  }, [bankTxSorted, activeGroupByBankTxnId, searchQ, bankUnmatchedVisibleN]);
 
   useEffect(() => {
     setSelectedBankTxnIds(new Set());
   }, [bankTab, selectedBusinessId, selectedAccountId]);
 
   const bankMatchedList = useMemo(() => {
-    // FULL-match only: Matched tab = in ACTIVE match group
-    return bankTxSorted.filter((t: any) => {
+    const out: any[] = [];
+    for (const t of bankTxSorted) {
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
-      if (!matchesRowSearch(hay)) return false;
+      if (!matchesRowSearch(hay)) continue;
 
       const id = String(t.id ?? "");
-      if (!id) return false;
-      return activeGroupByBankTxnId.has(id);
-    });
-  }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
+      if (!id) continue;
+      if (!activeGroupByBankTxnId.has(id)) continue;
 
-  const bankUnmatchedCount = bankUnmatchedList.length;
-  const bankMatchedCount = bankMatchedList.length;
+      out.push(t);
+      if (out.length >= bankMatchedVisibleN) break;
+    }
+    return out;
+  }, [bankTxSorted, activeGroupByBankTxnId, searchQ, bankMatchedVisibleN]);
+
+  // Counts (uncapped) for tab labels
+  const { bankUnmatchedCount, bankMatchedCount } = useMemo(() => {
+    let u = 0;
+    let m = 0;
+    for (const t of bankTxSorted) {
+      const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
+      if (!matchesRowSearch(hay)) continue;
+
+      const id = String(t.id ?? "");
+      if (!id) continue;
+
+      if (activeGroupByBankTxnId.has(id)) m++;
+      else u++;
+    }
+    return { bankUnmatchedCount: u, bankMatchedCount: m };
+  }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
 
   // -------------------------
   // Phase 5E: State summary (read-only, instant-fast)
@@ -1870,6 +1929,11 @@ export default function ReconcilePageClient() {
   );
 
   // Auth handled by AppShell
+  // Phase 2: targeted retry (prevents full router.refresh storms)
+  async function retryReconcileSurfaces() {
+    await refreshBankAndMatches({ preserveOnEmpty: true });
+    await entriesQ.refetch?.();
+  }
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
@@ -1887,7 +1951,7 @@ export default function ReconcilePageClient() {
         {(bannerMsg || mutErr) ? (
           <div className="px-3 pb-2">
             {bannerMsg ? (
-              <InlineBanner title="Can’t load reconcile" message={bannerMsg} onRetry={() => router.refresh()} />
+              <InlineBanner title="Can’t load reconcile" message={bannerMsg} onRetry={() => retryReconcileSurfaces()} />
             ) : (
               <InlineBanner
                 title={mutErrTitle || "Can’t update reconcile"}
@@ -1911,7 +1975,7 @@ export default function ReconcilePageClient() {
               title="No business yet"
               description="Create a business to start using BynkBook."
               primary={{ label: "Create business", href: "/settings?tab=business" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => retryReconcileSurfaces() }}
             />
           </div>
         ) : null}
@@ -1922,7 +1986,7 @@ export default function ReconcilePageClient() {
               title="No accounts yet"
               description="Add an account to start importing and categorizing transactions."
               primary={{ label: "Add account", href: "/settings?tab=accounts" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => retryReconcileSurfaces() }}
             />
           </div>
         ) : null}
@@ -1949,12 +2013,14 @@ export default function ReconcilePageClient() {
           footer={
             <DialogFooter
               left={
-                <PillToggle
-                  label="Auto-match (FULL only)"
-                  checked={createEntryAutoMatch}
-                  onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
-                  disabled={!canWriteReconcileEffective}
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-600 whitespace-nowrap">Auto-match</span>
+                  <PillToggle
+                    checked={createEntryAutoMatch}
+                    onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
+                    disabled={!canWriteReconcileEffective}
+                  />
+                </div>
               }
               right={
                 <>
@@ -2286,12 +2352,14 @@ export default function ReconcilePageClient() {
                     {selectedBankTxnIds.size} selected
                   </span>
 
-                  <PillToggle
-                    label="Auto-match (FULL only)"
-                    checked={bulkCreateAutoMatch}
-                    onCheckedChange={(next) => setBulkCreateAutoMatch(next)}
-                    disabled={!canWriteReconcileEffective}
-                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-600 whitespace-nowrap">Auto-match</span>
+                    <PillToggle
+                      checked={bulkCreateAutoMatch}
+                      onCheckedChange={(next) => setBulkCreateAutoMatch(next)}
+                      disabled={!canWriteReconcileEffective}
+                    />
+                  </div>
                 </div>
 
                 <HintWrap
@@ -2394,7 +2462,8 @@ export default function ReconcilePageClient() {
               ) : (expectedTab === "expected" ? entriesExpectedList : entriesMatchedList).length === 0 ? (
                 <EmptyState label={expectedTab === "expected" ? "No expected entries in this period" : "No matched entries in this period"} />
               ) : (
-                <table className="w-full table-fixed border-collapse">
+                <>
+                  <table className="w-full table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col />
@@ -2523,6 +2592,30 @@ export default function ReconcilePageClient() {
                     })}
                   </tbody>
                 </table>
+
+                {/* Phase 2 Performance: load more (keeps initial render bounded) */}
+                {expectedTab === "expected" && expectedCount > entriesExpectedList.length ? (
+                  <div className="p-2 flex justify-center">
+                    <button
+                      type="button"
+                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      onClick={() => setExpectedVisibleN((n) => n + PAGE_CHUNK)}
+                    >
+                      Load more
+                    </button>
+                  </div>
+                ) : expectedTab === "matched" && matchedCount > entriesMatchedList.length ? (
+                  <div className="p-2 flex justify-center">
+                    <button
+                      type="button"
+                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      onClick={() => setMatchedVisibleN((n) => n + PAGE_CHUNK)}
+                    >
+                      Load more
+                    </button>
+                  </div>
+                ) : null}
+                </>
               )}
             </div>
           </div>
@@ -2696,7 +2789,8 @@ export default function ReconcilePageClient() {
                   }
                 />
               ) : (
-                <table className="w-full table-fixed border-collapse">
+                <>
+                  <table className="w-full table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 36 }} />
                     <col style={{ width: 110 }} />
@@ -2710,7 +2804,6 @@ export default function ReconcilePageClient() {
                       <th className={thClass}>
                         {bankTab === "unmatched" ? (
                           <PillToggle
-                            label=""
                             checked={
                               bankUnmatchedList.length > 0 &&
                               selectedBankTxnIds.size === bankUnmatchedList.length
@@ -3001,6 +3094,30 @@ export default function ReconcilePageClient() {
                     })}
                   </tbody>
                 </table>
+
+                {/* Phase 2 Performance: load more (keeps initial render bounded) */}
+                {bankTab === "unmatched" && bankUnmatchedCount > bankUnmatchedList.length ? (
+                  <div className="p-2 flex justify-center">
+                    <button
+                      type="button"
+                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      onClick={() => setBankUnmatchedVisibleN((n) => n + PAGE_CHUNK)}
+                    >
+                      Load more
+                    </button>
+                  </div>
+                ) : bankTab === "matched" && bankMatchedCount > bankMatchedList.length ? (
+                  <div className="p-2 flex justify-center">
+                    <button
+                      type="button"
+                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      onClick={() => setBankMatchedVisibleN((n) => n + PAGE_CHUNK)}
+                    >
+                      Load more
+                    </button>
+                  </div>
+                ) : null}
+                </>
               )}
             </div>
           </div>

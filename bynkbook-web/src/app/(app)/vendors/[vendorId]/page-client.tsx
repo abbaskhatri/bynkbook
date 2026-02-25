@@ -834,139 +834,139 @@ export default function VendorDetailPageClient() {
               ) : null}
 
               <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="max-h-[420px] overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
-                    <tr className="h-9">
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Due</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Memo</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Applied</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Status</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bills.length === 0 ? (
-                      <tr>
-                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={8}>
-                          {billsLoading ? "Loading…" : "No bills yet."}
-                        </td>
+                <div className="max-h-[420px] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                      <tr className="h-9">
+                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Due</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Memo</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Applied</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Status</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actions</th>
                       </tr>
-                    ) : (
-                      bills.map((b: any) => {
-                        const amount = toBigIntSafe(b.amount_cents ?? 0);
-                        const applied = toBigIntSafe(b.applied_cents ?? 0);
-                        const outstanding = toBigIntSafe(b.outstanding_cents ?? 0);
-                        const st = String(b.status ?? "");
-                        const isVoid = st === "VOID";
+                    </thead>
+                    <tbody>
+                      {bills.length === 0 ? (
+                        <tr>
+                          <td className="px-3 py-4 text-sm text-slate-600" colSpan={8}>
+                            {billsLoading ? "Loading…" : "No bills yet."}
+                          </td>
+                        </tr>
+                      ) : (
+                        bills.map((b: any) => {
+                          const amount = toBigIntSafe(b.amount_cents ?? 0);
+                          const applied = toBigIntSafe(b.applied_cents ?? 0);
+                          const outstanding = toBigIntSafe(b.outstanding_cents ?? 0);
+                          const st = String(b.status ?? "");
+                          const isVoid = st === "VOID";
 
-                        return (
-                          <tr
-                            key={b.id}
-                            data-bill-row={String(b.id)}
-                            className={
-                              "h-9 border-b border-slate-100 hover:bg-slate-50 " +
-                              (highlightBillId === String(b.id) ? "bg-accent" : "")
-                            }
-                          >
-                            <td className="px-3 text-sm tabular-nums">{String(b.invoice_date ?? "").slice(0, 10)}</td>
-                            <td className="px-3 text-sm tabular-nums">{String(b.due_date ?? "").slice(0, 10)}</td>
-                            <td className="px-3 text-sm text-slate-700 truncate max-w-[260px]" title={String(b.memo ?? "")}>
-                              {b.memo ?? "—"}
-                            </td>
-                            <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(amount)}</td>
-                            <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(applied)}</td>
-                            <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(outstanding)}</td>
-                            <td className="px-3 text-xs">
-                              <span
-                                className={
-                                  "inline-flex h-6 items-center rounded-full px-2 " +
-                                  (isVoid
-                                    ? "bg-slate-100 text-slate-600"
-                                    : st === "PAID"
-                                      ? "bg-primary/10 text-primary"
-                                      : "bg-amber-50 text-amber-700")
-                                }
-                              >
-                                {st}
-                              </span>
-                            </td>
-                            <td className="px-3 text-right">
-                              <div className="inline-flex items-center gap-2">
-                                {pendingBillById[String(b.id)] ? (
-                                  <span className="inline-flex items-center" title="Saving…">
-                                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
-                                  </span>
-                                ) : null}
-
-                                <button
-                                  type="button"
-                                  className="text-xs text-slate-700 hover:underline disabled:opacity-50"
-                                  disabled={!canWrite || isVoid}
-                                  onClick={() => {
-                                    setBillEditId(String(b.id));
-                                    setBillDialogOpen(true);
-                                  }}
+                          return (
+                            <tr
+                              key={b.id}
+                              data-bill-row={String(b.id)}
+                              className={
+                                "h-9 border-b border-slate-100 hover:bg-slate-50 " +
+                                (highlightBillId === String(b.id) ? "bg-accent" : "")
+                              }
+                            >
+                              <td className="px-3 text-sm tabular-nums">{String(b.invoice_date ?? "").slice(0, 10)}</td>
+                              <td className="px-3 text-sm tabular-nums">{String(b.due_date ?? "").slice(0, 10)}</td>
+                              <td className="px-3 text-sm text-slate-700 truncate max-w-[260px]" title={String(b.memo ?? "")}>
+                                {b.memo ?? "—"}
+                              </td>
+                              <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(amount)}</td>
+                              <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(applied)}</td>
+                              <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(outstanding)}</td>
+                              <td className="px-3 text-xs">
+                                <span
+                                  className={
+                                    "inline-flex h-6 items-center rounded-full px-2 " +
+                                    (isVoid
+                                      ? "bg-slate-100 text-slate-600"
+                                      : st === "PAID"
+                                        ? "bg-primary/10 text-primary"
+                                        : "bg-amber-50 text-amber-700")
+                                  }
                                 >
-                                  Edit
-                                </button>
+                                  {st}
+                                </span>
+                              </td>
+                              <td className="px-3 text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  {pendingBillById[String(b.id)] ? (
+                                    <span className="inline-flex items-center" title="Saving…">
+                                      <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                    </span>
+                                  ) : null}
 
-                                <button
-                                  type="button"
-                                  className="text-xs text-red-700 hover:underline disabled:opacity-50"
-                                  disabled={!canWrite || isVoid || pendingBillById[String(b.id)]}
-                                  onClick={async () => {
-                                    if (!businessId) return;
+                                  <button
+                                    type="button"
+                                    className="text-xs text-slate-700 hover:underline disabled:opacity-50"
+                                    disabled={!canWrite || isVoid}
+                                    onClick={() => {
+                                      setBillEditId(String(b.id));
+                                      setBillDialogOpen(true);
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
 
-                                    setErr(null);
-                                    setErrIsClosed(false);
+                                  <button
+                                    type="button"
+                                    className="text-xs text-red-700 hover:underline disabled:opacity-50"
+                                    disabled={!canWrite || isVoid || pendingBillById[String(b.id)]}
+                                    onClick={async () => {
+                                      if (!businessId) return;
 
-                                    const billId = String(b.id);
-                                    const prevBill = b;
+                                      setErr(null);
+                                      setErrIsClosed(false);
 
-                                    markBillPending(billId);
+                                      const billId = String(b.id);
+                                      const prevBill = b;
 
-                                    // optimistic: mark VOID immediately (safe UI feedback)
-                                    setBills((prev) =>
-                                      prev.map((x: any) => (String(x.id) === billId ? { ...x, status: "VOID" } : x))
-                                    );
+                                      markBillPending(billId);
 
-                                    try {
-                                      await voidBill({ businessId, vendorId, billId });
-
-                                      const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
-                                      setApSummary(sumRes?.summary ?? null);
-                                    } catch (e: any) {
-                                      // rollback ONLY this row (snapshot)
+                                      // optimistic: mark VOID immediately (safe UI feedback)
                                       setBills((prev) =>
-                                        prev.map((x: any) => (String(x.id) === billId ? { ...x, ...prevBill } : x))
+                                        prev.map((x: any) => (String(x.id) === billId ? { ...x, status: "VOID" } : x))
                                       );
 
-                                      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Void failed";
-                                      setErr(msg);
-                                      setErrIsClosed(isClosedPeriodError(e, msg));
-                                    } finally {
-                                      clearBillPending(billId);
-                                    }
-                                  }}
-                                  title="Cannot void if applied—must unapply first"
-                                >
-                                  Void
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                                      try {
+                                        await voidBill({ businessId, vendorId, billId });
 
-              {err ? <div className="px-3 py-2 text-xs text-red-600 border-t border-slate-200">{err}</div> : null}
+                                        const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
+                                        setApSummary(sumRes?.summary ?? null);
+                                      } catch (e: any) {
+                                        // rollback ONLY this row (snapshot)
+                                        setBills((prev) =>
+                                          prev.map((x: any) => (String(x.id) === billId ? { ...x, ...prevBill } : x))
+                                        );
+
+                                        const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Void failed";
+                                        setErr(msg);
+                                        setErrIsClosed(isClosedPeriodError(e, msg));
+                                      } finally {
+                                        clearBillPending(billId);
+                                      }
+                                    }}
+                                    title="Cannot void if applied—must unapply first"
+                                  >
+                                    Void
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {err ? <div className="px-3 py-2 text-xs text-red-600 border-t border-slate-200">{err}</div> : null}
               </div>
             </div>
           ) : (
@@ -1025,53 +1025,53 @@ export default function VendorDetailPageClient() {
                               </span>
                             </td>
                             <td className="px-3 text-xs">
-                            {Array.isArray(p.applied_bills) && p.applied_bills.length ? (
-                              <div className="flex flex-wrap gap-1.5">
-                                {p.applied_bills.slice(0, 6).map((x: any) => (
-                                  <button
-                                    key={String(x.bill_id)}
-                                    type="button"
-                                    className="inline-flex h-6 items-center rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-50"
-                                    title="View invoice"
-                                    onClick={() => {
-                                      setApTab("bills");
-                                      setHighlightBillId(String(x.bill_id));
-                                      // scroll the bills table into view
-                                      setTimeout(() => {
-                                        const el = document.querySelector(`[data-bill-row="${String(x.bill_id)}"]`);
-                                        if (el && "scrollIntoView" in el) (el as any).scrollIntoView({ block: "center" });
-                                      }, 50);
-                                    }}
-                                  >
-                                    {String(x.memo ?? "Invoice")}
-                                  </button>
-                                ))}
-                                {p.applied_bills.length > 6 ? <span className="text-[11px] text-slate-500">+{p.applied_bills.length - 6}</span> : null}
+                              {Array.isArray(p.applied_bills) && p.applied_bills.length ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {p.applied_bills.slice(0, 6).map((x: any) => (
+                                    <button
+                                      key={String(x.bill_id)}
+                                      type="button"
+                                      className="inline-flex h-6 items-center rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-50"
+                                      title="View invoice"
+                                      onClick={() => {
+                                        setApTab("bills");
+                                        setHighlightBillId(String(x.bill_id));
+                                        // scroll the bills table into view
+                                        setTimeout(() => {
+                                          const el = document.querySelector(`[data-bill-row="${String(x.bill_id)}"]`);
+                                          if (el && "scrollIntoView" in el) (el as any).scrollIntoView({ block: "center" });
+                                        }, 50);
+                                      }}
+                                    >
+                                      {String(x.memo ?? "Invoice")}
+                                    </button>
+                                  ))}
+                                  {p.applied_bills.length > 6 ? <span className="text-[11px] text-slate-500">+{p.applied_bills.length - 6}</span> : null}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.amount_cents))}</td>
+                            <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(centsFromAny(p.applied_cents))}</td>
+                            <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.unapplied_cents))}</td>
+                            <td className="px-3 text-right">
+                              <div className="inline-flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="text-xs text-slate-700 hover:underline"
+                                  onClick={() => {
+                                    const first = (accountsQ.data ?? []).find((a: any) => !a.archived_at)?.id ?? null;
+                                    if (first) setApplyAccountId(first);
+                                    setPaymentEntryId(String(p.entry_id ?? p.id));
+                                    setApplyOpen(true);
+                                  }}
+                                >
+                                  Apply / Unapply
+                                </button>
                               </div>
-                            ) : (
-                              <span className="text-slate-500">—</span>
-                            )}
-                          </td>
-                          <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.amount_cents))}</td>
-                          <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(centsFromAny(p.applied_cents))}</td>
-                          <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.unapplied_cents))}</td>
-                          <td className="px-3 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                type="button"
-                                className="text-xs text-slate-700 hover:underline"
-                                onClick={() => {
-                                  const first = (accountsQ.data ?? []).find((a: any) => !a.archived_at)?.id ?? null;
-                                  if (first) setApplyAccountId(first);
-                                  setPaymentEntryId(String(p.entry_id ?? p.id));
-                                  setApplyOpen(true);
-                                }}
-                              >
-                                Apply / Unapply
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                            </td>
+                          </tr>
                         );
                       })
                     )}
@@ -1217,13 +1217,13 @@ export default function VendorDetailPageClient() {
                       prev.map((x: any) =>
                         String(x.id) === editingId
                           ? {
-                              ...x,
-                              invoice_date: billInvoiceDate,
-                              due_date: billDueDate,
-                              amount_cents,
-                              memo: billMemo,
-                              terms: billTerms,
-                            }
+                            ...x,
+                            invoice_date: billInvoiceDate,
+                            due_date: billDueDate,
+                            amount_cents,
+                            memo: billMemo,
+                            terms: billTerms,
+                          }
                           : x
                       )
                     );
@@ -1563,25 +1563,27 @@ export default function VendorDetailPageClient() {
                   <div className="text-[11px] text-slate-600">Auto-apply or enter amounts per bill.</div>
                 </div>
 
-                <PillToggle
-                  label="Auto-apply oldest first"
-                  checked={vendorPayAutoApply}
-                  onCheckedChange={(on) => {
-                    setVendorPayAutoApply(on);
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-600 whitespace-nowrap">Auto-apply oldest first</span>
+                  <PillToggle
+                    checked={vendorPayAutoApply}
+                    onCheckedChange={(on) => {
+                      setVendorPayAutoApply(on);
 
-                    if (!on) return;
+                      if (!on) return;
 
-                    const n = Number(vendorPayAmount);
-                    if (!Number.isFinite(n) || n <= 0) {
-                      setApplyAmounts({});
-                      return;
-                    }
+                      const n = Number(vendorPayAmount);
+                      if (!Number.isFinite(n) || n <= 0) {
+                        setApplyAmounts({});
+                        return;
+                      }
 
-                    const totalCents = BigInt(Math.round(n * 100));
-                    const { map } = computeAutoAllocationMap(totalCents);
-                    setApplyAmounts(map);
-                  }}
-                />
+                      const totalCents = BigInt(Math.round(n * 100));
+                      const { map } = computeAutoAllocationMap(totalCents);
+                      setApplyAmounts(map);
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="max-h-[320px] overflow-auto">

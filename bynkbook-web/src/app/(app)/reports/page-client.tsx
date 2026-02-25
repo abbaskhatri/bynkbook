@@ -725,17 +725,13 @@ export default function ReportsPageClient() {
                 <div className="ml-4 flex items-end gap-3">
                   <div className="flex flex-col justify-end">
                     {tab === "accounts" ? (
-                      <button
-                        type="button"
-                        onClick={() => setIncludeArchivedAccounts((v) => !v)}
-                        className={`h-7 px-3 rounded-md text-xs font-medium border ${includeArchivedAccounts
-                          ? "bg-slate-900 text-white border-slate-900"
-                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                          }`}
-                        title="Include archived accounts"
-                      >
-                        Archived {includeArchivedAccounts ? "Included" : "Excluded"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-600 whitespace-nowrap">Archived</span>
+                        <PillToggle
+                          checked={includeArchivedAccounts}
+                          onCheckedChange={(next) => setIncludeArchivedAccounts(next)}
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </div>

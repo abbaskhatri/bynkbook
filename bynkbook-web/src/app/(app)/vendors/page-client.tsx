@@ -249,7 +249,9 @@ export default function VendorsPageClient() {
         </div>
 
         <div className="px-3 pb-2">
-        <InlineBanner title="Can’t load vendors" message={bannerMsg} onRetry={() => void refresh()} />
+        {bannerMsg ? (
+          <InlineBanner title="Can’t load vendors" message={bannerMsg} onRetry={() => void refresh()} />
+        ) : null}
         </div>
 
         {!businessId && !businessesQ.isLoading ? (
@@ -258,7 +260,7 @@ export default function VendorsPageClient() {
               title="No business yet"
               description="Create a business to start using BynkBook."
               primary={{ label: "Create business", href: "/settings?tab=business" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => void refresh() }}
             />
           </div>
         ) : null}

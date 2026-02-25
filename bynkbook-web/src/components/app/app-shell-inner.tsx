@@ -520,7 +520,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                             ) : null}
 
                             {showUncat ? (
-                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-primary/10 px-1 text-[10px] font-semibold text-primary border border-primary/20">
+                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-primary px-1 text-[10px] font-semibold text-white border border-primary/20">
                                 {attnUncat}
                               </span>
                             ) : null}
@@ -548,7 +548,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                           ) : null}
 
                           {item.label === "Category Review" && attnUncat > 0 ? (
-                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
+                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary px-1.5 text-[11px] font-semibold text-white border border-primary/20">
                               {attnUncat}
                             </span>
                           ) : null}
