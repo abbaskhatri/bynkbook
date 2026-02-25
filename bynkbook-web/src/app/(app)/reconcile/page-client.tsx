@@ -618,6 +618,15 @@ export default function ReconcilePageClient() {
     };
   }, [selectedBusinessId, selectedAccountId]);
 
+  // -------------------------
+  // Phase 1 Stabilization: Refresh epoch + coalescing
+  // - Epoch guard: stale refreshes cannot commit state
+  // - Coalescing: prevent overlapping sync + refresh commits (1 in-flight, 1 queued)
+  // -------------------------
+  const refreshEpochRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<any> | null>(null);
+  const refreshQueuedOptsRef = useRef<{ preserveOnEmpty?: boolean } | null>(null);
+
   function newestPostedDate(items: any[]): string {
     let max = "";
     for (const t of items ?? []) {
@@ -630,59 +639,100 @@ export default function ReconcilePageClient() {
   async function refreshBankAndMatches(opts?: { preserveOnEmpty?: boolean }) {
     if (!selectedBusinessId || !selectedAccountId) return { bank: [] as any[], matches: [] as any[] };
 
+    // Coalesce refresh calls:
+    // - If a refresh is already running, queue ONE follow-up refresh (latest opts wins)
+    // - Prevent overlapping sync + refresh commits
+    if (refreshInFlightRef.current) {
+      refreshQueuedOptsRef.current = opts ?? {};
+      return refreshInFlightRef.current;
+    }
+
+    const myEpoch = ++refreshEpochRef.current;
+
     let bankItems: any[] = [];
     let matchItems: any[] = [];
 
-    setBankTxLoading(true);
+    const run = (async () => {
+      // -------------------------
+      // Bank transactions
+      // -------------------------
+      if (myEpoch === refreshEpochRef.current) setBankTxLoading(true);
+      try {
+        const res = await listBankTransactions({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          from: from || undefined,
+          to: to || undefined,
+          limit: 500,
+        });
+
+        const next = res?.items ?? [];
+        bankItems = next;
+
+        if (myEpoch === refreshEpochRef.current) {
+          setBankTx((prev) => {
+            if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
+            return next;
+          });
+        }
+      } catch {
+        if (myEpoch === refreshEpochRef.current) {
+          setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
+        }
+      } finally {
+        if (myEpoch === refreshEpochRef.current) setBankTxLoading(false);
+      }
+
+      // -------------------------
+      // Legacy matches (read-only, used for export/history fallback)
+      // -------------------------
+      if (myEpoch === refreshEpochRef.current) setMatchesLoading(true);
+      try {
+        const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
+        matchItems = m?.items ?? [];
+        if (myEpoch === refreshEpochRef.current) setMatches(matchItems);
+      } catch {
+        if (myEpoch === refreshEpochRef.current) setMatches([]);
+      } finally {
+        if (myEpoch === refreshEpochRef.current) setMatchesLoading(false);
+      }
+
+      // -------------------------
+      // MatchGroups (source of truth for matched state)
+      // -------------------------
+      if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(true);
+      try {
+        const mg: any = await listMatchGroups({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          status: "all", // needed for History (includes voided groups)
+        });
+        if (myEpoch === refreshEpochRef.current) setMatchGroups(mg?.items ?? []);
+      } catch {
+        if (myEpoch === refreshEpochRef.current) setMatchGroups([]);
+      } finally {
+        if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(false);
+      }
+
+      return { bank: bankItems, matches: matchItems };
+    })();
+
+    refreshInFlightRef.current = run;
+
     try {
-      const res = await listBankTransactions({
-        businessId: selectedBusinessId,
-        accountId: selectedAccountId,
-        from: from || undefined,
-        to: to || undefined,
-        limit: 500,
-      });
-
-      const next = res?.items ?? [];
-      bankItems = next;
-
-      setBankTx((prev) => {
-        if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
-        return next;
-      });
-    } catch {
-      setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
+      return await run;
     } finally {
-      setBankTxLoading(false);
-    }
+      // Clear in-flight
+      if (refreshInFlightRef.current === run) refreshInFlightRef.current = null;
 
-    setMatchesLoading(true);
-    try {
-      const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-      matchItems = m?.items ?? [];
-      setMatches(matchItems);
-    } catch {
-      setMatches([]);
-    } finally {
-      setMatchesLoading(false);
+      // Run at most one queued refresh (latest wins)
+      const queued = refreshQueuedOptsRef.current;
+      refreshQueuedOptsRef.current = null;
+      if (queued) {
+        // Fire-and-forget (do not cascade waits / storms)
+        void refreshBankAndMatches(queued);
+      }
     }
-
-    // Load active match groups (new model; additive only during migration)
-    setMatchGroupsLoading(true);
-    try {
-      const mg: any = await listMatchGroups({
-        businessId: selectedBusinessId,
-        accountId: selectedAccountId,
-        status: "all", // needed for History (includes voided groups)
-      });
-      setMatchGroups(mg?.items ?? []);
-    } catch {
-      setMatchGroups([]);
-    } finally {
-      setMatchGroupsLoading(false);
-    }
-
-    return { bank: bankItems, matches: matchItems };
   }
 
   // One debounced refresh after any mutation (no storms)
@@ -893,7 +943,7 @@ export default function ReconcilePageClient() {
 
     void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
 
-    refreshBankAndMatches({ preserveOnEmpty: true });
+    void refreshBankAndMatches({ preserveOnEmpty: true });
   }, [selectedBusinessId, selectedAccountId, from, to]);
 
   // Phase 6B: Load snapshot list when dialog opens

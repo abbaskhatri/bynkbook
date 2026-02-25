@@ -834,6 +834,16 @@ export default function LedgerPageClient() {
 
   // Auth is handled by AppShell
 
+    // Phase 1: per-surface retry (no router.refresh storms)
+  function retrySurfaceLoads() {
+    void businessesQ.refetch?.();
+    void accountsQ.refetch?.();
+    void entriesQ.refetch?.();
+    void categoriesQ.refetch?.();
+    void issuesCountQ.refetch?.();
+    void issuesListQ.refetch?.();
+  }
+
   // Business/account
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -1836,11 +1846,23 @@ export default function LedgerPageClient() {
 
   // Issues scan (Stage B)
   const [scanBusy, setScanBusy] = useState(false);
+
+  // Phase 1 Stabilization: epoch guard for scan workflow
+  // - prevents stale scan completion from committing after scope change
+  // - guarantees busy clears deterministically
+  const scanEpochRef = useRef(0);
+
+  useEffect(() => {
+    // Scope change cancels any prior scan epoch
+    scanEpochRef.current += 1;
+    setScanBusy(false);
+  }, [selectedBusinessId, selectedAccountId]);
   async function scanIssues() {
     if (scanBusy) return;
     if (!selectedBusinessId || !selectedAccountId) return;
 
     setErr(null);
+    const myEpoch = ++scanEpochRef.current;
     setScanBusy(true);
 
     try {
@@ -1894,9 +1916,9 @@ export default function LedgerPageClient() {
 
       // No success toast/message (keep UI quiet)
     } catch (e: any) {
-      setErr(e?.message || "Scan failed");
+      if (myEpoch === scanEpochRef.current) setErr(e?.message || "Scan failed");
     } finally {
-      setScanBusy(false);
+      if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
   }
 
@@ -3254,6 +3276,29 @@ export default function LedgerPageClient() {
   // Quick-fix: Missing Category inline (no dialog)
 
   // Body rows (memoized so add-row typing doesn't rebuild the full table body)
+    // Phase 1: skeleton-first table body (prevents blank panes while loading)
+  const skeletonBodyRows = useMemo(() => {
+    const tdSk = "px-1.5 py-0.5 align-middle";
+    const sk = (w: string) => <div className={`h-3 ${w} rounded bg-slate-200 animate-pulse`} />;
+
+    return Array.from({ length: 12 }).map((_, i) => (
+      <tr key={`sk-${i}`} className="h-[24px] border-b border-slate-200">
+        <td className={tdSk}><div className="h-4 w-4 rounded bg-slate-200 animate-pulse" /></td>
+        <td className={tdSk}>{sk("w-20")}</td>
+        <td className={tdSk}>{sk("w-12")}</td>
+        <td className={tdSk}>{sk("w-[260px]")}</td>
+        <td className={tdSk}>{sk("w-16")}</td>
+        <td className={tdSk}>{sk("w-20")}</td>
+        <td className={tdSk}>{sk("w-24")}</td>
+        <td className={tdSk + " text-right"}>{sk("w-20 ml-auto")}</td>
+        <td className={tdSk + " text-right"}>{sk("w-20 ml-auto")}</td>
+        <td className={tdSk + " text-center"}>{sk("w-16 mx-auto")}</td>
+        <td className={tdSk + " text-center"}>{sk("w-4 mx-auto")}</td>
+        <td className={tdSk + " text-center"}>{sk("w-4 mx-auto")}</td>
+        <td className={tdSk + " text-right"}>{sk("w-16 ml-auto")}</td>
+      </tr>
+    ));
+  }, []);
   const bodyRows = useMemo(() => {
 
     return pageRows.map((r) => {
@@ -4073,7 +4118,9 @@ export default function LedgerPageClient() {
       </div>
 
       <div className="px-3 space-y-2">
-        <InlineBanner title="Can’t load ledger" message={bannerMsg} onRetry={() => router.refresh()} />
+        {bannerMsg ? (
+          <InlineBanner title="Can’t load ledger" message={bannerMsg} onRetry={() => retrySurfaceLoads()} />
+        ) : null}
 
         <InlineBanner
           title={mutErrIsClosed ? "Period closed" : "Can’t save changes"}
@@ -4099,7 +4146,7 @@ export default function LedgerPageClient() {
             title="No business yet"
             description="Create a business to start using BynkBook."
             primary={{ label: "Create business", href: "/settings?tab=business" }}
-            secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            secondary={{ label: "Reload", onClick: () => retrySurfaceLoads() }}
           />
         </div>
       ) : null}
@@ -4110,18 +4157,17 @@ export default function LedgerPageClient() {
             title="No accounts yet"
             description="Add an account to start importing and categorizing transactions."
             primary={{ label: "Add account", href: "/settings?tab=accounts" }}
-            secondary={{ label: "Reload", onClick: () => router.refresh() }}
+            secondary={{ label: "Reload", onClick: () => retrySurfaceLoads() }}
           />
         </div>
       ) : null}
 
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
         <LedgerTableShell
-
           colgroup={cols}
           header={headerRow}
           addRow={addRow}
-          body={bodyRows}
+          body={entriesQ.isLoading ? skeletonBodyRows : bodyRows}
           footer={
             <tr>
               <td colSpan={13} className="p-0 border-t border-slate-200 bg-slate-50">

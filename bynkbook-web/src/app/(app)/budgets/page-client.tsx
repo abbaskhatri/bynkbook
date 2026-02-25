@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { inputH7 } from "@/components/primitives/tokens";
 
-import { PieChart } from "lucide-react";
+import { PieChart, ChevronLeft, ChevronRight } from "lucide-react";
 
 function ymNow(): string {
   const d = new Date();
@@ -91,6 +91,7 @@ export default function BudgetsPageClient() {
   }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const [month, setMonth] = useState<string>(ymNow());
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -136,7 +137,7 @@ export default function BudgetsPageClient() {
     return () => {
       alive = false;
     };
-  }, [authReady, selectedBusinessId, month]);
+  }, [authReady, selectedBusinessId, month, reloadNonce]);
 
   async function onSave() {
     if (!selectedBusinessId) return;
@@ -196,12 +197,12 @@ export default function BudgetsPageClient() {
             <div className="flex items-center gap-2">
               <div className="text-sm font-semibold text-slate-900">Budget by Category</div>
               <div className="flex items-center gap-1 text-xs text-slate-500">
-                <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, -1))}>
-                  ‹
+                <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, -1))} title="Previous month">
+                  <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <span className="px-2">{month}</span>
-                <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, 1))}>
-                  ›
+                <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, 1))} title="Next month">
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -211,7 +212,23 @@ export default function BudgetsPageClient() {
             </Button>
           </div>
 
-          {saveError ? <div className="px-3 py-2 text-xs text-red-700 border-b border-slate-200">{saveError}</div> : null}
+          {saveError ? (
+            <div className="px-3 py-2 text-xs text-red-700 border-b border-slate-200 flex items-center justify-between gap-3">
+              <span>{saveError}</span>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-7 px-3 text-xs"
+                disabled={loading}
+                onClick={() => {
+                  // re-trigger the existing loader by bumping month to same value
+                  setReloadNonce((n) => n + 1);
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : null}
 
           <LedgerTableShell
             colgroup={
@@ -233,11 +250,16 @@ export default function BudgetsPageClient() {
             addRow={null}
             body={
               loading ? (
-                <tr>
-                  <td colSpan={4} className="px-3 py-3 text-sm text-slate-600">
-                    Loading…
-                  </td>
-                </tr>
+                <>
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <tr key={`sk-${i}`} className="h-9 border-b border-slate-100">
+                      <td className="px-3"><div className="h-3 w-48 rounded bg-slate-200 animate-pulse" /></td>
+                      <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                      <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                      <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                    </tr>
+                  ))}
+                </>
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-3 py-3 text-sm text-slate-600">

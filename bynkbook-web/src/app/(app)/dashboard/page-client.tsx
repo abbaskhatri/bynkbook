@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
 
+import { useQuery } from "@tanstack/react-query";
+
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
@@ -75,16 +77,10 @@ export default function DashboardPageClient() {
   const accountsQ = useAccounts(selectedBusinessId);
 
   const accountIdFromUrl = sp.get("accountId"); // "all" | accountId
+  const selectedAccountId = accountIdFromUrl ?? "all";
   const [period, setPeriod] = useState<"90d" | "30d" | "ytd">("90d");
 
-  const [kpis, setKpis] = useState<{
-    income?: string;
-    expense?: string;
-    net?: string;
-    cashIn?: string;
-    cashOut?: string;
-    issues?: number;
-  }>({});
+  // KPI + chart surfaces are driven by canonical React Query keys.
 
   const currency = useMemo(
     () =>
@@ -132,10 +128,115 @@ export default function DashboardPageClient() {
     };
   }, [currency]);
 
-  // Real chart series from cashflow_series endpoint (monthly buckets).
-  const [cashSeries, setCashSeries] = useState<
-    Array<{ key: string; label: string; cashInCents: string; cashOutCents: string; netCents: string }>
-  >([]);
+  // Scope range (canonical, shared across dashboard surfaces)
+  const { from, to } = useMemo(() => {
+    const today = new Date();
+    const to = today.toISOString().slice(0, 10);
+    const from =
+      period === "30d"
+        ? new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10)
+        : period === "90d"
+          ? new Date(today.getTime() - 90 * 86400000).toISOString().slice(0, 10)
+          : `${today.getFullYear()}-01-01`;
+    return { from, to };
+  }, [period]);
+  
+  const dashEnabled = !!selectedBusinessId;
+
+  // Canonical per-surface keys (array format to match repo conventions)
+  const pnlQ = useQuery({
+    queryKey: ["dashboard", "pnlSummary", selectedBusinessId, selectedAccountId, from, to, period],
+    queryFn: () =>
+      getPnlSummary(selectedBusinessId as string, {
+        from,
+        to,
+        accountId: selectedAccountId,
+        ytd: period === "ytd",
+      }),
+    enabled: dashEnabled,
+  });
+
+  const cashflowQ = useQuery({
+    queryKey: ["dashboard", "cashflowSeries", selectedBusinessId, selectedAccountId, from, to, period],
+    queryFn: () =>
+      getCashflowSeries(selectedBusinessId as string, {
+        from,
+        to,
+        accountId: selectedAccountId,
+        ytd: period === "ytd",
+      }),
+    enabled: dashEnabled,
+  });
+
+  const issuesCountQ = useQuery({
+    queryKey: ["dashboard", "issuesCount", selectedBusinessId, selectedAccountId],
+    queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: selectedAccountId }),
+    enabled: dashEnabled,
+  });
+
+  const categoriesQ = useQuery({
+    queryKey: ["dashboard", "categories", selectedBusinessId, selectedAccountId, from, to],
+    queryFn: () => getCategories(selectedBusinessId as string, { from, to, accountId: selectedAccountId }),
+    enabled: dashEnabled,
+  });
+
+  const accountsSummaryQ = useQuery({
+    queryKey: ["dashboard", "accountsSummary", selectedBusinessId, to],
+    queryFn: () =>
+      getAccountsSummary(selectedBusinessId as string, {
+        asOf: to,
+        accountId: "all",
+        includeArchived: false,
+      }),
+    enabled: dashEnabled,
+  });
+
+  const insightsQ = useQuery({
+    queryKey: ["dashboard", "insights", selectedBusinessId, selectedAccountId, from, to, period],
+    queryFn: () => getDashboardInsights({ businessId: selectedBusinessId as string, from, to }),
+    enabled: dashEnabled,
+  });
+
+  // Derived, display-ready data (no cross-scope reuse: React Query caches per key)
+  const kpis = useMemo(() => {
+    return {
+      income: pnlQ.data?.period?.income_cents,
+      expense: pnlQ.data?.period?.expense_cents,
+      net: pnlQ.data?.period?.net_cents,
+      cashIn: cashflowQ.data?.totals?.cash_in_cents,
+      cashOut: cashflowQ.data?.totals?.cash_out_cents,
+      issues: issuesCountQ.data?.count,
+    };
+  }, [pnlQ.data, cashflowQ.data, issuesCountQ.data]);
+
+  // Real cashflow chart buckets (monthly)
+  const cashSeries = useMemo(() => {
+    const cashflow = cashflowQ.data;
+    if (!cashflow?.monthly) return [] as Array<{
+      key: string;
+      label: string;
+      cashInCents: string;
+      cashOutCents: string;
+      netCents: string;
+    }>;
+
+    const monthAbbr = (ym: string) => {
+      const m = Number(String(ym).slice(5, 7));
+      const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return names[m - 1] ?? ym;
+    };
+
+    return (cashflow.monthly ?? []).map((r: any) => {
+      const ym = String(r.month);
+      return {
+        key: ym,
+        label: monthAbbr(ym),
+        cashInCents: String(r.cash_in_cents ?? "0"),
+        cashOutCents: String(r.cash_out_cents ?? "0"),
+        netCents: String(r.net_cents ?? "0"),
+      };
+    });
+  }, [cashflowQ.data]);
 
   const hasMultiMonth = useMemo(() => {
     const uniq = new Set(cashSeries.map((r) => r.key));
@@ -202,10 +303,6 @@ export default function DashboardPageClient() {
     return (accountsQ.data ?? []).filter((a) => !a.archived_at);
   }, [accountsQ.data]);
 
-  const selectedAccountId = useMemo(() => {
-    return accountIdFromUrl ?? "all";
-  }, [accountIdFromUrl]);
-
   const selectedAccountLabel = useMemo(() => {
     if (selectedAccountId === "all") return "All accounts";
     const hit = activeAccountOptions.find((a) => a.id === selectedAccountId);
@@ -220,10 +317,13 @@ export default function DashboardPageClient() {
     }
   }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
-  const [dashErr, setDashErr] = useState<{ title: string; detail: string } | null>(null);
-  const [topCats, setTopCats] = useState<Array<{ label: string; cents: string; count: number }>>([]);
-  const [balancesByAccountId, setBalancesByAccountId] = useState<Record<string, string>>({});
-  const [dashLoading, setDashLoading] = useState(false);
+  const balancesByAccountId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const r of accountsSummaryQ.data?.rows ?? []) {
+      map[String((r as any).account_id)] = String((r as any).balance_cents ?? "0");
+    }
+    return map;
+  }, [accountsSummaryQ.data]);
 
   type DashboardInsight = {
     id: string;
@@ -237,134 +337,67 @@ export default function DashboardPageClient() {
   };
 
   // Phase F4: Dashboard insights (computed, non-hallucinated)
-  const [insightsLoading, setInsightsLoading] = useState(false);
-  const [insights, setInsights] = useState<DashboardInsight[]>([]);
-  const [insightsErr, setInsightsErr] = useState<string | null>(null);
+  const insights: DashboardInsight[] = useMemo(() => {
+    const raw: any = insightsQ.data as any;
+    return Array.isArray(raw?.insights) ? (raw.insights as DashboardInsight[]) : [];
+  }, [insightsQ.data]);
 
-  // (removed stray pasted Promise.all block)
+  const insightsErr = useMemo(() => {
+    if (!insightsQ.error) return null;
+    return normalizeApiError(insightsQ.error).detail;
+  }, [insightsQ.error]);
 
-  useEffect(() => {
-    if (!selectedBusinessId) return;
+  const topCats = useMemo((): Array<{ label: string; cents: string; count: number }> => {
+    const cats: any = categoriesQ.data;
+    if (!cats?.rows) return [] as Array<{ label: string; cents: string; count: number }>;
 
-    const today = new Date();
-    const to = today.toISOString().slice(0, 10);
-    const from =
-      period === "30d"
-        ? new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10)
-        : period === "90d"
-          ? new Date(today.getTime() - 90 * 86400000).toISOString().slice(0, 10)
-          : `${today.getFullYear()}-01-01`;
-
-    let cancelled = false;
-
-    (async () => {
-      setDashLoading(true);
-      setDashErr(null);
-
-      setInsightsLoading(true);
-      setInsightsErr(null);
-
+    const absBig = (s: string) => {
       try {
-        const [pnl, cashflow, issues, cats, acctSummary, ins] = await Promise.all([
-          getPnlSummary(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
-          getCashflowSeries(selectedBusinessId, { from, to, accountId: selectedAccountId, ytd: period === "ytd" }),
-          getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId }),
-          getCategories(selectedBusinessId, { from, to, accountId: selectedAccountId }),
-          getAccountsSummary(selectedBusinessId, { asOf: to, accountId: "all", includeArchived: false }),
-          getDashboardInsights({ businessId: selectedBusinessId, from, to }),
-        ]);
-
-        if (cancelled) return;
-
-        setKpis({
-          income: pnl.period.income_cents,
-          expense: pnl.period.expense_cents,
-          net: pnl.period.net_cents,
-          cashIn: cashflow.totals.cash_in_cents,
-          cashOut: cashflow.totals.cash_out_cents,
-          issues: issues.count,
-        });
-
-        // Real cashflow chart buckets (monthly)
-        const monthAbbr = (ym: string) => {
-          // ym: YYYY-MM
-          const m = Number(String(ym).slice(5, 7));
-          const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-          return names[m - 1] ?? ym;
-        };
-
-        const m = (cashflow.monthly ?? []).map((r: any) => {
-          const ym = String(r.month);
-          return {
-            key: ym,
-            label: monthAbbr(ym),
-            cashInCents: String(r.cash_in_cents ?? "0"),
-            cashOutCents: String(r.cash_out_cents ?? "0"),
-            netCents: String(r.net_cents ?? "0"),
-          };
-        });
-        setCashSeries(m);
-
-        const map: Record<string, string> = {};
-        for (const r of (acctSummary?.rows ?? [])) {
-          map[String(r.account_id)] = String(r.balance_cents ?? "0");
-        }
-        setBalancesByAccountId(map);
-
-        // Insights
-        const insList: DashboardInsight[] = Array.isArray(ins?.insights) ? (ins.insights as DashboardInsight[]) : [];
-        setInsights(insList);
-        setInsightsErr(null);
-        // Top categories: sort by absolute amount; show signed accounting value
-        const absBig = (s: string) => {
-          try {
-            const n = BigInt(s);
-            return n < 0n ? -n : n;
-          } catch {
-            return 0n;
-          }
-        };
-
-        const rows = (cats.rows ?? [])
-          .map((r: any) => ({
-            label: String(r.category ?? "Category"),
-            cents: String(r.amount_cents ?? "0"),
-            count: Number(r.count ?? 0),
-          }))
-          .sort((a: any, b: any) => {
-            const aa = absBig(a.cents);
-            const bb = absBig(b.cents);
-            if (bb === aa) return b.count - a.count;
-            return bb > aa ? 1 : -1;
-          })
-          .slice(0, 6);
-
-        setTopCats(rows);
-      } catch (e: any) {
-        if (cancelled) return;
-
-        const detail = appErrorMessageOrNull(e) ?? "Something went wrong. Try again.";
-        const status = extractHttpStatus(e);
-
-        if (status === 401) setDashErr({ title: "Signed out", detail });
-        else if (status === 403) setDashErr({ title: "Access denied", detail });
-        else setDashErr({ title: "Dashboard failed to load", detail });
-        setInsights([]);
-        setInsightsErr("Insights unavailable");
-
-        // Keep existing UI stable; just show banner.
-      } finally {
-        if (!cancelled) {
-          setDashLoading(false);
-          setInsightsLoading(false);
-        }
+        const n = BigInt(s);
+        return n < 0n ? -n : n;
+      } catch {
+        return 0n;
       }
-    })();
-
-    return () => {
-      cancelled = true;
     };
-  }, [selectedBusinessId, selectedAccountId, period]);
+
+    return (cats.rows ?? [])
+      .map((r: any) => ({
+        label: String(r.category ?? "Category"),
+        cents: String(r.amount_cents ?? "0"),
+        count: Number(r.count ?? 0),
+      }))
+      .sort((a: any, b: any) => {
+        const aa = absBig(a.cents);
+        const bb = absBig(b.cents);
+        if (bb === aa) return b.count - a.count;
+        return bb > aa ? 1 : -1;
+      })
+      .slice(0, 6);
+  }, [categoriesQ.data]);
+
+  const dashErr = useMemo(() => {
+    const errs = [pnlQ.error, cashflowQ.error, issuesCountQ.error, categoriesQ.error, accountsSummaryQ.error, insightsQ.error].filter(
+      Boolean
+    ) as any[];
+    if (errs.length === 0) return null;
+
+    // Prefer auth/permission errors for banner.
+    const first = errs[0];
+    const status = extractHttpStatus(first);
+    const detail = appErrorMessageOrNull(first) ?? "Something went wrong. Try again.";
+    if (status === 401) return { title: "Signed out", detail };
+    if (status === 403) return { title: "Access denied", detail };
+    return { title: "Dashboard failed to load", detail };
+  }, [pnlQ.error, cashflowQ.error, issuesCountQ.error, categoriesQ.error, accountsSummaryQ.error, insightsQ.error]);
+
+  const refetchAll = () => {
+    void pnlQ.refetch();
+    void cashflowQ.refetch();
+    void issuesCountQ.refetch();
+    void categoriesQ.refetch();
+    void accountsSummaryQ.refetch();
+    void insightsQ.refetch();
+  };
 
   // Tooltip state (single source of truth)
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -449,15 +482,20 @@ export default function DashboardPageClient() {
         />
       ) : null}
 
-      {dashErr ? <InlineBanner title={dashErr.title} message={dashErr.detail} onRetry={() => setPeriod((p) => p)} /> : null}
+      {dashErr ? <InlineBanner title={dashErr.title} message={dashErr.detail} onRetry={refetchAll} /> : null}
 
       {/* KPI tiles (Bundle 2) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label: "Income", v: kpis.income },
-          { label: "Expense", v: kpis.expense },
-          { label: "Net", v: kpis.net },
-          { label: "Open Issues", v: typeof kpis.issues === "number" ? String(kpis.issues) : undefined, isCount: true },
+          { label: "Income", v: kpis.income, loading: pnlQ.isLoading },
+          { label: "Expense", v: kpis.expense, loading: pnlQ.isLoading },
+          { label: "Net", v: kpis.net, loading: pnlQ.isLoading },
+          {
+            label: "Open Issues",
+            v: typeof kpis.issues === "number" ? String(kpis.issues) : undefined,
+            isCount: true,
+            loading: issuesCountQ.isLoading,
+          },
         ].map((x) => {
           const money = x.isCount ? null : fmtUsdAccountingFromCents(x.v);
           const text = x.isCount ? (x.v ?? "—") : money?.text ?? "—";
@@ -466,7 +504,13 @@ export default function DashboardPageClient() {
           return (
             <div key={x.label} className="rounded-xl border border-slate-200 bg-white shadow-sm px-3 py-2">
               <div className="text-[10px] uppercase tracking-wide text-slate-500">{x.label}</div>
-              <div className={`mt-1 text-sm font-semibold ${isNeg ? "text-rose-600" : "text-slate-900"}`}>{text}</div>
+              {x.loading && !x.v ? (
+                <div className="mt-1">
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              ) : (
+                <div className={`mt-1 text-sm font-semibold ${isNeg ? "text-rose-600" : "text-slate-900"}`}>{text}</div>
+              )}
             </div>
           );
         })}
@@ -508,7 +552,23 @@ export default function DashboardPageClient() {
                   </div>
                 </div>
 
-                {cashSeries.length >= 2 && hasMultiMonth ? (
+                {cashflowQ.isLoading && !cashflowQ.data ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <Skeleton className="h-40 w-full" />
+                    <div className="flex justify-between">
+                      <Skeleton className="h-3 w-16" />
+                      <Skeleton className="h-3 w-24" />
+                    </div>
+                  </div>
+                ) : cashflowQ.error ? (
+                  <InlineErrorBanner
+                    title="Cash Flow unavailable"
+                    detail={normalizeApiError(cashflowQ.error).detail}
+                    onRetry={() => {
+                      void cashflowQ.refetch();
+                    }}
+                  />
+                ) : cashSeries.length >= 2 && hasMultiMonth ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="flex items-start">
                       {/* Shared viewport: labels + plot align to the exact same 160px coordinate space */}
@@ -785,8 +845,7 @@ export default function DashboardPageClient() {
           </Card>
 
           {/* Top Categories (real aggregate) */}
-          {topCats.length > 0 ? (
-            <Card>
+          <Card>
               <CHeader className="pb-2">
                 <div className="flex items-center justify-between gap-4">
                   <CardTitle className="text-sm font-medium">Top Categories</CardTitle>
@@ -798,23 +857,51 @@ export default function DashboardPageClient() {
               </CHeader>
 
               <CardContent className="pt-0">
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  {topCats.map((c, idx) => {
-                    const fm = fmtUsdAccountingFromCentsSafe(c.cents);
-                    return (
-                      <div key={`${c.label}-${idx}`} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0">
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-slate-900 truncate">{c.label}</div>
-                          <div className="text-[11px] text-muted-foreground">{c.count} entries</div>
+                {categoriesQ.isLoading && !categoriesQ.data ? (
+                  <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    <div className="px-3 py-2 border-b border-slate-200">
+                      <Skeleton className="h-4 w-40" />
+                      <div className="mt-1"><Skeleton className="h-3 w-20" /></div>
+                    </div>
+                    <div className="px-3 py-2 border-b border-slate-200">
+                      <Skeleton className="h-4 w-32" />
+                      <div className="mt-1"><Skeleton className="h-3 w-24" /></div>
+                    </div>
+                    <div className="px-3 py-2">
+                      <Skeleton className="h-4 w-48" />
+                      <div className="mt-1"><Skeleton className="h-3 w-16" /></div>
+                    </div>
+                  </div>
+                ) : categoriesQ.error ? (
+                  <InlineErrorBanner
+                    title="Categories unavailable"
+                    detail={normalizeApiError(categoriesQ.error).detail}
+                    onRetry={() => {
+                      void categoriesQ.refetch();
+                    }}
+                  />
+                ) : topCats.length === 0 ? (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
+                    No category data for this range.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    {topCats.map((c, idx) => {
+                      const fm = fmtUsdAccountingFromCentsSafe(c.cents);
+                      return (
+                        <div key={`${c.label}-${idx}`} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-slate-900 truncate">{c.label}</div>
+                            <div className="text-[11px] text-muted-foreground">{c.count} entries</div>
+                          </div>
+                          <div className={`text-sm font-semibold tabular-nums ${fm.isNeg ? "text-rose-600" : "text-slate-900"}`}>{fm.text}</div>
                         </div>
-                        <div className={`text-sm font-semibold tabular-nums ${fm.isNeg ? "text-rose-600" : "text-slate-900"}`}>{fm.text}</div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
-          ) : null}
         </div>
 
         {/* Right column */}
@@ -829,50 +916,75 @@ export default function DashboardPageClient() {
             </CHeader>
 
             <CardContent className="pt-0">
-              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                {activeAccountOptions.slice(0, 5).map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => {
-                      if (!selectedBusinessId) return;
-                      const params = new URLSearchParams();
-                      params.set("businessId", selectedBusinessId);
-                      params.set("accountId", String(a.id));
-                      router.push(`/ledger?${params.toString()}`);
-                    }}
-                    className="w-full text-left flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0 hover:bg-slate-50"
-                    title="Open ledger"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-slate-900 truncate">{a.name}</div>
-                      <div className="text-[11px] text-muted-foreground truncate">
-                        {"institution" in (a as any) && (a as any).institution ? (a as any).institution : "—"}{" "}
-                        {"last4" in (a as any) && (a as any).last4 ? `•••• ${(a as any).last4}` : ""}
+              {accountsSummaryQ.isLoading && !accountsSummaryQ.data ? (
+                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0">
+                      <div className="min-w-0">
+                        <Skeleton className="h-4 w-40" />
+                        <div className="mt-1"><Skeleton className="h-3 w-28" /></div>
                       </div>
+                      <Skeleton className="h-4 w-16" />
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-semibold text-slate-900">
-                        {(() => {
-                          const cents = balancesByAccountId[String(a.id)];
-                          const fm = fmtUsdAccountingFromCentsSafe(cents ?? "0");
-                          return fm.text;
-                        })()}
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-slate-400" />
-                    </div>
-                  </button>
-                ))}
-
-                {activeAccountOptions.length === 0 ? (
-                  <div className="px-3 py-3 text-sm text-muted-foreground">No accounts yet.</div>
-                ) : null}
-
-                <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
-                  Balances shown reflect current app data.
+                  ))}
+                  <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
+                    Balances shown reflect current app data.
+                  </div>
                 </div>
-              </div>
+              ) : accountsSummaryQ.error ? (
+                <InlineErrorBanner
+                  title="Balances unavailable"
+                  detail={normalizeApiError(accountsSummaryQ.error).detail}
+                  onRetry={() => {
+                    void accountsSummaryQ.refetch();
+                  }}
+                />
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                  {activeAccountOptions.slice(0, 5).map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => {
+                        if (!selectedBusinessId) return;
+                        const params = new URLSearchParams();
+                        params.set("businessId", selectedBusinessId);
+                        params.set("accountId", String(a.id));
+                        router.push(`/ledger?${params.toString()}`);
+                      }}
+                      className="w-full text-left flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0 hover:bg-slate-50"
+                      title="Open ledger"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-slate-900 truncate">{a.name}</div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {"institution" in (a as any) && (a as any).institution ? (a as any).institution : "—"}{" "}
+                          {"last4" in (a as any) && (a as any).last4 ? `•••• ${(a as any).last4}` : ""}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold text-slate-900">
+                          {(() => {
+                            const cents = balancesByAccountId[String(a.id)];
+                            const fm = fmtUsdAccountingFromCentsSafe(cents ?? "0");
+                            return fm.text;
+                          })()}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-slate-400" />
+                      </div>
+                    </button>
+                  ))}
+
+                  {activeAccountOptions.length === 0 ? (
+                    <div className="px-3 py-3 text-sm text-muted-foreground">No accounts yet.</div>
+                  ) : null}
+
+                  <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
+                    Balances shown reflect current app data.
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -898,9 +1010,27 @@ export default function DashboardPageClient() {
             </CHeader>
 
             <CardContent className="pt-0">
+              {issuesCountQ.error ? (
+                <InlineErrorBanner
+                  title="Issues unavailable"
+                  detail={normalizeApiError(issuesCountQ.error).detail}
+                  onRetry={() => {
+                    void issuesCountQ.refetch();
+                  }}
+                />
+              ) : null}
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
                 <div className="text-sm font-medium text-amber-900">
-                  Open issues: {typeof kpis.issues === "number" ? kpis.issues : "—"}
+                  Open issues:{" "}
+                  {issuesCountQ.isLoading && typeof kpis.issues !== "number" ? (
+                    <span className="inline-block align-middle">
+                      <Skeleton className="h-4 w-10" />
+                    </span>
+                  ) : typeof kpis.issues === "number" ? (
+                    kpis.issues
+                  ) : (
+                    "—"
+                  )}
                 </div>
 
                 <div className="mt-2 text-[11px] text-amber-800/80">
@@ -919,13 +1049,19 @@ export default function DashboardPageClient() {
             </CHeader>
 
             <CardContent className="pt-0">
-              {insightsLoading ? (
+              {insightsQ.isLoading ? (
                 <div className="space-y-2">
                   <Skeleton className="h-12 w-full" />
                   <Skeleton className="h-12 w-full" />
                 </div>
               ) : insightsErr ? (
-                <div className="text-xs text-muted-foreground">Insights unavailable</div>
+                <InlineErrorBanner
+                  title="Insights unavailable"
+                  detail={insightsErr}
+                  onRetry={() => {
+                    void insightsQ.refetch();
+                  }}
+                />
               ) : insights.length === 0 ? (
                 <div className="text-xs text-muted-foreground">No insights for this period.</div>
               ) : (

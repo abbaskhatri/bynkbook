@@ -122,6 +122,8 @@ export default function SettingsPageClient() {
   const spKey = sp.toString(); // stable dependency key (prevents dynamic deps array issues)
   const qc = useQueryClient();
 
+  // Phase 1: per-surface reload triggers (no router.refresh storms)
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [authReady, setAuthReady] = useState(false);
   useEffect(() => {
     (async () => {
@@ -145,6 +147,17 @@ export default function SettingsPageClient() {
 
   // Keep Settings URL consistent with the selected business (one-shot sync; no loops)
   const didSyncBizRef = useRef(false);
+
+  // Phase 1: per-surface retry hooks (reloadNonce retriggers tab-scoped loaders safely)
+  function retryCategories() {
+    setReloadNonce((n) => n + 1);
+  }
+  // Phase 1 Stabilization: epoch guard for tab-scoped async loaders
+  const tabEpochRef = useRef(0);
+  useEffect(() => {
+    // bump epoch whenever tab/business changes (stale async completions must not commit)
+    tabEpochRef.current += 1;
+  }, [spKey, selectedBusinessId, reloadNonce]);
   useEffect(() => {
     if (didSyncBizRef.current) return;
     if (businessesQ.isLoading) return;
@@ -245,13 +258,14 @@ export default function SettingsPageClient() {
   const [catShowArchived, setCatShowArchived] = useState(false);
   const [catNewName, setCatNewName] = useState("");
 
-    // Load bookkeeping preferences when Bookkeeping tab is active
+  // Load bookkeeping preferences when Bookkeeping tab is active
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "bookkeeping") return;
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
     (async () => {
       setBkLoading(true);
@@ -263,7 +277,7 @@ export default function SettingsPageClient() {
         const amountCents = Number(res.amountToleranceCents || "0");
         const dollars = (amountCents / 100).toFixed(2);
 
-        if (!cancelled) {
+        if (!cancelled && myEpoch === tabEpochRef.current) {
           setBkAmountTol(dollars);
           setBkDaysTol(String(res.daysTolerance ?? 3));
           setBkDupWindow(String(res.duplicateWindowDays ?? 7));
@@ -280,9 +294,9 @@ export default function SettingsPageClient() {
           setBkInitial(snap);
         }
       } catch (e: any) {
-        if (!cancelled) setBkError(e?.message ?? "Failed to load bookkeeping preferences");
+        if (!cancelled && myEpoch === tabEpochRef.current) setBkError(e?.message ?? "Failed to load bookkeeping preferences");
       } finally {
-        if (!cancelled) setBkLoading(false);
+        if (!cancelled && myEpoch === tabEpochRef.current) setBkLoading(false);
       }
     })();
 
@@ -574,6 +588,7 @@ export default function SettingsPageClient() {
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
     (async () => {
       setActLoading(true);
@@ -588,16 +603,16 @@ export default function SettingsPageClient() {
           setActItems(items);
         }
       } catch (e: any) {
-        if (!cancelled) setActError(e?.message ?? "Failed to load activity");
+        if (!cancelled && myEpoch === tabEpochRef.current) setActError(e?.message ?? "Failed to load activity");
       } finally {
-        if (!cancelled) setActLoading(false);
+        if (!cancelled && myEpoch === tabEpochRef.current) setActLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId, actEventType]);
+  }, [sp, authReady, selectedBusinessId, actEventType, reloadNonce]);
 
   // Load team data when Team tab is active
   useEffect(() => {
@@ -606,27 +621,28 @@ export default function SettingsPageClient() {
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
     (async () => {
       setTeamLoading(true);
       setTeamError(null);
       try {
         const res = await getTeam(selectedBusinessId);
-        if (!cancelled) {
+        if (!cancelled && myEpoch === tabEpochRef.current) {
           setTeamMembers(res.members ?? []);
           setTeamInvites(res.invites ?? []);
         }
       } catch (e: any) {
-        if (!cancelled) setTeamError(e?.message ?? "Failed to load team");
+        if (!cancelled && myEpoch === tabEpochRef.current) setTeamError(e?.message ?? "Failed to load team");
       } finally {
-        if (!cancelled) setTeamLoading(false);
+        if (!cancelled && myEpoch === tabEpochRef.current) setTeamLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId]);
+  }, [sp, authReady, selectedBusinessId, reloadNonce]);
 
   // Load role policies when Team tab is active
   useEffect(() => {
@@ -635,6 +651,7 @@ export default function SettingsPageClient() {
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
     (async () => {
       setPolLoading(true);
@@ -667,6 +684,7 @@ export default function SettingsPageClient() {
     const list = accountsQ.data ?? [];
     if (!accountsQ.data || list.length === 0) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
 
     (async () => {
@@ -734,7 +752,7 @@ export default function SettingsPageClient() {
           return next;
         });
       } finally {
-        if (!cancelled) {
+        if (!cancelled && myEpoch === tabEpochRef.current) {
           setPlaidLoading((cur) => {
             const next = { ...cur };
             for (const a of toFetch) delete next[a.id];
@@ -756,24 +774,25 @@ export default function SettingsPageClient() {
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
     (async () => {
       setCatLoading(true);
       setCatError(null);
       try {
         const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-        if (!cancelled) setCategories(res?.rows ?? res?.items ?? []);
+        if (!cancelled && myEpoch === tabEpochRef.current) setCategories(res?.rows ?? res?.items ?? []);
       } catch (e: any) {
-        if (!cancelled) setCatError(e?.message ?? "Failed to load categories");
+        if (!cancelled && myEpoch === tabEpochRef.current) setCatError(e?.message ?? "Failed to load categories");
       } finally {
-        if (!cancelled) setCatLoading(false);
+        if (!cancelled && myEpoch === tabEpochRef.current) setCatLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId, catShowArchived]);
+  }, [sp, authReady, selectedBusinessId, catShowArchived, reloadNonce]);
 
   // Load delete eligibility when Accounts tab is active (cached)
   useEffect(() => {
@@ -786,6 +805,7 @@ export default function SettingsPageClient() {
     const list = accountsQ.data ?? [];
     if (list.length === 0) return;
 
+    const myEpoch = tabEpochRef.current;
     let cancelled = false;
 
     (async () => {
@@ -956,7 +976,9 @@ export default function SettingsPageClient() {
                         <TableRow key={it.id} className="hover:bg-slate-50">
                           <TableCell className="py-2 text-slate-700 text-xs whitespace-nowrap">{when}</TableCell>
                           <TableCell className="py-2 text-slate-900 text-xs font-medium">{humanize(it.event_type)}</TableCell>
-                          <TableCell className="py-2 text-slate-700 text-xs font-mono">{String(it.actor_user_id).slice(0, 12)}…</TableCell>
+                          <TableCell className="py-2 text-slate-700 text-xs">
+                            {currentUserId && String(it.actor_user_id) === String(currentUserId) ? "You" : "Member"}
+                          </TableCell>
                           <TableCell className="py-2 text-right">
                             <button
                               type="button"
@@ -1408,9 +1430,12 @@ export default function SettingsPageClient() {
             </CardHeader>
 
             <CardContent className="space-y-4">
-              {bkError ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                  {bkError}
+              {catError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 flex items-center justify-between gap-3">
+                  <span>{catError}</span>
+                  <Button type="button" variant="outline" className="h-7 px-3 text-xs" disabled={catLoading} onClick={retryCategories}>
+                    Retry
+                  </Button>
                 </div>
               ) : null}
 

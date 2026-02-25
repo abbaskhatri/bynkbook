@@ -19,8 +19,10 @@ export function LedgerTableShell(props: {
   addRow: React.ReactNode;
   body: React.ReactNode;
   footer: React.ReactNode;
+  disableInnerScroll?: boolean;
+  scrollMode?: "auto" | "visible";
 }) {
-  const { colgroup, header, addRow, body, footer } = props;
+  const { colgroup, header, addRow, body, footer, disableInnerScroll, scrollMode } = props;
 
   const safeCols = React.Children.toArray(colgroup).filter(
     (c) => typeof c !== "string" && typeof c !== "number"
@@ -34,7 +36,15 @@ export function LedgerTableShell(props: {
   return (
     <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-white">
       {/* IMPORTANT: no horizontal scroll */}
-      <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+      <div
+        className={
+          disableInnerScroll
+            ? "overflow-x-hidden"
+            : scrollMode === "visible"
+              ? "h-full min-h-0 overflow-y-visible overflow-x-hidden"
+              : "h-full min-h-0 overflow-y-auto overflow-x-hidden"
+        }
+      >
         <table className="w-full table-fixed border-collapse">
           <colgroup>{safeCols}</colgroup>
 

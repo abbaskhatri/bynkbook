@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -195,8 +195,6 @@ export default function CategoryReviewPageClient() {
   const [mutErrTitle, setMutErrTitle] = useState<string | null>(null);
 
   // Phase F2: suggestions (batch) + selection + bulk apply
-  const [sugLoading, setSugLoading] = useState(false);
-  const [sugByEntryId, setSugByEntryId] = useState<Record<string, any[]>>({});
   const [selectedSuggestionByEntryId, setSelectedSuggestionByEntryId] = useState<Record<string, string>>({});
 
   const [applyOpen, setApplyOpen] = useState(false);
@@ -231,19 +229,17 @@ export default function CategoryReviewPageClient() {
     return { msg: String(msg), isClosed: false };
   }
 
-  // Categories list
-  const [categories, setCategories] = useState<CategoryRow[]>([]);
-  useEffect(() => {
-    (async () => {
-      if (!selectedBusinessId) return;
-      try {
-        const res = await listCategories(selectedBusinessId, { includeArchived: false });
-        setCategories(res.rows ?? []);
-      } catch {
-        setCategories([]);
-      }
-    })();
-  }, [selectedBusinessId]);
+  // Categories list (canonical query key)
+  const categoriesQ = useQuery({
+    queryKey: ["categories", selectedBusinessId],
+    enabled: !!selectedBusinessId,
+    queryFn: async () => {
+      if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
+      return listCategories(selectedBusinessId, { includeArchived: false });
+    },
+  });
+
+  const categories = categoriesQ.data?.rows ?? [];
 
   const categoryNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -294,6 +290,10 @@ export default function CategoryReviewPageClient() {
       const t = String(e.type ?? "").toUpperCase();
       if (t === "TRANSFER" || t === "ADJUSTMENT" || t === "OPENING") return false;
 
+      // Exclude opening balance placeholders (these must never be categorized)
+      const payeeText = String(e.payee ?? "").trim().toLowerCase();
+      if (payeeText.startsWith("opening balance")) return false;
+
       if (applied.onlyUncategorized && e.category_id) return false;
       if (s) {
         const p = String(e.payee ?? "").toLowerCase();
@@ -315,68 +315,45 @@ export default function CategoryReviewPageClient() {
   }, [visibleRows]);
 
   // -------------------------
-  // Phase F2: batch suggestions (single request for up to 200 visible uncategorized rows)
+  // Phase F2: batch suggestions (canonical query key; per-surface retry; no stuck loading)
   // -------------------------
-  const lastSugKeyRef = useRef<string>("");
+  const suggestionsQ = useQuery({
+    queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId, suggestionTargetIds],
+    enabled: !!selectedBusinessId && !!selectedAccountId && !!suggestionTargetIds,
+    queryFn: async () => {
+      if (!selectedBusinessId || !selectedAccountId || !suggestionTargetIds) return {} as Record<string, any[]>;
 
-  useEffect(() => {
-    if (!selectedBusinessId || !selectedAccountId) return;
+      const targets = (visibleRows ?? []).filter((r: any) => !r?.category_id).slice(0, 200);
 
-    // If the target set hasn't changed, do nothing (prevents loops)
-    if (!suggestionTargetIds) {
-      setSugByEntryId({});
-      setSugLoading(false);
-      lastSugKeyRef.current = "";
-      return;
-    }
+      const items = targets.map((r: any) => ({
+        kind: "ENTRY" as const,
+        id: String(r.id),
+        date: String(r.date ?? "").slice(0, 10),
+        amount_cents: r.amount_cents,
+        payee_or_name: String(r.payee ?? ""),
+        memo: String(r.memo ?? ""),
+      }));
 
-    const cacheKey = `${selectedBusinessId}|${selectedAccountId}|${suggestionTargetIds}`;
-    if (lastSugKeyRef.current === cacheKey) return;
-    lastSugKeyRef.current = cacheKey;
+      const res: any = await getCategorySuggestions({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        items,
+        limitPerItem: 3,
+      });
 
-    const targets = (visibleRows ?? []).filter((r: any) => !r?.category_id).slice(0, 200);
-
-    let cancelled = false;
-
-    (async () => {
-      setSugLoading(true);
-
-      try {
-        const items = targets.map((r: any) => ({
-          kind: "ENTRY" as const,
-          id: String(r.id),
-          date: String(r.date ?? "").slice(0, 10),
-          amount_cents: r.amount_cents,
-          payee_or_name: String(r.payee ?? ""),
-          memo: String(r.memo ?? ""),
-        }));
-
-        const res: any = await getCategorySuggestions({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          items,
-          limitPerItem: 3,
-        });
-
-        const next: Record<string, any[]> = {};
-        for (const it of items) {
-          const id = it.id;
-          const s = res?.suggestionsById?.[id] ?? [];
-          next[id] = Array.isArray(s) ? s : [];
-        }
-
-        if (!cancelled) setSugByEntryId(next);
-      } catch {
-        if (!cancelled) setSugByEntryId({});
-      } finally {
-        if (!cancelled) setSugLoading(false);
+      const next: Record<string, any[]> = {};
+      for (const it of items) {
+        const id = it.id;
+        const s = res?.suggestionsById?.[id] ?? [];
+        next[id] = Array.isArray(s) ? s : [];
       }
-    })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedBusinessId, selectedAccountId, suggestionTargetIds]);
+      return next;
+    },
+  });
+
+  const sugByEntryId = (suggestionsQ.data ?? {}) as Record<string, any[]>;
+  const sugLoading = suggestionsQ.isFetching;
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -578,7 +555,7 @@ export default function CategoryReviewPageClient() {
     return out.slice(0, 200);
   }, [selectedSuggestionByEntryId]);
   return (
-    <div className="space-y-4 max-w-6xl">
+    <div className="space-y-4 max-w-6xl h-[calc(100vh-96px)] overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
@@ -727,8 +704,7 @@ export default function CategoryReviewPageClient() {
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="max-h-[calc(100vh-340px)] overflow-y-auto">
-                <LedgerTableShell
+              <LedgerTableShell scrollMode="visible"
                   colgroup={
                     <>
                       <col style={{ width: 36 }} />
@@ -765,7 +741,9 @@ export default function CategoryReviewPageClient() {
                         const dateYmd = String(e.date ?? "").slice(0, 10);
                         const failMsg = failedById[id];
                         const isSelected = selectedIds.has(id);
-
+                        const typeUpper = String(e.type ?? "").toUpperCase();
+                        const payeeLower = String(e.payee ?? "").trim().toLowerCase();
+                        const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
                         const categoryLabel = e.category_id
                           ? (categoryNameById[String(e.category_id)] ?? "Unknown category")
                           : "Uncategorized";
@@ -801,9 +779,10 @@ export default function CategoryReviewPageClient() {
                                 {/* Per-row category dropdown (applies immediately on change) */}
                                 <select
                                   className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
-                                  value={e.category_id ? String(e.category_id) : ""}
-                                  disabled={!!pendingIds[id]}
+                                  value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
+                                  disabled={isOpening || !!pendingIds[id]}
                                   onChange={async (ev) => {
+                                    if (isOpening) return;
                                     if (!selectedBusinessId || !selectedAccountId) return;
 
                                     const v = ev.target.value;
@@ -1003,6 +982,15 @@ export default function CategoryReviewPageClient() {
 
                                           {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
                                           {sugLoading && !list.length ? <span className="text-[10px] text-slate-400">Loading</span> : null}
+                                          {suggestionsQ.error && !list.length ? (
+                                            <button
+                                              type="button"
+                                              className="text-[10px] text-primary hover:underline"
+                                              onClick={() => void suggestionsQ.refetch()}
+                                            >
+                                              Retry
+                                            </button>
+                                          ) : null}
                                         </>
                                       );
                                     })()}
@@ -1017,7 +1005,6 @@ export default function CategoryReviewPageClient() {
                   }
                   footer={null}
                 />
-              </div>
             </div>
           )}
 

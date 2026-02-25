@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -174,6 +174,23 @@ export default function VendorDetailPageClient() {
   const CLOSED_PERIOD_MSG = "This period is closed. Reopen period to modify.";
 
   const [loading, setLoading] = useState(false);
+
+  // Phase 1 Stabilization:
+  // 1) Loading token prevents overlapping async flows from clearing each other’s busy state.
+  // 2) Refresh epoch + coalescing prevents stale refresh commits and overlapping refreshes.
+  const loadingTokenRef = useRef(0);
+  function beginLoading() {
+    const token = ++loadingTokenRef.current;
+    setLoading(true);
+    return token;
+  }
+  function endLoading(token: number) {
+    if (token === loadingTokenRef.current) setLoading(false);
+  }
+
+  const refreshEpochRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const refreshQueuedRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
   const [errIsClosed, setErrIsClosed] = useState(false);
   const [vendor, setVendor] = useState<any>(null);
@@ -287,60 +304,90 @@ export default function VendorDetailPageClient() {
 
   async function refresh() {
     if (!businessId || !vendorId) return;
-    setLoading(true);
-    setErr(null);
-    try {
-      const [vRes, billsRes, sumRes, uploadsRes, payRes] = await Promise.all([
-        getVendor({ businessId, vendorId }),
-        listBillsByVendor({ businessId, vendorId, status: "all", limit: 200 }),
-        getVendorApSummary({ businessId, vendorId, asOf: todayYmd() }),
 
-        apiFetchWithRetry(
-          `/v1/businesses/${businessId}/uploads?type=INVOICE&vendorId=${encodeURIComponent(vendorId)}&limit=50`,
-          { method: "GET" }
-        ),
+    // Coalesce refreshes: 1 in-flight, 1 queued
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
 
-        apiFetchWithRetry(
-          `/v1/businesses/${businessId}/vendors/${vendorId}/ap/payments-summary?limit=200`,
-          { method: "GET" },
-          1
-        ).catch((e: any) => {
-          // Do not break vendor page if payments endpoint is transient
-          return { ok: false, error: e?.message ?? "Payments unavailable", payments: [] };
-        }),
-      ]);
+    const myEpoch = ++refreshEpochRef.current;
+    const loadingToken = beginLoading();
 
-      setVendor(vRes.vendor);
-      setName(String(vRes.vendor?.name ?? ""));
-      setNotes(String(vRes.vendor?.notes ?? ""));
+    const run = (async () => {
+      setErr(null);
 
-      setBills(Array.isArray(billsRes.bills) ? billsRes.bills : []);
-      setApSummary(sumRes.summary ?? null);
+      try {
+        const [vRes, billsRes, sumRes, uploadsRes, payRes] = await Promise.all([
+          getVendor({ businessId, vendorId }),
+          listBillsByVendor({ businessId, vendorId, status: "all", limit: 200 }),
+          getVendorApSummary({ businessId, vendorId, asOf: todayYmd() }),
 
-      setInvoiceUploads(Array.isArray((uploadsRes as any)?.items) ? (uploadsRes as any).items : []);
+          apiFetchWithRetry(
+            `/v1/businesses/${businessId}/uploads?type=INVOICE&vendorId=${encodeURIComponent(vendorId)}&limit=50`,
+            { method: "GET" }
+          ),
 
-      if ((payRes as any)?.ok === false) {
-        setPaymentsErr(String((payRes as any)?.error ?? "Payments unavailable"));
-        setVendorPayments([]);
-        setVendorCreditCents(0n);
-        setCreditApplyCandidateEntryId(null);
-      } else {
-        setPaymentsErr(null);
+          apiFetchWithRetry(
+            `/v1/businesses/${businessId}/vendors/${vendorId}/ap/payments-summary?limit=200`,
+            { method: "GET" },
+            1
+          ).catch((e: any) => {
+            // Do not break vendor page if payments endpoint is transient
+            return { ok: false, error: e?.message ?? "Payments unavailable", payments: [] };
+          }),
+        ]);
 
-        const payments = Array.isArray((payRes as any)?.payments) ? (payRes as any).payments : [];
-        setVendorPayments(payments);
+        // Epoch guard: do not commit stale refresh results
+        if (myEpoch !== refreshEpochRef.current) return;
 
-        const totalUnapplied = toBigIntSafe((payRes as any)?.totals?.total_unapplied_cents ?? 0);
-        setVendorCreditCents(totalUnapplied);
+        setVendor(vRes.vendor);
+        setName(String(vRes.vendor?.name ?? ""));
+        setNotes(String(vRes.vendor?.notes ?? ""));
 
-        // Candidate payment entry: first with unapplied > 0 (do not preselect until account context is known)
-        const cand = payments.find((p: any) => toBigIntSafe(p?.unapplied_cents ?? 0) > 0n);
-        setCreditApplyCandidateEntryId(cand ? String(cand.entry_id ?? "") : null);
+        setBills(Array.isArray(billsRes.bills) ? billsRes.bills : []);
+        setApSummary(sumRes.summary ?? null);
+
+        setInvoiceUploads(Array.isArray((uploadsRes as any)?.items) ? (uploadsRes as any).items : []);
+
+        if ((payRes as any)?.ok === false) {
+          setPaymentsErr(String((payRes as any)?.error ?? "Payments unavailable"));
+          setVendorPayments([]);
+          setVendorCreditCents(0n);
+          setCreditApplyCandidateEntryId(null);
+        } else {
+          setPaymentsErr(null);
+
+          const payments = Array.isArray((payRes as any)?.payments) ? (payRes as any).payments : [];
+          setVendorPayments(payments);
+
+          const totalUnapplied = toBigIntSafe((payRes as any)?.totals?.total_unapplied_cents ?? 0);
+          setVendorCreditCents(totalUnapplied);
+
+          // Candidate payment entry: first with unapplied > 0 (do not preselect until account context is known)
+          const cand = payments.find((p: any) => toBigIntSafe(p?.unapplied_cents ?? 0) > 0n);
+          setCreditApplyCandidateEntryId(cand ? String(cand.entry_id ?? "") : null);
+        }
+      } catch (e: any) {
+        if (myEpoch === refreshEpochRef.current) setErr(e?.message ?? "Failed to load vendor");
+      } finally {
+        // Only clear loading if this refresh still owns the latest loading token
+        endLoading(loadingToken);
       }
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to load vendor");
+    })();
+
+    refreshInFlightRef.current = run;
+
+    try {
+      await run;
     } finally {
-      setLoading(false);
+      if (refreshInFlightRef.current === run) refreshInFlightRef.current = null;
+
+      // Run one queued refresh (latest scope wins automatically due to epoch)
+      if (refreshQueuedRef.current) {
+        refreshQueuedRef.current = false;
+        void refresh();
+      }
     }
   }
 
@@ -367,7 +414,7 @@ export default function VendorDetailPageClient() {
 
   async function onSave() {
     if (!businessId || !vendorId) return;
-    setLoading(true);
+    const loadingToken = beginLoading();
     setErr(null);
     try {
       const res = await updateVendor({
@@ -381,7 +428,7 @@ export default function VendorDetailPageClient() {
     } catch (e: any) {
       setErr(e?.message ?? "Failed to update vendor");
     } finally {
-      setLoading(false);
+      endLoading(loadingToken);
     }
   }
 
@@ -1182,8 +1229,9 @@ export default function VendorDetailPageClient() {
                     );
                   }
 
+                  let loadingToken = 0;
                   try {
-                    setLoading(true);
+                    loadingToken = beginLoading();
 
                     if (editingId) {
                       const res: any = await updateBill({
@@ -1236,7 +1284,7 @@ export default function VendorDetailPageClient() {
                     setErrIsClosed(isClosedPeriodError(e, msg));
                   } finally {
                     if (editingId) clearBillPending(editingId);
-                    setLoading(false);
+                    endLoading(loadingToken);
                   }
                 }}
               >

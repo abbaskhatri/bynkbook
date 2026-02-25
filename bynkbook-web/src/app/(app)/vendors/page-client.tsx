@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -63,6 +63,23 @@ export default function VendorsPageClient() {
   const [sort, setSort] = useState<SortKey>("name_asc");
 
   const [loading, setLoading] = useState(false);
+
+  // Phase 1 Stabilization:
+  // - Loading token prevents overlapping async flows from clearing each other’s busy state
+  // - Refresh epoch + coalescing prevents stale refresh commits and overlapping refreshes
+  const loadingTokenRef = useRef(0);
+  function beginLoading() {
+    const token = ++loadingTokenRef.current;
+    setLoading(true);
+    return token;
+  }
+  function endLoading(token: number) {
+    if (token === loadingTokenRef.current) setLoading(false);
+  }
+
+  const refreshEpochRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const refreshQueuedRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
 
   const bannerMsg = err || appErrorMessageOrNull(businessesQ.error) || null;
@@ -79,43 +96,58 @@ export default function VendorsPageClient() {
   async function refresh() {
     if (!businessId) return;
 
-    let mounted = true;
-    const cancel = () => { mounted = false; };
-
-    // If this refresh was triggered while unmounting, guard state updates
-    setLoading(true);
-    setErr(null);
-
-    try {
-      const res = await listVendors({ businessId, q: q.trim() || undefined, sort });
-      if (!mounted) return;
-
-      const list = res.vendors ?? [];
-      setVendors(list);
-
-      const ids = list.map((v: any) => String(v.id)).slice(0, 200);
-      const sumRes = await getVendorsApSummary({ businessId, vendorIds: ids, limit: 200 });
-      if (!mounted) return;
-
-      const m: Record<string, any> = {};
-      for (const row of (sumRes.vendors ?? [])) m[String(row.vendor_id)] = row;
-      setApByVendorId(m);
-    } catch (e: any) {
-      if (!mounted) return;
-      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
-    } finally {
-      if (!mounted) return;
-      setLoading(false);
+    // Coalesce refresh calls: 1 in-flight, 1 queued
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
     }
 
-    // Attach cancel to window lifecycle for safety
-    window.addEventListener("beforeunload", cancel, { once: true });
+    const myEpoch = ++refreshEpochRef.current;
+    const loadingToken = beginLoading();
+    setErr(null);
+
+    const run = (async () => {
+      try {
+        const res = await listVendors({ businessId, q: q.trim() || undefined, sort });
+        if (myEpoch !== refreshEpochRef.current) return;
+
+        const list = res.vendors ?? [];
+        setVendors(list);
+
+        const ids = list.map((v: any) => String(v.id)).slice(0, 200);
+        const sumRes = await getVendorsApSummary({ businessId, vendorIds: ids, limit: 200 });
+        if (myEpoch !== refreshEpochRef.current) return;
+
+        const m: Record<string, any> = {};
+        for (const row of (sumRes.vendors ?? [])) m[String(row.vendor_id)] = row;
+        setApByVendorId(m);
+      } catch (e: any) {
+        if (myEpoch !== refreshEpochRef.current) return;
+        setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
+      } finally {
+        endLoading(loadingToken);
+      }
+    })();
+
+    refreshInFlightRef.current = run;
+
+    try {
+      await run;
+    } finally {
+      if (refreshInFlightRef.current === run) refreshInFlightRef.current = null;
+
+      // Run one queued refresh (latest scope wins due to epoch)
+      if (refreshQueuedRef.current) {
+        refreshQueuedRef.current = false;
+        void refresh();
+      }
+    }
   }
 
   async function onCreate() {
     if (!businessId) return;
     if (!name.trim()) return;
-    setLoading(true);
+    const loadingToken = beginLoading();
     setErr(null);
     try {
       const res = await createVendor({ businessId, name: name.trim(), notes: notes.trim() || undefined });
@@ -127,7 +159,7 @@ export default function VendorsPageClient() {
     } catch (e: any) {
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
-      setLoading(false);
+      endLoading(loadingToken);
     }
   }
 
@@ -217,7 +249,7 @@ export default function VendorsPageClient() {
         </div>
 
         <div className="px-3 pb-2">
-          <InlineBanner title="Can’t load vendors" message={bannerMsg} onRetry={() => router.refresh()} />
+        <InlineBanner title="Can’t load vendors" message={bannerMsg} onRetry={() => void refresh()} />
         </div>
 
         {!businessId && !businessesQ.isLoading ? (
@@ -263,45 +295,69 @@ export default function VendorsPageClient() {
           }
           addRow={null}
           body={
-            <>
-              {vendors.map((v: any) => (
-                <tr
-                  key={v.id}
-                  className="h-9 border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
-                  onClick={() => {
-                    if (!businessId) return;
-                    router.push(`/vendors/${v.id}?businessId=${encodeURIComponent(businessId)}`);
-                  }}
-                >
-                  <td className="px-3 text-sm">{v.name}</td>
+            loading ? (
+              <>
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <tr key={`sk-${i}`} className="h-9 border-b border-slate-100">
+                    <td className="px-3">
+                      <div className="h-3 w-40 rounded bg-slate-200 animate-pulse" />
+                    </td>
+                    <td className="px-3">
+                      <div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" />
+                    </td>
+                    <td className="px-3">
+                      <div className="h-3 w-56 rounded bg-slate-200 animate-pulse" />
+                    </td>
+                    <td className="px-3">
+                      <div className="h-3 w-20 rounded bg-slate-200 animate-pulse" />
+                    </td>
+                    <td className="px-3">
+                      <div className="h-3 w-20 rounded bg-slate-200 animate-pulse" />
+                    </td>
+                  </tr>
+                ))}
+              </>
+            ) : (
+              <>
+                {vendors.map((v: any) => (
+                  <tr
+                    key={v.id}
+                    className="h-9 border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                    onClick={() => {
+                      if (!businessId) return;
+                      router.push(`/vendors/${v.id}?businessId=${encodeURIComponent(businessId)}`);
+                    }}
+                  >
+                    <td className="px-3 text-sm">{v.name}</td>
 
-                  <td className="px-3 text-sm tabular-nums font-semibold">
-                    {(() => {
-                      const row = apByVendorId[String(v.id)];
-                      const cents = toBigIntSafe(row?.total_open_cents ?? 0);
-                      const txt = formatUsdFromCents(cents);
-                      return <span className={cents > 0n ? "text-slate-900" : "text-slate-400"}>{txt}</span>;
-                    })()}
-                  </td>
+                    <td className="px-3 text-sm tabular-nums font-semibold">
+                      {(() => {
+                        const row = apByVendorId[String(v.id)];
+                        const cents = toBigIntSafe(row?.total_open_cents ?? 0);
+                        const txt = formatUsdFromCents(cents);
+                        return <span className={cents > 0n ? "text-slate-900" : "text-slate-400"}>{txt}</span>;
+                      })()}
+                    </td>
 
-                  <td className="px-3 text-xs text-slate-600 tabular-nums">
-                    {(() => {
-                      const row = apByVendorId[String(v.id)];
-                      const a = row?.aging;
-                      if (!a) return "—";
-                      const c = toBigIntSafe(a.current ?? 0);
-                      const d30 = toBigIntSafe(a.days_30 ?? 0);
-                      const d60 = toBigIntSafe(a.days_60 ?? 0);
-                      const d90 = toBigIntSafe(a.days_90 ?? 0);
-                      return `C ${formatUsdFromCents(c)} • 30 ${formatUsdFromCents(d30)} • 60 ${formatUsdFromCents(d60)} • 90+ ${formatUsdFromCents(d90)}`;
-                    })()}
-                  </td>
+                    <td className="px-3 text-xs text-slate-600 tabular-nums">
+                      {(() => {
+                        const row = apByVendorId[String(v.id)];
+                        const a = row?.aging;
+                        if (!a) return "—";
+                        const c = toBigIntSafe(a.current ?? 0);
+                        const d30 = toBigIntSafe(a.days_30 ?? 0);
+                        const d60 = toBigIntSafe(a.days_60 ?? 0);
+                        const d90 = toBigIntSafe(a.days_90 ?? 0);
+                        return `C ${formatUsdFromCents(c)} • 30 ${formatUsdFromCents(d30)} • 60 ${formatUsdFromCents(d60)} • 90+ ${formatUsdFromCents(d90)}`;
+                      })()}
+                    </td>
 
-                  <td className="px-3 text-sm text-slate-600">{String(v.updated_at ?? "").slice(0, 10)}</td>
-                  <td className="px-3 text-sm text-slate-600">{String(v.created_at ?? "").slice(0, 10)}</td>
-                </tr>
-              ))}
-            </>
+                    <td className="px-3 text-sm text-slate-600">{String(v.updated_at ?? "").slice(0, 10)}</td>
+                    <td className="px-3 text-sm text-slate-600">{String(v.created_at ?? "").slice(0, 10)}</td>
+                  </tr>
+                ))}
+              </>
+            )
           }
           footer={null}
         />

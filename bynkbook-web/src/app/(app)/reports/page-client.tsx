@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,7 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 
 type TabKey = "pnl" | "cashflow" | "accounts" | "ap" | "categories";
+type RangeMode = "weekly" | "monthly" | "yearly" | "custom";
 
 function todayYmd() {
   const d = new Date();
@@ -56,6 +57,37 @@ function monthRangeFromYm(ym: string) {
   const end = new Date(y, m, 0); // day 0 = last day of previous month => last day of this month because m is 1-based here
   const to = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
   return { from, to };
+}
+
+function yearNowY() {
+  return String(new Date().getFullYear());
+}
+
+function yearRangeFromY(y: string) {
+  const yy = String(y).slice(0, 4);
+  return { from: `${yy}-01-01`, to: `${yy}-12-31` };
+}
+
+function startOfWeekYmd(d: Date) {
+  // Week starts Monday
+  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = date.getDay(); // 0 Sun .. 6 Sat
+  const diff = (day === 0 ? -6 : 1) - day;
+  date.setDate(date.getDate() + diff);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+function addDaysYmd(ymd: string, delta: number) {
+  const [y, m, d] = ymd.split("-").map((x) => Number(x));
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 // BigInt-safe accounting currency formatting (USD)
@@ -382,13 +414,45 @@ export default function ReportsPageClient() {
   }, [businessId, businessesQ.data]);
 
   const [tab, setTab] = useState<TabKey>("pnl"); // Default tab: P&L
-  const [ym, setYm] = useState(monthNowYm()); // Month picker only
-  const [ytd, setYtd] = useState(false); // YTD toggle only
 
-  const { from, to } = useMemo(() => monthRangeFromYm(ym), [ym]);
+  const [rangeMode, setRangeMode] = useState<RangeMode>("monthly");
+  const [ym, setYm] = useState(monthNowYm()); // monthly
+  const [year, setYear] = useState(yearNowY()); // yearly
+  const [weekFrom, setWeekFrom] = useState(() => startOfWeekYmd(new Date())); // weekly (start of week)
+  const [customFrom, setCustomFrom] = useState(() => monthRangeFromYm(monthNowYm()).from);
+  const [customTo, setCustomTo] = useState(() => monthRangeFromYm(monthNowYm()).to);
+
+  const [ytd, setYtd] = useState(false); // applies only to monthly/yearly
+
+  const { from, to } = useMemo(() => {
+    if (rangeMode === "weekly") {
+      const from = weekFrom;
+      const to = addDaysYmd(weekFrom, 6);
+      return { from, to };
+    }
+    if (rangeMode === "yearly") return yearRangeFromY(year);
+    if (rangeMode === "custom") return { from: customFrom, to: customTo };
+    return monthRangeFromYm(ym);
+  }, [rangeMode, ym, year, weekFrom, customFrom, customTo]);
+
   const accountId = selectedAccountId;
 
   const [loading, setLoading] = useState(false);
+
+  // Phase 1 Stabilization:
+  // - Loading token prevents overlapping async flows from clearing each other’s busy state
+  // - Run epoch prevents stale async completions from committing after tab/range changes
+  const loadingTokenRef = useRef(0);
+  function beginLoading() {
+    const token = ++loadingTokenRef.current;
+    setLoading(true);
+    return token;
+  }
+  function endLoading(token: number) {
+    if (token === loadingTokenRef.current) setLoading(false);
+  }
+
+  const runEpochRef = useRef(0);
   const [err, setErr] = useState<string | null>(null);
 
   const bannerMsg =
@@ -417,30 +481,36 @@ export default function ReportsPageClient() {
 
   async function run() {
     if (!businessId) return;
-    setLoading(true);
+
+    const myEpoch = ++runEpochRef.current;
+    const loadingToken = beginLoading();
     setErr(null);
 
     try {
       if (tab === "pnl") {
         const res = await getPnlSummary(businessId, { from, to, accountId, ytd });
+        if (myEpoch !== runEpochRef.current) return;
         setPnl(res);
         return;
       }
 
       if (tab === "cashflow") {
         const res = await getCashflowSeries(businessId, { from, to, accountId, ytd });
+        if (myEpoch !== runEpochRef.current) return;
         setCashflow(res);
         return;
       }
 
       if (tab === "accounts") {
         const res = await getAccountsSummary(businessId, { asOf, accountId, includeArchived: includeArchivedAccounts });
+        if (myEpoch !== runEpochRef.current) return;
         setAccountsSummary(res);
         return;
       }
 
       if (tab === "ap") {
         const res = await getApAging(businessId, { asOf });
+        if (myEpoch !== runEpochRef.current) return;
         setApAging(res);
         setApVendorId(null);
         setApVendorDetail(null);
@@ -449,6 +519,7 @@ export default function ReportsPageClient() {
 
       if (tab === "categories") {
         const res = await getCategories(businessId, { from, to, accountId });
+        if (myEpoch !== runEpochRef.current) return;
         setCategories(res);
         setCatDetail(null);
         setCatDetailCategoryId(null);
@@ -456,31 +527,40 @@ export default function ReportsPageClient() {
         return;
       }
     } catch (e: any) {
+      if (myEpoch !== runEpochRef.current) return;
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
-      setLoading(false);
+      endLoading(loadingToken);
     }
   }
 
   async function openApVendor(vendorId: string) {
     if (!businessId) return;
-    setLoading(true);
+
+    const myEpoch = ++runEpochRef.current;
+    const loadingToken = beginLoading();
     setErr(null);
+
     try {
       const res = await getApAgingVendor(businessId, { asOf, vendorId });
+      if (myEpoch !== runEpochRef.current) return;
       setApVendorId(vendorId);
       setApVendorDetail(res);
     } catch (e: any) {
+      if (myEpoch !== runEpochRef.current) return;
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
-      setLoading(false);
+      endLoading(loadingToken);
     }
   }
 
   async function openCategoryDetail(categoryId: string | null, page: number) {
     if (!businessId) return;
-    setLoading(true);
+
+    const myEpoch = ++runEpochRef.current;
+    const loadingToken = beginLoading();
     setErr(null);
+
     try {
       const res = await getCategoriesDetail(businessId, {
         from,
@@ -490,20 +570,31 @@ export default function ReportsPageClient() {
         page,
         take: 50,
       });
+      if (myEpoch !== runEpochRef.current) return;
       setCatDetail(res);
       setCatDetailCategoryId(categoryId);
       setCatPage(page);
     } catch (e: any) {
+      if (myEpoch !== runEpochRef.current) return;
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
-      setLoading(false);
+      endLoading(loadingToken);
     }
   }
 
   // Small convenience: when switching tabs, clear error but do NOT auto-run.
   useEffect(() => {
     setErr(null);
+    runEpochRef.current += 1;
+    setLoading(false);
   }, [tab]);
+
+  // YTD only makes sense for monthly/yearly; force off for weekly/custom
+  useEffect(() => {
+    if (rangeMode === "weekly" || rangeMode === "custom") {
+      setYtd(false);
+    }
+  }, [rangeMode]);
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
@@ -572,14 +663,52 @@ export default function ReportsPageClient() {
             left={
               <>
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">Month</div>
-                  <Input
-                    type="month"
-                    className="h-7 w-[140px] text-xs"
-                    value={ym}
-                    onChange={(e) => setYm(e.target.value)}
-                  />
+                  <div className="text-[11px] text-slate-600">Range</div>
+                  <select
+                    className="h-7 w-[140px] text-xs rounded-md border border-slate-200 bg-white px-2"
+                    value={rangeMode}
+                    onChange={(e) => setRangeMode(e.target.value as RangeMode)}
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                    <option value="custom">Custom</option>
+                  </select>
                 </div>
+
+                {rangeMode === "monthly" ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-slate-600">Month</div>
+                    <Input type="month" className="h-7 w-[140px] text-xs" value={ym} onChange={(e) => setYm(e.target.value)} />
+                  </div>
+                ) : null}
+
+                {rangeMode === "yearly" ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-slate-600">Year</div>
+                    <Input type="number" className="h-7 w-[110px] text-xs" value={year} onChange={(e) => setYear(e.target.value)} />
+                  </div>
+                ) : null}
+
+                {rangeMode === "weekly" ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-slate-600">Week of</div>
+                    <Input type="date" className="h-7 w-[140px] text-xs" value={weekFrom} onChange={(e) => setWeekFrom(e.target.value)} />
+                  </div>
+                ) : null}
+
+                {rangeMode === "custom" ? (
+                  <div className="flex items-end gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-slate-600">From</div>
+                      <Input type="date" className="h-7 w-[140px] text-xs" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-slate-600">To</div>
+                      <Input type="date" className="h-7 w-[140px] text-xs" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="ml-2 flex flex-col justify-end">
                   <div className="text-[11px] text-slate-500">Range</div>
@@ -588,12 +717,13 @@ export default function ReportsPageClient() {
                   </div>
                 </div>
 
+                <div className="ml-4 flex items-center gap-2">
+                  <div className="text-[11px] text-slate-600">YTD</div>
+                  <PillToggle checked={ytd} onCheckedChange={(next) => setYtd(next)} disabled={rangeMode === "weekly" || rangeMode === "custom"} />
+                </div>
+
                 <div className="ml-4 flex items-end gap-3">
                   <div className="flex flex-col justify-end">
-                    <div className="text-[11px] text-slate-600">YTD</div>
-                    <PillToggle label="" checked={ytd} onCheckedChange={(next) => setYtd(next)} />
-                    <span className="text-xs text-slate-700">{ytd ? "On" : "Off"}</span>
-
                     {tab === "accounts" ? (
                       <button
                         type="button"

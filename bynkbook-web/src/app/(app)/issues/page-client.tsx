@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -167,6 +167,17 @@ export default function IssuesPageClient() {
 
   const [scanBusy, setScanBusy] = useState(false);
 
+  // Phase 1 Stabilization: epoch guard for scan workflows
+  // - prevents stale scan completion from winning after scope change
+  // - guarantees busy clears deterministically
+  const scanEpochRef = useRef(0);
+
+  useEffect(() => {
+    // Scope change cancels any prior scan "epoch"
+    scanEpochRef.current += 1;
+    setScanBusy(false);
+  }, [selectedBusinessId, selectedAccountId]);
+
   function shouldRunScan(iso: string | null) {
     if (!iso) return true;
     const t = Date.parse(iso);
@@ -199,6 +210,7 @@ export default function IssuesPageClient() {
 
     setScanErr(null);
     clearMutErr();
+    const myEpoch = ++scanEpochRef.current;
     setScanBusy(true);
 
     try {
@@ -254,7 +266,7 @@ export default function IssuesPageClient() {
       if (!r.isClosed) setScanErr(r.msg);
       else setScanErr(null);
     } finally {
-      setScanBusy(false);
+      if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
   }
 
@@ -262,6 +274,7 @@ export default function IssuesPageClient() {
     if (scanBusy) return;
     if (!selectedBusinessId || !selectedAccountId) return;
 
+    const myEpoch = ++scanEpochRef.current;
     setScanBusy(true);
     try {
       const session = await fetchAuthSession();
@@ -313,7 +326,7 @@ export default function IssuesPageClient() {
       }
       setLastScanAt(nowIso);
     } finally {
-      setScanBusy(false);
+      if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
   }
 
@@ -825,6 +838,15 @@ export default function IssuesPageClient() {
     </div>
   ) : null;
 
+  // Phase 1: per-surface retry (no full-page collapse / no router.refresh storms)
+  function retrySurfaceLoads() {
+    void businessesQ.refetch?.();
+    void accountsQ.refetch?.();
+    void entriesQ.refetch?.();
+    void categoriesQ.refetch?.();
+    void issuesQ.refetch();
+  }
+
   // Auth handled by AppShell
 
   return (
@@ -864,7 +886,7 @@ export default function IssuesPageClient() {
         {(bannerMsg || mutErr) ? (
           <div className="px-3 py-2">
             {bannerMsg ? (
-              <InlineBanner title="Can’t load issues" message={bannerMsg} onRetry={() => router.refresh()} />
+              <InlineBanner title="Can’t load issues" message={bannerMsg} onRetry={() => retrySurfaceLoads()} />
             ) : (
               <InlineBanner
                 title={mutErrTitle || "Can’t update issues"}
@@ -958,10 +980,38 @@ export default function IssuesPageClient() {
               </thead>
 
               <tbody>
-                {issuesQ.isError ? (
+                {(issuesQ.isLoading || entriesQ.isLoading) ? (
+                  <>
+                    {Array.from({ length: 10 }).map((_, i) => (
+                      <tr key={`sk-${i}`} className="h-[24px] border-b border-slate-200">
+                        <td className="px-2 py-0.5">
+                          <div className="h-3 w-3 rounded bg-slate-200 animate-pulse" />
+                        </td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-40 rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-full rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-slate-200 animate-pulse" /></td>
+                      </tr>
+                    ))}
+                  </>
+                ) : issuesQ.isError ? (
                   <tr>
                     <td colSpan={8} className="p-3 text-xs text-red-600" role="alert">
-                      Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong. Try again."}
+                      <div className="flex items-center justify-between gap-3">
+                        <span>
+                          Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong."}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          onClick={() => void issuesQ.refetch()}
+                        >
+                          Retry
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ) : renderRows.length === 0 ? (
@@ -1168,6 +1218,7 @@ export default function IssuesPageClient() {
         )}
         categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
         onDidMutate={() => {
+          clearSelection();
           if (selectedBusinessId && selectedAccountId) {
             void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
             void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });

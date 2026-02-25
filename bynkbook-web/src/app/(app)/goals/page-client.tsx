@@ -80,6 +80,7 @@ export default function GoalsPageClient() {
   const [rows, setRows] = useState<GoalRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -120,7 +121,7 @@ export default function GoalsPageClient() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, selectedBusinessId]);
+  }, [authReady, selectedBusinessId, reloadNonce]);
 
   const kpi = useMemo(() => {
     const total = rows.length;
@@ -204,7 +205,20 @@ export default function GoalsPageClient() {
             {loading ? <div className="text-xs text-slate-500">Loading…</div> : null}
           </div>
 
-          {err ? <div className="px-3 py-2 text-xs text-red-700 border-b border-slate-200">{err}</div> : null}
+          {err ? (
+            <div className="px-3 py-2 text-xs text-red-700 border-b border-slate-200 flex items-center justify-between gap-3">
+              <span>{err}</span>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-7 px-3 text-xs"
+                disabled={loading}
+                onClick={() => setReloadNonce((n) => n + 1)}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : null}
 
           <LedgerTableShell
             colgroup={
@@ -227,7 +241,19 @@ export default function GoalsPageClient() {
             }
             addRow={null}
             body={
-              rows.length === 0 && !loading ? (
+              loading ? (
+                <>
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <tr key={`sk-${i}`} className="h-9 border-b border-slate-100">
+                      <td className="px-3"><div className="h-3 w-40 rounded bg-slate-200 animate-pulse" /></td>
+                      <td className="px-3"><div className="h-3 w-48 rounded bg-slate-200 animate-pulse" /></td>
+                      <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse mx-auto" /></td>
+                      <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                      <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                    </tr>
+                  ))}
+                </>
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-3 py-3 text-sm text-slate-600">
                     No goals yet.

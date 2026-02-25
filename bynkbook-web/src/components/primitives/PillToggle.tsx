@@ -4,54 +4,41 @@ import * as React from "react";
 import { ringFocus } from "./tokens";
 
 export type PillToggleProps = {
-  label?: React.ReactNode;
   checked: boolean;
   onCheckedChange: (next: boolean) => void;
   disabled?: boolean;
   id?: string;
+  title?: string;
 };
 
-export function PillToggle({ label, checked, onCheckedChange, disabled = false, id }: PillToggleProps) {
+export function PillToggle({ checked, onCheckedChange, disabled = false, id, title }: PillToggleProps) {
   return (
-    <div className="flex items-center gap-2">
-      {label ? (
-        <label
-          htmlFor={id}
-          className={[
-            "text-xs select-none",
-            disabled ? "text-slate-400" : "text-slate-700",
-          ].join(" ")}
-        >
-          {label}
-        </label>
-      ) : null}
-
-      <button
-        id={id}
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={() => {
-          if (disabled) return;
-          onCheckedChange(!checked);
-        }}
+    <button
+      id={id}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => {
+        if (disabled) return;
+        onCheckedChange(!checked);
+      }}
+      className={[
+        // thinner + more compact than before
+        "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors",
+        checked ? "bg-primary/15 border-primary/25" : "bg-slate-200 border-slate-200",
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
+        ringFocus,
+      ].join(" ")}
+      title={title}
+    >
+      <span
+        aria-hidden="true"
         className={[
-          "relative inline-flex h-6 w-11 items-center rounded-full border transition-colors",
-          checked ? "bg-primary/10 text-primary border-primary/20" : "bg-slate-200 border-slate-200",
-          disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-          ringFocus,
+          "absolute left-0.5 top-1/2 -translate-y-1/2 h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+          checked ? "translate-x-4" : "translate-x-0",
         ].join(" ")}
-        title={typeof label === "string" ? label : undefined}
-      >
-        <span
-          aria-hidden="true"
-          className={[
-            "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
-            checked ? "translate-x-5" : "translate-x-1",
-          ].join(" ")}
-        />
-      </button>
-    </div>
+      />
+    </button>
   );
 }
