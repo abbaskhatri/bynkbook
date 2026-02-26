@@ -347,7 +347,8 @@ api.route("POST /v1/plaid/webhook", plaidWebhookHandler);
     } satisfies ApiHandler;
 
     api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/entries", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-
+    api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/merge", entryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    
 // ---------- Bank Transactions (Phase 4C read-only) ----------
 const bankTxHandler = {
   ...bizHandler,

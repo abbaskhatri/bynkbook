@@ -275,6 +275,181 @@ export async function handler(event: any) {
   const acctOk = await requireAccountInBusiness(prisma, biz, acct);
   if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
 
+  // -------------------------
+  // Merge duplicate entries (CPA-safe)
+  // POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/merge
+  //
+  // Rules:
+  // - Survivor amount NEVER changes
+  // - Duplicate is soft-deleted (deleted_at set)
+  // - Block if either entry is reconciled (ACTIVE MatchGroup), has active AP applications,
+  //   or differs in sourceBankTransactionId/sourceUploadId/transfer_id
+  // - Log MERGE_ENTRY activity event
+  // -------------------------
+  const isMergeEntry =
+    event?.routeKey === "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/merge";
+
+  if (isMergeEntry) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      body = {};
+    }
+
+    const duplicate_entry_id = String(body?.duplicate_entry_id ?? body?.duplicateEntryId ?? "").trim();
+    const reason = String(body?.reason ?? "").trim() || null;
+
+    if (!ent || !duplicate_entry_id) return json(400, { ok: false, error: "duplicate_entry_id is required" });
+    if (duplicate_entry_id === ent) return json(400, { ok: false, error: "Cannot merge an entry into itself" });
+
+    // Load both entries (must exist, same scope, not deleted)
+    const [survivor, dup] = await Promise.all([
+      prisma.entry.findFirst({
+        where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
+        select: {
+          id: true,
+          date: true,
+          transfer_id: true,
+          sourceUploadId: true,
+          sourceBankTransactionId: true,
+        },
+      }),
+      prisma.entry.findFirst({
+        where: { id: duplicate_entry_id, business_id: biz, account_id: acct, deleted_at: null },
+        select: {
+          id: true,
+          date: true,
+          transfer_id: true,
+          sourceUploadId: true,
+          sourceBankTransactionId: true,
+        },
+      }),
+    ]);
+
+    if (!survivor || !dup) return json(404, { ok: false, error: "Entry not found" });
+
+    // Closed period enforcement (both)
+    const cp1 = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: survivor.date });
+    if (!cp1.ok) return cp1.response;
+
+    const cp2 = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: dup.date });
+    if (!cp2.ok) return cp2.response;
+
+    // Block if entries differ on key lineage fields
+    const sUpload = survivor.sourceUploadId ?? null;
+    const dUpload = dup.sourceUploadId ?? null;
+
+    const sBank = survivor.sourceBankTransactionId ?? null;
+    const dBank = dup.sourceBankTransactionId ?? null;
+
+    const sTransfer = survivor.transfer_id ?? null;
+    const dTransfer = dup.transfer_id ?? null;
+
+    if (sUpload !== dUpload || sBank !== dBank || sTransfer !== dTransfer) {
+      return json(409, {
+        ok: false,
+        code: "MERGE_BLOCKED",
+        error: "Entries differ in source linkage; merge blocked.",
+        reason: "SOURCE_MISMATCH",
+      });
+    }
+
+    // Block if either entry is reconciled (ACTIVE MatchGroupEntry)
+    const activeMgCount = await prisma.matchGroupEntry.count({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        entry_id: { in: [ent, duplicate_entry_id] },
+        matchGroup: { status: "ACTIVE" },
+      },
+    });
+
+    if (activeMgCount > 0) {
+      return json(409, {
+        ok: false,
+        code: "MERGE_BLOCKED",
+        error: "Entry is reconciled; merge blocked.",
+        reason: "RECONCILED",
+      });
+    }
+
+    // Block if either entry has active AP applications
+    const activeApps = await prisma.billPaymentApplication.count({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        entry_id: { in: [ent, duplicate_entry_id] },
+        is_active: true,
+      },
+    });
+
+    if (activeApps > 0) {
+      return json(409, {
+        ok: false,
+        code: "MERGE_BLOCKED",
+        error: "Entry has active AP applications; merge blocked.",
+        reason: "AP_APPLIED",
+      });
+    }
+
+    // Transaction: record merge + soft delete duplicate + activity log
+    const mergeId = randomUUID();
+    await prisma.$transaction(async (tx: any) => {
+      await tx.entryMerge.create({
+        data: {
+          id: mergeId,
+          business_id: biz,
+          account_id: acct,
+          survivor_entry_id: ent,
+          merged_entry_id: duplicate_entry_id,
+          reason,
+          actor_user_id: sub,
+        },
+      });
+
+      // Soft-delete ONLY the duplicate. Survivor remains unchanged.
+      await tx.entry.updateMany({
+        where: { id: duplicate_entry_id, business_id: biz, account_id: acct, deleted_at: null },
+        data: { deleted_at: new Date(), updated_at: new Date() },
+      });
+
+      // Resolve duplicate issues for both entries (so Issues UI clears immediately)
+      await tx.entryIssue.updateMany({
+        where: {
+          business_id: biz,
+          account_id: acct,
+          entry_id: { in: [ent, duplicate_entry_id] },
+          issue_type: "DUPLICATE",
+          status: "OPEN",
+        },
+        data: { status: "RESOLVED", resolved_at: new Date(), updated_at: new Date() },
+      });
+
+      await logActivity(tx, {
+        businessId: biz,
+        actorUserId: sub,
+        scopeAccountId: acct,
+        eventType: "MERGE_ENTRY",
+        payloadJson: {
+          account_id: acct,
+          survivor_entry_id: ent,
+          merged_entry_id: duplicate_entry_id,
+          reason,
+        },
+      });
+    });
+
+    return json(200, {
+      ok: true,
+      merge_id: mergeId,
+      survivor_entry_id: ent,
+      deleted_entry_id: duplicate_entry_id,
+    });
+  }
+
   // GET /entries
   if (method === "GET" && path?.includes(`/v1/businesses/${biz}/accounts/${acct}/entries`)) {
     const q = qs(event);
@@ -310,8 +485,8 @@ export async function handler(event: any) {
     // Durable transfer display fields (no frontend session maps):
     // IMPORTANT: derive other account from the transfer record (not from entry legs),
     // so display remains correct even if one leg is missing in legacy data.
-    const transferIds = Array.from(
-      new Set(
+    const transferIds: string[] = Array.from(
+      new Set<string>(
         rows
           .map((r: any) => r.transfer_id)
           .filter((x: any) => !!x)
@@ -337,7 +512,7 @@ export async function handler(event: any) {
 
       const accountIds = Array.from(
         new Set(
-          transfers.flatMap((t) => [String(t.from_account_id), String(t.to_account_id)])
+          transfers.flatMap((t: any) => [String(t.from_account_id), String(t.to_account_id)])
         )
       );
 
@@ -411,7 +586,7 @@ export async function handler(event: any) {
 
     return json(200, {
       ok: true,
-      entries: rows.map((e) => {
+      entries: rows.map((e: any) => {
         const tid = e.transfer_id ? String(e.transfer_id) : null;
         const transferDisplay = tid ? transferDisplayById.get(tid) : null;
 
@@ -643,7 +818,7 @@ export async function handler(event: any) {
     const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
     if (!cp.ok) return cp.response;
 
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       // 1) Void any ACTIVE matches for this entry (brings bank txn back to Unmatched)
       await tx.bankMatch.updateMany({
         where: {

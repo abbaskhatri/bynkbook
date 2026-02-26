@@ -299,6 +299,34 @@ export async function deleteEntry(params: {
   return { deleted: !!res?.deleted || res?.ok === true };
 }
 
+export async function mergeEntry(params: {
+  businessId: string;
+  accountId: string;
+  survivorEntryId: string;
+  duplicateEntryId: string;
+  reason?: string | null;
+}): Promise<{ ok: boolean; merge_id?: string; survivor_entry_id?: string; deleted_entry_id?: string }> {
+  const { businessId, accountId, survivorEntryId, duplicateEntryId, reason } = params;
+
+  const res: any = await apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/entries/${survivorEntryId}/merge`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        duplicate_entry_id: duplicateEntryId,
+        reason: reason ?? null,
+      }),
+    }
+  );
+
+  return {
+    ok: !!res?.ok,
+    merge_id: res?.merge_id,
+    survivor_entry_id: res?.survivor_entry_id,
+    deleted_entry_id: res?.deleted_entry_id,
+  };
+}
+
 export async function restoreEntry(params: {
   businessId: string;
   accountId: string;

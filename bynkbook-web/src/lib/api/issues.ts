@@ -66,13 +66,20 @@ export async function getIssuesCount(
   const status = opts?.status ?? "OPEN";
   const accountId = opts?.accountId ?? "all";
 
-  // We only have an authoritative count endpoint (business-wide).
-  // If accountId === "all" use business count; otherwise use account issues list count.
-  if (accountId === "all" || !accountId) {
-    const res = await getBusinessIssuesCount({ businessId });
-    return { ok: true, count: res.total_open };
+  // Sidebar "Issues" should match the Issues page: DUPLICATE + STALE_CHECK (exclude MISSING_CATEGORY).
+  // Keep it server-derived and deterministic by counting from the authoritative list endpoint.
+  if (accountId && accountId !== "all") {
+    const list = await listAccountIssues({ businessId, accountId, status, limit: 500 });
+    const count = (list.issues ?? []).filter((it) => String(it.issue_type ?? "").toUpperCase() !== "MISSING_CATEGORY").length;
+    return { ok: true, count };
   }
 
-  const list = await listAccountIssues({ businessId, accountId, status, limit: 500 });
-  return { ok: true, count: list.issues.length };
+  // Business-wide fallback (not used by single-account routes)
+  const res: any = await apiFetch(
+    `/v1/businesses/${businessId}/issues/count?status=${encodeURIComponent(status)}&accountId=${encodeURIComponent(accountId)}`,
+    { method: "GET" }
+  );
+
+  const n = Number(res?.count ?? res?.total_open ?? res?.open ?? 0) || 0;
+  return { ok: true, count: n };
 }

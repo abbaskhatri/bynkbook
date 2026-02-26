@@ -24,7 +24,8 @@ import {
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { useQueryClient } from "@tanstack/react-query";
+import { getIssuesCount } from "@/lib/api/issues";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/app/pill";
 import GlobalSearch from "@/components/app/global-search";
@@ -347,29 +348,32 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     router.replace(`${pathname}?${params.toString()}`);
   }
 
-  // Sidebar attention counts (UI-only; not authoritative)
-  const [attnIssues, setAttnIssues] = useState(0);
+  // Sidebar Issues count (authoritative; server-derived)
+  const issuesCountQ = useQuery({
+    queryKey: ["issuesCount", businessId, currentAccountId || "all", "OPEN"],
+    enabled: !!businessId && !!currentAccountId,
+    queryFn: () => getIssuesCount(businessId!, { status: "OPEN", accountId: currentAccountId! }),
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const attnIssues = Number(issuesCountQ.data?.count ?? 0) || 0;
+
+  // Sidebar Category Review count (UI hint; existing behavior)
   const [attnUncat, setAttnUncat] = useState(0);
 
   useEffect(() => {
     if (!businessId || !currentAccountId) {
-      setAttnIssues(0);
       setAttnUncat(0);
       return;
     }
 
     const read = () => {
       try {
-        const kIssues = `bynkbook:attn:issues:${businessId}:${currentAccountId}`;
         const kUncat = `bynkbook:attn:uncat:${businessId}:${currentAccountId}`;
-
-        const i = Number(localStorage.getItem(kIssues) || "0");
         const u = Number(localStorage.getItem(kUncat) || "0");
-
-        setAttnIssues(Number.isFinite(i) ? i : 0);
         setAttnUncat(Number.isFinite(u) ? u : 0);
       } catch {
-        setAttnIssues(0);
         setAttnUncat(0);
       }
     };
@@ -377,14 +381,13 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     // initial read
     read();
 
-    // same-tab updates from Ledger
+    // same-tab updates from Category Review
     const onCustom = () => read();
 
     // cross-tab updates
     const onStorage = (ev: StorageEvent) => {
       if (!ev.key) return;
-      if (ev.key.includes(`bynkbook:attn:issues:${businessId}:${currentAccountId}`)) return read();
-      if (ev.key.includes(`bynkbook:attn:uncat:${businessId}:${currentAccountId}`)) return read();
+      if (ev.key.includes(`bynkbook:attn:uncat:${businessId}:${currentAccountId}`)) read();
     };
 
     window.addEventListener("bynkbook:attnCountsUpdated" as any, onCustom);

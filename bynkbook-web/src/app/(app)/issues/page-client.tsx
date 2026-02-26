@@ -910,7 +910,7 @@ export default function IssuesPageClient() {
               title="No business yet"
               description="Create a business to start using BynkBook."
               primary={{ label: "Create business", href: "/settings?tab=business" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => retrySurfaceLoads() }}
             />
           </div>
         ) : null}
@@ -921,7 +921,7 @@ export default function IssuesPageClient() {
               title="No accounts yet"
               description="Add an account to start importing and categorizing transactions."
               primary={{ label: "Add account", href: "/settings?tab=accounts" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: () => retrySurfaceLoads() }}
             />
           </div>
         ) : null}
@@ -1221,7 +1221,7 @@ export default function IssuesPageClient() {
           clearSelection();
           if (selectedBusinessId && selectedAccountId) {
             void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId, selectedAccountId, "OPEN"], exact: false });
             void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
           }
         }}
