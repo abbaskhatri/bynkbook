@@ -51,6 +51,37 @@ function ymdToDay(ymd: string) {
   return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
 }
 
+function normalizePayee(raw: string) {
+  const s = (raw || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  if (!s) return "";
+
+  // collapse whitespace
+  let out = s.replace(/\s+/g, " ");
+
+  // normalize masked digits like XXXXX / ####
+  out = out.replace(/x{3,}/g, "xxxxx");
+  out = out.replace(/#{3,}/g, "#####");
+
+  // drop punctuation noise but keep spaces
+  out = out.replace(/[^a-z0-9 ]+/g, "");
+
+  // remove long numeric fragments (store IDs, masked account numbers)
+  // e.g. 1040232, 0131899, 12301, etc.
+  out = out.replace(/\b\d{4,}\b/g, "");
+
+  // collapse again after stripping numbers
+  out = out.replace(/\s+/g, " ").trim();
+
+  // final collapse
+  out = out.replace(/\s+/g, " ").trim();
+
+  return out;
+}
+
 function todayYmd() {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
@@ -167,9 +198,14 @@ export async function handler(event: any) {
   const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean }>>();
 
   for (const e of entries) {
-    const payeeKey = (e.payee || "").trim().toLowerCase();
     const methodUpper = (e.method || "").toString().toUpperCase();
     const isCheck = methodUpper === "CHECK";
+
+    const payeeKey = normalizePayee(e.payee || "");
+
+    // Reduce false positives: skip NONCHECK duplicate detection when payee is too short/generic
+    // (CHECK duplicates remain allowed; they are higher-signal.)
+    if (!isCheck && payeeKey.length < 6) continue;
 
     const ymd = e.date.toISOString().slice(0, 10);
     const day = ymdToDay(ymd);
@@ -178,7 +214,11 @@ export async function handler(event: any) {
     // Signed amount cents included; prevents INCOME/EXPENSE cross-match by sign
     const amt = e.amount_cents.toString();
     const bucket = isCheck ? "CHECK" : "NONCHECK";
-    const key = `${bucket}|${amt}|${payeeKey}`;
+
+    // Reduce false positives: for NONCHECK include method in the key
+    const key = isCheck
+      ? `${bucket}|${amt}|${payeeKey}`
+      : `${bucket}|${amt}|${methodUpper}|${payeeKey}`;
 
     const arr = groups.get(key);
     if (arr) arr.push({ id: e.id, day, ymd, isCheck });
