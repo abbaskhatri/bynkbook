@@ -1050,6 +1050,17 @@ export default function ReconcilePageClient() {
   }, [bankTxSorted]);
 
   // MatchGroups lookup maps (read-only for now; used in next step to flip matched state)
+  const matchGroupHasAdjustment = (g: any): boolean => {
+    const entries = Array.isArray(g?.entries) ? g.entries : [];
+    for (const e of entries) {
+      // Deterministic: show Adjustment if any entry in the group is marked is_adjustment (or equivalent).
+      if (Boolean(e?.is_adjustment)) return true;
+      if (Boolean(e?.entry?.is_adjustment)) return true;
+      if (Boolean((e as any)?.entry_is_adjustment)) return true;
+    }
+    return false;
+  };
+
   const activeGroupByBankTxnId = useMemo(() => {
     const map = new Map<string, any>();
     for (const g of matchGroups ?? []) {
@@ -2489,6 +2500,9 @@ export default function ReconcilePageClient() {
 
                       const isMatched = matchedEntryIdSet.has(e.id);
 
+                      const g = activeGroupByEntryId.get(String(e.id)) ?? null;
+                      const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
+
                       const rowTone = isMatched ? " bg-primary/10" : "";
 
                       const deEmphasis = expectedTab === "matched" ? " text-slate-600" : "";
@@ -2522,7 +2536,10 @@ export default function ReconcilePageClient() {
                           <td className={`${tdClass} font-medium truncate${deEmphasis}`}>{payee}</td>
                           <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-center pl-3${deEmphasis}`}>
-                            <StatusChip label={isMatched ? "Matched" : "Expected"} tone={isMatched ? "success" : "default"} />
+                            <div className="inline-flex items-center justify-center gap-2">
+                              <StatusChip label={isMatched ? "Matched" : "Expected"} tone={isMatched ? "success" : "default"} />
+                              {hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
+                            </div>
                           </td>
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">

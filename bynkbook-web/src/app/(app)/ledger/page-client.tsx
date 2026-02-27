@@ -979,7 +979,36 @@ export default function LedgerPageClient() {
           0
         );
         const prev = m.get(id) ?? 0n;
-        m.set(id, prev + (cents < 0n ? -cents : cents)); // store positive abs
+        m.set(id, prev + (cents < 0n ? -cents : cents));
+      }
+    }
+
+    return m;
+  }, [matchGroupsQ.data]);
+
+  const hasAdjustmentByEntryId = useMemo(() => {
+    const m = new Map<string, boolean>();
+
+    const items = (matchGroupsQ.data as any)?.items ?? [];
+    for (const g of items) {
+      if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
+
+      const entries = Array.isArray(g?.entries) ? g.entries : [];
+      let groupHasAdj = false;
+
+      for (const e of entries) {
+        if (Boolean(e?.is_adjustment) || Boolean(e?.entry?.is_adjustment) || Boolean((e as any)?.entry_is_adjustment)) {
+          groupHasAdj = true;
+          break;
+        }
+      }
+
+      if (!groupHasAdj) continue;
+
+      for (const e of entries) {
+        const id = String(e?.entry_id ?? "");
+        if (!id) continue;
+        m.set(id, true);
       }
     }
 
@@ -1285,6 +1314,8 @@ export default function LedgerPageClient() {
           if (matchedAbs > 0n && matchedAbs < entryAbs) return "PARTIAL";
           return "EXPECTED";
         })(),
+
+        hasAdjustment: hasAdjustmentByEntryId.get(String(e.id)) ?? false,
         isDeleted,
         canDelete: e.id !== "opening_balance",
       };
@@ -3858,7 +3889,10 @@ export default function LedgerPageClient() {
 
           {/* Status */}
           <td className={td + " " + center}>
-            <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
+            <div className="inline-flex items-center justify-center gap-2">
+              <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
+              {r.hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
+            </div>
           </td>
 
           {/* DUP column (tight padding) */}

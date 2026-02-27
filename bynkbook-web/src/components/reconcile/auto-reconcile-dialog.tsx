@@ -91,6 +91,39 @@ function norm(s: any) {
   return String(s ?? "").trim().toLowerCase();
 }
 
+// Deterministic "Why" line for suggestions.
+// Prefer suggestion.reasons[] as the source of truth; only fall back if empty.
+function getSuggestionWhy(s: any): string | null {
+  const reasons = Array.isArray(s?.reasons) ? (s.reasons as any[]).map((x) => String(x ?? "").trim()).filter(Boolean) : [];
+  if (reasons.length > 0) {
+    const pick = (pred: (r: string) => boolean) => reasons.find((r) => pred(r));
+    // Stable priority: counterparty/memo/vendor signal > amount/date signal > first reason.
+    const best =
+      pick((r) => /payee|vendor|description/i.test(r)) ??
+      pick((r) => /memo|note/i.test(r)) ??
+      pick((r) => /exact amount|amount match/i.test(r)) ??
+      pick((r) => /date/i.test(r)) ??
+      reasons[0];
+    return best || null;
+  }
+
+  // Fallback only if reasons[] is empty: derive from existing visible fields (no scoring).
+  const kind = String(s?.kind ?? "").toUpperCase();
+  const bank = s?.bank ?? null;
+  const entries = Array.isArray(s?.entries) ? s.entries : [];
+
+  // If we truly cannot derive anything meaningful, return null (avoid "Pattern match" unless unavoidable).
+  const bankDesc = norm(bank?.name ?? bank?.description ?? bank?.memo ?? "");
+  const entryPayee = norm(entries[0]?.payee ?? entries[0]?.vendor_name ?? "");
+  if (bankDesc && entryPayee && (bankDesc.includes(entryPayee) || entryPayee.includes(bankDesc))) return "Payee/description match";
+
+  if (kind === "COMBINE") return "Combined items";
+  if (kind === "SPLIT") return "Split across entries";
+  if (kind === "ONE_TO_ONE") return "One-to-one match";
+
+  return null;
+}
+
 function badge(text: string, tone: "default" | "success" | "danger" = "default", title?: string) {
   const cls =
     tone === "success"
@@ -555,6 +588,8 @@ export function AutoReconcileDialog(props: {
                         ? badge("Pending")
                         : null;
 
+                const why = getSuggestionWhy(s);
+
                 return (
                   <div key={s.id} className="px-3 py-2 flex gap-3 items-start">
                     <input
@@ -611,8 +646,14 @@ export function AutoReconcileDialog(props: {
                                   return `${String(e.payee ?? "Entry")} (${f.text})`;
                                 })
                                 .join(", ")}
-                        </span>
+                      </span>
                       </div>
+
+                      {why ? (
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          Why: <span className="text-slate-600">{why}</span>
+                        </div>
+                      ) : null}
 
                       <div className="mt-2 flex flex-wrap gap-2">
                         {s.reasons.map((r) => (
