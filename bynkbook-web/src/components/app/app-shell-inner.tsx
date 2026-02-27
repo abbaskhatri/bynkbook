@@ -357,7 +357,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     refetchOnWindowFocus: true,
   });
 
-  const attnIssues = Number(issuesCountQ.data?.count ?? 0) || 0;
+  // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
+  const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.count ?? 0) || 0);
 
   // Sidebar Category Review count (UI hint; existing behavior)
   const [attnUncat, setAttnUncat] = useState(0);
@@ -495,7 +496,10 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     const link = href(item.path, item.needsAccountId);
 
                     if (collapsed) {
-                      const showIssues = item.label === "Issues" && attnIssues > 0;
+                      const showIssues =
+                        item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0;
+                      const showIssuesSkeleton = item.label === "Issues" && issuesCountQ.isLoading;
+
                       const showUncat = item.label === "Category Review" && attnUncat > 0;
 
                       return (
@@ -506,7 +510,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                           className="w-full justify-center"
                           size="sm"
                           title={
-                            item.label === "Issues" && attnIssues > 0
+                            item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
                               ? `Issues (${attnIssues})`
                               : item.label === "Category Review" && attnUncat > 0
                                 ? `Category Review (${attnUncat})`
@@ -520,6 +524,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                               <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-amber-50 px-1 text-[10px] font-semibold text-amber-800 border border-amber-200">
                                 {attnIssues}
                               </span>
+                            ) : showIssuesSkeleton ? (
+                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1 animate-pulse" />
                             ) : null}
 
                             {showUncat ? (
@@ -543,11 +549,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         <Link href={link} prefetch className="flex w-full items-center gap-2">
                           <span className="shrink-0 text-slate-600">{item.icon}</span>
                           <span className="truncate">{item.label}</span>
-
-                          {item.label === "Issues" && attnIssues > 0 ? (
+                          {item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0 ? (
                             <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
                               {attnIssues}
                             </span>
+                          ) : item.label === "Issues" && issuesCountQ.isLoading ? (
+                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1.5 animate-pulse" />
                           ) : null}
 
                           {item.label === "Category Review" && attnUncat > 0 ? (

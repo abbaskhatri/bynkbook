@@ -1056,8 +1056,12 @@ export default function LedgerPageClient() {
   }, [entriesQ.data]);
 
   // Bulk AP totals for ledger payment badges (single request, limit-bounded)
+  // Guardrail: never clear derived UI state to empty while Entries is still loading (no empty-before-commit).
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
+
+    // Keep prior AP totals while entries are loading (prevents flicker on scope change/refetch).
+    if (entriesQ.isLoading) return;
 
     const ids = (entriesQ.data ?? [])
       .filter((e: any) => String((e as any).entry_kind ?? "").toUpperCase() === "VENDOR_PAYMENT")
@@ -1088,7 +1092,7 @@ export default function LedgerPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBusinessId, selectedAccountId, entriesQ.data]);
+  }, [selectedBusinessId, selectedAccountId, entriesQ.data, entriesQ.isLoading]);
 
   const entriesWithOpening = useMemo(() => {
     if (!openingEntry) return entriesSorted;

@@ -14,6 +14,14 @@ export type EntryIssueRow = {
   resolved_at?: string | null;
 };
 
+export const ISSUES_PAGE_TYPES = ["DUPLICATE", "STALE_CHECK"] as const;
+export type IssuesPageIssueType = (typeof ISSUES_PAGE_TYPES)[number];
+
+export function isIssuesPageIssueType(issueType: unknown): issueType is IssuesPageIssueType {
+  const t = String(issueType ?? "").toUpperCase();
+  return t === "DUPLICATE" || t === "STALE_CHECK";
+}
+
 export async function listAccountIssues(params: {
   businessId: string;
   accountId: string;
@@ -66,11 +74,14 @@ export async function getIssuesCount(
   const status = opts?.status ?? "OPEN";
   const accountId = opts?.accountId ?? "all";
 
-  // Sidebar "Issues" should match the Issues page: DUPLICATE + STALE_CHECK (exclude MISSING_CATEGORY).
+  // Sidebar "Issues" must match the Issues page universe exactly:
+  // OPEN issues of type DUPLICATE + STALE_CHECK only (no mixed scopes).
   // Keep it server-derived and deterministic by counting from the authoritative list endpoint.
+  //
+  // NOTE: Backend /issues/count does not support type filtering today, so we filter deterministically client-side.
   if (accountId && accountId !== "all") {
     const list = await listAccountIssues({ businessId, accountId, status, limit: 500 });
-    const count = (list.issues ?? []).filter((it) => String(it.issue_type ?? "").toUpperCase() !== "MISSING_CATEGORY").length;
+    const count = (list.issues ?? []).filter((it) => isIssuesPageIssueType((it as any).issue_type)).length;
     return { ok: true, count };
   }
 

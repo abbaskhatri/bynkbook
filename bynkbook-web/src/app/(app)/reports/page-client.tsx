@@ -417,7 +417,7 @@ export default function ReportsPageClient() {
 
   const [rangeMode, setRangeMode] = useState<RangeMode>("monthly");
   const [ym, setYm] = useState(monthNowYm()); // monthly
-  const [year, setYear] = useState(yearNowY()); // yearly
+  const [year, setYear] = useState(yearNowY()); // yearly (YYYY)
   const [weekFrom, setWeekFrom] = useState(() => startOfWeekYmd(new Date())); // weekly (start of week)
   const [customFrom, setCustomFrom] = useState(() => monthRangeFromYm(monthNowYm()).from);
   const [customTo, setCustomTo] = useState(() => monthRangeFromYm(monthNowYm()).to);
@@ -426,14 +426,29 @@ export default function ReportsPageClient() {
 
   const { from, to } = useMemo(() => {
     if (rangeMode === "weekly") {
-      const from = weekFrom;
-      const to = addDaysYmd(weekFrom, 6);
-      return { from, to };
+      const f = weekFrom;
+      const t = addDaysYmd(weekFrom, 6);
+      return { from: f, to: t };
     }
-    if (rangeMode === "yearly") return yearRangeFromY(year);
+
     if (rangeMode === "custom") return { from: customFrom, to: customTo };
-    return monthRangeFromYm(ym);
-  }, [rangeMode, ym, year, weekFrom, customFrom, customTo]);
+
+    if (rangeMode === "yearly") {
+      const base = yearRangeFromY(year || yearNowY());
+      // YTD on yearly means: Jan 1 → today (or selected 'to' if you later add it)
+      if (ytd) return { from: base.from, to: todayYmd() };
+      return base;
+    }
+
+    // monthly
+    const base = monthRangeFromYm(ym);
+    if (ytd) {
+      // YTD on monthly means: Jan 1 of that year → end of selected month
+      const yy = String(ym || monthNowYm()).slice(0, 4);
+      return { from: `${yy}-01-01`, to: base.to };
+    }
+    return base;
+  }, [rangeMode, ym, year, weekFrom, customFrom, customTo, ytd]);
 
   const accountId = selectedAccountId;
 
@@ -587,7 +602,37 @@ export default function ReportsPageClient() {
     setErr(null);
     runEpochRef.current += 1;
     setLoading(false);
+
+    // Clear prior results when tab changes (prevents stale display)
+    setPnl(null);
+    setCashflow(null);
+    setAccountsSummary(null);
+    setApAging(null);
+    setApVendorId(null);
+    setApVendorDetail(null);
+    setCategories(null);
+    setCatDetail(null);
+    setCatDetailCategoryId(null);
+    setCatPage(1);
   }, [tab]);
+
+    // Clear visible results when range inputs change (user must still click Run report)
+  useEffect(() => {
+    setErr(null);
+    runEpochRef.current += 1;
+    setLoading(false);
+
+    setPnl(null);
+    setCashflow(null);
+    setAccountsSummary(null);
+    setApAging(null);
+    setApVendorId(null);
+    setApVendorDetail(null);
+    setCategories(null);
+    setCatDetail(null);
+    setCatDetailCategoryId(null);
+    setCatPage(1);
+  }, [rangeMode, ym, year, weekFrom, customFrom, customTo, ytd, accountId, includeArchivedAccounts]);
 
   // YTD only makes sense for monthly/yearly; force off for weekly/custom
   useEffect(() => {
@@ -686,7 +731,15 @@ export default function ReportsPageClient() {
                 {rangeMode === "yearly" ? (
                   <div className="space-y-1">
                     <div className="text-[11px] text-slate-600">Year</div>
-                    <Input type="number" className="h-7 w-[110px] text-xs" value={year} onChange={(e) => setYear(e.target.value)} />
+                    <Input
+                      type="number"
+                      className="h-7 w-[110px] text-xs"
+                      value={year}
+                      onChange={(e) => {
+                        const v = String(e.target.value ?? "").replace(/[^\d]/g, "").slice(0, 4);
+                        setYear(v);
+                      }}
+                    />
                   </div>
                 ) : null}
 

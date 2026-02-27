@@ -9,7 +9,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
-import { Building2 } from "lucide-react";
+import { Building2, Loader2 } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -239,7 +239,10 @@ export default function VendorsPageClient() {
       </div>
 
       <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={!businessId || loading}>
-        {loading ? "Loading…" : "Refresh"}
+        <span className="inline-flex items-center gap-2">
+          {loading ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
+          <span>Refresh</span>
+        </span>
       </Button>
 
     </div>

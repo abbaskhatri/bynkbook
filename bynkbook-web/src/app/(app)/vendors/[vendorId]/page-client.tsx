@@ -207,7 +207,7 @@ export default function VendorDetailPageClient() {
 
   // Row-level pending state (never feels stuck)
   const [pendingBillById, setPendingBillById] = useState<Record<string, boolean>>({});
-  const [pendingPaymentByEntryId, setPendingPaymentByEntryId] = useState<Record<string, boolean>>({});
+  const [pendingPaymentByEntryId, setPendingPaymentByEntryId] = useState<Record<string, "APPLYING" | "UNAPPLYING">>({});
   const [applyActionLoading, setApplyActionLoading] = useState(false);
 
   function isClosedPeriodError(e: any, msg: string | null): boolean {
@@ -233,9 +233,9 @@ export default function VendorDetailPageClient() {
     });
   }
 
-  function markPaymentPending(entryId: string) {
+  function markPaymentPending(entryId: string, action: "APPLYING" | "UNAPPLYING") {
     if (!entryId) return;
-    setPendingPaymentByEntryId((m) => ({ ...m, [entryId]: true }));
+    setPendingPaymentByEntryId((m) => ({ ...m, [entryId]: action }));
   }
   function clearPaymentPending(entryId: string) {
     if (!entryId) return;
@@ -698,8 +698,14 @@ export default function VendorDetailPageClient() {
                 Created: {String(vendor.created_at ?? "").slice(0, 10)} • Updated: {String(vendor.updated_at ?? "").slice(0, 10)}
               </div>
             </>
+          ) : loading ? (
+            <div className="space-y-2">
+              <div className="h-3 w-44 rounded bg-slate-200 animate-pulse" />
+              <div className="h-3 w-64 rounded bg-slate-200 animate-pulse" />
+              <div className="h-3 w-56 rounded bg-slate-200 animate-pulse" />
+            </div>
           ) : (
-            <div className="text-sm text-slate-600">{loading ? "Loading…" : "Vendor not loaded."}</div>
+            <div className="text-sm text-slate-600">Vendor not loaded.</div>
           )}
         </CardContent>
       </Card>
@@ -850,11 +856,28 @@ export default function VendorDetailPageClient() {
                     </thead>
                     <tbody>
                       {bills.length === 0 ? (
-                        <tr>
-                          <td className="px-3 py-4 text-sm text-slate-600" colSpan={8}>
-                            {billsLoading ? "Loading…" : "No bills yet."}
-                          </td>
-                        </tr>
+                        loading ? (
+                          <>
+                            {Array.from({ length: 8 }).map((_, i) => (
+                              <tr key={`bill-sk-${i}`} className="h-9 border-b border-slate-100">
+                                <td className="px-3"><div className="h-3 w-20 rounded bg-slate-200 animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-16 rounded bg-slate-200 animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                                <td className="px-3"><div className="h-3 w-20 rounded bg-slate-200 animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-16 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                              </tr>
+                            ))}
+                          </>
+                        ) : (
+                          <tr>
+                            <td className="px-3 py-4 text-sm text-slate-600" colSpan={8}>
+                              No bills yet.
+                            </td>
+                          </tr>
+                        )
                       ) : (
                         bills.map((b: any) => {
                           const amount = toBigIntSafe(b.amount_cents ?? 0);
@@ -1013,7 +1036,8 @@ export default function VendorDetailPageClient() {
                     ) : (
                       vendorPayments.map((p: any) => {
                         const entryId = String(p.entry_id ?? p.id ?? "");
-                        const isPending = !!pendingPaymentByEntryId[entryId];
+                        const pendingAction = pendingPaymentByEntryId[entryId];
+                        const isPending = !!pendingAction;
 
                         return (
                           <tr key={entryId} className="h-9 border-b border-slate-100 hover:bg-slate-50">
@@ -1022,6 +1046,11 @@ export default function VendorDetailPageClient() {
                               <span className="inline-flex items-center gap-2">
                                 {isPending ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
                                 <span>{p.payee}</span>
+                                {pendingAction === "APPLYING" ? (
+                                  <span className="text-[11px] text-slate-500">Applying…</span>
+                                ) : pendingAction === "UNAPPLYING" ? (
+                                  <span className="text-[11px] text-slate-500">Unapplying…</span>
+                                ) : null}
                               </span>
                             </td>
                             <td className="px-3 text-xs">
@@ -1059,7 +1088,9 @@ export default function VendorDetailPageClient() {
                               <div className="inline-flex items-center gap-2">
                                 <button
                                   type="button"
-                                  className="text-xs text-slate-700 hover:underline"
+                                  className="text-xs text-slate-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={isPending}
+                                  title={isPending ? "This payment is updating…" : "Apply or unapply this payment"}
                                   onClick={() => {
                                     const first = (accountsQ.data ?? []).find((a: any) => !a.archived_at)?.id ?? null;
                                     if (first) setApplyAccountId(first);
@@ -1351,7 +1382,7 @@ export default function VendorDetailPageClient() {
           open={vendorPayOpen}
           onClose={() => setVendorPayOpen(false)}
           title="Apply vendor payment"
-          size="lg"
+          size="md"
           footer={
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-slate-600">
@@ -1692,7 +1723,7 @@ export default function VendorDetailPageClient() {
                     setErrIsClosed(false);
 
                     setApplyActionLoading(true);
-                    markPaymentPending(String(paymentEntryId));
+                    markPaymentPending(String(paymentEntryId), "UNAPPLYING");
 
                     try {
                       await unapplyVendorPayment({
@@ -1720,7 +1751,7 @@ export default function VendorDetailPageClient() {
                 <Button
                   variant="outline"
                   className="h-7 px-3 text-xs text-red-700 border-red-200 hover:bg-red-50"
-                  disabled={!businessId || !applyAccountId || !paymentEntryId}
+                  disabled={applyActionLoading || !businessId || !applyAccountId || !paymentEntryId}
                   onClick={async () => {
                     if (!businessId || !applyAccountId || !paymentEntryId) return;
 
@@ -1728,7 +1759,7 @@ export default function VendorDetailPageClient() {
                     setErrIsClosed(false);
 
                     setApplyActionLoading(true);
-                    markPaymentPending(String(paymentEntryId));
+                    markPaymentPending(String(paymentEntryId), "UNAPPLYING");
 
                     try {
                       await apiFetch(
@@ -1755,6 +1786,7 @@ export default function VendorDetailPageClient() {
                 <Button
                   className="h-7 px-3 text-xs"
                   disabled={(() => {
+                    if (applyActionLoading) return true;
                     if (!businessId || !applyAccountId || !paymentEntryId) return true;
 
                     const entry = [...paymentEntries, ...suggestedEntries].find((e: any) => String(e.id) === String(paymentEntryId));
@@ -1789,6 +1821,9 @@ export default function VendorDetailPageClient() {
                     const entry = [...paymentEntries, ...suggestedEntries].find((e: any) => String(e.id) === String(paymentEntryId));
                     if (!entry) return;
 
+                    setErr(null);
+                    setErrIsClosed(false);
+
                     const apps: Array<{ bill_id: string; applied_amount_cents: number }> = [];
 
                     for (const b of bills) {
@@ -1805,6 +1840,9 @@ export default function VendorDetailPageClient() {
                       apps.push({ bill_id: key, applied_amount_cents: cents });
                     }
 
+                    setApplyActionLoading(true);
+                    markPaymentPending(String(paymentEntryId), "APPLYING");
+
                     try {
                       await applyVendorPayment({
                         businessId,
@@ -1813,10 +1851,16 @@ export default function VendorDetailPageClient() {
                         applications: apps,
                       });
 
+                      // Deterministic UI update: refresh is coalesced + epoch-guarded and does not empty-clear.
                       await refresh();
                       setApplyOpen(false);
                     } catch (e: any) {
-                      setErr(e?.message ?? "Apply failed");
+                      const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Apply failed";
+                      setErr(msg);
+                      setErrIsClosed(isClosedPeriodError(e, msg));
+                    } finally {
+                      clearPaymentPending(String(paymentEntryId));
+                      setApplyActionLoading(false);
                     }
                   }}
                 >
