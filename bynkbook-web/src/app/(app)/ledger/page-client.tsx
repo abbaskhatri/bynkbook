@@ -44,6 +44,7 @@ import { listCategories, createCategory, type CategoryRow } from "@/lib/api/cate
 import { getCategorySuggestions } from "@/lib/api/ai";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
 import { getBusinessIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
+import { listMatchGroups } from "@/lib/api/match-groups";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -114,6 +115,10 @@ function toBigIntSafe(v: unknown): bigint {
   return ZERO;
 }
 
+function absBigInt(n: bigint) {
+  return n < 0n ? -n : n;
+}
+
 function formatUsdFromCents(cents: bigint) {
   const neg = cents < ZERO;
   const abs = neg ? -cents : cents;
@@ -169,14 +174,14 @@ function statusTone(
   status: string
 ): "default" | "success" | "warning" | "danger" | "info" {
   const s = (status || "").trim().toUpperCase();
-  if (!s) return "default";
-  if (s === "SYSTEM") return "info";
-  if (s === "CLEARED" || s === "POSTED") return "success";
-  if (s === "PENDING") return "warning";
-  if (s.includes("FAIL") || s.includes("ERROR")) return "danger";
+
+  if (s === "DELETED") return "danger";
+  if (s === "MATCHED") return "success";
+  if (s === "PARTIAL") return "warning";
+  if (s === "EXPECTED") return "default";
+
   return "default";
 }
-
 function isOpeningLikePayee(payee: string | null | undefined): boolean {
   const x = String(payee ?? "").trim().toLowerCase();
   return x === "opening balance" || x === "opening balance (estimated)" || x.startsWith("opening balance");
@@ -834,7 +839,7 @@ export default function LedgerPageClient() {
 
   // Auth is handled by AppShell
 
-    // Phase 1: per-surface retry (no router.refresh storms)
+  // Phase 1: per-surface retry (no router.refresh storms)
   function retrySurfaceLoads() {
     void businessesQ.refetch?.();
     void accountsQ.refetch?.();
@@ -942,6 +947,44 @@ export default function LedgerPageClient() {
     limit: fetchLimit,
     includeDeleted: showDeleted,
   });
+
+  // MatchGroups (ACTIVE) drive ledger reconciliation status (Expected / Partial / Matched)
+  const matchGroupsQ = useQuery({
+    queryKey: ["matchGroups", selectedBusinessId, selectedAccountId],
+    enabled: !!selectedBusinessId && !!selectedAccountId,
+    queryFn: async () => {
+      if (!selectedBusinessId || !selectedAccountId) return { items: [] as any[] };
+      // status=active is sufficient for ledger status pills
+      return listMatchGroups({ businessId: selectedBusinessId, accountId: selectedAccountId, status: "active" } as any);
+    },
+    staleTime: 15_000,
+  });
+
+  const matchedAbsByEntryId = useMemo(() => {
+    const m = new Map<string, bigint>();
+
+    const items = (matchGroupsQ.data as any)?.items ?? [];
+    for (const g of items) {
+      if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
+
+      for (const e of (g?.entries ?? [])) {
+        const id = String(e?.entry_id ?? "");
+        if (!id) continue;
+
+        const cents = toBigIntSafe(
+          e?.matched_amount_cents ??
+          e?.matched_amount_abs_cents ??
+          e?.matched_amount_cents_abs ??
+          e?.amount_abs_cents ??
+          0
+        );
+        const prev = m.get(id) ?? 0n;
+        m.set(id, prev + (cents < 0n ? -cents : cents)); // store positive abs
+      }
+    }
+
+    return m;
+  }, [matchGroupsQ.data]);
 
   // Issues: backend truth (open issues + header button)
   const issuesCountQ = useQuery({
@@ -1208,8 +1251,36 @@ export default function LedgerPageClient() {
         amountNeg: amt < ZERO,
         balanceStr: isDeleted || rowBal === undefined ? "—" : formatUsdFromCents(rowBal),
         balanceNeg: !isDeleted && rowBal !== undefined ? rowBal < ZERO : false,
-        status: isDeleted ? "Deleted" : titleCase(e.status ?? ""),
-        rawStatus: isDeleted ? "DELETED" : (e.status ?? "").toString(),
+
+        status: (() => {
+          if (isDeleted) return "Deleted";
+
+          const t = String(e.type ?? "").toUpperCase();
+
+          // Adjustments are considered resolved for period close and ledger UX
+          if (t === "ADJUSTMENT") return "Matched";
+
+          const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
+          const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
+
+          if (matchedAbs >= entryAbs && entryAbs > 0n) return "Matched";
+          if (matchedAbs > 0n && matchedAbs < entryAbs) return "Partial";
+          return "Expected";
+        })(),
+
+        rawStatus: (() => {
+          if (isDeleted) return "DELETED";
+
+          const t = String(e.type ?? "").toUpperCase();
+          if (t === "ADJUSTMENT") return "MATCHED";
+
+          const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
+          const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
+
+          if (matchedAbs >= entryAbs && entryAbs > 0n) return "MATCHED";
+          if (matchedAbs > 0n && matchedAbs < entryAbs) return "PARTIAL";
+          return "EXPECTED";
+        })(),
         isDeleted,
         canDelete: e.id !== "opening_balance",
       };
@@ -3275,7 +3346,7 @@ export default function LedgerPageClient() {
   // Quick-fix: Missing Category inline (no dialog)
 
   // Body rows (memoized so add-row typing doesn't rebuild the full table body)
-    // Phase 1: skeleton-first table body (prevents blank panes while loading)
+  // Phase 1: skeleton-first table body (prevents blank panes while loading)
   const skeletonBodyRows = useMemo(() => {
     const tdSk = "px-1.5 py-0.5 align-middle";
     const sk = (w: string) => <div className={`h-3 ${w} rounded bg-slate-200 animate-pulse`} />;

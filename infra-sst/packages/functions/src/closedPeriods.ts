@@ -113,26 +113,30 @@ export async function handler(event: any) {
       to
     );
 
-    const reconciledRows: any[] = await prisma.$queryRawUnsafe(
-      `
-      SELECT COUNT(DISTINCT e.id)::int AS n
-      FROM "entry" e
-      JOIN "bank_match" bm
-        ON bm.entry_id = e.id
-       AND bm.business_id = e.business_id
-       ${accountId ? "AND bm.account_id = e.account_id" : ""}
-       AND bm.voided_at IS NULL
-      WHERE e.business_id = $1::uuid
-        ${whereAcctSql}
-        AND e.deleted_at IS NULL
-        AND e.date >= $3::date
-        AND e.date <= $4::date
-      `,
-      biz,
-      acctParam,
-      from,
-      to
-    );
+const reconciledRows: any[] = await prisma.$queryRawUnsafe(
+  `
+  SELECT COUNT(DISTINCT e.id)::int AS n
+  FROM "entry" e
+  LEFT JOIN "bank_match" bm
+    ON bm.entry_id = e.id
+   AND bm.business_id = e.business_id
+   ${accountId ? "AND bm.account_id = e.account_id" : ""}
+   AND bm.voided_at IS NULL
+  WHERE e.business_id = $1::uuid
+    ${whereAcctSql}
+    AND e.deleted_at IS NULL
+    AND e.date >= $3::date
+    AND e.date <= $4::date
+    AND (
+      bm.entry_id IS NOT NULL
+      OR UPPER(e.type) = 'ADJUSTMENT'
+    )
+  `,
+  biz,
+  acctParam,
+  from,
+  to
+);
 
     const issuesRows: any[] = await prisma.$queryRawUnsafe(
       `

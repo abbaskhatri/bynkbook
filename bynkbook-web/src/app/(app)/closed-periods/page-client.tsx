@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Lock } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
@@ -14,7 +15,7 @@ import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { closeThroughDate, listClosedPeriods, reopenPeriod } from "@/lib/api/closedPeriods";
+import { closeThroughDate, listClosedPeriods, reopenPeriod, previewClosedPeriods } from "@/lib/api/closedPeriods";
 import { getActivity } from "@/lib/api/activity";
 
 export default function ClosedPeriodsPageClient() {
@@ -224,75 +225,298 @@ export default function ClosedPeriodsPageClient() {
             </div>
           </div>
 
-          {/* Close-through control (month-end only) */}
+          {/* Close-through control (Month / Week / Custom) */}
           <div className="rounded-md border border-slate-200 px-3 py-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex flex-col gap-1">
-                <div className="text-[11px] font-semibold text-slate-600">Close through (month end)</div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="month"
-                    value={closeMonth}
-                    max={todayYmd.slice(0, 7)}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      // Clamp: disallow selecting a month beyond current month (UI-only)
-                      if (v && v > todayYmd.slice(0, 7)) {
-                        setCloseMonth(todayYmd.slice(0, 7));
-                      } else {
-                        setCloseMonth(v);
-                      }
-                    }}
-                    className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
-                    disabled={loading || !businessId}
-                  />
-                  <Button
-                    className="h-9 px-3 text-sm"
-                    disabled={loading || !businessId || !closeMonth || !canClose || isCloseBeyondToday}
-                    title={
-                      !canClose
-                        ? "Only OWNER or ADMIN can close periods"
-                        : isCloseBeyondToday
-                          ? "Can’t close beyond today"
-                          : "Close through"
-                    }
-                    onClick={() => {
-                      if (isCloseBeyondToday) return;
-                      setConfirmCloseOpen(true);
-                    }}
-                  >
-                    Close through
-                  </Button>
-                </div>
-                <div className="text-xs text-slate-500">
-                  Closing snaps to the last day of the selected month.
-                </div>
+            {(() => {
+              type RangeMode = "MONTH" | "WEEK" | "CUSTOM";
 
-                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
-                  <div>
-                    Closing through:{" "}
-                    <span className="font-medium tabular-nums">{closeMonth ? closeThroughYmd : "—"}</span>
+              // Local helpers (kept inside render block to avoid file-wide churn)
+              const addDays = (ymd: string, n: number) => {
+                const y = Number(ymd.slice(0, 4));
+                const m = Number(ymd.slice(5, 7));
+                const d = Number(ymd.slice(8, 10));
+                const dt = new Date(y, m - 1, d);
+                dt.setDate(dt.getDate() + n);
+                const yyyy = dt.getFullYear();
+                const mm = String(dt.getMonth() + 1).padStart(2, "0");
+                const dd = String(dt.getDate()).padStart(2, "0");
+                return `${yyyy}-${mm}-${dd}`;
+              };
+
+              const [mode, setMode] = useState<RangeMode>("MONTH");
+              const [monthMode, setMonthMode] = useState<string>(""); // YYYY-MM
+              const [weekStart, setWeekStart] = useState<string>(todayYmd);
+              const [customFrom, setCustomFrom] = useState<string>(todayYmd);
+              const [customTo, setCustomTo] = useState<string>(todayYmd);
+
+              const effective = useMemo(() => {
+                if (mode === "MONTH") {
+                  const m = monthMode || todayYmd.slice(0, 7);
+                  return { from: `${m}-01`, to: monthEndYmd(m) };
+                }
+                if (mode === "WEEK") {
+                  return { from: weekStart, to: addDays(weekStart, 6) };
+                }
+                return { from: customFrom, to: customTo };
+              }, [mode, monthMode, weekStart, customFrom, customTo]);
+
+              const [preview, setPreview] = useState<any>(null);
+              const [previewBusy, setPreviewBusy] = useState(false);
+              const [override, setOverride] = useState(false);
+              const [confirmOverride, setConfirmOverride] = useState(false);
+
+              const monthsAffected: string[] = preview?.months_affected ?? [];
+              const stats = preview?.stats ?? null;
+              const isClean = !!stats?.is_clean;
+
+              const runPreview = async () => {
+                if (!businessId) return;
+
+                setPreviewBusy(true);
+                setErr(null);
+                setPreview(null);
+                setConfirmOverride(false);
+
+                try {
+                  const res = await previewClosedPeriods({
+                    businessId,
+                    accountId: "all",
+                    from: effective.from,
+                    to: effective.to,
+                  });
+                  setPreview(res);
+                } catch (e: any) {
+                  setErr(appErrorMessageOrNull(e) ?? "Preview failed");
+                } finally {
+                  setPreviewBusy(false);
+                }
+              };
+
+              const doClose = async () => {
+                if (!businessId) return;
+                if (!preview) return;
+                if (!monthsAffected.length) return;
+
+                if (!isClean && !override) return;
+
+                if (!isClean && override && !confirmOverride) {
+                  setConfirmOverride(true);
+                  return;
+                }
+
+                setLoading(true);
+                setErr(null);
+                try {
+                  // One close-through call; backend expands months itself.
+                  await closeThroughDate(businessId, effective.to);
+                  setConfirmCloseOpen(false);
+                  setPreview(null);
+                  setConfirmOverride(false);
+                  await refresh();
+                } catch (e: any) {
+                  setErr(appErrorMessageOrNull(e) ?? "Close failed");
+                } finally {
+                  setLoading(false);
+                }
+              };
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[11px] font-semibold text-slate-600">Close through</div>
+
+                      {/* Mode tabs */}
+                      <div className="flex gap-2">
+                        {([
+                          { k: "MONTH", label: "Month" },
+                          { k: "WEEK", label: "Week" },
+                          { k: "CUSTOM", label: "Custom" },
+                        ] as const).map((t) => (
+                          <button
+                            key={t.k}
+                            type="button"
+                            onClick={() => {
+                              setMode(t.k);
+                              setPreview(null);
+                              setConfirmOverride(false);
+                              setOverride(false);
+                            }}
+                            className={`h-7 px-3 rounded-md text-xs font-medium transition ${
+                              mode === t.k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Range inputs */}
+                      <div className="flex flex-wrap items-end gap-2">
+                        {mode === "MONTH" ? (
+                          <div className="space-y-1">
+                            <div className="text-[11px] text-slate-600">Month</div>
+                            <Input
+                              type="month"
+                              className="h-7 w-[170px] text-xs"
+                              value={monthMode}
+                              max={todayYmd.slice(0, 7)}
+                              onChange={(e) => setMonthMode(e.target.value)}
+                              disabled={loading || !businessId || !canClose}
+                            />
+                          </div>
+                        ) : mode === "WEEK" ? (
+                          <>
+                            <div className="space-y-1">
+                              <div className="text-[11px] text-slate-600">Week start</div>
+                              <Input
+                                type="date"
+                                className="h-7 w-[170px] text-xs"
+                                value={weekStart}
+                                onChange={(e) => setWeekStart(e.target.value)}
+                                disabled={loading || !businessId || !canClose}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-[11px] text-slate-600">Week end</div>
+                              <Input type="date" className="h-7 w-[170px] text-xs" value={effective.to} readOnly />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              <div className="text-[11px] text-slate-600">From</div>
+                              <Input
+                                type="date"
+                                className="h-7 w-[170px] text-xs"
+                                value={customFrom}
+                                onChange={(e) => setCustomFrom(e.target.value)}
+                                disabled={loading || !businessId || !canClose}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-[11px] text-slate-600">To</div>
+                              <Input
+                                type="date"
+                                className="h-7 w-[170px] text-xs"
+                                value={customTo}
+                                onChange={(e) => setCustomTo(e.target.value)}
+                                disabled={loading || !businessId || !canClose}
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        <Button variant="outline" className="h-7 px-3 text-xs" onClick={runPreview} disabled={loading || previewBusy || !businessId || !canClose}>
+                          {previewBusy ? "Loading…" : "Preview"}
+                        </Button>
+                      </div>
+
+                      <div className="text-xs text-slate-500">
+                        Effective range:{" "}
+                        <span className="font-medium tabular-nums">{effective.from}</span>{" "}
+                        → <span className="font-medium tabular-nums">{effective.to}</span>
+                        {"  "}•{"  "}Today: <span className="font-medium tabular-nums">{todayYmd}</span>
+                      </div>
+
+                      {effective.to > todayYmd ? (
+                        <div className="text-[11px] text-amber-700">
+                          <span className="font-semibold">Can’t close beyond today.</span> Choose an end date on or before today.
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="text-xs text-slate-500">
+                      {canReopen ? "You can reopen months (OWNER only)." : "Only OWNER can reopen months."}{" "}
+                      {canClose ? "" : "Only OWNER/ADMIN can close periods."}
+                    </div>
                   </div>
-                  <div>
-                    Today: <span className="font-medium tabular-nums">{todayYmd}</span>
+
+                  {/* Preview box */}
+                  <div className="rounded-md border border-slate-200 overflow-hidden">
+                    <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
+                      <div className="text-xs font-semibold text-slate-700">Reconciliation</div>
+                      <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-amber-700") : "text-slate-500"}`}>
+                        {preview ? (isClean ? "Clean (recommended)" : "Not clean") : "Preview to see totals"}
+                      </div>
+                    </div>
+
+                    <div className="px-3 py-3">
+                      {!preview ? (
+                        <div className="text-sm text-slate-600">Preview to see totals and recommendation.</div>
+                      ) : (
+                        <div className="grid grid-cols-4 gap-3">
+                          <div className="rounded-md border border-slate-200 p-3">
+                            <div className="text-[11px] text-slate-600">Total</div>
+                            <div className="text-sm font-semibold">{stats.entries_total}</div>
+                          </div>
+                          <div className="rounded-md border border-slate-200 p-3">
+                            <div className="text-[11px] text-slate-600">Reconciled</div>
+                            <div className="text-sm font-semibold">{stats.entries_reconciled}</div>
+                          </div>
+                          <div className="rounded-md border border-slate-200 p-3">
+                            <div className="text-[11px] text-slate-600">Unreconciled</div>
+                            <div className="text-sm font-semibold">{stats.entries_unreconciled}</div>
+                          </div>
+                          <div className="rounded-md border border-slate-200 p-3">
+                            <div className="text-[11px] text-slate-600">Open issues</div>
+                            <div className="text-sm font-semibold">{stats.issues_open}</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Months affected + override */}
+                  {preview ? (
+                    <div className="space-y-2">
+                      <div className="text-sm text-slate-700">
+                        Months affected:{" "}
+                        <span className="font-medium text-slate-900">{monthsAffected.length ? monthsAffected.join(", ") : "—"}</span>
+                      </div>
+
+                      {!isClean ? (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={override}
+                            onChange={(e) => {
+                              setOverride(e.target.checked);
+                              setConfirmOverride(false);
+                            }}
+                            className="h-4 w-4 rounded border border-slate-300"
+                          />
+                          <span className="text-sm">Override and close anyway</span>
+                        </label>
+                      ) : null}
+
+                      {!isClean && override ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                          This period is not clean. {confirmOverride ? "Click Close again to proceed." : "Click Close to confirm override."}
+                        </div>
+                      ) : null}
+
+                      <div className="flex justify-end">
+                        <Button
+                          className="h-9 px-3 text-sm"
+                          disabled={
+                            loading ||
+                            !preview ||
+                            !monthsAffected.length ||
+                            effective.to > todayYmd ||
+                            (!isClean && !override)
+                          }
+                          onClick={doClose}
+                          title={!preview ? "Run preview first" : undefined}
+                        >
+                          Close
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-
-                {isCloseBeyondToday ? (
-                  <div className="mt-1 text-[11px] text-amber-700">
-                    <span className="font-semibold">Can’t close beyond today.</span>{" "}
-                    Select a month ending on or before today.
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="text-xs text-slate-500">
-                {canReopen
-                  ? "You can reopen months (OWNER only)."
-                  : "Only OWNER can reopen months."}{" "}
-                {canClose ? "" : "Only OWNER/ADMIN can close periods."}
-              </div>
-            </div>
+              );
+            })()}
           </div>
 
           {/* Confirm modal (no placeholders) */}

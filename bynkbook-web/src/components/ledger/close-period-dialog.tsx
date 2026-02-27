@@ -127,9 +127,7 @@ export function ClosePeriodDialog(props: {
 
     try {
       // Backend close is month-based; close each month explicitly
-      for (const m of monthsAffected) {
-        await closeThroughDate(businessId, to);
-      }
+      await closeThroughDate(businessId, effective.to);
       onOpenChange(false);
     } catch (e: any) {
       setErr(e?.message ?? "Close failed");
