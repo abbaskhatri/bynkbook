@@ -133,6 +133,114 @@ function NoTrendNote() {
   return <div className="text-xs text-slate-500">No multi-month trend for this range.</div>;
 }
 
+function ReportFootnote({ lines }: { lines: string[] }) {
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-2 text-[11px] text-slate-500 space-y-0.5">
+      {lines.map((l) => (
+        <div key={l}>{l}</div>
+      ))}
+    </div>
+  );
+}
+
+type ComboChartLayout = {
+  w: number;
+  h: number;
+  padX: number;
+  padY: number;
+  zeroY: number;
+  grid: Array<{ y: number; isZero: boolean; label: string }>;
+  bars: Array<{ x: number; y: number; width: number; height: number; cls: string; key: string }>;
+  linePoints: string;
+};
+
+function computeChartLayout(args: {
+  n: number;
+  barA: number[];
+  barB: number[];
+  line: number[];
+  formatMoney: (cents: string) => { text: string; isNeg: boolean };
+}): ComboChartLayout {
+  const { n, barA, barB, line, formatMoney } = args;
+
+  const w = 720;
+  const h = 140;
+  const padX = 44; // leave room for Y labels
+  const padY = 14;
+
+  const values = [...barA, ...barB, ...line];
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+
+  // Ensure 0 is in range so baseline is always meaningful and stable.
+  if (min > 0) min = 0;
+  if (max < 0) max = 0;
+
+  const span = max - min || 1;
+
+  const xStep = (w - padX * 2) / (n - 1);
+
+  const yOf = (v: number) => {
+    const yy = padY + ((max - v) * (h - padY * 2)) / span;
+    return Math.round(yy); // pixel rounding for consistent alignment
+  };
+
+  const zeroY = yOf(0);
+
+  const makeTickLabel = (v: number) => {
+    // Labels must align to the same baseline math; format as accounting cents.
+    try {
+      const cents = String(BigInt(Math.round(v)));
+      return formatMoney(cents).text;
+    } catch {
+      return formatMoney("0").text;
+    }
+  };
+
+  // Deterministic grid/ticks: always include 0 when range crosses 0.
+  const gridValues: number[] = (() => {
+    const crossesZero = min < 0 && max > 0;
+    if (crossesZero) {
+      return [max, (max + 0) / 2, 0, (0 + min) / 2, min];
+    }
+    // all positive or all negative (0 is forced into range above)
+    return [max, (max + min) / 2, min];
+  })();
+
+  const grid = gridValues.map((v) => ({
+    y: yOf(v),
+    isZero: Math.round(v) === 0,
+    label: makeTickLabel(v),
+  }));
+
+  // Bars
+  const barW = Math.max(6, Math.min(18, xStep * 0.35));
+  const bars: ComboChartLayout["bars"] = [];
+
+  for (let i = 0; i < n; i++) {
+    const xc = padX + i * xStep;
+
+    const mk = (xCenter: number, v: number, cls: string, key: string) => {
+      const yy = yOf(v);
+      const top = Math.min(yy, zeroY);
+      const bottom = Math.max(yy, zeroY);
+      const height = Math.max(1, bottom - top);
+      const xLeft = Math.round(xCenter - barW / 2);
+      return { x: xLeft, y: top, width: Math.round(barW), height, cls, key };
+    };
+
+    bars.push(mk(xc - barW * 0.35, barA[i] ?? 0, "fill-primary/80", `a-${i}`));
+    bars.push(mk(xc + barW * 0.35, barB[i] ?? 0, "fill-red-500/70", `b-${i}`));
+  }
+
+  const linePoints = line
+    .slice(0, n)
+    .map((v, i) => `${(padX + i * xStep).toFixed(1)},${yOf(v).toFixed(1)}`)
+    .join(" ");
+
+  return { w, h, padX, padY, zeroY, grid, bars, linePoints };
+}
+
 function ComboBarLineChart({
   title,
   months,
@@ -162,37 +270,7 @@ function ComboBarLineChart({
     try { return Number(BigInt(v)); } catch { return 0; }
   });
 
-  const values = [...A, ...B, ...L];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-
-  const w = 720;
-  const h = 140;
-  const padX = 12;
-  const padY = 14;
-
-  const xStep = (w - padX * 2) / (n - 1);
-
-  const y = (v: number) => {
-    return padY + ((max - v) * (h - padY * 2)) / span;
-  };
-
-  const zeroY = y(0);
-
-  const linePts = L.map((v, i) => `${(padX + i * xStep).toFixed(1)},${y(v).toFixed(1)}`);
-
-  // Bars: draw small vertical bars centered on each x
-  const barW = Math.max(6, Math.min(18, xStep * 0.35));
-
-  const barRect = (xCenter: number, v: number, cls: string, key: string) => {
-    const yy = y(v);
-    const top = Math.min(yy, zeroY);
-    const bottom = Math.max(yy, zeroY);
-    const height = Math.max(1, bottom - top);
-    const xLeft = xCenter - barW / 2;
-    return <rect key={key} x={xLeft} y={top} width={barW} height={height} rx={3} className={cls} />;
-  };
+  const layout = computeChartLayout({ n, barA: A, barB: B, line: L, formatMoney });
 
   // Legend values: show most recent month numbers (signed, accounting format)
   const last = n - 1;
@@ -211,39 +289,48 @@ function ComboBarLineChart({
         <div className="flex items-center gap-4 text-[11px] text-slate-600">
           <div className="flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-sm bg-primary" />
-            <span>In: <span className="text-slate-900">{lastA.text}</span></span>
+            <span>In</span>
+            <span className={lastA.isNeg ? "text-red-600" : ""}>{lastA.text}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-sm bg-red-500" />
-            <span>Out: <span className={`${lastB.isNeg ? "text-red-600" : "text-slate-900"}`}>{lastB.text}</span></span>
+            <span className="inline-block h-2 w-2 rounded-sm bg-red-500/70" />
+            <span>Out</span>
+            <span className={lastB.isNeg ? "text-red-600" : ""}>{lastB.text}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block h-[2px] w-6 bg-slate-700" />
-            <span>Net: <span className={`${lastL.isNeg ? "text-red-600" : "text-slate-900"}`}>{lastL.text}</span></span>
+            <span className="inline-block h-0.5 w-4 rounded bg-slate-700" />
+            <span>Net</span>
+            <span className={lastL.isNeg ? "text-red-600" : ""}>{lastL.text}</span>
           </div>
         </div>
       </div>
 
-      <div className="mt-2 overflow-x-auto">
-        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block">
-          {/* zero line */}
-          <line x1={padX} x2={w - padX} y1={zeroY} y2={zeroY} className="stroke-slate-200" strokeWidth="1" />
+      <div className="mt-3 overflow-x-auto">
+        <svg width={layout.w} height={layout.h} viewBox={`0 0 ${layout.w} ${layout.h}`} className="block">
+          {/* gridlines + labels (single source of truth from layout) */}
+          {layout.grid.map((g) => (
+            <g key={`grid-${g.y}`}>
+              <line
+                x1={layout.padX}
+                x2={layout.w - layout.padX}
+                y1={g.y}
+                y2={g.y}
+                className={g.isZero ? "stroke-slate-200" : "stroke-slate-100"}
+                strokeWidth={g.isZero ? 1 : 1}
+              />
+              <text x={layout.padX - 8} y={g.y} textAnchor="end" dominantBaseline="middle" className="fill-slate-500 text-[10px]">
+                {g.label}
+              </text>
+            </g>
+          ))}
 
           {/* bars */}
-          {Array.from({ length: n }).map((_, i) => {
-            const xc = padX + i * xStep;
-            const a = A[i];
-            const b = B[i];
-            return (
-              <g key={`bars-${i}`}>
-                {barRect(xc - barW * 0.35, a, "fill-primary/80", `a-${i}`)}
-                {barRect(xc + barW * 0.35, b, "fill-red-500/70", `b-${i}`)}
-              </g>
-            );
-          })}
+          {layout.bars.map((b) => (
+            <rect key={b.key} x={b.x} y={b.y} width={b.width} height={b.height} rx={3} className={b.cls} />
+          ))}
 
           {/* net line */}
-          <polyline fill="none" stroke="currentColor" strokeWidth="2" points={linePts.join(" ")} className="text-slate-700" />
+          <polyline fill="none" stroke="currentColor" strokeWidth="2" points={layout.linePoints} className="text-slate-700" />
         </svg>
       </div>
 
@@ -597,22 +684,14 @@ export default function ReportsPageClient() {
     }
   }
 
-  // Small convenience: when switching tabs, clear error but do NOT auto-run.
+  // Switching tabs should never empty-clear existing results.
+  // We keep the last known results for each tab until the user runs a new report (deterministic, no blank flicker).
   useEffect(() => {
     setErr(null);
     runEpochRef.current += 1;
     setLoading(false);
 
-    // Clear prior results when tab changes (prevents stale display)
-    setPnl(null);
-    setCashflow(null);
-    setAccountsSummary(null);
-    setApAging(null);
-    setApVendorId(null);
-    setApVendorDetail(null);
-    setCategories(null);
-    setCatDetail(null);
-    setCatDetailCategoryId(null);
+    // Reset only tab-local paging state (safe; does not blank existing results).
     setCatPage(1);
   }, [tab]);
 
@@ -906,6 +985,13 @@ export default function ReportsPageClient() {
                   </div>
                 </>
               )}
+            <ReportFootnote
+              lines={[
+                "Basis: Ledger effective date (entry date).",
+                "Scope: Selected account (or All accounts), excluding deleted entries.",
+                "Closed periods are read-only (no mutations allowed).",
+              ]}
+            />
             </CardContent>
           </Card>
         ) : null}
@@ -988,6 +1074,13 @@ export default function ReportsPageClient() {
                   </div>
                 </>
               )}
+            <ReportFootnote
+              lines={[
+                "Basis: Ledger effective date (entry date).",
+                "Cash in/out reflects INCOME/EXPENSE entries in the selected scope (excludes deleted entries).",
+                "Closed periods are read-only (no mutations allowed).",
+              ]}
+            />
             </CardContent>
           </Card>
         ) : null}
@@ -1022,6 +1115,13 @@ export default function ReportsPageClient() {
                   </div>
                 </div>
               )}
+            <ReportFootnote
+              lines={[
+                "Basis: Ledger effective date (entry date).",
+                "Scope: Selected account (or All accounts), excluding deleted entries.",
+                "Closed periods are read-only (no mutations allowed).",
+              ]}
+            />
             </CardContent>
           </Card>
         ) : null}
@@ -1113,6 +1213,13 @@ export default function ReportsPageClient() {
                   ) : null}
                 </>
               )}
+            <ReportFootnote
+              lines={[
+                "As-of: Outstanding vendor bills at the selected date, excluding deleted entries.",
+                "Scope: Selected account (or All accounts) as applicable.",
+                "Closed periods are read-only (no mutations allowed).",
+              ]}
+            />
             </CardContent>
           </Card>
         ) : null}
@@ -1217,6 +1324,13 @@ export default function ReportsPageClient() {
                   ) : null}
                 </>
               )}
+            <ReportFootnote
+              lines={[
+                "Basis: Ledger effective date (entry date).",
+                "Scope: Selected account (or All accounts), excluding deleted entries.",
+                "Closed periods are read-only (no mutations allowed).",
+              ]}
+            />
             </CardContent>
           </Card>
         ) : null}
