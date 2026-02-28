@@ -18,6 +18,20 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { FileText } from "lucide-react";
 
 import {
+  ResponsiveContainer,
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
+
+import {
   getPnlSummary,
   getCashflowSeries,
   getAccountsSummary,
@@ -90,6 +104,67 @@ function addDaysYmd(ymd: string, delta: number) {
   return `${yy}-${mm}-${dd}`;
 }
 
+function priorRangeForCurrent(rangeMode: RangeMode, from: string, to: string, ym: string, year: string, weekFrom: string, customFrom: string, customTo: string, ytd: boolean) {
+  // Deterministic prior comparison window:
+  // weekly → previous week, monthly → previous month, yearly → previous year, custom → same-length previous range.
+  if (rangeMode === "weekly") {
+    const prevFrom = addDaysYmd(weekFrom, -7);
+    const prevTo = addDaysYmd(weekFrom, -1);
+    return { from: prevFrom, to: prevTo, ytd: false };
+  }
+
+  if (rangeMode === "monthly") {
+    const [yy, mm] = (ym || monthNowYm()).split("-");
+    const y = Number(yy);
+    const m = Number(mm);
+    const prev = new Date(y, m - 2, 1); // previous month (0-based)
+    const prevYm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    const base = monthRangeFromYm(prevYm);
+    if (ytd) {
+      const yStr = String(prev.getFullYear());
+      return { from: `${yStr}-01-01`, to: base.to, ytd: true };
+    }
+    return { ...base, ytd: false };
+  }
+
+  if (rangeMode === "yearly") {
+    const y = Number((year || yearNowY()).slice(0, 4));
+    const prevY = String(y - 1);
+    const base = yearRangeFromY(prevY);
+    if (ytd) {
+      return { from: base.from, to: todayYmd(), ytd: true };
+    }
+    return { ...base, ytd: false };
+  }
+
+  // custom: same length immediately preceding `from`
+  const start = new Date(from);
+  const end = new Date(to);
+  const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (24 * 3600 * 1000)) + 1);
+  const prevTo = addDaysYmd(from, -1);
+  const prevFrom = addDaysYmd(prevTo, -(days - 1));
+  return { from: prevFrom, to: prevTo, ytd: false };
+}
+
+function pctChange(curr: bigint, prev: bigint) {
+  if (prev === 0n) return null;
+  const delta = curr - prev;
+  // scaled by 10000 for 2dp; deterministic integer math
+  const pct = Number((delta * 10000n) / prev) / 100;
+  return pct;
+}
+
+function topNByAbs(rows: Array<{ label: string; cents: string }>, n: number) {
+  const absBig = (s: string) => {
+    try { const x = BigInt(s); return x < 0n ? -x : x; } catch { return 0n; }
+  };
+  return [...rows]
+    .map((r) => ({ ...r, abs: absBig(r.cents) }))
+    .sort((a, b) => (b.abs > a.abs ? 1 : b.abs < a.abs ? -1 : 0))
+    .slice(0, n)
+    .map(({ label, cents }) => ({ label, cents }));
+}
+
 // BigInt-safe accounting currency formatting (USD)
 function addCommas(intStr: string) {
   const s = intStr.replace(/^0+(?=\d)/, "");
@@ -143,201 +218,98 @@ function ReportFootnote({ lines }: { lines: string[] }) {
   );
 }
 
-type ComboChartLayout = {
-  w: number;
-  h: number;
-  padX: number;
-  padY: number;
-  zeroY: number;
-  grid: Array<{ y: number; isZero: boolean; label: string }>;
-  bars: Array<{ x: number; y: number; width: number; height: number; cls: string; key: string }>;
-  linePoints: string;
-};
+function compactUsdTickFromCentsNumber(v: number) {
+  // v is cents in number form (charting)
+  try {
+    const cents = BigInt(Math.round(v));
+    const fm = formatUsdAccountingFromCents(String(cents));
+    const raw = fm.text.replace(/[(),$]/g, "").replace(/,/g, "");
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fm.text;
 
-function computeChartLayout(args: {
-  n: number;
-  barA: number[];
-  barB: number[];
-  line: number[];
-  formatMoney: (cents: string) => { text: string; isNeg: boolean };
-}): ComboChartLayout {
-  const { n, barA, barB, line, formatMoney } = args;
+    const abs = Math.abs(n);
+    const withSuffix =
+      abs >= 1_000_000 ? `${(abs / 1_000_000).toFixed(1)}M`
+      : abs >= 1_000 ? `${(abs / 1_000).toFixed(1)}k`
+      : abs.toFixed(0);
 
-  const w = 720;
-  const h = 140;
-  const padX = 44; // leave room for Y labels
-  const padY = 14;
-
-  const values = [...barA, ...barB, ...line];
-  let min = Math.min(...values);
-  let max = Math.max(...values);
-
-  // Ensure 0 is in range so baseline is always meaningful and stable.
-  if (min > 0) min = 0;
-  if (max < 0) max = 0;
-
-  const span = max - min || 1;
-
-  const xStep = (w - padX * 2) / (n - 1);
-
-  const yOf = (v: number) => {
-    const yy = padY + ((max - v) * (h - padY * 2)) / span;
-    return Math.round(yy); // pixel rounding for consistent alignment
-  };
-
-  const zeroY = yOf(0);
-
-  const makeTickLabel = (v: number) => {
-    // Labels must align to the same baseline math; format as accounting cents.
-    try {
-      const cents = String(BigInt(Math.round(v)));
-      return formatMoney(cents).text;
-    } catch {
-      return formatMoney("0").text;
-    }
-  };
-
-  // Deterministic grid/ticks: always include 0 when range crosses 0.
-  const gridValues: number[] = (() => {
-    const crossesZero = min < 0 && max > 0;
-    if (crossesZero) {
-      return [max, (max + 0) / 2, 0, (0 + min) / 2, min];
-    }
-    // all positive or all negative (0 is forced into range above)
-    return [max, (max + min) / 2, min];
-  })();
-
-  const grid = gridValues.map((v) => ({
-    y: yOf(v),
-    isZero: Math.round(v) === 0,
-    label: makeTickLabel(v),
-  }));
-
-  // Bars
-  const barW = Math.max(6, Math.min(18, xStep * 0.35));
-  const bars: ComboChartLayout["bars"] = [];
-
-  for (let i = 0; i < n; i++) {
-    const xc = padX + i * xStep;
-
-    const mk = (xCenter: number, v: number, cls: string, key: string) => {
-      const yy = yOf(v);
-      const top = Math.min(yy, zeroY);
-      const bottom = Math.max(yy, zeroY);
-      const height = Math.max(1, bottom - top);
-      const xLeft = Math.round(xCenter - barW / 2);
-      return { x: xLeft, y: top, width: Math.round(barW), height, cls, key };
-    };
-
-    bars.push(mk(xc - barW * 0.35, barA[i] ?? 0, "fill-primary/80", `a-${i}`));
-    bars.push(mk(xc + barW * 0.35, barB[i] ?? 0, "fill-red-500/70", `b-${i}`));
+    const base = `$${withSuffix}`;
+    return fm.isNeg ? `(${base})` : base;
+  } catch {
+    return "$0";
   }
+}
 
-  const linePoints = line
-    .slice(0, n)
-    .map((v, i) => `${(padX + i * xStep).toFixed(1)},${yOf(v).toFixed(1)}`)
-    .join(" ");
-
-  return { w, h, padX, padY, zeroY, grid, bars, linePoints };
+function mkComboSeriesData(months: string[], a: string[], b: string[], l: string[]) {
+  const n = Math.min(months.length, a.length, b.length, l.length);
+  return Array.from({ length: n }).map((_, i) => {
+    const A = (() => { try { return Number(BigInt(a[i] ?? "0")); } catch { return 0; } })();
+    const B = (() => { try { return Number(BigInt(b[i] ?? "0")); } catch { return 0; } })();
+    const L = (() => { try { return Number(BigInt(l[i] ?? "0")); } catch { return 0; } })();
+    return { month: String(months[i] ?? ""), a: A, b: B, l: L };
+  });
 }
 
 function ComboBarLineChart({
   title,
   months,
-  barA, // positive series (income/cash in)
-  barB, // negative series (expense/cash out)
-  line, // net
-  formatMoney,
+  barA,
+  barB,
+  line,
+  aLabel,
+  bLabel,
+  lineLabel,
 }: {
   title: string;
   months: string[];
   barA: string[];
   barB: string[];
   line: string[];
-  formatMoney: (cents: string) => { text: string; isNeg: boolean };
+  aLabel: string;
+  bLabel: string;
+  lineLabel: string;
 }) {
-  const n = Math.min(months.length, barA.length, barB.length, line.length);
-  if (n < 2) return <NoTrendNote />;
+  const data = mkComboSeriesData(months, barA, barB, line);
+  if (data.length < 2) return <NoTrendNote />;
 
-  // Convert BigInt cents to number for plotting (safe enough for charting ranges)
-  const A = barA.slice(0, n).map((v) => {
-    try { return Number(BigInt(v)); } catch { return 0; }
-  });
-  const B = barB.slice(0, n).map((v) => {
-    try { return Number(BigInt(v)); } catch { return 0; }
-  });
-  const L = line.slice(0, n).map((v) => {
-    try { return Number(BigInt(v)); } catch { return 0; }
-  });
-
-  const layout = computeChartLayout({ n, barA: A, barB: B, line: L, formatMoney });
-
-  // Legend values: show most recent month numbers (signed, accounting format)
-  const last = n - 1;
-  const lastA = formatMoney(String(BigInt(barA[last] ?? "0")));
-  const lastB = formatMoney(String(BigInt(barB[last] ?? "0")));
-  const lastL = formatMoney(String(BigInt(line[last] ?? "0")));
+  const tooltipFmt = (v: any) => {
+    try {
+      const cents = BigInt(Math.round(Number(v) || 0));
+      return formatUsdAccountingFromCents(String(cents)).text;
+    } catch {
+      return "—";
+    }
+  };
 
   return (
     <div className="rounded-md border border-slate-200 p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[11px] text-slate-600">{title}</div>
-          <div className="text-[11px] text-slate-500">{months[last]}</div>
-        </div>
-
-        <div className="flex items-center gap-4 text-[11px] text-slate-600">
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-sm bg-primary" />
-            <span>In</span>
-            <span className={lastA.isNeg ? "text-red-600" : ""}>{lastA.text}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-sm bg-red-500/70" />
-            <span>Out</span>
-            <span className={lastB.isNeg ? "text-red-600" : ""}>{lastB.text}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-0.5 w-4 rounded bg-slate-700" />
-            <span>Net</span>
-            <span className={lastL.isNeg ? "text-red-600" : ""}>{lastL.text}</span>
-          </div>
+          <div className="text-[11px] text-slate-500">{data[data.length - 1]?.month}</div>
         </div>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
-        <svg width={layout.w} height={layout.h} viewBox={`0 0 ${layout.w} ${layout.h}`} className="block">
-          {/* gridlines + labels (single source of truth from layout) */}
-          {layout.grid.map((g) => (
-            <g key={`grid-${g.y}`}>
-              <line
-                x1={layout.padX}
-                x2={layout.w - layout.padX}
-                y1={g.y}
-                y2={g.y}
-                className={g.isZero ? "stroke-slate-200" : "stroke-slate-100"}
-                strokeWidth={g.isZero ? 1 : 1}
-              />
-              <text x={layout.padX - 8} y={g.y} textAnchor="end" dominantBaseline="middle" className="fill-slate-500 text-[10px]">
-                {g.label}
-              </text>
-            </g>
-          ))}
-
-          {/* bars */}
-          {layout.bars.map((b) => (
-            <rect key={b.key} x={b.x} y={b.y} width={b.width} height={b.height} rx={3} className={b.cls} />
-          ))}
-
-          {/* net line */}
-          <polyline fill="none" stroke="currentColor" strokeWidth="2" points={layout.linePoints} className="text-slate-700" />
-        </svg>
-      </div>
-
-      <div className="mt-2 flex gap-2 text-[11px] text-slate-500">
-        <span>{months[0]}</span>
-        <span>→</span>
-        <span>{months[last]}</span>
+      <div className="mt-3 h-[360px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 10, right: 16, bottom: 8, left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+            <YAxis
+              tick={{ fontSize: 11 }}
+              tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
+              width={72}
+            />
+            <Tooltip
+              formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
+              labelFormatter={(label: any) => String(label)}
+              contentStyle={{ fontSize: 12 }}
+            />
+            <Bar dataKey="a" name={aLabel} fill="hsl(var(--primary))" radius={[3, 3, 3, 3]} />
+            <Bar dataKey="b" name={bLabel} fill="rgb(239 68 68 / 0.70)" radius={[3, 3, 3, 3]} />
+            <Line dataKey="l" name={lineLabel} type="monotone" stroke="rgb(51 65 85)" strokeWidth={2.25} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
@@ -346,127 +318,82 @@ function ComboBarLineChart({
 function DonutBreakdown({
   title,
   rows,
-  formatMoney,
 }: {
   title: string;
   rows: Array<{ label: string; cents: string }>;
-  formatMoney: (cents: string) => { text: string; isNeg: boolean };
 }) {
   if (!rows || rows.length < 2) return null;
-
-  // Top 8 by abs(amount); remainder -> Other
-  const sorted = [...rows].sort((a, b) => {
-    const aa = (() => { try { return Number(BigInt(a.cents < "0" ? a.cents.slice(1) : a.cents)); } catch { return 0; } })();
-    const bb = (() => { try { return Number(BigInt(b.cents < "0" ? b.cents.slice(1) : b.cents)); } catch { return 0; } })();
-    return bb - aa;
-  });
-
-  const top = sorted.slice(0, 8);
-  const rest = sorted.slice(8);
 
   const absBig = (s: string) => {
     try { const n = BigInt(s); return n < 0n ? -n : n; } catch { return 0n; }
   };
 
-  const topAbs = top.map((r) => absBig(r.cents));
-  const otherAbs = rest.reduce((acc, r) => acc + absBig(r.cents), 0n);
+  const sorted = [...rows]
+    .map((r) => ({ ...r, abs: absBig(r.cents) }))
+    .sort((a, b) => (b.abs > a.abs ? 1 : b.abs < a.abs ? -1 : 0));
 
-  const slices = [...top.map((r, i) => ({ label: r.label, cents: r.cents, abs: topAbs[i] })), ...(otherAbs > 0n ? [{ label: "Other", cents: "0", abs: otherAbs }] : [])];
+  const top = sorted.slice(0, 8);
+  const rest = sorted.slice(8);
+  const otherAbs = rest.reduce((acc, r) => acc + r.abs, 0n);
 
-  const totalAbs = slices.reduce((acc, s) => acc + s.abs, 0n);
-  if (totalAbs <= 0n) return null;
+  const slices = [
+    ...top.map((r) => ({ name: r.label, value: Number(r.abs), cents: r.cents })),
+    ...(otherAbs > 0n ? [{ name: "Other", value: Number(otherAbs), cents: "0" }] : []),
+  ];
 
-  const w = 160;
-  const h = 160;
-  const r = 62;
-  const cx = w / 2;
-  const cy = h / 2;
-  const C = 2 * Math.PI * r;
-
-  let offset = 0;
-
-  // Use a restrained palette (professional): slate shades + one accent
-  const colors = [
-    "stroke-slate-900",
-    "stroke-slate-700",
-    "stroke-slate-500",
-    "stroke-slate-400",
-    "stroke-slate-300",
-    "stroke-primary",
-    "stroke-primary",
-    "stroke-primary",
-    "stroke-slate-200",
+  const palette = [
+    "rgb(15 23 42)",
+    "rgb(51 65 85)",
+    "rgb(100 116 139)",
+    "rgb(148 163 184)",
+    "rgb(203 213 225)",
+    "hsl(var(--primary))",
+    "rgb(34 197 94)",
+    "rgb(59 130 246)",
   ];
 
   return (
     <div className="rounded-md border border-slate-200 p-3">
       <div className="text-[11px] text-slate-600">{title}</div>
 
-      <div className="mt-2 flex items-start gap-4">
-        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block">
-          {/* background ring */}
-          <circle cx={cx} cy={cy} r={r} fill="none" className="stroke-slate-200" strokeWidth="14" />
-
-          {/* slices sized by ABS(amount) */}
-          {slices.map((s, i) => {
-            const frac = Number(s.abs) / Number(totalAbs);
-            const len = Math.max(1, frac * C);
-            const dash = `${len} ${C - len}`;
-            const thisOffset = offset;
-            offset += len;
-
-            return (
-              <circle
-                key={`${s.label}-${i}`}
-                cx={cx}
-                cy={cy}
-                r={r}
-                fill="none"
-                strokeWidth="14"
-                strokeLinecap="butt"
-                className={colors[i % colors.length]}
-                style={{
-                  strokeDasharray: dash,
-                  strokeDashoffset: -thisOffset,
-                  transform: "rotate(-90deg)",
-                  transformOrigin: "50% 50%",
-                  opacity: 0.9,
+      <div className="mt-2 grid grid-cols-[260px_1fr] gap-6 items-start">
+        <div className="h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Tooltip
+                formatter={(v: any, name: any, props: any) => {
+                  const cents = props?.payload?.cents ?? "0";
+                  return [formatUsdAccountingFromCents(String(cents)).text, String(name)];
                 }}
+                contentStyle={{ fontSize: 12 }}
               />
-            );
-          })}
-        </svg>
+              <Pie data={slices} dataKey="value" nameKey="name" innerRadius={62} outerRadius={90} paddingAngle={2}>
+                {slices.map((_, i) => (
+                  <Cell key={`cell-${i}`} fill={palette[i % palette.length]} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
 
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <div className="space-y-1">
             {top.map((r, i) => {
-              const fm = formatMoney(r.cents);
-              const abs = absBig(r.cents);
-              const pct = Math.round((Number(abs) / Number(totalAbs)) * 100);
+              const fm = formatUsdAccountingFromCents(r.cents);
               return (
                 <div key={`${r.label}-${i}`} className="flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0 flex items-center gap-2">
-                    <span className={`inline-block h-2 w-2 rounded-sm ${i % 2 === 0 ? "bg-slate-700" : "bg-primary"}`} />
+                    <span className="inline-block h-2 w-2 rounded-sm" style={{ background: palette[i % palette.length] }} />
                     <span className="truncate text-slate-700">{r.label}</span>
-                    <span className="text-[11px] text-slate-500">{pct}%</span>
                   </div>
                   <div className={`tabular-nums ${fm.isNeg ? "text-red-600" : "text-slate-900"}`}>{fm.text}</div>
                 </div>
               );
             })}
-            {otherAbs > 0n ? (
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <div className="min-w-0 flex items-center gap-2">
-                  <span className="inline-block h-2 w-2 rounded-sm bg-slate-300" />
-                  <span className="truncate text-slate-700">Other</span>
-                </div>
-                <div className="tabular-nums text-slate-600">—</div>
-              </div>
-            ) : null}
           </div>
 
           <div className="mt-2 text-[11px] text-slate-500">
-            Slice sizing uses absolute value; amounts display signed accounting values.
+            Composition uses absolute values; amounts display signed accounting values.
           </div>
         </div>
       </div>
@@ -564,7 +491,17 @@ export default function ReportsPageClient() {
     null;
 
   const [pnl, setPnl] = useState<any>(null);
+  const [pnlPrev, setPnlPrev] = useState<any>(null);
+
   const [cashflow, setCashflow] = useState<any>(null);
+  const [cashflowPrev, setCashflowPrev] = useState<any>(null);
+
+  const [cashEndingCents, setCashEndingCents] = useState<string | null>(null);
+  const [cashEndingPrevCents, setCashEndingPrevCents] = useState<string | null>(null);
+
+  const [topCats, setTopCats] = useState<Array<{ label: string; cents: string }> | null>(null);
+  const [topVendorsAp, setTopVendorsAp] = useState<Array<{ label: string; cents: string }> | null>(null);
+
   const [accountsSummary, setAccountsSummary] = useState<any>(null);
   const [includeArchivedAccounts, setIncludeArchivedAccounts] = useState(false); // Accounts Summary default: exclude archived
   const [apAging, setApAging] = useState<any>(null);
@@ -590,16 +527,63 @@ export default function ReportsPageClient() {
 
     try {
       if (tab === "pnl") {
-        const res = await getPnlSummary(businessId, { from, to, accountId, ytd });
+        const prev = priorRangeForCurrent(rangeMode, from, to, ym, year, weekFrom, customFrom, customTo, ytd);
+
+        const [res, resPrev, cats, ap] = await Promise.all([
+          getPnlSummary(businessId, { from, to, accountId, ytd }),
+          getPnlSummary(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
+          getCategories(businessId, { from, to, accountId }),
+          getApAging(businessId, { asOf: to }),
+        ]);
+
         if (myEpoch !== runEpochRef.current) return;
+
         setPnl(res);
+        setPnlPrev(resPrev);
+
+        const catRows = (cats?.rows ?? []).map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents ?? "0") }));
+        setTopCats(topNByAbs(catRows, 5));
+
+        const vendorRows = (ap?.rows ?? []).map((r: any) => ({ label: String(r.vendor ?? "Vendor"), cents: String(r.total_cents ?? "0") }));
+        setTopVendorsAp(topNByAbs(vendorRows, 5));
+
         return;
       }
 
       if (tab === "cashflow") {
-        const res = await getCashflowSeries(businessId, { from, to, accountId, ytd });
+        const prev = priorRangeForCurrent(rangeMode, from, to, ym, year, weekFrom, customFrom, customTo, ytd);
+
+        const [res, resPrev, cats, ap, endAcct, endPrevAcct] = await Promise.all([
+          getCashflowSeries(businessId, { from, to, accountId, ytd }),
+          getCashflowSeries(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
+          getCategories(businessId, { from, to, accountId }),
+          getApAging(businessId, { asOf: to }),
+          getAccountsSummary(businessId, { asOf: to, accountId, includeArchived: false }),
+          getAccountsSummary(businessId, { asOf: prev.to, accountId, includeArchived: false }),
+        ]);
+
         if (myEpoch !== runEpochRef.current) return;
+
         setCashflow(res);
+        setCashflowPrev(resPrev);
+
+        const sumBalances = (rows: any[]) => {
+          let s = 0n;
+          for (const r of rows ?? []) {
+            try { s += BigInt(String(r.balance_cents ?? "0")); } catch {}
+          }
+          return String(s);
+        };
+
+        setCashEndingCents(sumBalances(endAcct?.rows ?? []));
+        setCashEndingPrevCents(sumBalances(endPrevAcct?.rows ?? []));
+
+        const catRows = (cats?.rows ?? []).map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents ?? "0") }));
+        setTopCats(topNByAbs(catRows, 5));
+
+        const vendorRows = (ap?.rows ?? []).map((r: any) => ({ label: String(r.vendor ?? "Vendor"), cents: String(r.total_cents ?? "0") }));
+        setTopVendorsAp(topNByAbs(vendorRows, 5));
+
         return;
       }
 
@@ -695,21 +679,14 @@ export default function ReportsPageClient() {
     setCatPage(1);
   }, [tab]);
 
-    // Clear visible results when range inputs change (user must still click Run report)
+  // Do NOT empty-clear results while the user adjusts range controls.
+  // Keep prior results visible until they click Run report again (more readable, deterministic).
   useEffect(() => {
     setErr(null);
     runEpochRef.current += 1;
     setLoading(false);
 
-    setPnl(null);
-    setCashflow(null);
-    setAccountsSummary(null);
-    setApAging(null);
-    setApVendorId(null);
-    setApVendorDetail(null);
-    setCategories(null);
-    setCatDetail(null);
-    setCatDetailCategoryId(null);
+    // Safe reset: paging-only.
     setCatPage(1);
   }, [rangeMode, ym, year, weekFrom, customFrom, customTo, ytd, accountId, includeArchivedAccounts]);
 
@@ -887,6 +864,9 @@ export default function ReportsPageClient() {
               <CardTitle className="text-sm">Profit &amp; Loss</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              <div className="text-[11px] text-slate-600">
+                Income and Expenses (ledger effective date). Net = Income − Expenses.
+              </div>
               {!pnl ? (
                 <div className="text-sm text-slate-600">Run the report to view results.</div>
               ) : (
@@ -914,48 +894,102 @@ export default function ReportsPageClient() {
                     </div>
                   </div>
 
-                  {ytd && pnl.ytd ? (
+                  {pnlPrev?.period ? (
                     <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">YTD ({pnl.ytd.from} → {pnl.ytd.to})</div>
-                      <div className="mt-2 grid grid-cols-3 gap-3">
-                        <div>
-                          <div className="text-[11px] text-slate-500">Income</div>
-                          <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.income_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(pnl.ytd.income_cents).text}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] text-slate-500">Expenses</div>
-                          <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.expense_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(pnl.ytd.expense_cents).text}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[11px] text-slate-500">Net</div>
-                          <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.net_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(pnl.ytd.net_cents).text}
-                          </div>
-                        </div>
-                      </div>
+                      <div className="text-xs text-slate-600">Change vs prior period</div>
 
-                      <div className="mt-3">
-                        <div className="text-[11px] text-slate-500 mb-2">Trend</div>
+                      {(() => {
+                        const curInc = BigInt(String(pnl.period.income_cents ?? "0"));
+                        const curExp = BigInt(String(pnl.period.expense_cents ?? "0"));
+                        const curNet = BigInt(String(pnl.period.net_cents ?? "0"));
 
-                        {hasMultiMonthSeries(pnl.monthly ?? []) ? (
-                          <ComboBarLineChart
-                            title="Income vs Expenses (bars) + Net (line)"
-                            months={(pnl.monthly ?? []).map((m: any) => m.month)}
-                            barA={(pnl.monthly ?? []).map((m: any) => m.income_cents)}
-                            barB={(pnl.monthly ?? []).map((m: any) => m.expense_cents)}
-                            line={(pnl.monthly ?? []).map((m: any) => m.net_cents)}
-                            formatMoney={formatUsdAccountingFromCents}
-                          />
-                        ) : (
-                          <NoTrendNote />
-                        )}
-                      </div>
+                        const prevInc = BigInt(String(pnlPrev.period.income_cents ?? "0"));
+                        const prevExp = BigInt(String(pnlPrev.period.expense_cents ?? "0"));
+                        const prevNet = BigInt(String(pnlPrev.period.net_cents ?? "0"));
+
+                        const dInc = curInc - prevInc;
+                        const dExp = curExp - prevExp;
+                        const dNet = curNet - prevNet;
+
+                        const pInc = pctChange(curInc, prevInc);
+                        const pExp = pctChange(curExp, prevExp);
+                        const pNet = pctChange(curNet, prevNet);
+
+                        const fmtPct = (p: number | null) => (p === null ? "—" : `${p.toFixed(1)}%`);
+
+                        return (
+                          <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
+                            <div>
+                              <div className="text-[11px] text-slate-500">Income</div>
+                              <div className={`tabular-nums ${dInc < 0n ? "text-red-600" : "text-slate-900"}`}>
+                                {formatUsdAccountingFromCents(String(dInc)).text} <span className="text-[11px] text-slate-500">({fmtPct(pInc)})</span>
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-slate-500">Expenses</div>
+                              <div className={`tabular-nums ${dExp < 0n ? "text-red-600" : "text-slate-900"}`}>
+                                {formatUsdAccountingFromCents(String(dExp)).text} <span className="text-[11px] text-slate-500">({fmtPct(pExp)})</span>
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-slate-500">Net</div>
+                              <div className={`tabular-nums ${dNet < 0n ? "text-red-600" : "text-slate-900"}`}>
+                                {formatUsdAccountingFromCents(String(dNet)).text} <span className="text-[11px] text-slate-500">({fmtPct(pNet)})</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : null}
+
+                  <div className="rounded-md border border-slate-200 p-3">
+                    <div className="text-xs text-slate-600">Trend</div>
+                    <div className="mt-2">
+                      {hasMultiMonthSeries(pnl.monthly ?? []) ? (
+                        <ComboBarLineChart
+                          title="Income vs Expenses (bars) + Net per period (line)"
+                          months={(pnl.monthly ?? []).map((m: any) => m.month)}
+                          barA={(pnl.monthly ?? []).map((m: any) => m.income_cents)}
+                          barB={(pnl.monthly ?? []).map((m: any) => m.expense_cents)}
+                          line={(pnl.monthly ?? []).map((m: any) => m.net_cents)}
+                          aLabel="Income"
+                          bLabel="Expenses"
+                          lineLabel="Net"
+                        />
+                      ) : (
+                        <NoTrendNote />
+                      )}
+                    </div>
+
+                    {ytd && pnl.ytd ? (
+                      <div className="mt-3 rounded-md border border-slate-200 p-3">
+                        <div className="text-xs text-slate-600">YTD ({pnl.ytd.from} → {pnl.ytd.to})</div>
+                        <div className="mt-2 grid grid-cols-3 gap-3">
+                          <div>
+                            <div className="text-[11px] text-slate-500">Income</div>
+                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.income_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(pnl.ytd.income_cents).text}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] text-slate-500">Expenses</div>
+                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(pnl.ytd.expense_cents).text}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] text-slate-500">Net</div>
+                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.net_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(pnl.ytd.net_cents).text}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* Cash Flow: keep interpretation unique. Top categories/vendors shown on P&L and AP tabs. */}
 
                   <div className="rounded-md border border-slate-200 overflow-hidden">
                     <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
@@ -964,8 +998,15 @@ export default function ReportsPageClient() {
                     </div>
 
                     <div className="divide-y divide-slate-100">
+                      <div className="h-9 px-3 grid grid-cols-4 items-center text-[11px] font-semibold text-slate-700 bg-white">
+                        <div>Month</div>
+                        <div className="text-right">Income</div>
+                        <div className="text-right">Expenses</div>
+                        <div className="text-right">Net</div>
+                      </div>
+
                       {(pnl.monthly ?? []).map((r: any, idx: number) => (
-                        <div key={`${r.month}-${idx}`} className="h-9 px-3 flex items-center gap-3 text-sm">
+                        <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-4 items-center gap-3 text-sm">
                           <div className="w-[90px] tabular-nums text-slate-700">{r.month}</div>
                           <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-red-600" : ""}`}>
                             {formatUsdAccountingFromCents(r.income_cents).text}
@@ -1002,11 +1043,14 @@ export default function ReportsPageClient() {
               <CardTitle className="text-sm">Cash Flow</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              <div className="text-[11px] text-slate-600">
+                Cash In/Out movements (ledger effective date). Line shows cumulative net cash change over the range.
+              </div>
               {!cashflow ? (
                 <div className="text-sm text-slate-600">Run the report to view results.</div>
               ) : (
                 <>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-4 gap-3">
                     <div className="rounded-md border border-slate-200 p-3">
                       <div className="text-xs text-slate-600">Cash In</div>
                       <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
@@ -1022,39 +1066,122 @@ export default function ReportsPageClient() {
                     </div>
 
                     <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Net</div>
+                      <div className="text-xs text-slate-600">Net change</div>
                       <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.net_cents).isNeg ? "text-red-600" : ""}`}>
                         {formatUsdAccountingFromCents(cashflow.totals.net_cents).text}
                       </div>
                     </div>
+
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs text-slate-600">Ending Cash (as of {to})</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(String(cashEndingCents ?? "0")).isNeg ? "text-red-600" : ""}`}>
+                        {formatUsdAccountingFromCents(String(cashEndingCents ?? "0")).text}
+                      </div>
+                      {cashEndingPrevCents ? (
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          vs prior end: {formatUsdAccountingFromCents(String(BigInt(String(cashEndingCents ?? "0")) - BigInt(String(cashEndingPrevCents)))).text}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
+
+                  {cashflowPrev?.totals ? (
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs text-slate-600">Change vs prior period</div>
+
+                      {(() => {
+                        const curIn = BigInt(String(cashflow.totals.cash_in_cents ?? "0"));
+                        const curOut = BigInt(String(cashflow.totals.cash_out_cents ?? "0"));
+                        const curNet = BigInt(String(cashflow.totals.net_cents ?? "0"));
+
+                        const prevIn = BigInt(String(cashflowPrev.totals.cash_in_cents ?? "0"));
+                        const prevOut = BigInt(String(cashflowPrev.totals.cash_out_cents ?? "0"));
+                        const prevNet = BigInt(String(cashflowPrev.totals.net_cents ?? "0"));
+
+                        const dIn = curIn - prevIn;
+                        const dOut = curOut - prevOut;
+                        const dNet = curNet - prevNet;
+
+                        const pIn = pctChange(curIn, prevIn);
+                        const pOut = pctChange(curOut, prevOut);
+                        const pNet = pctChange(curNet, prevNet);
+
+                        const fmtPct = (p: number | null) => (p === null ? "—" : `${p.toFixed(1)}%`);
+
+                        return (
+                          <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
+                            <div>
+                              <div className="text-[11px] text-slate-500">Cash In</div>
+                              <div className={`tabular-nums ${dIn < 0n ? "text-red-600" : "text-slate-900"}`}>
+                                {formatUsdAccountingFromCents(String(dIn)).text} <span className="text-[11px] text-slate-500">({fmtPct(pIn)})</span>
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-slate-500">Cash Out</div>
+                              <div className={`tabular-nums ${dOut < 0n ? "text-red-600" : "text-slate-900"}`}>
+                                {formatUsdAccountingFromCents(String(dOut)).text} <span className="text-[11px] text-slate-500">({fmtPct(pOut)})</span>
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-slate-500">Net change</div>
+                              <div className={`tabular-nums ${dNet < 0n ? "text-red-600" : "text-slate-900"}`}>
+                                {formatUsdAccountingFromCents(String(dNet)).text} <span className="text-[11px] text-slate-500">({fmtPct(pNet)})</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
 
                   <div className="rounded-md border border-slate-200 p-3">
                     <div className="text-[11px] text-slate-500 mb-2">Trend</div>
 
                     {hasMultiMonthSeries(cashflow.monthly ?? []) ? (
                       <ComboBarLineChart
-                        title="Cash In vs Cash Out (bars) + Net (line)"
+                        title="Cash In vs Cash Out (bars) + Cumulative net cash change (line)"
                         months={(cashflow.monthly ?? []).map((m: any) => m.month)}
                         barA={(cashflow.monthly ?? []).map((m: any) => m.cash_in_cents)}
                         barB={(cashflow.monthly ?? []).map((m: any) => m.cash_out_cents)}
-                        line={(cashflow.monthly ?? []).map((m: any) => m.net_cents)}
-                        formatMoney={formatUsdAccountingFromCents}
+                        line={(() => {
+                          const src = (cashflow.monthly ?? []).map((m: any) => m.net_cents);
+                          let run = 0n;
+                          return src.map((c: any) => {
+                            try {
+                              run += BigInt(String(c ?? "0"));
+                              return String(run);
+                            } catch {
+                              return String(run);
+                            }
+                          });
+                        })()}
+                        aLabel="Cash In"
+                        bLabel="Cash Out"
+                        lineLabel="Cumulative"
                       />
                     ) : (
                       <NoTrendNote />
                     )}
                   </div>
 
+                  {/* Cash Flow focuses on cash movement + ending cash. Category composition lives in Categories. */}
+
                   <div className="rounded-md border border-slate-200 overflow-hidden">
                     <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
                       <div className="text-xs font-semibold text-slate-700">Monthly</div>
-                      <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Last 12 months ending selected month"}</div>
+                      <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
                     </div>
 
                     <div className="divide-y divide-slate-100">
+                      <div className="h-9 px-3 grid grid-cols-4 items-center text-[11px] font-semibold text-slate-700 bg-white">
+                        <div>Month</div>
+                        <div className="text-right">Cash In</div>
+                        <div className="text-right">Cash Out</div>
+                        <div className="text-right">Net</div>
+                      </div>
+
                       {(cashflow.monthly ?? []).map((r: any, idx: number) => (
-                        <div key={`${r.month}-${idx}`} className="h-9 px-3 flex items-center gap-3 text-sm">
+                        <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-4 items-center gap-3 text-sm">
                           <div className="w-[90px] tabular-nums text-slate-700">{r.month}</div>
                           <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
                             {formatUsdAccountingFromCents(r.cash_in_cents).text}
@@ -1090,38 +1217,92 @@ export default function ReportsPageClient() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Accounts Summary (as of {asOf})</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+
+            <CardContent className="space-y-3 text-sm">
               {!accountsSummary ? (
                 <div className="text-sm text-slate-600">Run the report to view results.</div>
               ) : (accountsSummary.rows ?? []).length === 0 ? (
                 <div className="text-sm text-slate-600">No accounts match this view.</div>
               ) : (
-                <div className="rounded-md border border-slate-200 overflow-hidden">
-                  <div className="bg-slate-50 px-3 h-9 flex items-center text-xs font-semibold text-slate-700">
-                    <div className="flex-1">Account</div>
-                    <div className="w-[120px] text-right">Type</div>
-                    <div className="w-[180px] text-right">Balance</div>
+                <>
+                  {/* Top accounts chart */}
+                  <div className="rounded-md border border-slate-200 p-3">
+                    <div className="text-xs font-semibold text-slate-700">Top accounts</div>
+                    <div className="mt-2 h-[320px]">
+                      {(() => {
+                        const rows = (accountsSummary.rows ?? []).map((r: any) => ({
+                          name: String(r.name ?? "Account"),
+                          balance: (() => {
+                            try {
+                              return Number(BigInt(String(r.balance_cents ?? "0")));
+                            } catch {
+                              return 0;
+                            }
+                          })(),
+                        }));
+
+                        rows.sort((a: any, b: any) => Math.abs(b.balance) - Math.abs(a.balance));
+                        const top = rows.slice(0, 10);
+
+                        return (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={top} layout="vertical" margin={{ top: 10, right: 18, bottom: 10, left: 10 }}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis
+                                type="number"
+                                tick={{ fontSize: 11 }}
+                                tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
+                              />
+                              <YAxis type="category" dataKey="name" width={180} tick={{ fontSize: 11 }} />
+                              <Tooltip
+                                formatter={(value: any) => {
+                                  try {
+                                    const cents = BigInt(Math.round(Number(value) || 0));
+                                    return formatUsdAccountingFromCents(String(cents)).text;
+                                  } catch {
+                                    return "—";
+                                  }
+                                }}
+                                contentStyle={{ fontSize: 12 }}
+                              />
+                              <Bar dataKey="balance" name="Balance" fill="hsl(var(--primary))" radius={[3, 3, 3, 3]} />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        );
+                      })()}
+                    </div>
                   </div>
-                  <div className="divide-y divide-slate-100">
-                    {(accountsSummary.rows ?? []).map((r: any) => (
-                      <div key={r.account_id} className="h-9 px-3 flex items-center text-sm">
-                        <div className="flex-1 min-w-0 truncate">{r.name}</div>
-                        <div className="w-[120px] text-right text-slate-600">{r.type}</div>
-                        <div className={`w-[180px] text-right tabular-nums ${formatUsdAccountingFromCents(r.balance_cents).isNeg ? "text-red-600" : ""}`}>
-                          {formatUsdAccountingFromCents(r.balance_cents).text}
+
+                  {/* Table */}
+                  <div className="rounded-md border border-slate-200 overflow-hidden">
+                    <div className="bg-slate-50 px-3 h-9 flex items-center text-xs font-semibold text-slate-700">
+                      <div className="flex-1">Account</div>
+                      <div className="w-[120px] text-right">Type</div>
+                      <div className="w-[180px] text-right">Balance</div>
+                    </div>
+
+                    <div className="divide-y divide-slate-100">
+                      {(accountsSummary.rows ?? []).map((r: any) => (
+                        <div key={r.account_id} className="h-9 px-3 flex items-center text-sm">
+                          <div className="flex-1 min-w-0 truncate">{r.name}</div>
+                          <div className="w-[120px] text-right text-slate-600">{r.type}</div>
+                          <div className={`w-[180px] text-right tabular-nums ${formatUsdAccountingFromCents(r.balance_cents).isNeg ? "text-red-600" : ""}`}>
+                            {formatUsdAccountingFromCents(r.balance_cents).text}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
-            <ReportFootnote
-              lines={[
-                "Basis: Ledger effective date (entry date).",
-                "Scope: Selected account (or All accounts), excluding deleted entries.",
-                "Closed periods are read-only (no mutations allowed).",
-              ]}
-            />
+
+              <ReportFootnote
+                lines={[
+                  "Basis: Ledger effective date (entry date).",
+                  "Scope: Selected account (or All accounts), excluding deleted entries.",
+                  "Closed periods are read-only (no mutations allowed).",
+                ]}
+              />
             </CardContent>
           </Card>
         ) : null}
@@ -1138,6 +1319,55 @@ export default function ReportsPageClient() {
                 <div className="text-sm text-slate-600">No outstanding AP as of {asOf}.</div>
               ) : (
                 <>
+                  <div className="rounded-md border border-slate-200 p-3">
+                    <div className="text-xs font-semibold text-slate-700">AP bucket totals</div>
+                    <div className="mt-2 h-[260px]">
+                      {(() => {
+                        const sum = (k: string) => {
+                          let s = 0n;
+                          for (const r of apAging.rows ?? []) {
+                            try { s += BigInt(String((r as any)[k] ?? "0")); } catch {}
+                          }
+                          return Number(s);
+                        };
+
+                        const data = [{
+                          label: "AP",
+                          Current: sum("current_cents"),
+                          "1–30": sum("b1_30_cents"),
+                          "31–60": sum("b31_60_cents"),
+                          "61–90": sum("b61_90_cents"),
+                          "90+": sum("b90p_cents"),
+                        }];
+
+                        const fmt = (v: any) => {
+                          try {
+                            const cents = BigInt(Math.round(Number(v) || 0));
+                            return formatUsdAccountingFromCents(String(cents)).text;
+                          } catch {
+                            return "—";
+                          }
+                        };
+
+                        return (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={data} margin={{ top: 10, right: 18, bottom: 10, left: 10 }}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))} width={72} />
+                              <Tooltip formatter={(value: any, name: any) => [fmt(value), String(name)]} contentStyle={{ fontSize: 12 }} />
+                              <Bar dataKey="Current" stackId="ap" fill="rgb(51 65 85)" />
+                              <Bar dataKey="1–30" stackId="ap" fill="rgb(100 116 139)" />
+                              <Bar dataKey="31–60" stackId="ap" fill="rgb(148 163 184)" />
+                              <Bar dataKey="61–90" stackId="ap" fill="rgb(203 213 225)" />
+                              <Bar dataKey="90+" stackId="ap" fill="hsl(var(--primary))" />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
                   <div className="rounded-md border border-slate-200 overflow-hidden">
                     <div className="bg-slate-50 px-3 h-9 flex items-center text-xs font-semibold text-slate-700">
                       <div className="flex-1">Vendor</div>
@@ -1184,6 +1414,12 @@ export default function ReportsPageClient() {
                       </div>
 
                       <div className="divide-y divide-slate-100">
+                        <div className="px-3 py-2 text-[11px] font-semibold text-slate-700 bg-white flex items-center gap-3">
+                          <div className="flex-1">Bill</div>
+                          <div className="w-[160px] text-right">Outstanding</div>
+                          <div className="w-[90px] text-right">Age</div>
+                        </div>
+
                         {(apVendorDetail.rows ?? []).map((b: any) => (
                           <div key={b.bill_id} className="px-3 py-2 text-sm">
                             <div className="flex items-center justify-between gap-3">
@@ -1244,7 +1480,6 @@ export default function ReportsPageClient() {
                         label: String(r.category ?? "Category"),
                         cents: String(r.amount_cents),
                       }))}
-                    formatMoney={formatUsdAccountingFromCents}
                   />
 
                   <div className="rounded-md border border-slate-200 overflow-hidden">
@@ -1288,6 +1523,12 @@ export default function ReportsPageClient() {
                       </div>
 
                       <div className="divide-y divide-slate-100">
+                        <div className="h-9 px-3 flex items-center text-[11px] font-semibold text-slate-700 bg-white">
+                          <div className="w-[100px]">Date</div>
+                          <div className="flex-1">Payee / Memo</div>
+                          <div className="w-[180px] text-right">Amount</div>
+                        </div>
+
                         {(catDetail.rows ?? []).map((e: any) => (
                           <div key={e.entry_id} className="h-9 px-3 flex items-center text-sm">
                             <div className="w-[100px] text-slate-600 tabular-nums">{e.date}</div>
