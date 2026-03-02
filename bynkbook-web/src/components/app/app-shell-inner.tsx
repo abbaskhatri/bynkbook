@@ -8,6 +8,7 @@ import {
   Bell,
   HelpCircle,
   UserCircle,
+  Building2,
   LayoutDashboard,
   BookOpen,
   GitMerge,
@@ -27,6 +28,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { getIssuesCount } from "@/lib/api/issues";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
 import GlobalSearch from "@/components/app/global-search";
 
@@ -360,46 +362,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
   const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.count ?? 0) || 0);
 
-  // Sidebar Category Review count (UI hint; existing behavior)
-  const [attnUncat, setAttnUncat] = useState(0);
-
-  useEffect(() => {
-    if (!businessId || !currentAccountId) {
-      setAttnUncat(0);
-      return;
-    }
-
-    const read = () => {
-      try {
-        const kUncat = `bynkbook:attn:uncat:${businessId}:${currentAccountId}`;
-        const u = Number(localStorage.getItem(kUncat) || "0");
-        setAttnUncat(Number.isFinite(u) ? u : 0);
-      } catch {
-        setAttnUncat(0);
-      }
-    };
-
-    // initial read
-    read();
-
-    // same-tab updates from Category Review
-    const onCustom = () => read();
-
-    // cross-tab updates
-    const onStorage = (ev: StorageEvent) => {
-      if (!ev.key) return;
-      if (ev.key.includes(`bynkbook:attn:uncat:${businessId}:${currentAccountId}`)) read();
-    };
-
-    window.addEventListener("bynkbook:attnCountsUpdated" as any, onCustom);
-    window.addEventListener("storage", onStorage);
-
-    return () => {
-      window.removeEventListener("bynkbook:attnCountsUpdated" as any, onCustom);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, [businessId, currentAccountId]);
-
   const href = (path: string, needsAccountId: boolean) => {
     if (!businessId) return path;
     const base = `${path}?businessId=${businessId}`;
@@ -448,8 +410,37 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   if (showChrome && authChecked && isAuthed && !pathname.startsWith("/create-business")) {
     if (businessesQ.isLoading) {
       return (
-        <div className="min-h-screen flex items-center justify-center p-6">
-          <div className="text-sm text-slate-600">Loading…</div>
+        <div className="min-h-screen flex bg-slate-50">
+          {/* Sidebar skeleton */}
+          <div className="w-64 border-r border-slate-200 bg-white p-3 space-y-3">
+            <Skeleton className="h-6 w-36" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <div className="pt-2 space-y-2">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          </div>
+
+          {/* Main skeleton */}
+          <div className="flex-1 p-6">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-6 w-44" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-6 w-28" />
+                <Skeleton className="h-6 w-28" />
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
+            </div>
+          </div>
         </div>
       );
     }
@@ -458,8 +449,37 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     if (list.length === 0) {
       // Redirect effect will run; render a stable loading state to avoid flashing Dashboard.
       return (
-        <div className="min-h-screen flex items-center justify-center p-6">
-          <div className="text-sm text-slate-600">Loading…</div>
+        <div className="min-h-screen flex bg-slate-50">
+          {/* Sidebar skeleton */}
+          <div className="w-64 border-r border-slate-200 bg-white p-3 space-y-3">
+            <Skeleton className="h-6 w-36" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <div className="pt-2 space-y-2">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          </div>
+
+          {/* Main skeleton */}
+          <div className="flex-1 p-6">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-6 w-44" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-6 w-28" />
+                <Skeleton className="h-6 w-28" />
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
+              <Skeleton className="h-28 w-full" />
+            </div>
+          </div>
         </div>
       );
     }
@@ -500,8 +520,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0;
                       const showIssuesSkeleton = item.label === "Issues" && issuesCountQ.isLoading;
 
-                      const showUncat = item.label === "Category Review" && attnUncat > 0;
-
                       return (
                         <Button
                           key={item.path}
@@ -512,9 +530,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                           title={
                             item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
                               ? `Issues (${attnIssues})`
-                              : item.label === "Category Review" && attnUncat > 0
-                                ? `Category Review (${attnUncat})`
-                                : item.label
+                              : item.label
                           }
                         >
                           <Link href={link} prefetch className="relative flex items-center justify-center w-full">
@@ -526,12 +542,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                               </span>
                             ) : showIssuesSkeleton ? (
                               <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1 animate-pulse" />
-                            ) : null}
-
-                            {showUncat ? (
-                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-primary px-1 text-[10px] font-semibold text-white border border-primary/20">
-                                {attnUncat}
-                              </span>
                             ) : null}
                           </Link>
                         </Button>
@@ -555,12 +565,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                             </span>
                           ) : item.label === "Issues" && issuesCountQ.isLoading ? (
                             <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1.5 animate-pulse" />
-                          ) : null}
-
-                          {item.label === "Category Review" && attnUncat > 0 ? (
-                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary px-1.5 text-[11px] font-semibold text-white border border-primary/20">
-                              {attnUncat}
-                            </span>
                           ) : null}
                         </Link>
                       </Button>
@@ -596,7 +600,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-3 min-w-0">
             <Pill title="Business">
-              {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <Building2 className="h-4 w-4 text-slate-500 shrink-0" />
+                <span className="truncate">
+                  {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
+                </span>
+              </span>
             </Pill>
           </div>
 

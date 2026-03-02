@@ -1,63 +1,320 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-// Auth is handled by AppShell
+// Auth handled by AppShell
 
 import { useQuery } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { useAccounts } from "@/lib/queries/useAccounts";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
-import { getDashboardInsights } from "@/lib/api/ai";
 import { getIssuesCount } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { LayoutDashboard, ChevronRight } from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 
-import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
+import { InlineBanner } from "@/components/app/inline-banner";
 import { appErrorMessageOrNull, extractHttpStatus } from "@/lib/errors/app-error";
+
+type PeriodMode = "THIS_MONTH" | "LAST_MONTH" | "LAST_3_MONTHS" | "YTD" | "CUSTOM";
+
+type Money = { text: string; isNeg: boolean };
+
+function isoYmd(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+function ymOf(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function firstOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function lastOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+function addMonths(d: Date, delta: number) {
+  return new Date(d.getFullYear(), d.getMonth() + delta, 1);
+}
+function monthAbbr(raw: string) {
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const s = String(raw ?? "").trim();
+
+  // Preferred: YYYY-MM
+  if (/^\d{4}-\d{2}$/.test(s)) {
+    const m = Number(s.slice(5, 7));
+    return `${names[m - 1] ?? s} ${s.slice(2, 4)}`;
+  }
+
+  // Fallback: parse date-like strings (e.g., "Fri Aug ...", "2026-02-01", etc.)
+  try {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      const m = d.getMonth() + 1;
+      const yy = String(d.getFullYear()).slice(2, 4);
+      return `${names[m - 1] ?? s} ${yy}`;
+    }
+  } catch {
+    // ignore
+  }
+
+  return s || "—";
+}
+
+function absBig(n: bigint) {
+  return n < 0n ? -n : n;
+}
+
+function fmtUsdAccountingFromCents(centsStr?: string): Money {
+  if (!centsStr) return { text: "—", isNeg: false };
+  let n: bigint;
+  try {
+    n = BigInt(centsStr);
+  } catch {
+    return { text: "—", isNeg: false };
+  }
+  const isNeg = n < 0n;
+  const a = isNeg ? -n : n;
+
+  const dollars = a / 100n;
+  const cents = a % 100n;
+
+  const dollarsStr = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const cents2 = cents.toString().padStart(2, "0");
+  const base = `$${dollarsStr}.${cents2}`;
+  return { text: isNeg ? `(${base})` : base, isNeg };
+}
+
+function centsToNumber(centsStr: string) {
+  try {
+    return Number(BigInt(centsStr)) / 100;
+  } catch {
+    return 0;
+  }
+}
+
+function moneyClassFromCents(centsStr?: string) {
+  try {
+    if (!centsStr) return "text-slate-900";
+    return BigInt(centsStr) < 0n ? "text-rose-600" : "text-slate-900";
+  } catch {
+    return "text-slate-900";
+  }
+}
+
+type AreaLayout = {
+  w: number;
+  h: number;
+  padL: number;
+  padR: number;
+  padT: number;
+  padB: number;
+  domainMin: number;
+  domainMax: number;
+  zeroY: number | null;
+  grid: Array<{ y: number; label: string; isZero: boolean }>;
+  x: number[];
+  lineD: string;
+  areaD: string;
+};
+
+function computeNiceTicks(minV: number, maxV: number) {
+  // 5 ticks max. Deterministic, no scoring.
+  const span = maxV - minV || 1;
+  const rawStep = span / 4;
+  const pow10 = Math.pow(10, Math.floor(Math.log10(Math.abs(rawStep))));
+  const step = Math.max(pow10, Math.round(rawStep / pow10) * pow10);
+
+  const start = Math.floor(minV / step) * step;
+  const end = Math.ceil(maxV / step) * step;
+
+  const ticks: number[] = [];
+  for (let v = start; v <= end + step * 0.5; v += step) ticks.push(v);
+  return ticks;
+}
+
+function fmtAxisUsd(n: number) {
+  const abs = Math.abs(n);
+  const sign = n < 0 ? -1 : 1;
+
+  const to = (v: number) => {
+    // v is dollars (number)
+    // Compact format: $0, $10K, $1.2M
+    if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (v >= 1_000) return `$${(v / 1_000).toFixed(v % 1_000 === 0 ? 0 : 1)}K`;
+    return `$${Math.round(v).toString()}`;
+  };
+
+  const s = to(abs);
+  return sign < 0 ? `(${s})` : s;
+}
+
+function computeAreaLayout(args: {
+  labels: string[];
+  valuesDollars: number[];
+  // Chart rule: add 5–10% padding so movement is visible in tight ranges.
+  padPct: number;
+}): AreaLayout {
+  const w = 980;
+  const h = 300;
+
+  const padL = 64;
+  const padR = 16;
+  const padT = 16;
+  const padB = 34;
+
+  const n = Math.min(args.labels.length, args.valuesDollars.length);
+  const vals = args.valuesDollars.slice(0, n);
+
+  // Guard: if we don't have at least 2 points, return a safe empty layout.
+  // This prevents runtime crashes during initial loads / empty datasets.
+  if (vals.length < 2) {
+    return {
+      w,
+      h,
+      padL,
+      padR,
+      padT,
+      padB,
+      domainMin: 0,
+      domainMax: 1,
+      zeroY: null,
+      grid: [],
+      x: [],
+      lineD: "",
+      areaD: "",
+    };
+  }
+
+  let minV = Math.min(...vals);
+  let maxV = Math.max(...vals);
+
+  // padding rule (5–10% of range); if range is 0, use a small fixed pad.
+  const span = maxV - minV;
+  const pad = span === 0 ? Math.max(Math.abs(maxV) * 0.08, 250) : Math.max(span * args.padPct, span * 0.05);
+  minV = minV - pad;
+  maxV = maxV + pad;
+
+  const yOf = (v: number) => {
+    const usable = h - padT - padB;
+    const s = (maxV - v) / (maxV - minV || 1);
+    return Math.round(padT + s * usable);
+  };
+
+  const xStep = (w - padL - padR) / (n - 1);
+  const x = Array.from({ length: n }).map((_, i) => Math.round(padL + i * xStep));
+
+  const ticks = computeNiceTicks(minV, maxV);
+
+  // Zero baseline: only if 0 is within visible range.
+  const zeroY = 0 >= minV && 0 <= maxV ? yOf(0) : null;
+
+  const grid = ticks
+    .map((t) => ({
+      y: yOf(t),
+      label: fmtAxisUsd(t),
+      isZero: Math.abs(t) < 1e-9,
+    }))
+    .filter((g, idx, arr) => idx === 0 || g.y !== arr[idx - 1].y); // avoid duplicates after rounding
+
+  const pts = vals.map((v, i) => ({ x: x[i], y: yOf(v) }));
+
+  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+
+  // Area closes to bottom plot baseline (not zero). This is Cash Position chart (ending cash), not net chart.
+  const bottomY = h - padB;
+  const areaD =
+    `${lineD} ` +
+    `L ${pts[pts.length - 1].x} ${bottomY} ` +
+    `L ${pts[0].x} ${bottomY} Z`;
+
+  return {
+    w,
+    h,
+    padL,
+    padR,
+    padT,
+    padB,
+    domainMin: minV,
+    domainMax: maxV,
+    zeroY,
+    grid,
+    x,
+    lineD,
+    areaD,
+  };
+}
+
+type CashBarsLayout = {
+  w: number;
+  h: number;
+  padL: number;
+  padR: number;
+  padT: number;
+  padB: number;
+  x: number[];
+  grid: Array<{ y: number; label: string; isZero: boolean }>;
+  yOf: (v: number) => number;
+};
+
+function computeCashBarsLayout(args: {
+  labels: string[];
+  inCents: string[];
+  outCents: string[];
+  padPct: number; // 5–10% domain padding
+}): CashBarsLayout {
+  const w = 980;
+  const h = 300;
+
+  const padL = 64;
+  const padR = 16;
+  const padT = 16;
+  const padB = 34;
+
+  const n = Math.min(args.labels.length, args.inCents.length, args.outCents.length);
+  if (n < 2) {
+    return { w, h, padL, padR, padT, padB, x: [], grid: [], yOf: () => h - padB };
+  }
+
+  const centsToAbsDollars = (s: string) => {
+    try {
+      return Math.abs(Number(BigInt(String(s ?? "0")))) / 100;
+    } catch {
+      return 0;
+    }
+  };
+
+  let maxV = 0;
+  for (let i = 0; i < n; i++) {
+    maxV = Math.max(maxV, centsToAbsDollars(args.inCents[i]), centsToAbsDollars(args.outCents[i]));
+  }
+
+  const pad = Math.max(maxV * args.padPct, maxV * 0.05, 100);
+  const domainMax = maxV + pad;
+
+  const yOf = (v: number) => {
+    const usable = h - padT - padB;
+    const s = (domainMax - v) / (domainMax || 1);
+    return Math.round(padT + s * usable);
+  };
+
+  const xStep = (w - padL - padR) / (n - 1);
+  const x = Array.from({ length: n }).map((_, i) => Math.round(padL + i * xStep));
+
+  const ticks = computeNiceTicks(0, domainMax);
+  const grid = ticks
+    .map((t) => ({ y: yOf(t), label: fmtAxisUsd(t), isZero: Math.abs(t) < 1e-9 }))
+    .filter((g, idx, arr) => idx === 0 || g.y !== arr[idx - 1].y);
+
+  return { w, h, padL, padR, padT, padB, x, grid, yOf };
+}
 
 export default function DashboardPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
-
-  function InlineErrorBanner({
-    title,
-    detail,
-    onRetry,
-  }: {
-    title: string;
-    detail?: string | null;
-    onRetry?: (() => void) | null;
-  }) {
-    return (
-      <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-rose-900">{title}</div>
-            {detail ? <div className="mt-0.5 text-[11px] text-rose-800/90 break-words">{detail}</div> : null}
-          </div>
-          {onRetry ? (
-            <Button size="sm" variant="outline" className="h-7" onClick={onRetry}>
-              Retry
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  function normalizeApiError(e: any): { detail: string } {
-    return { detail: appErrorMessageOrNull(e) ?? "Something went wrong. Try again." };
-  }
-
-  // Auth is handled by AppShell
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -74,396 +331,704 @@ export default function DashboardPageClient() {
     if (!sp.get("businessId")) router.replace(`/dashboard?businessId=${selectedBusinessId}`);
   }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
-  const accountsQ = useAccounts(selectedBusinessId);
+  // Period selector (top-right; controls ALL widgets)
+  const [periodMode, setPeriodMode] = useState<PeriodMode>("THIS_MONTH");
+  const [customFrom, setCustomFrom] = useState<string>(() => isoYmd(firstOfMonth(new Date())));
+  const [customTo, setCustomTo] = useState<string>(() => isoYmd(new Date()));
 
-  const accountIdFromUrl = sp.get("accountId"); // "all" | accountId
-  const selectedAccountId = accountIdFromUrl ?? "all";
-  const [period, setPeriod] = useState<"90d" | "30d" | "ytd">("90d");
+  const range = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  // KPI + chart surfaces are driven by canonical React Query keys.
-
-  const currency = useMemo(
-    () =>
-      new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      }),
-    []
-  );
-
-  function fmtMoney(n: number) {
-    return n < 0 ? `(${currency.format(Math.abs(n))})` : currency.format(n);
-  }
-  function moneyClass(n: number) {
-    return n < 0 ? "text-rose-600" : "text-slate-900";
-  }
-
-  function fmtUsdAccountingFromCents(centsStr?: string) {
-    if (!centsStr) return { text: "—", isNeg: false };
-    let n: bigint;
-    try {
-      n = BigInt(centsStr);
-    } catch {
-      return { text: "—", isNeg: false };
+    if (periodMode === "THIS_MONTH") {
+      const from = isoYmd(firstOfMonth(today));
+      const to = isoYmd(today);
+      return { from, to, mode: periodMode };
     }
 
-    const isNeg = n < 0n;
-    const abs = isNeg ? -n : n;
+    if (periodMode === "LAST_MONTH") {
+      const lm = addMonths(today, -1);
+      const from = isoYmd(firstOfMonth(lm));
+      const to = isoYmd(lastOfMonth(lm));
+      return { from, to, mode: periodMode };
+    }
 
-    const dollars = abs / 100n;
-    const cents = abs % 100n;
+    if (periodMode === "LAST_3_MONTHS") {
+      const start = addMonths(today, -2);
+      const from = isoYmd(firstOfMonth(start));
+      const to = isoYmd(today);
+      return { from, to, mode: periodMode };
+    }
 
-    const dollarsStr = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    const cents2 = cents.toString().padStart(2, "0");
+    if (periodMode === "YTD") {
+      const from = `${today.getFullYear()}-01-01`;
+      const to = isoYmd(today);
+      return { from, to, mode: periodMode };
+    }
 
-    const base = `$${dollarsStr}.${cents2}`;
-    return { text: isNeg ? `(${base})` : base, isNeg };
-  }
-  const formatAxis = useMemo(() => {
-    return (n: number) => {
-      if (n < 0) return `(${currency.format(Math.abs(n))})`;
-      return currency.format(n);
-    };
-  }, [currency]);
+    // CUSTOM
+    const from = customFrom || isoYmd(firstOfMonth(today));
+    const to = customTo || isoYmd(today);
+    return { from, to, mode: periodMode };
+  }, [periodMode, customFrom, customTo]);
 
-  // Scope range (canonical, shared across dashboard surfaces)
-  const { from, to } = useMemo(() => {
-    const today = new Date();
-    const to = today.toISOString().slice(0, 10);
-    const from =
-      period === "30d"
-        ? new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10)
-        : period === "90d"
-          ? new Date(today.getTime() - 90 * 86400000).toISOString().slice(0, 10)
-          : `${today.getFullYear()}-01-01`;
-    return { from, to };
-  }, [period]);
-  
   const dashEnabled = !!selectedBusinessId;
 
-  // Canonical per-surface keys (array format to match repo conventions)
+  // Account scope selector: All accounts vs a specific account
+  const [accountScopeId, setAccountScopeId] = useState<string>("all");
+
+  // Keep-last-good: preserve previous data while fetching new period.
   const pnlQ = useQuery({
-    queryKey: ["dashboard", "pnlSummary", selectedBusinessId, selectedAccountId, from, to, period],
+    queryKey: ["dashboardExec", "pnlSummary", selectedBusinessId, range.from, range.to, range.mode],
     queryFn: () =>
       getPnlSummary(selectedBusinessId as string, {
-        from,
-        to,
-        accountId: selectedAccountId,
-        ytd: period === "ytd",
+        from: range.from,
+        to: range.to,
+        accountId: accountScopeId,
+        ytd: range.mode === "YTD",
       }),
     enabled: dashEnabled,
+    staleTime: 20_000,
+    placeholderData: (prev) => prev,
   });
 
   const cashflowQ = useQuery({
-    queryKey: ["dashboard", "cashflowSeries", selectedBusinessId, selectedAccountId, from, to, period],
+    queryKey: ["dashboardExec", "cashflowSeries", selectedBusinessId, range.from, range.to, range.mode],
     queryFn: () =>
       getCashflowSeries(selectedBusinessId as string, {
-        from,
-        to,
-        accountId: selectedAccountId,
-        ytd: period === "ytd",
+        from: range.from,
+        to: range.to,
+        accountId: accountScopeId,
+        ytd: range.mode === "YTD",
       }),
     enabled: dashEnabled,
-  });
-
-  const issuesCountQ = useQuery({
-    queryKey: ["dashboard", "issuesCount", selectedBusinessId, selectedAccountId],
-    queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: selectedAccountId }),
-    enabled: dashEnabled,
+    staleTime: 20_000,
+    placeholderData: (prev) => prev,
   });
 
   const categoriesQ = useQuery({
-    queryKey: ["dashboard", "categories", selectedBusinessId, selectedAccountId, from, to],
-    queryFn: () => getCategories(selectedBusinessId as string, { from, to, accountId: selectedAccountId }),
+    queryKey: ["dashboardExec", "categories", selectedBusinessId, range.from, range.to, range.mode],
+    queryFn: () => getCategories(selectedBusinessId as string, { from: range.from, to: range.to, accountId: accountScopeId }),
     enabled: dashEnabled,
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 
-  const accountsSummaryQ = useQuery({
-    queryKey: ["dashboard", "accountsSummary", selectedBusinessId, to],
+  const issuesCountQ = useQuery({
+    queryKey: ["dashboardExec", "issuesCount", selectedBusinessId, accountScopeId, "OPEN"],
+    queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: accountScopeId }),
+    enabled: dashEnabled,
+    staleTime: 20_000,
+    placeholderData: (prev) => prev,
+  });
+
+  const openIssuesN = Number((issuesCountQ.data as any)?.count ?? 0) || 0;
+
+  // Always fetch "all accounts" summary (for account picker options + business cash balance)
+  const accountsAllQ = useQuery({
+    queryKey: ["dashboardExec", "accountsSummaryAll", selectedBusinessId, range.to],
     queryFn: () =>
       getAccountsSummary(selectedBusinessId as string, {
-        asOf: to,
+        asOf: range.to,
         accountId: "all",
         includeArchived: false,
       }),
     enabled: dashEnabled,
+    staleTime: 20_000,
+    placeholderData: (prev) => prev,
   });
 
-  const insightsQ = useQuery({
-    queryKey: ["dashboard", "insights", selectedBusinessId, selectedAccountId, from, to, period],
-    queryFn: () => getDashboardInsights({ businessId: selectedBusinessId as string, from, to }),
+  // Scoped summary for the selected account (or all)
+  const accountsSummaryQ = useQuery({
+    queryKey: ["dashboardExec", "accountsSummary", selectedBusinessId, range.to, accountScopeId],
+    queryFn: () =>
+      getAccountsSummary(selectedBusinessId as string, {
+        asOf: range.to,
+        accountId: accountScopeId,
+        includeArchived: false,
+      }),
     enabled: dashEnabled,
+    staleTime: 20_000,
+    placeholderData: (prev) => prev,
   });
-
-  // Derived, display-ready data (no cross-scope reuse: React Query caches per key)
-  const kpis = useMemo(() => {
-    return {
-      income: pnlQ.data?.period?.income_cents,
-      expense: pnlQ.data?.period?.expense_cents,
-      net: pnlQ.data?.period?.net_cents,
-      cashIn: cashflowQ.data?.totals?.cash_in_cents,
-      cashOut: cashflowQ.data?.totals?.cash_out_cents,
-      issues: issuesCountQ.data?.count,
-    };
-  }, [pnlQ.data, cashflowQ.data, issuesCountQ.data]);
-
-  // Real cashflow chart buckets (monthly)
-  const cashSeries = useMemo(() => {
-    const cashflow = cashflowQ.data;
-    if (!cashflow?.monthly) return [] as Array<{
-      key: string;
-      label: string;
-      cashInCents: string;
-      cashOutCents: string;
-      netCents: string;
-    }>;
-
-    const monthAbbr = (ym: string) => {
-      const m = Number(String(ym).slice(5, 7));
-      const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      return names[m - 1] ?? ym;
-    };
-
-    return (cashflow.monthly ?? []).map((r: any) => {
-      const ym = String(r.month);
-      return {
-        key: ym,
-        label: monthAbbr(ym),
-        cashInCents: String(r.cash_in_cents ?? "0"),
-        cashOutCents: String(r.cash_out_cents ?? "0"),
-        netCents: String(r.net_cents ?? "0"),
-      };
-    });
-  }, [cashflowQ.data]);
-
-  const hasMultiMonth = useMemo(() => {
-    const uniq = new Set(cashSeries.map((r) => r.key));
-    return uniq.size >= 2;
-  }, [cashSeries]);
-
-  const { maxPosCents, maxNegAbsCents } = useMemo(() => {
-    let pos = 0n;
-    let neg = 0n;
-
-    for (const r of cashSeries) {
-      try {
-        const cashIn = BigInt(r.cashInCents); // expected >= 0
-        const cashOut = BigInt(r.cashOutCents); // expected <= 0
-        const net = BigInt(r.netCents);
-
-        if (cashIn > pos) pos = cashIn;
-
-        const outAbs = cashOut < 0n ? -cashOut : cashOut;
-        if (outAbs > neg) neg = outAbs;
-
-        if (net > 0n && net > pos) pos = net;
-        if (net < 0n && (-net) > neg) neg = -net;
-      } catch {
-        // ignore
-      }
-    }
-
-    // Snap each side to a nice step so grid labels look clean
-    const step = 500000n; // $5,000.00 in cents
-    const snapUp = (v: bigint) => (v <= 0n ? step : ((v + step - 1n) / step) * step);
-
-    return {
-      maxPosCents: snapUp(pos),
-      maxNegAbsCents: snapUp(neg),
-    };
-  }, [cashSeries]);
-
-  const yTicksPosCents = useMemo(() => {
-    const half = maxPosCents / 2n;
-    return [maxPosCents, half, 0n];
-  }, [maxPosCents]);
-
-  const yTicksNegCents = useMemo(() => {
-    const half = maxNegAbsCents / 2n;
-    // negatives (as signed cents)
-    return [0n, -half, -maxNegAbsCents];
-  }, [maxNegAbsCents]);
-
-  function fmtUsdAccountingFromCentsSafe(centsStr?: string) {
-    if (!centsStr) return { text: "—", isNeg: false };
-    return fmtUsdAccountingFromCents(centsStr);
-  }
-
-  function centsToNumber(centsStr: string) {
-    try {
-      return Number(BigInt(centsStr)) / 100;
-    } catch {
-      return 0;
-    }
-  }
-
-  const activeAccountOptions = useMemo(() => {
-    return (accountsQ.data ?? []).filter((a) => !a.archived_at);
-  }, [accountsQ.data]);
-
-  const selectedAccountLabel = useMemo(() => {
-    if (selectedAccountId === "all") return "All accounts";
-    const hit = activeAccountOptions.find((a) => a.id === selectedAccountId);
-    return hit?.name ?? "Account";
-  }, [selectedAccountId, activeAccountOptions]);
-
-  useEffect(() => {
-    if (businessesQ.isLoading) return;
-    if (!selectedBusinessId) return;
-    if (!sp.get("accountId")) {
-      router.replace(`/dashboard?businessId=${selectedBusinessId}&accountId=all`);
-    }
-  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
-
-  const balancesByAccountId = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const r of accountsSummaryQ.data?.rows ?? []) {
-      map[String((r as any).account_id)] = String((r as any).balance_cents ?? "0");
-    }
-    return map;
-  }, [accountsSummaryQ.data]);
-
-  type DashboardInsight = {
-    id: string;
-    type: string;
-    title: string;
-    value: any;
-    unit: "PCT" | "TEXT" | string;
-    severity?: "LOW" | "MED" | "HIGH" | string;
-    reason?: string;
-    drilldown?: { href?: string };
-  };
-
-  // Phase F4: Dashboard insights (computed, non-hallucinated)
-  const insights: DashboardInsight[] = useMemo(() => {
-    const raw: any = insightsQ.data as any;
-    return Array.isArray(raw?.insights) ? (raw.insights as DashboardInsight[]) : [];
-  }, [insightsQ.data]);
-
-  const insightsErr = useMemo(() => {
-    if (!insightsQ.error) return null;
-    return normalizeApiError(insightsQ.error).detail;
-  }, [insightsQ.error]);
-
-  const topCats = useMemo((): Array<{ label: string; cents: string; count: number }> => {
-    const cats: any = categoriesQ.data;
-    if (!cats?.rows) return [] as Array<{ label: string; cents: string; count: number }>;
-
-    const absBig = (s: string) => {
-      try {
-        const n = BigInt(s);
-        return n < 0n ? -n : n;
-      } catch {
-        return 0n;
-      }
-    };
-
-    return (cats.rows ?? [])
-      .map((r: any) => ({
-        label: String(r.category ?? "Category"),
-        cents: String(r.amount_cents ?? "0"),
-        count: Number(r.count ?? 0),
-      }))
-      .sort((a: any, b: any) => {
-        const aa = absBig(a.cents);
-        const bb = absBig(b.cents);
-        if (bb === aa) return b.count - a.count;
-        return bb > aa ? 1 : -1;
-      })
-      .slice(0, 6);
-  }, [categoriesQ.data]);
 
   const dashErr = useMemo(() => {
-    const errs = [pnlQ.error, cashflowQ.error, issuesCountQ.error, categoriesQ.error, accountsSummaryQ.error, insightsQ.error].filter(
-      Boolean
-    ) as any[];
+    const errs = [pnlQ.error, cashflowQ.error, categoriesQ.error, accountsSummaryQ.error].filter(Boolean) as any[];
     if (errs.length === 0) return null;
 
-    // Prefer auth/permission errors for banner.
     const first = errs[0];
     const status = extractHttpStatus(first);
     const detail = appErrorMessageOrNull(first) ?? "Something went wrong. Try again.";
     if (status === 401) return { title: "Signed out", detail };
     if (status === 403) return { title: "Access denied", detail };
     return { title: "Dashboard failed to load", detail };
-  }, [pnlQ.error, cashflowQ.error, issuesCountQ.error, categoriesQ.error, accountsSummaryQ.error, insightsQ.error]);
+  }, [pnlQ.error, cashflowQ.error, categoriesQ.error, accountsSummaryQ.error]);
 
   const refetchAll = () => {
     void pnlQ.refetch();
     void cashflowQ.refetch();
-    void issuesCountQ.refetch();
     void categoriesQ.refetch();
     void accountsSummaryQ.refetch();
-    void insightsQ.refetch();
   };
 
-  // Tooltip state (single source of truth)
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [hoverPos, setHoverPos] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // ---- Derivations (deterministic only) ----
+  const cashBalanceCents = useMemo(() => {
+    let s = 0n;
+    for (const r of accountsSummaryQ.data?.rows ?? []) {
+      try {
+        s += BigInt(String((r as any).balance_cents ?? "0"));
+      } catch {
+        // ignore
+      }
+    }
+    return String(s);
+  }, [accountsSummaryQ.data]);
 
-  // Auth handled by AppShell
+  const revenueCents = pnlQ.data?.period?.income_cents ?? null;
+  const expensesCents = pnlQ.data?.period?.expense_cents ?? null;
+  const netCents = pnlQ.data?.period?.net_cents ?? null;
+
+  // Monthly cash ending series for Cash Position:
+  // - If backend provides ending_cash_cents (or similar), use it.
+  // - Else compute cumulative net and offset so the last point matches cashBalanceCents.
+  const cashMonthly = useMemo(() => {
+    const rows = (cashflowQ.data?.monthly ?? []) as any[];
+    if (!Array.isArray(rows) || rows.length < 1) return [] as any[];
+
+    const monthKeyOf = (raw: any) => {
+      const s = String(raw ?? "").trim();
+      if (/^\d{4}-\d{2}$/.test(s)) return s;
+      try {
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) {
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        }
+      } catch {}
+      return s;
+    };
+
+    const sorted = [...rows]
+      .map((r) => ({ ...r, month: monthKeyOf(r.month ?? r.ym ?? r.date ?? r.period) }))
+      .sort((a, b) => (String(a.month) > String(b.month) ? 1 : -1));
+
+    let cashEnd: bigint;
+    try {
+      cashEnd = BigInt(String(cashBalanceCents ?? "0"));
+    } catch {
+      cashEnd = 0n;
+    }
+
+    // Prefer server-provided ending cash if present.
+    const serverEnding = sorted.every((r) => r.ending_cash_cents != null);
+    if (serverEnding) {
+      return sorted.map((r) => ({
+        ym: String(r.month),
+        label: monthAbbr(String(r.month)),
+        endingCashCents: String(r.ending_cash_cents ?? "0"),
+        cashInCents: String(r.cash_in_cents ?? "0"),
+        cashOutCents: String(r.cash_out_cents ?? "0"),
+        netCents: String(r.net_cents ?? "0"),
+      }));
+    }
+
+    // Otherwise: cumulative net (per bucket) and offset to match real ending cash.
+    const cum: bigint[] = [];
+    let run = 0n;
+    for (const r of sorted) {
+      try {
+        run += BigInt(String(r.net_cents ?? "0"));
+      } catch {
+        // ignore
+      }
+      cum.push(run);
+    }
+
+    const lastCum = cum[cum.length - 1] ?? 0n;
+    const offset = cashEnd - lastCum;
+
+    return sorted.map((r, i) => {
+      const ending = (cum[i] ?? 0n) + offset;
+      return {
+        ym: String(r.month),
+        label: monthAbbr(String(r.month)),
+        endingCashCents: String(ending),
+        cashInCents: String(r.cash_in_cents ?? "0"),
+        cashOutCents: String(r.cash_out_cents ?? "0"),
+        netCents: String(r.net_cents ?? "0"),
+      };
+    });
+  }, [cashflowQ.data, cashBalanceCents]);
+
+  // Hover (tooltip) for Cash Position chart
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState<number | null>(null);
+
+  // Area chart animation: tween values over 200ms when series length matches.
+  const [animCashMonthly, setAnimCashMonthly] = useState(cashMonthly);
+  const prevCashMonthlyRef = useRef(cashMonthly);
+
+  useEffect(() => {
+    const prev = prevCashMonthlyRef.current;
+    const next = cashMonthly;
+
+    // If shape changes, snap (still keep-last-good visually during fetch).
+    if (!prev || !next || prev.length !== next.length || prev.length < 2) {
+      prevCashMonthlyRef.current = next;
+      setAnimCashMonthly(next);
+      return;
+    }
+
+    // If values unchanged, do nothing.
+    const same = prev.every(
+      (p: any, i: number) =>
+        p.ym === next[i].ym &&
+        String(p.endingCashCents) === String(next[i].endingCashCents) &&
+        String(p.cashInCents) === String(next[i].cashInCents) &&
+        String(p.cashOutCents) === String(next[i].cashOutCents) &&
+        String(p.netCents) === String(next[i].netCents)
+    );
+    if (same) return;
+
+    const start = performance.now();
+    const dur = 200;
+
+    const centsNum = (s: any) => {
+      try {
+        return Number(BigInt(String(s ?? "0")));
+      } catch {
+        return 0;
+      }
+    };
+
+    const prevEnd = prev.map((r: any) => centsNum(r.endingCashCents));
+    const nextEnd = next.map((r: any) => centsNum(r.endingCashCents));
+
+    const prevIn = prev.map((r: any) => centsNum(r.cashInCents));
+    const nextIn = next.map((r: any) => centsNum(r.cashInCents));
+
+    const prevOut = prev.map((r: any) => centsNum(r.cashOutCents));
+    const nextOut = next.map((r: any) => centsNum(r.cashOutCents));
+
+    const prevNet = prev.map((r: any) => centsNum(r.netCents));
+    const nextNet = next.map((r: any) => centsNum(r.netCents));
+
+    let raf = 0;
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - start) / dur);
+      const ease = 1 - Math.pow(1 - k, 3); // easeOutCubic
+
+      const blended = next.map((r: any, i: number) => {
+        const lerp = (a: number, b: number) => a + (b - a) * ease;
+
+        const endC = BigInt(Math.round(lerp(prevEnd[i], nextEnd[i])));
+        const inC = BigInt(Math.round(lerp(prevIn[i], nextIn[i])));
+        const outC = BigInt(Math.round(lerp(prevOut[i], nextOut[i])));
+        const netC = BigInt(Math.round(lerp(prevNet[i], nextNet[i])));
+
+        return {
+          ...r,
+          endingCashCents: String(endC),
+          cashInCents: String(inC),
+          cashOutCents: String(outC),
+          netCents: String(netC),
+        };
+      });
+
+      setAnimCashMonthly(blended);
+
+      if (k < 1) raf = requestAnimationFrame(tick);
+      else {
+        prevCashMonthlyRef.current = next;
+        setAnimCashMonthly(next);
+      }
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [cashMonthly]);
+
+  const runway = useMemo(() => {
+    // avg monthly expenses (last 3 full months) derived from pnl monthly buckets if present.
+    const monthly = (pnlQ.data?.monthly ?? []) as any[];
+    const sorted = [...monthly].map((r) => ({ ...r, month: String(r.month) })).sort((a, b) => (a.month > b.month ? 1 : -1));
+
+    // Use last 3 *full* months if possible. For simplicity, take last 3 buckets excluding current partial month when mode includes current month.
+    // Deterministic rule: if we have >=4 buckets and range includes current month, drop the last bucket from avg calc.
+    const nowYm = ymOf(new Date());
+    const includesCurrent = sorted.some((r) => String(r.month) === nowYm) && (range.mode === "THIS_MONTH" || range.mode === "LAST_3_MONTHS" || range.mode === "YTD" || range.mode === "CUSTOM");
+
+    const usable = includesCurrent && sorted.length >= 4 ? sorted.slice(0, -1) : sorted;
+    const last3 = usable.slice(-3);
+
+    let expSumAbs = 0n;
+    let n = 0n;
+
+    for (const r of last3) {
+      try {
+        const e = BigInt(String(r.expense_cents ?? "0"));
+        expSumAbs += absBig(e);
+        n += 1n;
+      } catch {
+        // ignore
+      }
+    }
+
+    if (n === 0n) return { display: "—", tooltip: null as string | null };
+
+    // average monthly expense in cents
+    const avg = expSumAbs / n;
+    if (avg <= 0n) return { display: "—", tooltip: null };
+
+    let cash: bigint;
+    try {
+      cash = BigInt(String(cashBalanceCents ?? "0"));
+    } catch {
+      cash = 0n;
+    }
+
+    if (cash <= 0n) return { display: "0.0", tooltip: "Runway: 0.0 months" };
+
+    const months = Number(cash) / Number(avg);
+    if (!Number.isFinite(months)) return { display: "—", tooltip: null };
+
+    const uncapped = Math.round(months * 10) / 10; // 1 decimal
+    const capped = uncapped > 24 ? "24+ months" : `${uncapped.toFixed(1)} months`;
+    const tip = uncapped > 24 ? `Runway: ${uncapped.toFixed(1)} months (display capped)` : `Runway: ${uncapped.toFixed(1)} months`;
+
+    return { display: capped, tooltip: tip };
+  }, [pnlQ.data, cashBalanceCents, range.mode]);
+
+  const topExpenseCats = useMemo(() => {
+    const cats: any = categoriesQ.data;
+    const rows = Array.isArray(cats?.rows) ? cats.rows : [];
+    const items = rows
+      .map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents ?? "0") }))
+      .filter((x: any) => x && typeof x.cents === "string");
+
+    // Expenses only: take absolute value for ranking; keep original sign for display (should be negative).
+    const abs = (s: string) => {
+      try {
+        return absBig(BigInt(s));
+      } catch {
+        return 0n;
+      }
+    };
+
+    const sorted = items.sort((a: any, b: any) => (abs(b.cents) > abs(a.cents) ? 1 : abs(b.cents) < abs(a.cents) ? -1 : 0));
+
+    const top = sorted.slice(0, 6);
+    const rest = sorted.slice(6);
+
+    let other = 0n;
+    for (const r of rest) {
+      try {
+        other += absBig(BigInt(r.cents));
+      } catch {
+        // ignore
+      }
+    }
+
+    // total for pct calc
+    let total = 0n;
+    for (const r of sorted) {
+      try {
+        total += absBig(BigInt(r.cents));
+      } catch {
+        // ignore
+      }
+    }
+
+    const withOther =
+      other > 0n
+        ? [
+            ...top.map((t: any) => ({ ...t, absCents: abs(t.cents) })),
+            { label: "Other", cents: String(other), absCents: other },
+          ]
+        : top.map((t: any) => ({ ...t, absCents: abs(t.cents) }));
+
+    return { rows: withOther, totalAbs: total };
+  }, [categoriesQ.data]);
+
+  const monthlySummary = useMemo(() => {
+    // Prefer pnl monthly for revenue/expenses/net; use cashMonthly for ending cash.
+    const pnlMonthly = (pnlQ.data?.monthly ?? []) as any[];
+    const pnlSorted = [...pnlMonthly].map((r) => ({ ...r, month: String(r.month) })).sort((a, b) => (a.month > b.month ? 1 : -1));
+
+    const cashByYm: Record<string, string> = {};
+    for (const r of cashMonthly) cashByYm[r.ym] = r.endingCashCents;
+
+    const rows = pnlSorted.map((r, idx) => {
+      const ym = String(r.month);
+      const ending = cashByYm[ym] ?? null;
+
+      let deltaCash: string | null = null;
+      if (ending && idx > 0) {
+        const prevYm = String(pnlSorted[idx - 1].month);
+        const prevEnd = cashByYm[prevYm] ?? null;
+        if (prevEnd) {
+          try {
+            deltaCash = String(BigInt(ending) - BigInt(prevEnd));
+          } catch {
+            deltaCash = null;
+          }
+        }
+      }
+
+      return {
+        ym,
+        label: monthAbbr(ym),
+        revenue_cents: String(r.income_cents ?? "0"),
+        expenses_cents: String(r.expense_cents ?? "0"),
+        net_cents: String(r.net_cents ?? "0"),
+        delta_cash_cents: deltaCash, // null => show —
+        ending_cash_cents: ending, // null => show —
+      };
+    });
+
+    return rows;
+  }, [pnlQ.data, cashMonthly]);
+
+  // Deterministic insights (max 3)
+  const insights = useMemo(() => {
+    const out: Array<{ title: string; value: string; tone?: "default" | "good" | "bad" }> = [];
+
+    // 1) Net change vs prior period (if we have a prior period from same duration)
+    // Simple deterministic: compare last month vs previous month when mode is THIS_MONTH/LAST_MONTH/LAST_3_MONTHS.
+    if (monthlySummary.length >= 2) {
+      const last = monthlySummary[monthlySummary.length - 1];
+      const prev = monthlySummary[monthlySummary.length - 2];
+
+      try {
+        const lastNet = BigInt(last.net_cents);
+        const prevNet = BigInt(prev.net_cents);
+        const delta = lastNet - prevNet;
+
+        const pct = prevNet === 0n ? null : Number(delta) / Number(prevNet);
+        if (pct !== null && Number.isFinite(pct)) {
+          const pctText = `${(pct * 100).toFixed(0)}%`;
+          out.push({
+            title: "Net vs prior month",
+            value: `${pct >= 0 ? "+" : ""}${pctText}`,
+            tone: pct >= 0 ? "good" : "bad",
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2) Cash streak (>=2 decreases)
+    if (monthlySummary.length >= 3) {
+      let streak = 0;
+      for (let i = monthlySummary.length - 1; i >= 1; i--) {
+        const cur = monthlySummary[i].ending_cash_cents;
+        const prev = monthlySummary[i - 1].ending_cash_cents;
+        if (!cur || !prev) break;
+        try {
+          if (BigInt(cur) < BigInt(prev)) streak++;
+          else break;
+        } catch {
+          break;
+        }
+      }
+      if (streak >= 2) {
+        out.push({ title: "Cash declining streak", value: `${streak} months`, tone: "bad" });
+      }
+    }
+
+    // 3) Largest expense category (from donut data)
+    const firstCat = topExpenseCats.rows[0];
+    if (firstCat && topExpenseCats.totalAbs > 0n) {
+      const pct = Number(firstCat.absCents) / Number(topExpenseCats.totalAbs);
+      if (Number.isFinite(pct)) {
+        out.push({
+          title: "Largest expense category",
+          value: `${firstCat.label} (${(pct * 100).toFixed(0)}%)`,
+          tone: "default",
+        });
+      }
+    }
+
+    return out.slice(0, 3);
+  }, [monthlySummary, topExpenseCats]);
+
+  // Area chart layout + zero baseline emphasis rule
+  const areaLayout = useMemo(() => {
+    const labels = animCashMonthly.map((r) => r.label);
+    const values = animCashMonthly.map((r) => centsToNumber(r.endingCashCents)); // dollars
+    return computeAreaLayout({ labels, valuesDollars: values, padPct: 0.08 });
+  }, [animCashMonthly]);
+
+  // Donut rendering (simple deterministic SVG)
+  const donut = useMemo(() => {
+    const rows = topExpenseCats.rows;
+    const total = topExpenseCats.totalAbs;
+
+    if (!rows || rows.length === 0 || total <= 0n) {
+      return { arcs: [] as Array<{ a0: number; a1: number; label: string; cents: string }>, totalAbs: total };
+    }
+
+    let angle = -Math.PI / 2;
+    const arcs: Array<{ a0: number; a1: number; label: string; cents: string }> = [];
+
+    for (const r of rows) {
+      const v = Number(r.absCents);
+      const t = Number(total);
+      const frac = t > 0 ? v / t : 0;
+      const a0 = angle;
+      const a1 = angle + frac * Math.PI * 2;
+      arcs.push({ a0, a1, label: r.label, cents: r.cents });
+      angle = a1;
+    }
+
+    return { arcs, totalAbs: total };
+  }, [topExpenseCats]);
+
+    // Donut animation (200ms): tween arc angles when data changes.
+  const [animDonutArcs, setAnimDonutArcs] = useState(donut.arcs);
+  const prevDonutRef = useRef(donut.arcs);
+
+  useEffect(() => {
+    const prev = prevDonutRef.current;
+    const next = donut.arcs;
+
+    if (!prev || !next || prev.length !== next.length || next.length === 0) {
+      prevDonutRef.current = next;
+      setAnimDonutArcs(next);
+      return;
+    }
+
+    const start = performance.now();
+    const dur = 200;
+
+    let raf = 0;
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - start) / dur);
+      const ease = 1 - Math.pow(1 - k, 3);
+
+      const blended = next.map((n: any, i: number) => {
+        const p: any = prev[i];
+        return {
+          ...n,
+          a0: (p.a0 ?? n.a0) + ((n.a0 ?? 0) - (p.a0 ?? n.a0)) * ease,
+          a1: (p.a1 ?? n.a1) + ((n.a1 ?? 0) - (p.a1 ?? n.a1)) * ease,
+        };
+      });
+
+      setAnimDonutArcs(blended);
+
+      if (k < 1) raf = requestAnimationFrame(tick);
+      else {
+        prevDonutRef.current = next;
+        setAnimDonutArcs(next);
+      }
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [donut.arcs]);
+
+  function arcPath(cx: number, cy: number, rOuter: number, rInner: number, a0: number, a1: number) {
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+
+    const x0 = cx + rOuter * Math.cos(a0);
+    const y0 = cy + rOuter * Math.sin(a0);
+    const x1 = cx + rOuter * Math.cos(a1);
+    const y1 = cy + rOuter * Math.sin(a1);
+
+    const xi1 = cx + rInner * Math.cos(a1);
+    const yi1 = cy + rInner * Math.sin(a1);
+    const xi0 = cx + rInner * Math.cos(a0);
+    const yi0 = cy + rInner * Math.sin(a0);
+
+    return [
+      `M ${x0} ${y0}`,
+      `A ${rOuter} ${rOuter} 0 ${large} 1 ${x1} ${y1}`,
+      `L ${xi1} ${yi1}`,
+      `A ${rInner} ${rInner} 0 ${large} 0 ${xi0} ${yi0}`,
+      "Z",
+    ].join(" ");
+  }
+
+  const periodCapsule = (
+    <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
+      <CapsuleSelect
+        variant="flat"
+        value={periodMode}
+        onValueChange={(v) => setPeriodMode(v as PeriodMode)}
+        options={[
+          { value: "THIS_MONTH", label: "This Month" },
+          { value: "LAST_MONTH", label: "Last Month" },
+          { value: "LAST_3_MONTHS", label: "Last 3 Months" },
+          { value: "YTD", label: "YTD" },
+          { value: "CUSTOM", label: "Custom" },
+        ]}
+        placeholder="This Month"
+      />
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
-          {(() => {
-            const opts = [
-              { value: "all", label: "All accounts" },
-              ...activeAccountOptions.map((a) => ({ value: a.id, label: a.name })),
-            ];
+          <PageHeader
+            icon={<LayoutDashboard className="h-4 w-4" />}
+            title="Dashboard"
+            right={
+              <div className="flex items-center gap-2">
+                {/* Account scope (All vs account) */}
+                <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
+                  <CapsuleSelect
+                    variant="flat"
+                    value={accountScopeId}
+                    onValueChange={(v) => setAccountScopeId(String(v))}
+                    options={[
+                      { value: "all", label: "All Accounts" },
+                      ...((accountsAllQ.data?.rows ?? []) as any[])
+                        .filter((r: any) => r && r.id && !r.archived_at)
+                        .map((r: any) => ({
+                          value: String(r.id),
+                          label: String(r.name ?? "Account"),
+                        })),
+                    ]}
+                    placeholder="All Accounts"
+                  />
+                </div>
 
-            const accountCapsule = (
-              <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
-                <CapsuleSelect
-                  variant="flat"
-                  loading={accountsQ.isLoading}
-                  value={selectedAccountId || "all"}
-                  onValueChange={(v) => {
-                    if (!selectedBusinessId) return;
-                    const params = new URLSearchParams(sp.toString());
-                    params.set("businessId", selectedBusinessId);
-                    params.set("accountId", v);
-                    router.replace(`/dashboard?${params.toString()}`);
-                  }}
-                  options={opts}
-                  placeholder="All accounts"
-                />
+                {periodCapsule}
+
+                {openIssuesN > 0 ? (
+                  <div className="h-6 px-2 rounded-md border border-amber-200 bg-amber-50 text-[11px] font-semibold text-amber-800 flex items-center gap-2">
+                    <span>Issues</span>
+                    <span className="tabular-nums">{openIssuesN}</span>
+                  </div>
+                ) : null}
+
+                {periodMode === "CUSTOM" ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="h-6 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                      type="date"
+                      value={customFrom}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                    />
+                    <span className="text-xs text-slate-400">→</span>
+                    <input
+                      className="h-6 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                      type="date"
+                      value={customTo}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                    />
+                  </div>
+                ) : null}
               </div>
-            );
-
-            const periodCapsule = (
-              <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
-                <CapsuleSelect
-                  variant="flat"
-                  value={period}
-                  onValueChange={(v) => setPeriod(v as any)}
-                  options={[
-                    { value: "90d", label: "Last 90 days" },
-                    { value: "30d", label: "Last 30 days" },
-                    { value: "ytd", label: "Year to date" },
-                  ]}
-                  placeholder="Last 90 days"
-                />
-              </div>
-            );
-
-            return (
-              <PageHeader
-                icon={<LayoutDashboard className="h-4 w-4" />}
-                title="Dashboard"
-                afterTitle={accountCapsule}
-                right={<div className="flex items-center gap-2">{periodCapsule}</div>}
-              />
-            );
-          })()}
+            }
+          />
         </div>
         <div className="mt-2 h-px bg-slate-200" />
       </div>
 
-      {/* Explicit empty + error states */}
       {!selectedBusinessId && !businessesQ.isLoading ? (
         <EmptyStateCard
           title="No business yet"
@@ -473,621 +1038,386 @@ export default function DashboardPageClient() {
         />
       ) : null}
 
-      {selectedBusinessId && !accountsQ.isLoading && activeAccountOptions.length === 0 ? (
-        <EmptyStateCard
-          title="No accounts yet"
-          description="Add an account to start importing and categorizing transactions."
-          primary={{ label: "Add account", href: "/settings?tab=accounts" }}
-          secondary={{ label: "Reload", onClick: () => router.refresh() }}
-        />
+      {dashErr ? (
+        <InlineBanner title={dashErr.title} message={dashErr.detail} onRetry={() => refetchAll()} />
       ) : null}
 
-      {dashErr ? <InlineBanner title={dashErr.title} message={dashErr.detail} onRetry={refetchAll} /> : null}
-
-      {/* KPI tiles (Bundle 2) */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* KPI Strip */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {[
-          { label: "Income", v: kpis.income, loading: pnlQ.isLoading },
-          { label: "Expense", v: kpis.expense, loading: pnlQ.isLoading },
-          { label: "Net", v: kpis.net, loading: pnlQ.isLoading },
           {
-            label: "Open Issues",
-            v: typeof kpis.issues === "number" ? String(kpis.issues) : undefined,
-            isCount: true,
-            loading: issuesCountQ.isLoading,
+            label: "Cash Balance",
+            value: fmtUsdAccountingFromCents(cashBalanceCents).text,
+            isNeg: fmtUsdAccountingFromCents(cashBalanceCents).isNeg,
+            sub: `As of ${range.to}`,
+            emphasize: true,
+            tooltip: null as string | null,
           },
-        ].map((x) => {
-          const money = x.isCount ? null : fmtUsdAccountingFromCents(x.v);
-          const text = x.isCount ? (x.v ?? "—") : money?.text ?? "—";
-          const isNeg = x.isCount ? false : !!money?.isNeg;
+          {
+            label: "Cash Runway",
+            value: runway.display,
+            isNeg: false,
+            sub: "based on 3-mo avg expenses",
+            emphasize: true,
+            tooltip: runway.tooltip,
+          },
+          {
+            label: "Revenue",
+            value: fmtUsdAccountingFromCents(revenueCents ?? undefined).text,
+            isNeg: fmtUsdAccountingFromCents(revenueCents ?? undefined).isNeg,
+            sub: "Cash-basis",
+            emphasize: false,
+            tooltip: null as string | null,
+          },
+          {
+            label: "Expenses",
+            value: fmtUsdAccountingFromCents(expensesCents ?? undefined).text,
+            isNeg: fmtUsdAccountingFromCents(expensesCents ?? undefined).isNeg,
+            sub: "Cash-basis",
+            emphasize: false,
+            tooltip: null as string | null,
+          },
+          {
+            label: "Net",
+            value: fmtUsdAccountingFromCents(netCents ?? undefined).text,
+            isNeg: fmtUsdAccountingFromCents(netCents ?? undefined).isNeg,
+            sub: "Revenue − Expenses",
+            emphasize: false,
+            tooltip: null as string | null,
+          },
+        ].map((k) => (
+          <Card key={k.label} className={`rounded-[10px] border ${k.emphasize ? "border-slate-300" : "border-slate-200"} shadow-sm`}>
+            <CardContent className="p-4">
+              <div className="text-[11px] uppercase tracking-wide text-slate-500">{k.label}</div>
 
-          return (
-            <div key={x.label} className="rounded-xl border border-slate-200 bg-white shadow-sm px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-slate-500">{x.label}</div>
-              {x.loading && !x.v ? (
-                <div className="mt-1">
-                  <Skeleton className="h-4 w-24" />
-                </div>
-              ) : (
-                <div className={`mt-1 text-sm font-semibold ${isNeg ? "text-rose-600" : "text-slate-900"}`}>{text}</div>
-              )}
-            </div>
-          );
-        })}
+              <div className={`mt-2 text-[28px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-rose-600" : "text-slate-900"}`} title={k.tooltip ?? undefined}>
+                {pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching ? (
+                  <span className="inline-block align-middle">
+                    <Skeleton className="h-8 w-28" />
+                  </span>
+                ) : (
+                  k.value
+                )}
+              </div>
+
+              <div className="mt-1 text-[11px] text-slate-500">{k.sub}</div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Main grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left column */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Cash Flow */}
-          <Card>
-            <CHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <CardTitle className="text-sm font-medium">Cash Flow</CardTitle>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {selectedAccountLabel} •{" "}
-                    {period === "90d" ? "Last 90 days" : period === "30d" ? "Last 30 days" : "Year to date"}
-                  </div>
-                </div>
-              </div>
-            </CHeader>
+{/* Cash Flow (bars) */}
+      <Card className="rounded-[10px] border border-slate-200 shadow-sm">
+        <CHeader className="pb-2">
+          <CardTitle className="text-base font-semibold text-slate-800">Cash Flow</CardTitle>
+          <div className="text-[11px] text-slate-500">Cash In vs Cash Out by month (cash-basis)</div>
+        </CHeader>
+        <CardContent className="p-5 pt-3">
+          {animCashMonthly.length < 2 ? (
+            <Skeleton className="h-[300px] w-full" />
+          ) : (() => {
+            const labels = animCashMonthly.map((r: any) => r.label);
+            const ins = animCashMonthly.map((r: any) => String(r.cashInCents ?? "0"));
+            const outs = animCashMonthly.map((r: any) => String(r.cashOutCents ?? "0"));
+            const layout = computeCashBarsLayout({ labels, inCents: ins, outCents: outs, padPct: 0.08 });
 
-            <CardContent className="space-y-3">
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                {/* Legend */}
-                <div className="flex items-center gap-4 text-xs text-slate-700 mb-3">
-                  <div className="inline-flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-sm bg-primary" />
-                    Cash in
-                  </div>
-                  <div className="inline-flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-sm bg-rose-400" />
-                    Cash out
-                  </div>
-                  <div className="inline-flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-slate-700" />
-                    Net
-                  </div>
-                </div>
+            const n = animCashMonthly.length;
+            const xStep = n > 1 ? (layout.x[1] - layout.x[0]) : 80;
+            const groupW = Math.max(22, Math.min(44, Math.round(xStep * 0.55)));
+            const gap = 6;
+            const barW = Math.max(8, Math.floor((groupW - gap) / 2));
+            const baseY = layout.h - layout.padB;
 
-                {cashflowQ.isLoading && !cashflowQ.data ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
-                    <Skeleton className="h-40 w-full" />
-                    <div className="flex justify-between">
-                      <Skeleton className="h-3 w-16" />
-                      <Skeleton className="h-3 w-24" />
-                    </div>
-                  </div>
-                ) : cashflowQ.error ? (
-                  <InlineErrorBanner
-                    title="Cash Flow unavailable"
-                    detail={normalizeApiError(cashflowQ.error).detail}
-                    onRetry={() => {
-                      void cashflowQ.refetch();
-                    }}
-                  />
-                ) : cashSeries.length >= 2 && hasMultiMonth ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex items-start">
-                      {/* Shared viewport: labels + plot align to the exact same 160px coordinate space */}
-                      <div className="w-14 pr-3 text-[10px] text-slate-500">
-                        {(() => {
-                          const H = 160;
+            const dollarsAbs = (centsStr: any) => {
+              try {
+                return Math.abs(Number(BigInt(String(centsStr ?? "0")))) / 100;
+              } catch {
+                return 0;
+              }
+            };
 
-                          const posMaxDollars = Number(maxPosCents) / 100;
-                          const negMaxDollars = Number(maxNegAbsCents) / 100;
-                          const total = Math.max(1, posMaxDollars + negMaxDollars);
-                          const posPx = (H * posMaxDollars) / total;
-                          const zeroY = posPx;
-
-                          const positions = [
-                            { cents: maxPosCents, y: 0 },
-                            { cents: maxPosCents / 2n, y: zeroY / 2 },
-                            { cents: 0n, y: zeroY },
-                            { cents: -(maxNegAbsCents / 2n), y: zeroY + (H - zeroY) / 2 },
-                            { cents: -maxNegAbsCents, y: H },
-                          ];
-
-                          return (
-                            <div className="h-40 relative">
-                              {positions.map((p) => {
-                                const fm = fmtUsdAccountingFromCentsSafe(p.cents.toString());
-                                const isZero = p.cents === 0n;
-
-                                return (
-                                  <div
-                                    key={p.cents.toString()}
-                                    className={`absolute right-2 leading-none ${p.cents === 0n ? "text-slate-600" : fm.isNeg ? "text-rose-600" : ""}`}
-                                    style={{
-                                      top: isZero ? `${p.y - 6}px` : `${p.y}px`,
-                                      transform: isZero ? "translateY(0)" : "translateY(-50%)",
-                                    }}
-                                  >
-                                    {fm.text}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </div>
-
-                      {/* Plot (single coordinate space for bars + line + dots + hover) */}
-                      <div className="flex-1 pl-1">
-                        {(() => {
-                          const H = 160;
-
-                          const posMaxDollars = Number(maxPosCents) / 100;
-                          const negMaxDollars = Number(maxNegAbsCents) / 100;
-
-                          // Allocate vertical space proportional to magnitude (smart asymmetric axis)
-                          const total = Math.max(1, posMaxDollars + negMaxDollars);
-                          const posPx = (H * posMaxDollars) / total;
-                          const negPx = H - posPx;
-
-                          const zeroY = posPx; // 0 line (bars merge here)
-
-                          const posScale = posPx / Math.max(1, posMaxDollars);
-                          const negScale = negPx / Math.max(1, negMaxDollars);
-                          const n = cashSeries.length;
-                          const W = Math.max(1, n * 100); // fixed chart width, stable every render
-                          const colW = W / n;
-                          const barW = 14;
-                          const DOT_R = 5;
-
-                          const xPx = (i: number) => (i + 0.5) * colW;
-                          const yPxNet = (net: number) => {
-                            const y = net >= 0 ? zeroY - net * posScale : zeroY - net * negScale; // net negative pushes down
-                            return Math.max(2, Math.min(H - 2, y));
-                          };
-
-                          const points = cashSeries.map((r, i) => ({ x: xPx(i), y: yPxNet(centsToNumber(r.netCents)) }));
-                          const polyPoints = points.map((p) => `${p.x},${p.y}`).join(" ");
-
-                          const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-                          return (
-                            <div
-                              className="relative h-40"
-                              onMouseLeave={() => {
-                                setHoverIdx(null);
-                                setHoverPos(null);
-                              }}
-                              onMouseMove={(e) => {
-                                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                                const x = e.clientX - rect.left;
-                                const y = e.clientY - rect.top;
-                                setHoverPos({ x, y, w: rect.width, h: rect.height });
-                              }}
-                            >
-                              {/* Grid + 0 line */}
-                              <div className="absolute inset-0 pointer-events-none">
-                                <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: 0 }} />
-                                <div className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${zeroY / 2}px` }} />
-                                <div className="absolute left-0 right-0 border-t border-slate-400" style={{ top: `${zeroY}px` }} />
-                                <div className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${zeroY + (H - zeroY) / 2}px` }} />
-                                <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: `${H}px` }} />
-                              </div>
-
-                              {/* One SVG: bars + line + dots + hit regions */}
-                              <svg
-                                className="absolute inset-0"
-                                viewBox={`0 0 ${W} ${H}`}
-                                preserveAspectRatio="none"
-                              >
-                                {/* Hit regions */}
-                                {cashSeries.map((r, i) => (
-                                  <rect
-                                    key={`hit-${r.key}`}
-                                    x={i * colW}
-                                    y={0}
-                                    width={colW}
-                                    height={H}
-                                    fill="transparent"
-                                    onMouseEnter={() => setHoverIdx(i)}
-                                  />
-                                ))}
-
-                                {/* Bars (true zero-axis: green up from 0, purple down from 0) */}
-                                {cashSeries.map((r, i) => {
-                                  // Use the SAME zero line as the grid/net line (do NOT override it here)
-                                  const scaleIn = posScale;
-                                  const scaleOut = negScale;
-
-                                  const cashIn = Math.max(0, centsToNumber(r.cashInCents)); // positive
-                                  const cashOutAbs = Math.max(0, Math.abs(centsToNumber(r.cashOutCents))); // expenses negative
-
-                                  const inPx = cashIn * scaleIn;
-                                  const outPx = cashOutAbs * scaleOut;
-
-                                  const x = xPx(i) - barW / 2;
-
-                                  // Green: from zero line up
-                                  const inTop = zeroY - inPx;
-                                  const inH = inPx;
-
-                                  // Purple: from zero line down
-                                  const outTop = zeroY;
-                                  const outH = outPx;
-
-                                  const rx = 6;
-
-                                  return (
-                                    <g key={`bars-${r.key}`}>
-                                      {/* Cash In (rounded top) */}
-                                      {inH > 0 ? (
-                                        <path
-                                          d={[
-                                            `M ${x} ${inTop + rx}`,
-                                            `A ${rx} ${rx} 0 0 1 ${x + rx} ${inTop}`,
-                                            `H ${x + barW - rx}`,
-                                            `A ${rx} ${rx} 0 0 1 ${x + barW} ${inTop + rx}`,
-                                            `V ${inTop + inH}`,
-                                            `H ${x}`,
-                                            `Z`,
-                                          ].join(" ")}
-                                          fill="rgba(52,211,153,0.75)"
-                                        />
-                                      ) : null}
-
-                                      {/* Cash Out (rounded bottom) */}
-                                      {outH > 0 ? (
-                                        <path
-                                          d={[
-                                            `M ${x} ${outTop}`,
-                                            `H ${x + barW}`,
-                                            `V ${outTop + outH - rx}`,
-                                            `A ${rx} ${rx} 0 0 1 ${x + barW - rx} ${outTop + outH}`,
-                                            `H ${x + rx}`,
-                                            `A ${rx} ${rx} 0 0 1 ${x} ${outTop + outH - rx}`,
-                                            `Z`,
-                                          ].join(" ")}
-                                          fill="rgba(167,139,250,0.75)"
-                                        />
-                                      ) : null}
-                                    </g>
-                                  );
-                                })}
-
-                                {/* Net line */}
-                                <polyline
-                                  fill="none"
-                                  stroke="rgba(71,85,105,0.85)"
-                                  strokeWidth="2"
-                                  points={polyPoints}
-                                  pointerEvents="none"
-                                />
-
-                                {/* Dots (same points) */}
-                                {points.map((p, i) => (
-                                  <circle
-                                    key={`dot-${i}`}
-                                    cx={p.x}
-                                    cy={p.y}
-                                    r={DOT_R}
-                                    fill="rgb(51,65,85)"
-                                    pointerEvents="none"
-                                  />
-                                ))}
-                              </svg>
-
-                              {/* Tooltip (to the right of cursor, clamped) */}
-                              {hoverIdx !== null && hoverPos ? (() => {
-                                const TOOLTIP_W = 220;
-                                const TOOLTIP_H = 104;
-
-                                // Flip behavior: right by default; if overflow, place left.
-                                const preferRight = hoverPos.x + 12;
-                                const wouldOverflow = preferRight + TOOLTIP_W + 8 > hoverPos.w;
-
-                                const left = wouldOverflow
-                                  ? clamp(hoverPos.x - 12 - TOOLTIP_W, 8, hoverPos.w - TOOLTIP_W - 8)
-                                  : clamp(preferRight, 8, hoverPos.w - TOOLTIP_W - 8);
-
-                                const top = clamp(hoverPos.y, 8, hoverPos.h - TOOLTIP_H - 8);
-
-                                const r = cashSeries[hoverIdx];
-
-                                return (
-                                  <div className="absolute z-20 pointer-events-none" style={{ left, top, width: TOOLTIP_W }}>
-                                    <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-3 py-2 text-xs">
-                                      <div className="font-medium text-slate-900">{r.label}</div>
-
-                                      <div className="mt-1 flex items-center justify-between gap-3">
-                                        <span className="text-slate-600">Cash in</span>
-                                        <span className="font-medium text-primary">{fmtUsdAccountingFromCentsSafe(r.cashInCents).text}</span>
-                                      </div>
-
-                                      <div className="flex items-center justify-between gap-3">
-                                        <span className="text-slate-600">Cash out</span>
-                                        <span className="font-medium text-rose-600">{fmtUsdAccountingFromCentsSafe(r.cashOutCents).text}</span>
-                                      </div>
-
-                                      <div className="mt-1 flex items-center justify-between gap-3">
-                                        <span className="text-slate-600">Net</span>
-                                        {(() => {
-                                          const fm = fmtUsdAccountingFromCentsSafe(r.netCents);
-                                          return <span className={`font-semibold ${fm.isNeg ? "text-rose-600" : "text-slate-900"}`}>{fm.text}</span>;
-                                        })()}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })() : null}
-                            </div>
-                          );
-                        })()}
-
-                        {/* X axis labels */}
-                        <div className="mt-2 flex gap-1">
-                          {cashSeries.map((r) => (
-                            <div key={r.key} className="flex-1 text-center text-[10px] text-slate-500">
-                              {r.label}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 text-[11px] text-muted-foreground">
-                      Basis: Cash (Entries). Types: Income/Expense only.
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
-                    No multi-month trend for this range.
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Top Categories (real aggregate) */}
-          <Card>
-              <CHeader className="pb-2">
-                <div className="flex items-center justify-between gap-4">
-                  <CardTitle className="text-sm font-medium">Top Categories</CardTitle>
-                  <div className="text-xs text-muted-foreground">
-                    {selectedAccountLabel} •{" "}
-                    {period === "90d" ? "Last 90 days" : period === "30d" ? "Last 30 days" : "Year to date"}
-                  </div>
-                </div>
-              </CHeader>
-
-              <CardContent className="pt-0">
-                {categoriesQ.isLoading && !categoriesQ.data ? (
-                  <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                    <div className="px-3 py-2 border-b border-slate-200">
-                      <Skeleton className="h-4 w-40" />
-                      <div className="mt-1"><Skeleton className="h-3 w-20" /></div>
-                    </div>
-                    <div className="px-3 py-2 border-b border-slate-200">
-                      <Skeleton className="h-4 w-32" />
-                      <div className="mt-1"><Skeleton className="h-3 w-24" /></div>
-                    </div>
-                    <div className="px-3 py-2">
-                      <Skeleton className="h-4 w-48" />
-                      <div className="mt-1"><Skeleton className="h-3 w-16" /></div>
-                    </div>
-                  </div>
-                ) : categoriesQ.error ? (
-                  <InlineErrorBanner
-                    title="Categories unavailable"
-                    detail={normalizeApiError(categoriesQ.error).detail}
-                    onRetry={() => {
-                      void categoriesQ.refetch();
-                    }}
-                  />
-                ) : topCats.length === 0 ? (
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
-                    No category data for this range.
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                    {topCats.map((c, idx) => {
-                      const fm = fmtUsdAccountingFromCentsSafe(c.cents);
-                      return (
-                        <div key={`${c.label}-${idx}`} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-slate-900 truncate">{c.label}</div>
-                            <div className="text-[11px] text-muted-foreground">{c.count} entries</div>
-                          </div>
-                          <div className={`text-sm font-semibold tabular-nums ${fm.isNeg ? "text-rose-600" : "text-slate-900"}`}>{fm.text}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-        </div>
-
-        {/* Right column */}
-        <div className="space-y-4">
-          {/* Account Balances */}
-          <Card>
-            <CHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-sm font-medium">Account Balances</CardTitle>
-                <div className="text-xs text-muted-foreground">Top accounts</div>
-              </div>
-            </CHeader>
-
-            <CardContent className="pt-0">
-              {accountsSummaryQ.isLoading && !accountsSummaryQ.data ? (
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0">
-                      <div className="min-w-0">
-                        <Skeleton className="h-4 w-40" />
-                        <div className="mt-1"><Skeleton className="h-3 w-28" /></div>
-                      </div>
-                      <Skeleton className="h-4 w-16" />
-                    </div>
-                  ))}
-                  <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
-                    Balances shown reflect current app data.
-                  </div>
-                </div>
-              ) : accountsSummaryQ.error ? (
-                <InlineErrorBanner
-                  title="Balances unavailable"
-                  detail={normalizeApiError(accountsSummaryQ.error).detail}
-                  onRetry={() => {
-                    void accountsSummaryQ.refetch();
+            return (
+              <div className="w-full">
+                <svg
+                  viewBox={`0 0 ${layout.w} ${layout.h}`}
+                  className="block w-full h-[300px]"
+                  onMouseLeave={() => {
+                    setHoverIdx(null);
+                    setHoverX(null);
                   }}
-                />
-              ) : (
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  {activeAccountOptions.slice(0, 5).map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => {
-                        if (!selectedBusinessId) return;
-                        const params = new URLSearchParams();
-                        params.set("businessId", selectedBusinessId);
-                        params.set("accountId", String(a.id));
-                        router.push(`/ledger?${params.toString()}`);
-                      }}
-                      className="w-full text-left flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 last:border-b-0 hover:bg-slate-50"
-                      title="Open ledger"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-slate-900 truncate">{a.name}</div>
-                        <div className="text-[11px] text-muted-foreground truncate">
-                          {"institution" in (a as any) && (a as any).institution ? (a as any).institution : "—"}{" "}
-                          {"last4" in (a as any) && (a as any).last4 ? `•••• ${(a as any).last4}` : ""}
-                        </div>
-                      </div>
+                  onMouseMove={(e) => {
+                    const svg = e.currentTarget;
+                    const rect = svg.getBoundingClientRect();
+                    const sx = ((e.clientX - rect.left) / rect.width) * layout.w;
 
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-slate-900">
-                          {(() => {
-                            const cents = balancesByAccountId[String(a.id)];
-                            const fm = fmtUsdAccountingFromCentsSafe(cents ?? "0");
-                            return fm.text;
-                          })()}
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-slate-400" />
-                      </div>
-                    </button>
-                  ))}
-
-                  {activeAccountOptions.length === 0 ? (
-                    <div className="px-3 py-3 text-sm text-muted-foreground">No accounts yet.</div>
-                  ) : null}
-
-                  <div className="px-3 py-2 text-[11px] text-muted-foreground bg-slate-50 border-t border-slate-200">
-                    Balances shown reflect current app data.
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Open Issues */}
-          <Card className="border-amber-200">
-            <CHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-sm font-medium">Open Issues</CardTitle>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7"
-                  onClick={() => {
-                    const params = new URLSearchParams();
-                    if (selectedBusinessId) params.set("businessId", selectedBusinessId);
-                    if (selectedAccountId && selectedAccountId !== "all") params.set("accountId", selectedAccountId);
-                    router.push(`/issues?${params.toString()}`);
+                    let bestI = 0;
+                    let bestD = Infinity;
+                    for (let i = 0; i < layout.x.length; i++) {
+                      const d = Math.abs(layout.x[i] - sx);
+                      if (d < bestD) {
+                        bestD = d;
+                        bestI = i;
+                      }
+                    }
+                    setHoverIdx(bestI);
+                    setHoverX(layout.x[bestI]);
                   }}
                 >
-                  Review
-                </Button>
-              </div>
-            </CHeader>
-
-            <CardContent className="pt-0">
-              {issuesCountQ.error ? (
-                <InlineErrorBanner
-                  title="Issues unavailable"
-                  detail={normalizeApiError(issuesCountQ.error).detail}
-                  onRetry={() => {
-                    void issuesCountQ.refetch();
-                  }}
-                />
-              ) : null}
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-                <div className="text-sm font-medium text-amber-900">
-                  Open issues:{" "}
-                  {issuesCountQ.isLoading && typeof kpis.issues !== "number" ? (
-                    <span className="inline-block align-middle">
-                      <Skeleton className="h-4 w-10" />
-                    </span>
-                  ) : typeof kpis.issues === "number" ? (
-                    kpis.issues
-                  ) : (
-                    "—"
-                  )}
-                </div>
-
-                <div className="mt-2 text-[11px] text-amber-800/80">
-                  Count of open issues for the selected business/account.
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* AI Insights */}
-          <Card>
-            <CHeader className="pb-2">
-              <div className="flex items-center justify-between gap-4">
-                <CardTitle className="text-sm font-medium">Insights</CardTitle>
-              </div>
-            </CHeader>
-
-            <CardContent className="pt-0">
-              {insightsQ.isLoading ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                </div>
-              ) : insightsErr ? (
-                <InlineErrorBanner
-                  title="Insights unavailable"
-                  detail={insightsErr}
-                  onRetry={() => {
-                    void insightsQ.refetch();
-                  }}
-                />
-              ) : insights.length === 0 ? (
-                <div className="text-xs text-muted-foreground">No insights for this period.</div>
-              ) : (
-                <div className="space-y-2">
-                  {insights.map((it: DashboardInsight) => (
-                    <button
-                      key={String(it.id)}
-                      type="button"
-                      onClick={() => router.push(it.drilldown?.href ?? "#")}
-                      className="w-full text-left rounded-lg border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50"
-                    >
-                      <div className="text-[11px] font-semibold text-slate-900">{it.title}</div>
-                      <div className="mt-1 text-xs text-slate-700">
-                        {it.unit === "PCT" ? `${it.value}%` : it.value}
-                      </div>
-                      <div className="mt-1 text-[11px] text-muted-foreground truncate">
-                        {it.reason}
-                      </div>
-                    </button>
+                  {/* grid + y labels */}
+                  {layout.grid.map((g) => (
+                    <g key={`g-${g.y}`}>
+                      <line
+                        x1={layout.padL}
+                        x2={layout.w - layout.padR}
+                        y1={g.y}
+                        y2={g.y}
+                        className="stroke-slate-100"
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={layout.padL - 10}
+                        y={g.y}
+                        textAnchor="end"
+                        dominantBaseline="middle"
+                        className="fill-slate-500 text-[11px]"
+                      >
+                        {g.label}
+                      </text>
+                    </g>
                   ))}
+
+                  {/* bars (animated via animCashMonthly) */}
+                  {animCashMonthly.map((r: any, i: number) => {
+                    const xc = layout.x[i];
+                    if (xc == null) return null;
+
+                    const inH = Math.max(1, baseY - layout.yOf(dollarsAbs(r.cashInCents)));
+                    const outH = Math.max(1, baseY - layout.yOf(dollarsAbs(r.cashOutCents)));
+
+                    const x0 = xc - Math.floor(groupW / 2);
+                    const xIn = x0;
+                    const xOut = x0 + barW + gap;
+
+                    return (
+                      <g key={`m-${i}`}>
+                        <rect x={xIn} y={baseY - inH} width={barW} height={inH} rx={3} className="fill-primary/75" />
+                        <rect x={xOut} y={baseY - outH} width={barW} height={outH} rx={3} className="fill-rose-500/70" />
+                      </g>
+                    );
+                  })}
+
+                  {/* hover tooltip */}
+                  {hoverIdx !== null && hoverX !== null ? (() => {
+                    const r: any = animCashMonthly[hoverIdx];
+                    if (!r) return null;
+
+                    const label = r.label;
+                    const ending = fmtUsdAccountingFromCents(r.endingCashCents).text;
+                    const cin = fmtUsdAccountingFromCents(r.cashInCents).text;
+                    const cout = fmtUsdAccountingFromCents(r.cashOutCents).text;
+                    const net = fmtUsdAccountingFromCents(r.netCents).text;
+
+                    const tipW = 240;
+                    const tipH = 92;
+                    const x = Math.min(layout.w - tipW - 10, Math.max(10, hoverX + 10));
+                    const y = 18;
+
+                    return (
+                      <g>
+                        <line x1={hoverX} x2={hoverX} y1={layout.padT} y2={layout.h - layout.padB} className="stroke-slate-200" strokeWidth={1} />
+                        <g transform={`translate(${x}, ${y})`}>
+                          <rect width={tipW} height={tipH} rx={8} className="fill-white stroke-slate-200" />
+                          <text x={10} y={18} className="fill-slate-700 text-[11px]">{label}</text>
+
+                          <text x={10} y={38} className="fill-slate-500 text-[11px]">Cash In:</text>
+                          <text x={86} y={38} className="fill-slate-700 text-[11px]">{cin}</text>
+
+                          <text x={10} y={54} className="fill-slate-500 text-[11px]">Cash Out:</text>
+                          <text x={86} y={54} className="fill-slate-700 text-[11px]">{cout}</text>
+
+                          <text x={10} y={70} className="fill-slate-500 text-[11px]">Net:</text>
+                          <text x={86} y={70} className="fill-slate-700 text-[11px]">{net}</text>
+
+                          <text x={150} y={70} className="fill-slate-500 text-[11px]">End:</text>
+                          <text x={182} y={70} className="fill-slate-700 text-[11px]">{ending}</text>
+                        </g>
+                      </g>
+                    );
+                  })() : null}
+
+                  {/* x labels */}
+                  {(() => {
+                    const every = n <= 8 ? 1 : n <= 16 ? 2 : 3;
+                    const y = layout.h - 8;
+                    return animCashMonthly.map((r: any, i: number) =>
+                      i % every === 0 || i === n - 1 ? (
+                        <text
+                          key={`x-${i}`}
+                          x={layout.x[i]}
+                          y={y}
+                          textAnchor="middle"
+                          dominantBaseline="ideographic"
+                          className="fill-slate-500 text-[11px]"
+                        >
+                          {r.label}
+                        </text>
+                      ) : null
+                    );
+                  })()}
+                </svg>
+
+                {/* legend */}
+                <div className="mt-2 flex items-center gap-4 text-[11px] text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2 w-2 rounded-sm bg-primary/75" />
+                    <span>Cash In</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2 w-2 rounded-sm bg-rose-500/70" />
+                    <span>Cash Out</span>
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
+
+      {/* Donut + Insights (balanced height) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="rounded-[10px] border border-slate-200 shadow-sm" style={{ height: 360 }}>
+          <CHeader className="pb-2">
+            <CardTitle className="text-base font-semibold text-slate-800">Expense Composition</CardTitle>
+            <div className="text-[11px] text-slate-500">Top categories (Top 6 + Other)</div>
+          </CHeader>
+          <CardContent className="p-5 pt-3">
+            {animDonutArcs.length === 0 ? (
+              <Skeleton className="h-[260px] w-full" />
+            ) : (
+              <div className="h-full grid grid-cols-[240px_1fr] gap-4 items-center">
+                {/* donut left */}
+                <div className="flex items-center justify-center">
+                  <svg width={220} height={220} viewBox="0 0 220 220" className="block">
+                    <g>
+                      {animDonutArcs.map((a: any, idx: number) => (
+                        <path
+                          key={`${a.label}-${idx}`}
+                          d={arcPath(110, 110, 100, 62, a.a0, a.a1)}
+                          className={idx === 0 ? "fill-primary" : idx === 1 ? "fill-primary/70" : idx === 2 ? "fill-primary/55" : "fill-primary/35"}
+                        />
+                      ))}
+                    </g>
+                  </svg>
+                </div>
+
+                {/* values right */}
+                <div className="space-y-2">
+                  {animDonutArcs.map((a: any, idx: number) => {
+                    const abs = (() => {
+                      try {
+                        return absBig(BigInt(a.cents));
+                      } catch {
+                        return 0n;
+                      }
+                    })();
+                    const pct = donut.totalAbs > 0n ? Number(abs) / Number(donut.totalAbs) : 0;
+                    return (
+                      <div key={`leg-${a.label}-${idx}`} className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`inline-block h-2 w-2 rounded-sm ${idx === 0 ? "bg-primary" : idx === 1 ? "bg-primary/70" : idx === 2 ? "bg-primary/55" : "bg-primary/35"}`} />
+                          <span className="text-slate-700 truncate">{a.label}</span>
+                        </div>
+                        <div className="flex items-center gap-3 tabular-nums">
+                          <span className="text-slate-500">{(pct * 100).toFixed(0)}%</span>
+                          <span className={moneyClassFromCents(a.cents)}>{fmtUsdAccountingFromCents(String(abs)).text}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-[10px] border border-slate-200 shadow-sm" style={{ height: 360 }}>
+          <CHeader className="pb-2">
+            <CardTitle className="text-base font-semibold text-slate-800">Insights</CardTitle>
+            <div className="text-[11px] text-slate-500">Deterministic signals (no AI)</div>
+          </CHeader>
+          <CardContent className="p-5 pt-3 h-full">
+            {pnlQ.isLoading || cashflowQ.isLoading || accountsSummaryQ.isLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-20 w-full" />
+                <Skeleton className="h-20 w-full" />
+              </div>
+            ) : insights.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-slate-500">No notable signals for this period.</div>
+            ) : (
+              <div className={`h-full flex flex-col ${insights.length < 3 ? "justify-center" : "justify-start"} gap-3`}>
+                {insights.map((it) => (
+                  <div key={it.title} className="rounded-[10px] border border-slate-200 bg-white p-4">
+                    <div className="text-[13px] font-medium text-slate-800">{it.title}</div>
+                    <div className={`mt-1 text-[18px] font-semibold tabular-nums ${it.tone === "good" ? "text-primary" : it.tone === "bad" ? "text-rose-600" : "text-slate-900"}`}>
+                      {it.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Monthly Summary */}
+      <Card className="rounded-[10px] border border-slate-200 shadow-sm">
+        <CHeader className="pb-2">
+          <CardTitle className="text-base font-semibold text-slate-800">Monthly Summary</CardTitle>
+          <div className="text-[11px] text-slate-500">Cash-basis overview with Δ Cash</div>
+        </CHeader>
+        <CardContent className="p-5 pt-3">
+          {monthlySummary.length === 0 ? (
+            <Skeleton className="h-48 w-full" />
+          ) : (
+            <div className="rounded-md border border-slate-200 overflow-hidden">
+              <div className="grid grid-cols-6 h-10 items-center bg-white px-3 text-[12px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                <div>Month</div>
+                <div className="text-right">Revenue</div>
+                <div className="text-right">Expenses</div>
+                <div className="text-right">Net</div>
+                <div className="text-right">Δ Cash</div>
+                <div className="text-right">Ending Cash</div>
+              </div>
+
+              {monthlySummary.map((r) => (
+                <div key={r.ym} className="grid grid-cols-6 h-10 items-center px-3 text-sm border-b border-slate-100 hover:bg-slate-50">
+                  <div className="text-slate-700">{r.label}</div>
+                  <div className={`text-right tabular-nums ${moneyClassFromCents(r.revenue_cents)}`}>{fmtUsdAccountingFromCents(r.revenue_cents).text}</div>
+                  <div className={`text-right tabular-nums ${moneyClassFromCents(r.expenses_cents)}`}>{fmtUsdAccountingFromCents(r.expenses_cents).text}</div>
+                  <div className={`text-right tabular-nums ${moneyClassFromCents(r.net_cents)}`}>{fmtUsdAccountingFromCents(r.net_cents).text}</div>
+
+                  <div className="text-right tabular-nums">
+                    {r.delta_cash_cents ? (
+                      <span className={moneyClassFromCents(r.delta_cash_cents)}>{fmtUsdAccountingFromCents(r.delta_cash_cents).text}</span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </div>
+
+                  <div className="text-right tabular-nums">
+                    {r.ending_cash_cents ? (
+                      <span className={moneyClassFromCents(r.ending_cash_cents)}>{fmtUsdAccountingFromCents(r.ending_cash_cents).text}</span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

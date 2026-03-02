@@ -236,7 +236,8 @@ export default function CategoryReviewPageClient() {
 
   // Categories list (canonical query key)
   const categoriesQ = useQuery({
-    queryKey: ["categories", selectedBusinessId],
+    // IMPORTANT: includeArchived must be part of the cache key so we never reuse an archived-inclusive cache.
+    queryKey: ["categories", selectedBusinessId, false],
     enabled: !!selectedBusinessId,
     queryFn: async () => {
       if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
@@ -244,7 +245,8 @@ export default function CategoryReviewPageClient() {
     },
   });
 
-  const categories = categoriesQ.data?.rows ?? [];
+  // Never offer archived categories in Category Review dropdowns.
+  const categories = (categoriesQ.data?.rows ?? []).filter((c) => !c.archived_at);
 
   const categoryNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -795,6 +797,12 @@ export default function CategoryReviewPageClient() {
 
                                     // Prevent double-submit while row is applying
                                     if (pendingIds[id]) return;
+
+                                    // Guardrail: never send an archived/invalid category id (prevents 400 Invalid category)
+                                    if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
+                                      setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
+                                      return;
+                                    }
 
                                     clearMutErr();
 
