@@ -12,6 +12,10 @@ export const surfaceCardSoft =
 export const ringFocus =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0";
 
+  // Motion: premium, non-bouncy micro-interactions (200ms ease-out)
+export const motionFast =
+  "transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out";
+
 // Canonical input height + focus style (Ledger standard)
 export const inputH7 =
   "h-7 w-full px-2 py-0 text-xs leading-tight bg-white border border-slate-200 rounded-md " +

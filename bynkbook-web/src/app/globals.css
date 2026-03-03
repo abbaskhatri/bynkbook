@@ -49,91 +49,127 @@
 :root {
   --radius: 0.625rem;
 
-  /* Emerald + slate theme (light mode) */
-  --background: oklch(0.985 0.006 255); /* subtle slate tint */
-  --foreground: oklch(0.145 0 0);
+  /* Base44 palette (LIGHT) — exact hex, no color drift */
+  --bb-emerald-600: #059669;
+  --bb-emerald-700: #047857;
+  --bb-emerald-100: #d1fae5;
+  --bb-emerald-50:  #ecfdf5;
 
-  --card: oklch(1 0 0); /* keep tables/cards crisp */
-  --card-foreground: oklch(0.145 0 0);
+  --bb-green-600: #16a34a;
+  --bb-red-600:   #dc2626;
+  --bb-red-700:   #b91c1c;
+  --bb-red-800:   #991b1b;
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --bb-amber-500: #f59e0b;
+  --bb-blue-500:  #3b82f6;
 
-  --primary: oklch(0.55 0.14 158); /* emerald */
-  --primary-foreground: oklch(0.985 0 0);
+  --bb-slate-50:  #f8fafc;
+  --bb-slate-100: #f1f5f9;
+  --bb-slate-200: #e2e8f0;
+  --bb-slate-400: #94a3b8;
+  --bb-slate-500: #64748b;
+  --bb-slate-900: #0f172a;
 
-  --secondary: oklch(0.972 0.006 255);
-  --secondary-foreground: oklch(0.205 0 0);
+  --bb-white: #ffffff;
 
-  --muted: oklch(0.972 0.006 255);
-  --muted-foreground: oklch(0.49 0.01 255);
+  /* shadcn-style semantic mapping (LIGHT) */
+  --background: var(--bb-slate-50);
+  --foreground: var(--bb-slate-900);
 
-  --accent: oklch(0.972 0.006 255);
-  --accent-foreground: oklch(0.205 0 0);
+  --card: var(--bb-white);
+  --card-foreground: var(--bb-slate-900);
 
-  --destructive: oklch(0.577 0.245 27.325);
+  --popover: var(--bb-white);
+  --popover-foreground: var(--bb-slate-900);
 
-  /* Slightly stronger borders/inputs for compact tables */
-  --border: oklch(0.90 0.01 255);
-  --input: oklch(0.90 0.01 255);
+  --primary: var(--bb-emerald-600);
+  --primary-foreground: var(--bb-white);
 
-  /* Focus ring: emerald */
-  --ring: oklch(0.66 0.16 158);
+  --secondary: var(--bb-slate-100);
+  --secondary-foreground: var(--bb-slate-900);
 
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --muted: var(--bb-slate-100);
+  --muted-foreground: var(--bb-slate-500);
 
-  /* Sidebar tokens unchanged in this first pass */
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --accent: var(--bb-slate-100);
+  --accent-foreground: var(--bb-slate-900);
+
+  --destructive: var(--bb-red-600);
+
+  --border: var(--bb-slate-200);
+  --input: var(--bb-slate-200);
+
+  --ring: var(--bb-emerald-600);
+
+  /* Chart tokens (LIGHT) — bind to Base44 semantics */
+  --chart-1: var(--bb-emerald-600); /* net / primary */
+  --chart-2: var(--bb-green-600);   /* income */
+  --chart-3: var(--bb-red-600);     /* expense */
+  --chart-4: var(--bb-blue-500);    /* info */
+  --chart-5: var(--bb-amber-500);   /* warning */
+
+  /* Standardized chart component vars (used by ChartContainer) */
+  --bb-chart-income: var(--bb-green-600);
+  --bb-chart-expense: var(--bb-red-600);
+  --bb-chart-net: var(--bb-emerald-600);
+  --bb-chart-grid: var(--bb-slate-200);
+  --bb-chart-axis: var(--bb-slate-500);
+  --bb-chart-tooltip-bg: var(--bb-white);
+  --bb-chart-tooltip-border: var(--bb-slate-200);
+  --bb-chart-tooltip-text: var(--bb-slate-900);
+
+  /* Sidebar tokens unchanged in this pass */
+  --sidebar: var(--bb-white);
+  --sidebar-foreground: var(--bb-slate-900);
+  --sidebar-primary: var(--bb-emerald-600);
+  --sidebar-primary-foreground: var(--bb-white);
+  --sidebar-accent: var(--bb-slate-100);
+  --sidebar-accent-foreground: var(--bb-slate-900);
+  --sidebar-border: var(--bb-slate-200);
+  --sidebar-ring: var(--bb-emerald-600);
 }
 
-
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  /* Dark mode — keep the same emerald brand identity, but use slate surfaces */
+  --background: #0f172a;
+  --foreground: #f8fafc;
 
-  /* Green theme (dark mode) */
-  --primary: oklch(0.62 0.16 158);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --card: #111827;
+  --card-foreground: #f8fafc;
 
-  /* Focus ring: green */
-  --ring: oklch(0.70 0.16 158);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --popover: #111827;
+  --popover-foreground: #f8fafc;
+
+  --primary: var(--bb-emerald-600);
+  --primary-foreground: #ffffff;
+
+  --secondary: #111827;
+  --secondary-foreground: #f8fafc;
+
+  --muted: #111827;
+  --muted-foreground: #94a3b8;
+
+  --accent: #111827;
+  --accent-foreground: #f8fafc;
+
+  --destructive: var(--bb-red-600);
+
+  --border: rgba(255, 255, 255, 0.10);
+  --input: rgba(255, 255, 255, 0.15);
+
+  --ring: var(--bb-emerald-600);
+
+  --chart-1: var(--bb-emerald-600);
+  --chart-2: var(--bb-green-600);
+  --chart-3: var(--bb-red-600);
+  --chart-4: var(--bb-blue-500);
+  --chart-5: var(--bb-amber-500);
+
+  --bb-chart-grid: rgba(255, 255, 255, 0.10);
+  --bb-chart-axis: #94a3b8;
+  --bb-chart-tooltip-bg: #111827;
+  --bb-chart-tooltip-border: rgba(255, 255, 255, 0.12);
+  --bb-chart-tooltip-text: #f8fafc;
 }
 
 @layer base {

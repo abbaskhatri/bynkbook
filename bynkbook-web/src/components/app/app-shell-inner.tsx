@@ -36,6 +36,8 @@ function navVariant(active: boolean) {
   return active ? "default" : "outline";
 }
 
+const NAV_ICON_CLASS = "h-5 w-5";
+
 export default function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -376,26 +378,26 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     {
       group: "Core",
       items: [
-        { label: "Dashboard", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className="h-4 w-4" /> },
-        { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className="h-4 w-4" /> },
+        { label: "Dashboard", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className={NAV_ICON_CLASS} /> },
+        { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
       ],
     },
       {
         group: "Bookkeeping",
         items: [
-          { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className="h-4 w-4" /> },
-          { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className="h-4 w-4" /> },
-          { label: "Category Review", path: "/category-review", needsAccountId: true, icon: <Tags className="h-4 w-4" /> },
-          { label: "Closed Periods", path: "/closed-periods", needsAccountId: true, icon: <CalendarCheck2 className="h-4 w-4" /> },
-          { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className="h-4 w-4" /> },
-          { label: "Reports", path: "/reports", needsAccountId: false, icon: <BarChart3 className="h-4 w-4" /> },
+          { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className={NAV_ICON_CLASS} /> },
+          { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className={NAV_ICON_CLASS} /> },
+          { label: "Category Review", path: "/category-review", needsAccountId: true, icon: <Tags className={NAV_ICON_CLASS} /> },
+          { label: "Closed Periods", path: "/closed-periods", needsAccountId: true, icon: <CalendarCheck2 className={NAV_ICON_CLASS} /> },
+          { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className={NAV_ICON_CLASS} /> },
+          { label: "Reports", path: "/reports", needsAccountId: false, icon: <BarChart3 className={NAV_ICON_CLASS} /> },
         ],
       },
       {
         group: "Business",
         items: [
-          { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className="h-4 w-4" /> },
-          { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className="h-4 w-4" /> },
+          { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className={NAV_ICON_CLASS} /> },
+          { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className={NAV_ICON_CLASS} /> },
         ],
       },
     {
@@ -627,7 +629,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               title="Activity"
               onClick={() => router.push("/settings?tab=activity")}
             >
-              <Bell className="h-4 w-4" />
+              <Bell className={NAV_ICON_CLASS} />
             </button>
 
             <div className="relative" ref={userMenuRef}>
@@ -637,7 +639,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                 title="Account"
                 onClick={() => setUserMenuOpen((v) => !v)}
               >
-                <UserCircle className="h-4 w-4" />
+                <UserCircle className={NAV_ICON_CLASS} />
               </button>
 
               {userMenuOpen ? (

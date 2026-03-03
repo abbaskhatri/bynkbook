@@ -14,7 +14,44 @@ import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LayoutDashboard } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as RechartsTooltip,
+  Legend as RechartsLegend,
+  ReferenceLine,
+} from "recharts";
+
+import {
+  ChartContainer,
+  MoneyXAxis,
+  MoneyYAxis,
+  MoneyGrid,
+  MoneyTooltip,
+  formatUsdAccountingFromCents,
+} from "@/components/charts/ChartContainer";
+
+import {
+  LayoutDashboard,
+  Wallet,
+  Timer,
+  TrendingUp,
+  TrendingDown,
+  Sigma,
+  Landmark,
+  AlertTriangle,
+  Tag,
+  BarChart3,
+  LineChart,
+  PieChart as PieIcon,
+  Sparkles,
+  CalendarDays,
+} from "lucide-react";
 
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { InlineBanner } from "@/components/app/inline-banner";
@@ -49,17 +86,8 @@ function monthAbbr(raw: string) {
     return `${names[m - 1] ?? s} ${s.slice(2, 4)}`;
   }
 
-  // Fallback: parse date-like strings (e.g., "Fri Aug ...", "2026-02-01", etc.)
-  try {
-    const d = new Date(s);
-    if (!Number.isNaN(d.getTime())) {
-      const m = d.getMonth() + 1;
-      const yy = String(d.getFullYear()).slice(2, 4);
-      return `${names[m - 1] ?? s} ${yy}`;
-    }
-  } catch {
-    // ignore
-  }
+  // Do NOT parse arbitrary date strings (it creates "Fri Aug" style labels).
+  // If it's not YYYY-MM, return the raw value.
 
   return s || "—";
 }
@@ -332,7 +360,7 @@ export default function DashboardPageClient() {
   }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   // Period selector (top-right; controls ALL widgets)
-  const [periodMode, setPeriodMode] = useState<PeriodMode>("THIS_MONTH");
+  const [periodMode, setPeriodMode] = useState<PeriodMode>("LAST_3_MONTHS");
   const [customFrom, setCustomFrom] = useState<string>(() => isoYmd(firstOfMonth(new Date())));
   const [customTo, setCustomTo] = useState<string>(() => isoYmd(new Date()));
 
@@ -497,19 +525,39 @@ export default function DashboardPageClient() {
 
     const monthKeyOf = (raw: any) => {
       const s = String(raw ?? "").trim();
+
+      // Preferred: YYYY-MM
       if (/^\d{4}-\d{2}$/.test(s)) return s;
-      try {
-        const d = new Date(s);
-        if (!Number.isNaN(d.getTime())) {
-          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        }
-      } catch {}
-      return s;
+
+      // Also accept YYYY-MM-DD and normalize to YYYY-MM
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);
+
+      // Do NOT accept/return weekday strings like "Fri Aug".
+      // Return empty marker to trigger a deterministic synthetic timeline.
+      return "";
     };
 
-    const sorted = [...rows]
-      .map((r) => ({ ...r, month: monthKeyOf(r.month ?? r.ym ?? r.date ?? r.period) }))
-      .sort((a, b) => (String(a.month) > String(b.month) ? 1 : -1));
+    const mapped = [...rows].map((r) => ({
+      ...r,
+      month: monthKeyOf(r.month ?? r.ym ?? r.date ?? r.period),
+    }));
+
+    const allValidYm = mapped.length > 0 && mapped.every((r) => /^\d{4}-\d{2}$/.test(String(r.month)));
+
+    const sorted = allValidYm
+      ? mapped.sort((a, b) => (String(a.month) > String(b.month) ? 1 : -1))
+      : (() => {
+        // Synthetic month keys ending at range.to month, preserving row order.
+        const end = new Date(`${range.to}T00:00:00`);
+        const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+        const n = mapped.length;
+        return mapped.map((r, i) => {
+          const d = new Date(endMonth.getFullYear(), endMonth.getMonth() - (n - 1 - i), 1);
+          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          return { ...r, month: ym };
+        });
+      })();
 
     let cashEnd: bigint;
     try {
@@ -565,6 +613,33 @@ export default function DashboardPageClient() {
 
   // Area chart animation: tween values over 200ms when series length matches.
   const [animCashMonthly, setAnimCashMonthly] = useState(cashMonthly);
+
+  const cashBarsData = useMemo(() => {
+    return (animCashMonthly ?? []).map((r: any) => {
+      const cashIn = centsToNumber(String(r.cashInCents ?? "0")); // dollars (>=0)
+      const cashOutAbs = Math.abs(centsToNumber(String(r.cashOutCents ?? "0"))); // dollars (abs)
+      return {
+        ym: String(r.ym ?? ""),
+        label: String(r.label ?? ""),
+        cashIn,
+        cashOutAbs,
+      };
+    });
+  }, [animCashMonthly]);
+
+  const cashPosData = useMemo(() => {
+    return (animCashMonthly ?? []).map((r: any) => {
+      const endingCash = centsToNumber(String(r.endingCashCents ?? "0")); // dollars
+      return {
+        ym: String(r.ym ?? ""),
+        label: String(r.label ?? ""),
+        endingCash,
+        endingCashPos: Math.max(endingCash, 0),
+        endingCashNeg: Math.min(endingCash, 0),
+      };
+    });
+  }, [animCashMonthly]);
+
   const prevCashMonthlyRef = useRef(cashMonthly);
 
   useEffect(() => {
@@ -702,8 +777,18 @@ export default function DashboardPageClient() {
     const cats: any = categoriesQ.data;
     const rows = Array.isArray(cats?.rows) ? cats.rows : [];
     const items = rows
-      .map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents ?? "0") }))
-      .filter((x: any) => x && typeof x.cents === "string");
+      .map((r: any) => ({
+        label: String(r.category ?? r.category_name ?? r.name ?? r.label ?? "Category"),
+        cents: String(r.amount_cents ?? r.total_cents ?? r.spent_cents ?? r.value_cents ?? r.cents ?? "0"),
+      }))
+      .filter((x: any) => x && typeof x.cents === "string")
+      .filter((x: any) => {
+        try {
+          return absBig(BigInt(x.cents)) > 0n;
+        } catch {
+          return false;
+        }
+      });
 
     // Expenses only: take absolute value for ranking; keep original sign for display (should be negative).
     const abs = (s: string) => {
@@ -741,13 +826,59 @@ export default function DashboardPageClient() {
     const withOther =
       other > 0n
         ? [
-            ...top.map((t: any) => ({ ...t, absCents: abs(t.cents) })),
-            { label: "Other", cents: String(other), absCents: other },
-          ]
+          ...top.map((t: any) => ({ ...t, absCents: abs(t.cents) })),
+          { label: "Other", cents: String(other), absCents: other },
+        ]
         : top.map((t: any) => ({ ...t, absCents: abs(t.cents) }));
 
+    if (total <= 0n) return { rows: [] as any[], totalAbs: 0n };
     return { rows: withOther, totalAbs: total };
   }, [categoriesQ.data]);
+
+  const expensePieFills = [
+    "var(--bb-emerald-600)",
+    "var(--bb-blue-500)",
+    "var(--bb-amber-500)",
+    "var(--bb-green-600)",
+    "var(--bb-red-600)",
+  ];
+
+  const expensePieFillFor = (label: string, i: number) => {
+    const t = (label ?? "").toLowerCase();
+    if (t.includes("uncategorized")) return "var(--bb-slate-400)";
+    return expensePieFills[i % expensePieFills.length];
+  };
+
+  const expensePieData = useMemo(() => {
+    const rows = topExpenseCats?.rows ?? [];
+    if (!Array.isArray(rows) || rows.length === 0) return [] as any[];
+    return rows.map((r: any) => ({
+      label: String(r.label ?? "Category"),
+      // dollars (positive) for pie geometry; tooltip renders as negative accounting.
+      value: Math.max(0, centsToNumber(String(r.absCents ?? "0"))),
+    }));
+  }, [topExpenseCats]);
+  const expenseRanked = useMemo(() => {
+    const rows = topExpenseCats.rows ?? [];
+    const total = topExpenseCats.totalAbs ?? 0n;
+
+    return rows
+      .slice(0, 8)
+      .map((r: any) => {
+        let absC = 0n;
+        try {
+          absC = BigInt(String(r.absCents ?? "0"));
+        } catch {
+          absC = 0n;
+        }
+        const pct = total > 0n ? Number(absC) / Number(total) : 0;
+        return {
+          label: String(r.label ?? "Category"),
+          absCents: String(absC),
+          pct: Number.isFinite(pct) ? pct : 0,
+        };
+      });
+  }, [topExpenseCats]);
 
   const monthlySummary = useMemo(() => {
     // Prefer pnl monthly for revenue/expenses/net; use cashMonthly for ending cash.
@@ -884,7 +1015,7 @@ export default function DashboardPageClient() {
     return { arcs, totalAbs: total };
   }, [topExpenseCats]);
 
-    // Donut animation (200ms): tween arc angles when data changes.
+  // Donut animation (200ms): tween arc angles when data changes.
   const [animDonutArcs, setAnimDonutArcs] = useState(donut.arcs);
   const prevDonutRef = useRef(donut.arcs);
 
@@ -969,7 +1100,7 @@ export default function DashboardPageClient() {
   );
 
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-5 max-w-7xl">
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
@@ -977,33 +1108,8 @@ export default function DashboardPageClient() {
             title="Dashboard"
             right={
               <div className="flex items-center gap-2">
-                {/* Account scope (All vs account) */}
-                <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
-                  <CapsuleSelect
-                    variant="flat"
-                    value={accountScopeId}
-                    onValueChange={(v) => setAccountScopeId(String(v))}
-                    options={[
-                      { value: "all", label: "All Accounts" },
-                      ...((accountsAllQ.data?.rows ?? []) as any[])
-                        .filter((r: any) => r && r.id && !r.archived_at)
-                        .map((r: any) => ({
-                          value: String(r.id),
-                          label: String(r.name ?? "Account"),
-                        })),
-                    ]}
-                    placeholder="All Accounts"
-                  />
-                </div>
 
                 {periodCapsule}
-
-                {openIssuesN > 0 ? (
-                  <div className="h-6 px-2 rounded-md border border-amber-200 bg-amber-50 text-[11px] font-semibold text-amber-800 flex items-center gap-2">
-                    <span>Issues</span>
-                    <span className="tabular-nums">{openIssuesN}</span>
-                  </div>
-                ) : null}
 
                 {periodMode === "CUSTOM" ? (
                   <div className="flex items-center gap-2">
@@ -1021,12 +1127,35 @@ export default function DashboardPageClient() {
                       onChange={(e) => setCustomTo(e.target.value)}
                     />
                   </div>
+
                 ) : null}
               </div>
             }
           />
         </div>
         <div className="mt-2 h-px bg-slate-200" />
+      </div>
+
+      <div className="px-3 pb-2">
+        <div className="flex items-center gap-2">
+          <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
+            <CapsuleSelect
+              variant="flat"
+              value={accountScopeId}
+              onValueChange={(v) => setAccountScopeId(String(v))}
+              options={[
+                { value: "all", label: "All Accounts" },
+                ...((accountsAllQ.data?.rows ?? []) as any[])
+                  .filter((r: any) => r && r.id && !r.archived_at)
+                  .map((r: any) => ({
+                    value: String(r.id),
+                    label: String(r.name ?? "Account"),
+                  })),
+              ]}
+              placeholder="All Accounts"
+            />
+          </div>
+        </div>
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
@@ -1043,381 +1172,539 @@ export default function DashboardPageClient() {
       ) : null}
 
       {/* KPI Strip */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
         {[
           {
             label: "Cash Balance",
             value: fmtUsdAccountingFromCents(cashBalanceCents).text,
             isNeg: fmtUsdAccountingFromCents(cashBalanceCents).isNeg,
             sub: `As of ${range.to}`,
-            emphasize: true,
             tooltip: null as string | null,
+            icon: Wallet,
+            accent: "bg-emerald-600",
+            iconBg: "bg-emerald-50",
+            iconFg: "text-emerald-700",
           },
           {
             label: "Cash Runway",
             value: runway.display,
             isNeg: false,
             sub: "based on 3-mo avg expenses",
-            emphasize: true,
             tooltip: runway.tooltip,
+            icon: Timer,
+            accent: "bg-emerald-600",
+            iconBg: "bg-emerald-50",
+            iconFg: "text-emerald-700",
           },
           {
             label: "Revenue",
             value: fmtUsdAccountingFromCents(revenueCents ?? undefined).text,
             isNeg: fmtUsdAccountingFromCents(revenueCents ?? undefined).isNeg,
             sub: "Cash-basis",
-            emphasize: false,
             tooltip: null as string | null,
+            icon: TrendingUp,
+            accent: "bg-green-600",
+            iconBg: "bg-emerald-50",
+            iconFg: "text-emerald-700",
           },
           {
             label: "Expenses",
             value: fmtUsdAccountingFromCents(expensesCents ?? undefined).text,
             isNeg: fmtUsdAccountingFromCents(expensesCents ?? undefined).isNeg,
             sub: "Cash-basis",
-            emphasize: false,
             tooltip: null as string | null,
+            icon: TrendingDown,
+            accent: "bg-red-600",
+            iconBg: "bg-emerald-50",
+            iconFg: "text-emerald-700",
           },
           {
             label: "Net",
             value: fmtUsdAccountingFromCents(netCents ?? undefined).text,
             isNeg: fmtUsdAccountingFromCents(netCents ?? undefined).isNeg,
             sub: "Revenue − Expenses",
-            emphasize: false,
             tooltip: null as string | null,
+            icon: Sigma,
+            accent: "bg-emerald-600",
+            iconBg: "bg-emerald-50",
+            iconFg: "text-emerald-700",
           },
-        ].map((k) => (
-          <Card key={k.label} className={`rounded-[10px] border ${k.emphasize ? "border-slate-300" : "border-slate-200"} shadow-sm`}>
-            <CardContent className="p-4">
-              <div className="text-[11px] uppercase tracking-wide text-slate-500">{k.label}</div>
+        ].map((k) => {
+          const Icon = k.icon;
+          const loading = pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching;
 
-              <div className={`mt-2 text-[28px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-rose-600" : "text-slate-900"}`} title={k.tooltip ?? undefined}>
-                {pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching ? (
-                  <span className="inline-block align-middle">
-                    <Skeleton className="h-8 w-28" />
-                  </span>
-                ) : (
-                  k.value
-                )}
-              </div>
+          return (
+            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-slate-200 shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
+              <CardContent className="px-3 py-3">
+                <div className="flex items-center gap-3">
+                  <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${k.iconBg}`}>
+                    <Icon className={`h-7 w-7 ${k.iconFg}`} strokeWidth={2} />
+                  </div>
 
-              <div className="mt-1 text-[11px] text-slate-500">{k.sub}</div>
-            </CardContent>
-          </Card>
-        ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] uppercase tracking-wide font-semibold text-slate-600">{k.label}</div>
+
+                    <div
+                      className={`mt-0.5 text-[18px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-rose-600" : "text-slate-900"}`}
+                      title={k.tooltip ?? undefined}
+                    >
+                      {loading ? (
+                        <span className="inline-block align-middle">
+                          <Skeleton className="h-6 w-24" />
+                        </span>
+                      ) : (
+                        k.value
+                      )}
+                    </div>
+
+                    <div className="mt-0.5 text-[10px] text-slate-500 truncate">{k.sub}</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-{/* Cash Flow (bars) */}
-      <Card className="rounded-[10px] border border-slate-200 shadow-sm">
-        <CHeader className="pb-2">
-          <CardTitle className="text-base font-semibold text-slate-800">Cash Flow</CardTitle>
-          <div className="text-[11px] text-slate-500">Cash In vs Cash Out by month (cash-basis)</div>
-        </CHeader>
-        <CardContent className="p-5 pt-3">
-          {animCashMonthly.length < 2 ? (
-            <Skeleton className="h-[300px] w-full" />
-          ) : (() => {
-            const labels = animCashMonthly.map((r: any) => r.label);
-            const ins = animCashMonthly.map((r: any) => String(r.cashInCents ?? "0"));
-            const outs = animCashMonthly.map((r: any) => String(r.cashOutCents ?? "0"));
-            const layout = computeCashBarsLayout({ labels, inCents: ins, outCents: outs, padPct: 0.08 });
+      {/* Base44 layout: Left stack (same heights) + Right stack (same width) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* LEFT: charts stack */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* 1) Cash Flow bars (Cash In / Cash Out) */}
+          <ChartContainer
+            title="Cash Flow"
+            subtitle="Cash In vs Cash Out by month"
+            right={
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                <BarChart3 className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+              </div>
+            }
+            height="sm"
+            loading={cashflowQ.isFetching}
+            empty={
+              cashBarsData.length < 2
+                ? { title: "Not enough data", description: "Add transactions to see monthly cash flow." }
+                : undefined
+            }
+          >
+            <BarChart
+              data={cashBarsData}
+              barSize={24}
+              barGap={7}
+              barCategoryGap="35%"
+              margin={{ top: 0, right: 10, bottom: 0, left: 8 }}
+            >
+              <MoneyGrid />
+              <MoneyXAxis dataKey="ym" tickFormatter={(v: any) => monthAbbr(String(v))} />
+              <MoneyYAxis />
+              <RechartsTooltip
+                contentStyle={{
+                  background: "var(--bb-chart-tooltip-bg)",
+                  border: "1px solid var(--bb-chart-tooltip-border)",
+                  borderRadius: 10,
+                  fontSize: 12,
+                }}
+                labelStyle={{ color: "var(--bb-chart-tooltip-text)", fontWeight: 600 }}
+                itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
+                formatter={(value: any, name: any) => {
+                  const dollars = Number(value ?? 0);
+                  const cents = Number.isFinite(dollars) ? BigInt(Math.trunc(dollars * 100)) : 0n;
 
-            const n = animCashMonthly.length;
-            const xStep = n > 1 ? (layout.x[1] - layout.x[0]) : 80;
-            const groupW = Math.max(22, Math.min(44, Math.round(xStep * 0.55)));
-            const gap = 6;
-            const barW = Math.max(8, Math.floor((groupW - gap) / 2));
-            const baseY = layout.h - layout.padB;
+                  // Accounting style negatives: Cash Out shown as negative.
+                  if (String(name) === "Cash Out") return formatUsdAccountingFromCents(-cents).text;
+                  return formatUsdAccountingFromCents(cents).text;
+                }}
+              />
+              <RechartsLegend
+                verticalAlign="top"
+                align="right"
+                height={18}
+                wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+              />
+              <Bar
+                dataKey="cashIn"
+                name="Cash In"
+                fill="var(--bb-green-600)"
+                radius={[4, 4, 0, 0]}
+                isAnimationActive
+                animationDuration={200}
+              />
+              <Bar
+                dataKey="cashOutAbs"
+                name="Cash Out"
+                fill="var(--bb-red-600)"
+                radius={[4, 4, 0, 0]}
+                isAnimationActive
+                animationDuration={200}
+              />
+            </BarChart>
+          </ChartContainer>
 
-            const dollarsAbs = (centsStr: any) => {
-              try {
-                return Math.abs(Number(BigInt(String(centsStr ?? "0")))) / 100;
-              } catch {
-                return 0;
-              }
-            };
+          {/* 2) Cash Position line/area (compact) */}
+          <ChartContainer
+            title="Cash Position"
+            subtitle="Ending cash balance by month (cash-basis)"
+            right={
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                <LineChart className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+              </div>
+            }
+            height="sm"
+            loading={cashflowQ.isFetching || accountsSummaryQ.isFetching}
+            empty={
+              cashPosData.length < 2
+                ? { title: "Not enough data", description: "Add transactions to see monthly cash trend." }
+                : undefined
+            }
+          >
+            <AreaChart data={cashPosData} margin={{ top: 4, right: 12, bottom: 4, left: 8 }}>
+              <defs>
+                <linearGradient id="bbCashPosFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--bb-emerald-600)" stopOpacity={0.18} />
+                  <stop offset="100%" stopColor="var(--bb-emerald-600)" stopOpacity={0.0} />
+                </linearGradient>
+              </defs>
 
-            return (
-              <div className="w-full">
-                <svg
-                  viewBox={`0 0 ${layout.w} ${layout.h}`}
-                  className="block w-full h-[300px]"
-                  onMouseLeave={() => {
-                    setHoverIdx(null);
-                    setHoverX(null);
-                  }}
-                  onMouseMove={(e) => {
-                    const svg = e.currentTarget;
-                    const rect = svg.getBoundingClientRect();
-                    const sx = ((e.clientX - rect.left) / rect.width) * layout.w;
+              <MoneyGrid />
+              <MoneyXAxis dataKey="ym" tickFormatter={(v: any) => monthAbbr(String(v))} />
+              <MoneyYAxis />
+              <ReferenceLine y={0} stroke="var(--bb-chart-grid)" strokeWidth={1} />
+              <MoneyTooltip />
+              <RechartsLegend
+                verticalAlign="top"
+                align="right"
+                height={18}
+                wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+              />
 
-                    let bestI = 0;
-                    let bestD = Infinity;
-                    for (let i = 0; i < layout.x.length; i++) {
-                      const d = Math.abs(layout.x[i] - sx);
-                      if (d < bestD) {
-                        bestD = d;
-                        bestI = i;
-                      }
-                    }
-                    setHoverIdx(bestI);
-                    setHoverX(layout.x[bestI]);
-                  }}
-                >
-                  {/* grid + y labels */}
-                  {layout.grid.map((g) => (
-                    <g key={`g-${g.y}`}>
-                      <line
-                        x1={layout.padL}
-                        x2={layout.w - layout.padR}
-                        y1={g.y}
-                        y2={g.y}
-                        className="stroke-slate-100"
-                        strokeWidth={1}
-                      />
-                      <text
-                        x={layout.padL - 10}
-                        y={g.y}
-                        textAnchor="end"
-                        dominantBaseline="middle"
-                        className="fill-slate-500 text-[11px]"
-                      >
-                        {g.label}
-                      </text>
-                    </g>
-                  ))}
+              <Area
+                type="monotone"
+                dataKey="endingCashPos"
+                name="Ending Cash"
+                stroke="var(--bb-emerald-600)"
+                fill="url(#bbCashPosFill)"
+                strokeWidth={2.25}
+                dot={false}
+                activeDot={{ r: 4 }}
+                isAnimationActive
+                animationDuration={200}
+              />
 
-                  {/* bars (animated via animCashMonthly) */}
-                  {animCashMonthly.map((r: any, i: number) => {
-                    const xc = layout.x[i];
-                    if (xc == null) return null;
+              <Area
+                type="monotone"
+                dataKey="endingCashNeg"
+                name="Ending Cash (negative)"
+                stroke="var(--bb-red-600)"
+                fill="transparent"
+                strokeWidth={1.75}
+                dot={false}
+                activeDot={{ r: 3 }}
+                isAnimationActive
+                animationDuration={200}
+              />
+            </AreaChart>
+          </ChartContainer>
 
-                    const inH = Math.max(1, baseY - layout.yOf(dollarsAbs(r.cashInCents)));
-                    const outH = Math.max(1, baseY - layout.yOf(dollarsAbs(r.cashOutCents)));
+          {/* 3) Category donut (thin/compact) */}
+          <ChartContainer
+            title="Category Breakdown"
+            subtitle="Top expense categories"
+            right={
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                <PieIcon className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+              </div>
+            }
+            height="md"
+            noResponsive
+            loading={categoriesQ.isFetching}
+            empty={
+              expensePieData.length === 0
+                ? { title: "No category spend in this period", description: "Try a wider date range to see your breakdown." }
+                : undefined
+            }
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+              {/* Donut */}
+              <div className="flex items-center justify-center md:justify-center md:self-start">
+                <div style={{ width: 220, height: 220 }}>
+                  <PieChart width={220} height={220}>
+                    <RechartsTooltip
+                      contentStyle={{
+                        background: "var(--bb-chart-tooltip-bg)",
+                        border: "1px solid var(--bb-chart-tooltip-border)",
+                        borderRadius: 10,
+                        fontSize: 12,
+                      }}
+                      labelStyle={{ color: "var(--bb-chart-tooltip-text)", fontWeight: 600 }}
+                      itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
+                      formatter={(value: any) => {
+                        const dollars = Number(value);
+                        const cents = Number.isFinite(dollars) ? BigInt(Math.trunc(dollars * 100)) : 0n;
+                        return formatUsdAccountingFromCents(-cents).text;
+                      }}
+                    />
 
-                    const x0 = xc - Math.floor(groupW / 2);
-                    const xIn = x0;
-                    const xOut = x0 + barW + gap;
+                    <Pie
+                      data={expensePieData}
+                      dataKey="value"
+                      nameKey="label"
+                      innerRadius={62}
+                      outerRadius={92}
+                      paddingAngle={2}
+                      stroke="var(--bb-chart-tooltip-bg)"
+                      strokeWidth={2}
+                    >
+                      {expensePieData.map((d: any, i: number) => (
+                        <Cell key={i} fill={expensePieFillFor(String(d.label ?? ""), i)} />
+                      ))}
+                    </Pie>
 
-                    return (
-                      <g key={`m-${i}`}>
-                        <rect x={xIn} y={baseY - inH} width={barW} height={inH} rx={3} className="fill-primary/75" />
-                        <rect x={xOut} y={baseY - outH} width={barW} height={outH} rx={3} className="fill-rose-500/70" />
-                      </g>
-                    );
-                  })}
-
-                  {/* hover tooltip */}
-                  {hoverIdx !== null && hoverX !== null ? (() => {
-                    const r: any = animCashMonthly[hoverIdx];
-                    if (!r) return null;
-
-                    const label = r.label;
-                    const ending = fmtUsdAccountingFromCents(r.endingCashCents).text;
-                    const cin = fmtUsdAccountingFromCents(r.cashInCents).text;
-                    const cout = fmtUsdAccountingFromCents(r.cashOutCents).text;
-                    const net = fmtUsdAccountingFromCents(r.netCents).text;
-
-                    const tipW = 240;
-                    const tipH = 92;
-                    const x = Math.min(layout.w - tipW - 10, Math.max(10, hoverX + 10));
-                    const y = 18;
-
-                    return (
-                      <g>
-                        <line x1={hoverX} x2={hoverX} y1={layout.padT} y2={layout.h - layout.padB} className="stroke-slate-200" strokeWidth={1} />
-                        <g transform={`translate(${x}, ${y})`}>
-                          <rect width={tipW} height={tipH} rx={8} className="fill-white stroke-slate-200" />
-                          <text x={10} y={18} className="fill-slate-700 text-[11px]">{label}</text>
-
-                          <text x={10} y={38} className="fill-slate-500 text-[11px]">Cash In:</text>
-                          <text x={86} y={38} className="fill-slate-700 text-[11px]">{cin}</text>
-
-                          <text x={10} y={54} className="fill-slate-500 text-[11px]">Cash Out:</text>
-                          <text x={86} y={54} className="fill-slate-700 text-[11px]">{cout}</text>
-
-                          <text x={10} y={70} className="fill-slate-500 text-[11px]">Net:</text>
-                          <text x={86} y={70} className="fill-slate-700 text-[11px]">{net}</text>
-
-                          <text x={150} y={70} className="fill-slate-500 text-[11px]">End:</text>
-                          <text x={182} y={70} className="fill-slate-700 text-[11px]">{ending}</text>
-                        </g>
-                      </g>
-                    );
-                  })() : null}
-
-                  {/* x labels */}
-                  {(() => {
-                    const every = n <= 8 ? 1 : n <= 16 ? 2 : 3;
-                    const y = layout.h - 8;
-                    return animCashMonthly.map((r: any, i: number) =>
-                      i % every === 0 || i === n - 1 ? (
-                        <text
-                          key={`x-${i}`}
-                          x={layout.x[i]}
-                          y={y}
-                          textAnchor="middle"
-                          dominantBaseline="ideographic"
-                          className="fill-slate-500 text-[11px]"
-                        >
-                          {r.label}
-                        </text>
-                      ) : null
-                    );
-                  })()}
-                </svg>
-
-                {/* legend */}
-                <div className="mt-2 flex items-center gap-4 text-[11px] text-slate-600">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-2 w-2 rounded-sm bg-primary/75" />
-                    <span>Cash In</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-2 w-2 rounded-sm bg-rose-500/70" />
-                    <span>Cash Out</span>
-                  </div>
+                    <text x="50%" y="48%" textAnchor="middle" fill="#94a3b8" fontSize="11">
+                      Total
+                    </text>
+                    <text x="50%" y="58%" textAnchor="middle" fill="#0f172a" fontSize="14" fontWeight="600">
+                      {formatUsdAccountingFromCents(-BigInt(String(topExpenseCats.totalAbs ?? 0n))).text}
+                    </text>
+                  </PieChart>
                 </div>
               </div>
-            );
-          })()}
-        </CardContent>
-      </Card>
 
-      {/* Donut + Insights (balanced height) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="rounded-[10px] border border-slate-200 shadow-sm" style={{ height: 360 }}>
-          <CHeader className="pb-2">
-            <CardTitle className="text-base font-semibold text-slate-800">Expense Composition</CardTitle>
-            <div className="text-[11px] text-slate-500">Top categories (Top 6 + Other)</div>
-          </CHeader>
-          <CardContent className="p-5 pt-3">
-            {animDonutArcs.length === 0 ? (
-              <Skeleton className="h-[260px] w-full" />
-            ) : (
-              <div className="h-full grid grid-cols-[240px_1fr] gap-4 items-center">
-                {/* donut left */}
-                <div className="flex items-center justify-center">
-                  <svg width={220} height={220} viewBox="0 0 220 220" className="block">
-                    <g>
-                      {animDonutArcs.map((a: any, idx: number) => (
-                        <path
-                          key={`${a.label}-${idx}`}
-                          d={arcPath(110, 110, 100, 62, a.a0, a.a1)}
-                          className={idx === 0 ? "fill-primary" : idx === 1 ? "fill-primary/70" : idx === 2 ? "fill-primary/55" : "fill-primary/35"}
-                        />
-                      ))}
-                    </g>
-                  </svg>
-                </div>
-
-                {/* values right */}
-                <div className="space-y-2">
-                  {animDonutArcs.map((a: any, idx: number) => {
-                    const abs = (() => {
-                      try {
-                        return absBig(BigInt(a.cents));
-                      } catch {
-                        return 0n;
-                      }
-                    })();
-                    const pct = donut.totalAbs > 0n ? Number(abs) / Number(donut.totalAbs) : 0;
-                    return (
-                      <div key={`leg-${a.label}-${idx}`} className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`inline-block h-2 w-2 rounded-sm ${idx === 0 ? "bg-primary" : idx === 1 ? "bg-primary/70" : idx === 2 ? "bg-primary/55" : "bg-primary/35"}`} />
-                          <span className="text-slate-700 truncate">{a.label}</span>
+              {/* Ranked list (table-like; compact) */}
+              <div>
+                <div className="-mt-1 divide-y divide-slate-100">
+                  {expenseRanked.map((r: any, idx: number) => (
+                    <div key={`${r.label}-${idx}`} className="py-2">
+                      {/* Top row: label left, amount + % right */}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 truncate text-sm font-medium text-slate-800">
+                          {r.label}
                         </div>
-                        <div className="flex items-center gap-3 tabular-nums">
-                          <span className="text-slate-500">{(pct * 100).toFixed(0)}%</span>
-                          <span className={moneyClassFromCents(a.cents)}>{fmtUsdAccountingFromCents(String(abs)).text}</span>
+
+                        <div className="flex items-baseline gap-3 text-right tabular-nums">
+                          <div className="text-sm font-semibold text-slate-900">
+                            {formatUsdAccountingFromCents(-BigInt(r.absCents)).text}
+                          </div>
+                          <div className="text-[12px] text-slate-500">
+                            {(r.pct * 100).toFixed(0)}%
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
+
+                      {/* Bar */}
+                      <div className="mt-1.5 h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.max(0, Math.min(100, r.pct * 100))}%`,
+                            background: expensePieFillFor(String(r.label ?? ""), idx),
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </div>
+          </ChartContainer>
+        </div>
 
-        <Card className="rounded-[10px] border border-slate-200 shadow-sm" style={{ height: 360 }}>
-          <CHeader className="pb-2">
-            <CardTitle className="text-base font-semibold text-slate-800">Insights</CardTitle>
-            <div className="text-[11px] text-slate-500">Deterministic signals (no AI)</div>
-          </CHeader>
-          <CardContent className="p-5 pt-3 h-full">
-            {pnlQ.isLoading || cashflowQ.isLoading || accountsSummaryQ.isLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
+        {/* RIGHT: cards stack */}
+        <div className="space-y-4">
+          {/* Account Balances (Base44 structure) */}
+          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+              <div className="flex items-center justify-between leading-none">
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                    <Landmark className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  </div>
+                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Account Balances</CardTitle>
+                </div>
+
+                <div className="text-[11px] text-slate-500 leading-none">As of {range.to}</div>
               </div>
-            ) : insights.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-sm text-slate-500">No notable signals for this period.</div>
-            ) : (
-              <div className={`h-full flex flex-col ${insights.length < 3 ? "justify-center" : "justify-start"} gap-3`}>
-                {insights.map((it) => (
-                  <div key={it.title} className="rounded-[10px] border border-slate-200 bg-white p-4">
-                    <div className="text-[13px] font-medium text-slate-800">{it.title}</div>
-                    <div className={`mt-1 text-[18px] font-semibold tabular-nums ${it.tone === "good" ? "text-primary" : it.tone === "bad" ? "text-rose-600" : "text-slate-900"}`}>
-                      {it.value}
+            </CHeader>
+
+            <CardContent className="p-0">
+              {(accountsSummaryQ.data?.rows ?? []).length === 0 ? (
+                <div className="px-4 py-3 text-sm text-slate-500">No accounts found.</div>
+              ) : (
+                <div className="-mt-1 divide-y divide-slate-100">
+                  {(accountsSummaryQ.data?.rows ?? []).slice(0, 6).map((r: any, idx: number) => (
+                    <div
+                      key={`${String(r.id ?? "")}-${String(r.name ?? "")}-${idx}`}
+                      className="flex items-center justify-between px-4 py-1.5"
+                    >
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                        <Landmark className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                        <div className="min-w-0 leading-tight">
+                          <div className="font-medium text-[13px] truncate text-slate-900">
+                            {String(r.name ?? "Account")}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {String(r.type ?? "")}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className={`text-sm font-semibold tabular-nums ${moneyClassFromCents(String(r.balance_cents ?? "0"))}`}>
+                        {fmtUsdAccountingFromCents(String(r.balance_cents ?? "0")).text}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Next Actions */}
+          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+              <div className="flex items-center justify-between leading-none">
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                    <Tag className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  </div>
+                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Next Actions</CardTitle>
+                </div>
+
+                <div className="text-xs font-medium rounded-full border border-slate-200 px-2 py-0.5 text-slate-700 bg-white">
+                  {openIssuesN} open
+                </div>
+              </div>
+            </CHeader>
+
+            <CardContent className="p-0">
+              <div className="-mt-1 divide-y divide-slate-100">
+                <button
+                  type="button"
+                  onClick={() => router.push("/issues")}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-rose-100 flex items-center justify-center">
+                      <AlertTriangle className="h-4 w-4 text-rose-600" strokeWidth={2} />
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm text-slate-900">{openIssuesN} Open Issues</div>
+                      <div className="text-xs text-slate-500">Review and resolve</div>
                     </div>
                   </div>
-                ))}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push("/category-review")}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                      <Tag className="h-4 w-4 text-emerald-700" strokeWidth={2} />
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm text-slate-900">Category Review</div>
+                      <div className="text-xs text-slate-500">Assign categories</div>
+                    </div>
+                  </div>
+                </button>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
 
-      {/* Monthly Summary */}
-      <Card className="rounded-[10px] border border-slate-200 shadow-sm">
-        <CHeader className="pb-2">
-          <CardTitle className="text-base font-semibold text-slate-800">Monthly Summary</CardTitle>
-          <div className="text-[11px] text-slate-500">Cash-basis overview with Δ Cash</div>
-        </CHeader>
-        <CardContent className="p-5 pt-3">
-          {monthlySummary.length === 0 ? (
-            <Skeleton className="h-48 w-full" />
-          ) : (
-            <div className="rounded-md border border-slate-200 overflow-hidden">
-              <div className="grid grid-cols-6 h-10 items-center bg-white px-3 text-[12px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
-                <div>Month</div>
-                <div className="text-right">Revenue</div>
-                <div className="text-right">Expenses</div>
-                <div className="text-right">Net</div>
-                <div className="text-right">Δ Cash</div>
-                <div className="text-right">Ending Cash</div>
+          {/* AI Insights (Base44 card structure; deterministic for now) */}
+          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+              <div className="flex items-center justify-between leading-none">
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                    <Sparkles className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  </div>
+                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">AI Insights</CardTitle>
+                </div>
+
+                <div className="text-xs text-slate-500 leading-none">Deterministic</div>
               </div>
+            </CHeader>
 
-              {monthlySummary.map((r) => (
-                <div key={r.ym} className="grid grid-cols-6 h-10 items-center px-3 text-sm border-b border-slate-100 hover:bg-slate-50">
-                  <div className="text-slate-700">{r.label}</div>
-                  <div className={`text-right tabular-nums ${moneyClassFromCents(r.revenue_cents)}`}>{fmtUsdAccountingFromCents(r.revenue_cents).text}</div>
-                  <div className={`text-right tabular-nums ${moneyClassFromCents(r.expenses_cents)}`}>{fmtUsdAccountingFromCents(r.expenses_cents).text}</div>
-                  <div className={`text-right tabular-nums ${moneyClassFromCents(r.net_cents)}`}>{fmtUsdAccountingFromCents(r.net_cents).text}</div>
+            <CardContent className="p-0">
+              {pnlQ.isLoading || cashflowQ.isLoading || accountsSummaryQ.isLoading ? (
+                <div className="px-4 py-4 space-y-3">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : insights.length === 0 ? (
+                <div className="px-4 py-4 text-sm text-slate-500">No notable signals for this period.</div>
+              ) : (
+                <div className="-mt-1 divide-y divide-slate-100">
+                  {insights.slice(0, 3).map((it) => (
+                    <div key={it.title} className="px-4 py-3">
+                      <div className="text-xs text-slate-500">{it.title}</div>
+                      <div
+                        className={`mt-0.5 text-sm font-semibold tabular-nums ${it.tone === "good" ? "text-emerald-700" : it.tone === "bad" ? "text-rose-600" : "text-slate-900"
+                          }`}
+                      >
+                        {it.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-                  <div className="text-right tabular-nums">
-                    {r.delta_cash_cents ? (
-                      <span className={moneyClassFromCents(r.delta_cash_cents)}>{fmtUsdAccountingFromCents(r.delta_cash_cents).text}</span>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
+          {/* Monthly Summary (Base44 card structure) */}
+          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+              <div className="flex items-center justify-between leading-none">
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                    <CalendarDays className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  </div>
+                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Monthly Summary</CardTitle>
+                </div>
+
+                <div className="text-xs text-slate-500 leading-none">Last 4 months</div>
+              </div>
+            </CHeader>
+
+            <CardContent className="p-0">
+              {monthlySummary.length === 0 ? (
+                <div className="px-4 py-4">
+                  <Skeleton className="h-24 w-full" />
+                </div>
+              ) : (
+                <div>
+                  <div className="grid grid-cols-3 items-center px-4 py-2 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                    <div>Month</div>
+                    <div className="text-right">Net</div>
+                    <div className="text-right">End Cash</div>
                   </div>
 
-                  <div className="text-right tabular-nums">
-                    {r.ending_cash_cents ? (
-                      <span className={moneyClassFromCents(r.ending_cash_cents)}>{fmtUsdAccountingFromCents(r.ending_cash_cents).text}</span>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
+                  <div className="-mt-1 divide-y divide-slate-100">
+                    {monthlySummary.slice(-4).map((r) => (
+                      <div key={r.ym} className="grid grid-cols-3 items-center px-4 py-3 text-sm">
+                        <div className="text-slate-700">{r.label}</div>
+                        <div className={`text-right tabular-nums ${moneyClassFromCents(r.net_cents)}`}>
+                          {fmtUsdAccountingFromCents(r.net_cents).text}
+                        </div>
+                        <div className="text-right tabular-nums">
+                          {r.ending_cash_cents ? (
+                            <span className={moneyClassFromCents(r.ending_cash_cents)}>
+                              {fmtUsdAccountingFromCents(r.ending_cash_cents).text}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
