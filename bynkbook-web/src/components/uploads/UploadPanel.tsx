@@ -160,7 +160,11 @@ function VendorPicker(props: {
         </div>
       ) : null}
 
-      {loading ? <div className="text-[11px] text-slate-500">Searching…</div> : null}
+      {loading ? (
+        <div className="space-y-1 py-1">
+          <div className="h-3 w-32 rounded bg-slate-200 animate-pulse" />
+        </div>
+      ) : null}
       {err ? <div className="text-[11px] text-red-600">{err}</div> : null}
 
       {!value && results.length > 0 ? (
@@ -242,7 +246,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
     controller.clearAll();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Auto-switch to summary once all uploads are completed (no need to press Done)
+  // Auto-switch to summary once all uploads are completed (no need to press Done)
   useEffect(() => {
     if (!open) return;
     if (controller.items.length === 0) return;
@@ -360,13 +364,13 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
             </Button>
 
             <Button
-  type="button"
-  className="h-7 px-3 text-xs"
-  onClick={onClose}
-  disabled={controller.hasActiveUploads}
->
-  Upload
-</Button>
+              type="button"
+              className="h-7 px-3 text-xs"
+              onClick={onClose}
+              disabled={controller.hasActiveUploads}
+            >
+              Upload
+            </Button>
           </div>
         </div>
       }
@@ -452,21 +456,21 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
         {/* Summary */}
         {showSummary && !controller.hasActiveUploads ? (
           <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-<div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
-  <div>
-    <div className="text-sm font-semibold text-slate-900">Upload summary</div>
-    <div className="text-xs text-slate-600">
-      {type === "INVOICE"
-        ? "Invoices extracted from uploaded files."
-        : type === "RECEIPT"
-        ? "Receipts extracted from uploaded files."
-        : "Uploaded files."}
-    </div>
-  </div>
+            <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Upload summary</div>
+                <div className="text-xs text-slate-600">
+                  {type === "INVOICE"
+                    ? "Invoices extracted from uploaded files."
+                    : type === "RECEIPT"
+                      ? "Receipts extracted from uploaded files."
+                      : "Uploaded files."}
+                </div>
+              </div>
 
-  {/* Entry creation is controlled per-row via checkboxes below */}
+              {/* Entry creation is controlled per-row via checkboxes below */}
 
-</div>
+            </div>
 
             {/* Table */}
             <div className="overflow-x-auto">
@@ -474,73 +478,73 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                 <thead className="bg-slate-50 text-slate-700">
                   {type === "INVOICE" ? (
                     <tr className="border-b border-slate-200">
-<th className="px-3 py-2 text-center font-semibold">
-  <input
-    type="checkbox"
-    className="h-4 w-4 rounded border border-slate-300"
-      checked={
-        controller.items
-          .filter((it) => {
-            if (!it.uploadId) return false;
-            const cents =
-              (it.parsed as any)?.amount_cents ??
-              (it.completedMeta as any)?.parsed?.amount_cents ??
-              null;
-            return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
-          })
-          .every((it) => !!selectedForEntry[it.uploadId as string]) &&
-        controller.items.some((it) => {
-          if (!it.uploadId) return false;
-          const cents =
-            (it.parsed as any)?.amount_cents ??
-            (it.completedMeta as any)?.parsed?.amount_cents ??
-            null;
-          return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
-        })
-      }
-    onChange={(e) => {
-      const checked = e.target.checked;
-      setSelectedForEntry((prev) => {
-        const next = { ...prev };
-        for (const it of controller.items) {
-          if (!it.uploadId) continue;
-          if (it.parsedStatus !== "PARSED") continue;
-          next[it.uploadId] = checked;
-        }
-        return next;
-      });
+                      <th className="px-3 py-2 text-center font-semibold">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border border-slate-300"
+                          checked={
+                            controller.items
+                              .filter((it) => {
+                                if (!it.uploadId) return false;
+                                const cents =
+                                  (it.parsed as any)?.amount_cents ??
+                                  (it.completedMeta as any)?.parsed?.amount_cents ??
+                                  null;
+                                return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+                              })
+                              .every((it) => !!selectedForEntry[it.uploadId as string]) &&
+                            controller.items.some((it) => {
+                              if (!it.uploadId) return false;
+                              const cents =
+                                (it.parsed as any)?.amount_cents ??
+                                (it.completedMeta as any)?.parsed?.amount_cents ??
+                                null;
+                              return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+                            })
+                          }
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSelectedForEntry((prev) => {
+                              const next = { ...prev };
+                              for (const it of controller.items) {
+                                if (!it.uploadId) continue;
+                                if (it.parsedStatus !== "PARSED") continue;
+                                next[it.uploadId] = checked;
+                              }
+                              return next;
+                            });
 
-      // When selecting, auto-fill entry date with today if missing
-      if (checked) {
-        const today = new Date().toISOString().slice(0, 10);
-        setEntryDateByUploadId((prev) => {
-          const next = { ...prev };
-          for (const it of controller.items) {
-            if (!it.uploadId) continue;
-            const cents =
-              (it.parsed as any)?.amount_cents ??
-              (it.completedMeta as any)?.parsed?.amount_cents ??
-              null;
-            const eligible = it.status === "COMPLETED" && typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
-            if (!eligible) continue;
-            if (!next[it.uploadId]) next[it.uploadId] = today;
-          }
-          return next;
-        });
-      }
-    }}
-    title="Select all parsed invoices"
-  />
-</th>
+                            // When selecting, auto-fill entry date with today if missing
+                            if (checked) {
+                              const today = new Date().toISOString().slice(0, 10);
+                              setEntryDateByUploadId((prev) => {
+                                const next = { ...prev };
+                                for (const it of controller.items) {
+                                  if (!it.uploadId) continue;
+                                  const cents =
+                                    (it.parsed as any)?.amount_cents ??
+                                    (it.completedMeta as any)?.parsed?.amount_cents ??
+                                    null;
+                                  const eligible = it.status === "COMPLETED" && typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
+                                  if (!eligible) continue;
+                                  if (!next[it.uploadId]) next[it.uploadId] = today;
+                                }
+                                return next;
+                              });
+                            }
+                          }}
+                          title="Select all parsed invoices"
+                        />
+                      </th>
 
-<th className="px-3 py-2 text-left font-semibold">Vendor</th>
-<th className="px-3 py-2 text-left font-semibold">Invoice #</th>
-<th className="px-3 py-2 text-left font-semibold">Invoice date</th>
-<th className="px-3 py-2 text-left font-semibold">Entry date</th>
-<th className="px-3 py-2 text-left font-semibold">Due</th>
-<th className="px-3 py-2 text-right font-semibold">Total</th>
-<th className="px-3 py-2 text-left font-semibold">Status</th>
-<th className="px-3 py-2 text-right font-semibold">File</th>
+                      <th className="px-3 py-2 text-left font-semibold">Vendor</th>
+                      <th className="px-3 py-2 text-left font-semibold">Invoice #</th>
+                      <th className="px-3 py-2 text-left font-semibold">Invoice date</th>
+                      <th className="px-3 py-2 text-left font-semibold">Entry date</th>
+                      <th className="px-3 py-2 text-left font-semibold">Due</th>
+                      <th className="px-3 py-2 text-right font-semibold">Total</th>
+                      <th className="px-3 py-2 text-left font-semibold">Status</th>
+                      <th className="px-3 py-2 text-right font-semibold">File</th>
                     </tr>
                   ) : type === "RECEIPT" ? (
                     <tr className="border-b border-slate-200">
@@ -586,12 +590,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                       status === "PARSING"
                         ? "Parsing…"
                         : status === "PARSED"
-                        ? "Parsed"
-                        : status === "NEEDS_REVIEW"
-                        ? "Needs review"
-                        : status === "FAILED"
-                        ? "Failed"
-                        : "Uploaded";
+                          ? "Parsed"
+                          : status === "NEEDS_REVIEW"
+                            ? "Needs review"
+                            : status === "FAILED"
+                              ? "Failed"
+                              : "Uploaded";
 
                     return (
                       <tr key={it.id}>
@@ -606,8 +610,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                               !eligible && it.status !== "COMPLETED"
                                 ? "Still retrieving…"
                                 : !eligible
-                                ? "Missing extracted total"
-                                : "Create entry for this receipt";
+                                  ? "Missing extracted total"
+                                  : "Create entry for this receipt";
                             return (
                               <input
                                 type="checkbox"
@@ -636,25 +640,25 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                             <td className="px-3 py-2 text-slate-700">{invoiceNo || "—"}</td>
                             <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
 
-<td className="px-3 py-2 text-slate-700">
-  {it.uploadId ? (
-    <div className="w-[170px]">
-      <AppDatePicker
-        value={entryDateByUploadId[it.uploadId] || ""}
-        onChange={(next) => {
-          const id = it.uploadId!;
-          setEntryDateByUploadId((m) => ({ ...m, [id]: next }));
-        }}
-        disabled={!selectedForEntry[it.uploadId]}
-        allowClear
-      />
-    </div>
-  ) : (
-    "—"
-  )}
-</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {it.uploadId ? (
+                                <div className="w-[170px]">
+                                  <AppDatePicker
+                                    value={entryDateByUploadId[it.uploadId] || ""}
+                                    onChange={(next) => {
+                                      const id = it.uploadId!;
+                                      setEntryDateByUploadId((m) => ({ ...m, [id]: next }));
+                                    }}
+                                    disabled={!selectedForEntry[it.uploadId]}
+                                    allowClear
+                                  />
+                                </div>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
 
-<td className="px-3 py-2 text-slate-700">{dueDate || "—"}</td>
+                            <td className="px-3 py-2 text-slate-700">{dueDate || "—"}</td>
                             <td className="px-3 py-2 text-right text-slate-900">{total || "—"}</td>
                             <td className="px-3 py-2">
                               <span
@@ -662,12 +666,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   status === "PARSING"
                                     ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                     : status === "PARSED"
-                                    ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
-                                    : status === "NEEDS_REVIEW"
-                                    ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
-                                    : status === "FAILED"
-                                    ? "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
-                                    : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                      ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
+                                      : status === "NEEDS_REVIEW"
+                                        ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
+                                        : status === "FAILED"
+                                          ? "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
+                                          : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                 }
                               >
                                 {statusLabel}
@@ -701,12 +705,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   it.status !== "COMPLETED"
                                     ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                     : status === "PARSED"
-                                    ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
-                                    : status === "NEEDS_REVIEW"
-                                    ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
-                                    : status === "FAILED"
-                                    ? "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
-                                    : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                      ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
+                                      : status === "NEEDS_REVIEW"
+                                        ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
+                                        : status === "FAILED"
+                                          ? "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
+                                          : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                 }
                               >
                                 {it.status !== "COMPLETED" ? (
@@ -745,50 +749,50 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         <td className="px-3 py-2 text-right">
                           {it.uploadId ? (
                             <div className="inline-flex items-center gap-2 justify-end">
-  <Button
-    type="button"
-    variant="outline"
-    className="h-7 w-8 p-0"
-    title="Download"
-    onClick={async () => {
-      const businessId = ctx?.businessId?.trim();
-      if (!businessId) return;
-      const res: any = await apiFetch(`/v1/businesses/${businessId}/uploads/${it.uploadId}/download`, { method: "GET" });
-      const url = res?.download?.url;
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
-    }}
-  >
-    <Download className="h-4 w-4 mx-auto" />
-  </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 w-8 p-0"
+                                title="Download"
+                                onClick={async () => {
+                                  const businessId = ctx?.businessId?.trim();
+                                  if (!businessId) return;
+                                  const res: any = await apiFetch(`/v1/businesses/${businessId}/uploads/${it.uploadId}/download`, { method: "GET" });
+                                  const url = res?.download?.url;
+                                  if (url) window.open(url, "_blank", "noopener,noreferrer");
+                                }}
+                              >
+                                <Download className="h-4 w-4 mx-auto" />
+                              </Button>
 
-  <Button
-    type="button"
-    variant="outline"
-    className="h-7 w-8 p-0"
-    title="Remove from list"
-    onClick={() => {
-  // Remove from list
-  controller.remove(it.id);
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 w-8 p-0"
+                                title="Remove from list"
+                                onClick={() => {
+                                  // Remove from list
+                                  controller.remove(it.id);
 
-  // Also clean selection state (prevents "selected" count staying high)
-  if (it.uploadId) {
-    const uid = it.uploadId;
-    setSelectedForEntry((m) => {
-      const next = { ...m };
-      delete next[uid];
-      return next;
-    });
-    setEntryDateByUploadId((m) => {
-      const next = { ...m };
-      delete next[uid];
-      return next;
-    });
-  }
-}}
-  >
-    <Trash2 className="h-4 w-4 mx-auto text-slate-500" />
-  </Button>
-</div>
+                                  // Also clean selection state (prevents "selected" count staying high)
+                                  if (it.uploadId) {
+                                    const uid = it.uploadId;
+                                    setSelectedForEntry((m) => {
+                                      const next = { ...m };
+                                      delete next[uid];
+                                      return next;
+                                    });
+                                    setEntryDateByUploadId((m) => {
+                                      const next = { ...m };
+                                      delete next[uid];
+                                      return next;
+                                    });
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 mx-auto text-slate-500" />
+                              </Button>
+                            </div>
                           ) : null}
                         </td>
                       </tr>

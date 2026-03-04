@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api/client";
 
 export type UploadListItem = {
@@ -30,8 +30,11 @@ export function useUploadsList(args: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const reqIdRef = useRef(0);
+
   useEffect(() => {
     let cancelled = false;
+    const myReq = ++reqIdRef.current;
 
     async function run() {
       if (!businessId) return;
@@ -48,11 +51,11 @@ export function useUploadsList(args: {
         const res = await apiFetch(`/v1/businesses/${businessId}/uploads?${qs.toString()}`, { method: "GET" });
         if (!res?.ok) throw new Error(res?.error || "Failed to load uploads");
 
-        if (!cancelled) setItems(res.items ?? []);
+        if (!cancelled && myReq === reqIdRef.current) setItems(res.items ?? []);
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to load uploads");
+        if (!cancelled && myReq === reqIdRef.current) setError(e?.message || "Failed to load uploads");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && myReq === reqIdRef.current) setLoading(false);
       }
     }
 
@@ -62,5 +65,31 @@ export function useUploadsList(args: {
     };
   }, [businessId, accountId, type, vendorId, limit]);
 
-  return { items, loading, error };
+  async function refetch() {
+    // Force a new request id so stale in-flight cannot win.
+    reqIdRef.current += 1;
+    const myReq = reqIdRef.current;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(limit));
+      if (type) qs.set("type", type);
+      if (accountId) qs.set("accountId", accountId);
+      if (vendorId) qs.set("vendorId", vendorId);
+
+      const res = await apiFetch(`/v1/businesses/${businessId}/uploads?${qs.toString()}`, { method: "GET" });
+      if (!res?.ok) throw new Error(res?.error || "Failed to load uploads");
+
+      if (myReq === reqIdRef.current) setItems(res.items ?? []);
+    } catch (e: any) {
+      if (myReq === reqIdRef.current) setError(e?.message || "Failed to load uploads");
+    } finally {
+      if (myReq === reqIdRef.current) setLoading(false);
+    }
+  }
+
+  return { items, loading, error, refetch };
 }

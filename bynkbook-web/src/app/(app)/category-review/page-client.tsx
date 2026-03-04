@@ -324,15 +324,11 @@ export default function CategoryReviewPageClient() {
   // -------------------------
   // Phase F2: batch suggestions (canonical query key; per-surface retry; no stuck loading)
   // -------------------------
-  const suggestionsQ = useQuery({
-    queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId, suggestionTargetIds],
-    enabled: !!selectedBusinessId && !!selectedAccountId && !!suggestionTargetIds,
-    queryFn: async () => {
-      if (!selectedBusinessId || !selectedAccountId || !suggestionTargetIds) return {} as Record<string, any[]>;
-
-      const targets = (visibleRows ?? []).filter((r: any) => !r?.category_id).slice(0, 200);
-
-      const items = targets.map((r: any) => ({
+  const suggestionTargets = useMemo(() => {
+    return (visibleRows ?? [])
+      .filter((r: any) => !r?.category_id)
+      .slice(0, 200)
+      .map((r: any) => ({
         kind: "ENTRY" as const,
         id: String(r.id),
         date: String(r.date ?? "").slice(0, 10),
@@ -340,21 +336,39 @@ export default function CategoryReviewPageClient() {
         payee_or_name: String(r.payee ?? ""),
         memo: String(r.memo ?? ""),
       }));
+  }, [visibleRows]);
+
+  const suggestionTargetsKey = useMemo(() => {
+    return suggestionTargets.map((x) => x.id).join("|");
+  }, [suggestionTargets]);
+
+  const suggestionsQ = useQuery({
+    queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId, suggestionTargetsKey],
+    enabled: !!selectedBusinessId && !!selectedAccountId && suggestionTargets.length > 0,
+
+    // Keep last-good suggestions while refetching; no empty flash.
+    placeholderData: (prev) => prev ?? ({} as Record<string, any[]>),
+
+    staleTime: 15_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+
+    queryFn: async () => {
+      if (!selectedBusinessId || !selectedAccountId) return {} as Record<string, any[]>;
+      if (!suggestionTargets.length) return {} as Record<string, any[]>;
 
       const res: any = await getCategorySuggestions({
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
-        items,
+        items: suggestionTargets,
         limitPerItem: 3,
       });
 
       const next: Record<string, any[]> = {};
-      for (const it of items) {
-        const id = it.id;
-        const s = res?.suggestionsById?.[id] ?? [];
-        next[id] = Array.isArray(s) ? s : [];
+      for (const it of suggestionTargets) {
+        const s = res?.suggestionsById?.[it.id] ?? [];
+        next[it.id] = Array.isArray(s) ? s : [];
       }
-
       return next;
     },
   });
@@ -479,12 +493,8 @@ export default function CategoryReviewPageClient() {
     const idx = prev.findIndex((x: any) => String(x.id) === entryId);
     const prevEntry = idx >= 0 ? prev[idx] : null;
 
-    // Optimistic update (remove from view if uncategorized filter is on)
-    if (idx >= 0) {
-      const next = prev.slice();
-      next[idx] = { ...next[idx], category_id: categoryId };
-      qc.setQueryData(entriesKey, next);
-    }
+    // No cache write here: keep hook-owned cache authoritative to avoid mismatched query keys.
+    // We rely on targeted refetch after mutation.
 
     try {
       await updateEntry({
@@ -493,6 +503,10 @@ export default function CategoryReviewPageClient() {
         entryId,
         updates: { category_id: categoryId },
       });
+
+            // One targeted refresh: entries for this business+account only.
+      void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+      
     } catch (e: any) {
       // Revert this entry only
       if (idx >= 0 && prevEntry) {
@@ -712,131 +726,214 @@ export default function CategoryReviewPageClient() {
           ) : (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
               <LedgerTableShell scrollMode="visible"
-                  colgroup={
-                    <>
-                      <col style={{ width: 36 }} />
-                      <col style={{ width: 98 }} />
-                      <col />
-                      <col style={{ width: 120 }} />
-                      <col style={{ width: 360 }} />
-                    </>
-                  }
-                  header={
-                    <tr className="h-7">
-                      <th className="px-0 text-center align-middle">
-                        <div className="flex h-7 items-center justify-center">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={allVisibleSelected}
-                            onChange={toggleSelectAllVisible}
-                          />
-                        </div>
-                      </th>
-                      <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Date</th>
-                      <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Payee</th>
-                      <th className="px-2 text-right text-[10px] font-semibold text-slate-600">Amount</th>
-                      <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Category</th>
-                    </tr>
-                  }
-                  addRow={null}
-                  body={
-                    <>
-                      {visibleRows.map((e: any) => {
-                        const id = String(e.id);
-                        const payee = String(e.payee ?? "");
-                        const dateYmd = String(e.date ?? "").slice(0, 10);
-                        const failMsg = failedById[id];
-                        const isSelected = selectedIds.has(id);
-                        const typeUpper = String(e.type ?? "").toUpperCase();
-                        const payeeLower = String(e.payee ?? "").trim().toLowerCase();
-                        const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
-                        const categoryLabel = e.category_id
-                          ? (categoryNameById[String(e.category_id)] ?? "Unknown category")
-                          : "Uncategorized";
+                colgroup={
+                  <>
+                    <col style={{ width: 36 }} />
+                    <col style={{ width: 98 }} />
+                    <col />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 360 }} />
+                  </>
+                }
+                header={
+                  <tr className="h-7">
+                    <th className="px-0 text-center align-middle">
+                      <div className="flex h-7 items-center justify-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={allVisibleSelected}
+                          onChange={toggleSelectAllVisible}
+                        />
+                      </div>
+                    </th>
+                    <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Date</th>
+                    <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Payee</th>
+                    <th className="px-2 text-right text-[10px] font-semibold text-slate-600">Amount</th>
+                    <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Category</th>
+                  </tr>
+                }
+                addRow={null}
+                body={
+                  <>
+                    {visibleRows.map((e: any) => {
+                      const id = String(e.id);
+                      const payee = String(e.payee ?? "");
+                      const dateYmd = String(e.date ?? "").slice(0, 10);
+                      const failMsg = failedById[id];
+                      const isSelected = selectedIds.has(id);
+                      const typeUpper = String(e.type ?? "").toUpperCase();
+                      const payeeLower = String(e.payee ?? "").trim().toLowerCase();
+                      const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
+                      const categoryLabel = e.category_id
+                        ? (categoryNameById[String(e.category_id)] ?? "Unknown category")
+                        : "Uncategorized";
 
-                        return (
-                          <tr key={id} className={`h-7 border-b border-slate-100 ${isSelected ? "bg-accent" : ""}`}>
-                            <td className="px-0 text-center align-middle">
-                              <div className="flex h-7 items-center justify-center">
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4"
-                                  checked={isSelected}
-                                  onChange={() => toggleRow(id)}
-                                />
-                              </div>
-                            </td>
+                      return (
+                        <tr key={id} className={`h-7 border-b border-slate-100 ${isSelected ? "bg-accent" : ""}`}>
+                          <td className="px-0 text-center align-middle">
+                            <div className="flex h-7 items-center justify-center">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={isSelected}
+                                onChange={() => toggleRow(id)}
+                              />
+                            </div>
+                          </td>
 
-                            <td className="px-2 text-xs text-slate-700 whitespace-nowrap">{dateYmd}</td>
+                          <td className="px-2 text-xs text-slate-700 whitespace-nowrap">{dateYmd}</td>
 
-                            <td className="px-2 text-xs text-slate-900 truncate font-medium">{payee}</td>
+                          <td className="px-2 text-xs text-slate-900 truncate font-medium">{payee}</td>
 
-                            <td
-                              className={`px-2 text-xs text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
-                                }`}
-                            >
-                              {formatUsdAccountingFromCents(e.amount_cents)}
-                            </td>
+                          <td
+                            className={`px-2 text-xs text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
+                              }`}
+                          >
+                            {formatUsdAccountingFromCents(e.amount_cents)}
+                          </td>
 
-                            <td className="px-2">
-                              <div className="flex items-center justify-start gap-1.5">
-                                {null}
+                          <td className="px-2">
+                            <div className="flex items-center justify-start gap-1.5">
+                              {null}
 
-                                {/* Per-row category dropdown (applies immediately on change) */}
-                                <select
-                                  className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
-                                  value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
-                                  disabled={isOpening || !!pendingIds[id]}
-                                  onChange={async (ev) => {
-                                    if (isOpening) return;
-                                    if (!selectedBusinessId || !selectedAccountId) return;
+                              {/* Per-row category dropdown (applies immediately on change) */}
+                              <select
+                                className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+                                value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
+                                disabled={isOpening || !!pendingIds[id]}
+                                onChange={async (ev) => {
+                                  if (isOpening) return;
+                                  if (!selectedBusinessId || !selectedAccountId) return;
 
-                                    const v = ev.target.value;
-                                    const nextCategoryId = v ? v : null;
+                                  const v = ev.target.value;
+                                  const nextCategoryId = v ? v : null;
 
-                                    // Prevent double-submit while row is applying
+                                  // Prevent double-submit while row is applying
+                                  if (pendingIds[id]) return;
+
+                                  // Guardrail: never send an archived/invalid category id (prevents 400 Invalid category)
+                                  if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
+                                    setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
+                                    return;
+                                  }
+
+                                  clearMutErr();
+
+                                  // Manual override should NOT be attributed to AI.
+                                  // If it fails, restore prior session-local AI/undo state.
+                                  const hadAi = !!aiAppliedById[id];
+                                  const undoSnap = undoByEntryId[id] ?? null;
+
+                                  if (hadAi) {
+                                    setAiAppliedById((m) => {
+                                      const next = { ...m };
+                                      delete next[id];
+                                      return next;
+                                    });
+                                  }
+                                  if (undoSnap) {
+                                    setUndoByEntryId((m) => {
+                                      const next = { ...m };
+                                      delete next[id];
+                                      return next;
+                                    });
+                                    clearUndoTimer(id);
+                                  }
+
+                                  try {
+                                    await applyCategoryToEntry(id, nextCategoryId);
+                                  } catch {
+                                    // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
+                                    // Restore session-local state if the manual change failed.
+                                    if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                    if (undoSnap) {
+                                      setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
+                                      // restore timer with remaining time (best-effort)
+                                      const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
+                                      if (remaining > 0) {
+                                        clearUndoTimer(id);
+                                        undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
+                                          setUndoByEntryId((m) => {
+                                            if (!m[id]) return m;
+                                            const next = { ...m };
+                                            delete next[id];
+                                            return next;
+                                          });
+                                          clearUndoTimer(id);
+                                        }, remaining);
+                                      }
+                                    }
+                                  }
+                                }}
+                              >
+                                <option value="">Uncategorized</option>
+                                {categories.map((c) => (
+                                  <option key={String(c.id)} value={String(c.id)}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              {/* Row-level pending spinner */}
+                              {pendingIds[id] ? (
+                                <span className="inline-flex items-center" title="Applying…">
+                                  <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                </span>
+                              ) : null}
+
+                              {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
+
+                              {/* F7a: session-local AI attribution + Undo (only for suggestion-pill applies) */}
+                              {aiAppliedById[id] ? (
+                                <span
+                                  className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center"
+                                  title="Applied via AI suggestion"
+                                >
+                                  AI
+                                </span>
+                              ) : null}
+
+                              {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
+                                <button
+                                  type="button"
+                                  className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
+                                  title="Undo"
+                                  disabled={!!pendingIds[id]}
+                                  onClick={async () => {
                                     if (pendingIds[id]) return;
 
-                                    // Guardrail: never send an archived/invalid category id (prevents 400 Invalid category)
-                                    if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
-                                      setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
-                                      return;
-                                    }
+                                    const snapAi = !!aiAppliedById[id];
+                                    const snapUndo = undoByEntryId[id] ?? null;
+                                    if (!snapUndo) return;
 
                                     clearMutErr();
 
-                                    // Manual override should NOT be attributed to AI.
-                                    // If it fails, restore prior session-local AI/undo state.
-                                    const hadAi = !!aiAppliedById[id];
-                                    const undoSnap = undoByEntryId[id] ?? null;
+                                    try {
+                                      await applyCategoryToEntry(id, snapUndo.prevCategoryId);
 
-                                    if (hadAi) {
-                                      setAiAppliedById((m) => {
-                                        const next = { ...m };
-                                        delete next[id];
-                                        return next;
-                                      });
-                                    }
-                                    if (undoSnap) {
+                                      // Guardrail: clear undo state only on SUCCESS
                                       setUndoByEntryId((m) => {
                                         const next = { ...m };
                                         delete next[id];
                                         return next;
                                       });
                                       clearUndoTimer(id);
-                                    }
 
-                                    try {
-                                      await applyCategoryToEntry(id, nextCategoryId);
+                                      // Since undo is a manual action, remove AI attribution on success
+                                      if (snapAi) {
+                                        setAiAppliedById((m) => {
+                                          const next = { ...m };
+                                          delete next[id];
+                                          return next;
+                                        });
+                                      }
                                     } catch {
-                                      // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
-                                      // Restore session-local state if the manual change failed.
-                                      if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                      if (undoSnap) {
-                                        setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
-                                        // restore timer with remaining time (best-effort)
-                                        const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
+                                      // Guardrail: restore undo state if undo fails
+                                      if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                      if (snapUndo) {
+                                        setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
+                                        const remaining = Math.max(0, (snapUndo.expiresAt ?? 0) - Date.now());
                                         if (remaining > 0) {
                                           clearUndoTimer(id);
                                           undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
@@ -853,171 +950,92 @@ export default function CategoryReviewPageClient() {
                                     }
                                   }}
                                 >
-                                  <option value="">Uncategorized</option>
-                                  {categories.map((c) => (
-                                    <option key={String(c.id)} value={String(c.id)}>
-                                      {c.name}
-                                    </option>
-                                  ))}
-                                </select>
+                                  Undo
+                                </button>
+                              ) : null}
 
-                                {/* Row-level pending spinner */}
-                                {pendingIds[id] ? (
-                                  <span className="inline-flex items-center" title="Applying…">
-                                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
-                                  </span>
-                                ) : null}
+                              {/* Compact suggestions (top 2 + +more); click applies immediately */}
+                              {!e.category_id ? (
+                                <div className="flex items-center gap-1 overflow-hidden">
+                                  {(() => {
+                                    const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
+                                    const top = list.slice(0, 2);
+                                    const more = Math.max(0, list.length - top.length);
 
-                                {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
+                                    return (
+                                      <>
+                                        {top.map((s: any) => {
+                                          const catId = String(s?.category_id ?? "");
+                                          const name = String(s?.category_name ?? "—");
+                                          const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
 
-                                {/* F7a: session-local AI attribution + Undo (only for suggestion-pill applies) */}
-                                {aiAppliedById[id] ? (
-                                  <span
-                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center"
-                                    title="Applied via AI suggestion"
-                                  >
-                                    AI
-                                  </span>
-                                ) : null}
-
-                                {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
-                                  <button
-                                    type="button"
-                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
-                                    title="Undo"
-                                    disabled={!!pendingIds[id]}
-                                    onClick={async () => {
-                                      if (pendingIds[id]) return;
-
-                                      const snapAi = !!aiAppliedById[id];
-                                      const snapUndo = undoByEntryId[id] ?? null;
-                                      if (!snapUndo) return;
-
-                                      clearMutErr();
-
-                                      try {
-                                        await applyCategoryToEntry(id, snapUndo.prevCategoryId);
-
-                                        // Guardrail: clear undo state only on SUCCESS
-                                        setUndoByEntryId((m) => {
-                                          const next = { ...m };
-                                          delete next[id];
-                                          return next;
-                                        });
-                                        clearUndoTimer(id);
-
-                                        // Since undo is a manual action, remove AI attribution on success
-                                        if (snapAi) {
-                                          setAiAppliedById((m) => {
-                                            const next = { ...m };
-                                            delete next[id];
-                                            return next;
-                                          });
-                                        }
-                                      } catch {
-                                        // Guardrail: restore undo state if undo fails
-                                        if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                        if (snapUndo) {
-                                          setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
-                                          const remaining = Math.max(0, (snapUndo.expiresAt ?? 0) - Date.now());
-                                          if (remaining > 0) {
-                                            clearUndoTimer(id);
-                                            undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
-                                              setUndoByEntryId((m) => {
-                                                if (!m[id]) return m;
-                                                const next = { ...m };
-                                                delete next[id];
-                                                return next;
-                                              });
-                                              clearUndoTimer(id);
-                                            }, remaining);
-                                          }
-                                        }
-                                      }
-                                    }}
-                                  >
-                                    Undo
-                                  </button>
-                                ) : null}
-
-                                {/* Compact suggestions (top 2 + +more); click applies immediately */}
-                                {!e.category_id ? (
-                                  <div className="flex items-center gap-1 overflow-hidden">
-                                    {(() => {
-                                      const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
-                                      const top = list.slice(0, 2);
-                                      const more = Math.max(0, list.length - top.length);
-
-                                      return (
-                                        <>
-                                          {top.map((s: any) => {
-                                            const catId = String(s?.category_id ?? "");
-                                            const name = String(s?.category_name ?? "—");
-                                            const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
-
-                                            return (
-                                              <button
-                                                key={catId || name}
-                                                type="button"
-                                                className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
-                                                title={String(s?.reason ?? "")}
-                                                disabled={!!pendingIds[id]}
-                                                onClick={async () => {
-                                                  if (!catId) return;
-
-                                                  // Auto-apply immediately (explicit click on suggestion)
-                                                  if (!selectedBusinessId || !selectedAccountId) return;
-
-                                                  // Prevent double-submit
-                                                  if (pendingIds[id]) return;
-
-                                                  clearMutErr();
-
-                                                  // Snapshot previous category for undo (session-local)
-                                                  const prevCategoryId = e.category_id ? String(e.category_id) : null;
-
-                                                  try {
-                                                    await applyCategoryToEntry(id, catId);
-
-                                                    // SUCCESS: mark AI attribution + start undo window (10s)
-                                                    setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                                    setUndoWindow(id, prevCategoryId, catId);
-                                                  } catch {
-                                                    // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
-                                                  }
-                                                }}
-                                              >
-                                                <span className="font-semibold truncate max-w-[88px]">{name}</span>
-                                                <span className="text-primary">{conf}%</span>
-                                              </button>
-                                            );
-                                          })}
-
-                                          {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
-                                          {sugLoading && !list.length ? <span className="text-[10px] text-slate-400">Loading</span> : null}
-                                          {suggestionsQ.error && !list.length ? (
+                                          return (
                                             <button
+                                              key={catId || name}
                                               type="button"
-                                              className="text-[10px] text-primary hover:underline"
-                                              onClick={() => void suggestionsQ.refetch()}
+                                              className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
+                                              title={String(s?.reason ?? "")}
+                                              disabled={!!pendingIds[id]}
+                                              onClick={async () => {
+                                                if (!catId) return;
+
+                                                // Auto-apply immediately (explicit click on suggestion)
+                                                if (!selectedBusinessId || !selectedAccountId) return;
+
+                                                // Prevent double-submit
+                                                if (pendingIds[id]) return;
+
+                                                clearMutErr();
+
+                                                // Snapshot previous category for undo (session-local)
+                                                const prevCategoryId = e.category_id ? String(e.category_id) : null;
+
+                                                try {
+                                                  await applyCategoryToEntry(id, catId);
+
+                                                  // SUCCESS: mark AI attribution + start undo window (10s)
+                                                  setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                                  setUndoWindow(id, prevCategoryId, catId);
+                                                } catch {
+                                                  // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
+                                                }
+                                              }}
                                             >
-                                              Retry
+                                              <span className="font-semibold truncate max-w-[88px]">{name}</span>
+                                              <span className="text-primary">{conf}%</span>
                                             </button>
-                                          ) : null}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </>
-                  }
-                  footer={null}
-                />
+                                          );
+                                        })}
+
+                                        {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
+                                        {sugLoading && !list.length ? (
+                                          <span className="inline-flex items-center gap-1">
+                                            <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
+                                          </span>
+                                        ) : null}
+                                        {suggestionsQ.error && !list.length ? (
+                                          <button
+                                            type="button"
+                                            className="text-[10px] text-primary hover:underline"
+                                            onClick={() => void suggestionsQ.refetch()}
+                                          >
+                                            Retry
+                                          </button>
+                                        ) : null}
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </>
+                }
+                footer={null}
+              />
             </div>
           )}
 

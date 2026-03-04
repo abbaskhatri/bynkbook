@@ -3545,6 +3545,23 @@ export default function ReconcilePageClient() {
                           return;
                         }
 
+                        // Optimistic: inject created group so rows move instantly (no waiting for refresh).
+                        const createdGroup =
+                          (first as any)?.match_group ??
+                          (first as any)?.matchGroup ??
+                          (first as any)?.group ??
+                          (first as any)?.item ??
+                          null;
+
+                        if (createdGroup?.id) {
+                          setMatchGroups((prev) => {
+                            const next = Array.isArray(prev) ? prev.slice() : [];
+                            const gid = String(createdGroup.id);
+                            if (!next.some((g: any) => String(g?.id) === gid)) next.unshift(createdGroup);
+                            return next;
+                          });
+                        }
+
                         await refreshBankAndMatches({ preserveOnEmpty: true });
                         await entriesQ.refetch?.();
 
@@ -4060,6 +4077,23 @@ export default function ReconcilePageClient() {
                         if (!first?.ok) {
                           setEntryMatchError(String(first?.error ?? "Combine match failed"));
                           return;
+                        }
+
+                        // Optimistic: inject created group so rows move instantly.
+                        const createdGroup =
+                          (first as any)?.match_group ??
+                          (first as any)?.matchGroup ??
+                          (first as any)?.group ??
+                          (first as any)?.item ??
+                          null;
+
+                        if (createdGroup?.id) {
+                          setMatchGroups((prev) => {
+                            const next = Array.isArray(prev) ? prev.slice() : [];
+                            const gid = String(createdGroup.id);
+                            if (!next.some((g: any) => String(g?.id) === gid)) next.unshift(createdGroup);
+                            return next;
+                          });
                         }
 
                         await refreshBankAndMatches({ preserveOnEmpty: true });

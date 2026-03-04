@@ -33,7 +33,7 @@ export function UploadsList(props: {
   showStatementPeriod?: boolean;
 }) {
   const { title, businessId, accountId, type, vendorId, limit = 10, showStatementPeriod } = props;
-  const { items, loading, error } = useUploadsList({ businessId, accountId, type, vendorId, limit });
+  const { items, loading, error, refetch } = useUploadsList({ businessId, accountId, type, vendorId, limit });
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -42,8 +42,8 @@ export function UploadsList(props: {
     try {
       setImportingId(uploadId);
       await importBankStatementUpload(businessId, uploadId);
-      // simplest refresh to show updated meta.importStatus + counts
-      window.location.reload();
+      // Targeted refresh only (no full reload)
+      await refetch();
     } finally {
       setImportingId(null);
     }
@@ -64,14 +64,22 @@ export function UploadsList(props: {
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-      <div className="px-3 py-2 border-b border-slate-200">
+      <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-slate-900">{title}</div>
+        {loading && items.length > 0 ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
       </div>
 
-      {loading ? (
-        <div className="p-3 text-xs text-slate-600">Loading…</div>
-      ) : error ? (
+      {error ? (
         <div className="p-3 text-xs text-red-700">{error}</div>
+      ) : items.length === 0 && loading ? (
+        <div className="p-3 space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="space-y-1">
+              <div className="h-3 w-48 rounded bg-slate-200 animate-pulse" />
+              <div className="h-3 w-64 rounded bg-slate-200 animate-pulse" />
+            </div>
+          ))}
+        </div>
       ) : items.length === 0 ? (
         <div className="p-3 text-xs text-slate-600">No uploads yet.</div>
       ) : (

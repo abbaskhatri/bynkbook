@@ -355,11 +355,13 @@ export default function DashboardPageClient() {
     return list[0]?.id ?? null;
   }, [bizIdFromUrl, businessesQ.data]);
 
+  const spKey = sp.toString();
+
   useEffect(() => {
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
     if (!sp.get("businessId")) router.replace(`/dashboard?businessId=${selectedBusinessId}`);
-  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
+  }, [businessesQ.isLoading, selectedBusinessId, router, spKey]);
 
   // Period selector (top-right; controls ALL widgets)
   const [periodMode, setPeriodMode] = useState<PeriodMode>("LAST_3_MONTHS");
@@ -409,7 +411,7 @@ export default function DashboardPageClient() {
 
   // Keep-last-good: preserve previous data while fetching new period.
   const pnlQ = useQuery({
-    queryKey: ["dashboardExec", "pnlSummary", selectedBusinessId, range.from, range.to, range.mode],
+    queryKey: ["dashboardExec", "pnlSummary", selectedBusinessId, accountScopeId, range.from, range.to, range.mode,],
     queryFn: () =>
       getPnlSummary(selectedBusinessId as string, {
         from: range.from,
@@ -423,7 +425,7 @@ export default function DashboardPageClient() {
   });
 
   const cashflowQ = useQuery({
-    queryKey: ["dashboardExec", "cashflowSeries", selectedBusinessId, range.from, range.to, range.mode],
+    queryKey: ["dashboardExec", "cashflowSeries", selectedBusinessId, accountScopeId, range.from, range.to, range.mode],
     queryFn: () =>
       getCashflowSeries(selectedBusinessId as string, {
         from: range.from,
@@ -437,7 +439,7 @@ export default function DashboardPageClient() {
   });
 
   const categoriesQ = useQuery({
-    queryKey: ["dashboardExec", "categories", selectedBusinessId, range.from, range.to, range.mode],
+    queryKey: ["dashboardExec", "categories", selectedBusinessId, accountScopeId, range.from, range.to, range.mode],
     queryFn: () => getCategories(selectedBusinessId as string, { from: range.from, to: range.to, accountId: accountScopeId }),
     enabled: dashEnabled,
     staleTime: 30_000,
