@@ -26,6 +26,7 @@ import {
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getIssuesCount } from "@/lib/api/issues";
+import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,6 +65,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   // Stage 1: global auth guard for all app routes (exclude auth pages themselves)
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (
@@ -84,9 +86,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
     (async () => {
       try {
-        await getCurrentUser();
+        const u: any = await getCurrentUser();
         setIsAuthed(true);
+
+        // Prefer stable identifier for activity "You" label.
+        const id = String(u?.userId ?? u?.username ?? "");
+        setCurrentUserId(id || null);
       } catch {
+        setCurrentUserId(null);
         router.replace(`/login?next=${encodeURIComponent(currentUrl)}`);
       } finally {
         setAuthChecked(true);
@@ -126,12 +133,29 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
+  // Activity dropdown (Bell)
+  const [activityOpen, setActivityOpen] = useState(false);
+  const activityRef = useRef<HTMLDivElement | null>(null);
+
+  const [activityItems, setActivityItems] = useState<ActivityLogItem[] | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityErr, setActivityErr] = useState<string | null>(null);
+  const activityFetchedAtRef = useRef<number>(0);
+
+  const ACTIVITY_TTL_MS = 15_000;
+
   useEffect(() => {
     function onDocMouseDown(ev: MouseEvent) {
-      const el = userMenuRef.current;
-      if (!el) return;
-      if (ev.target instanceof Node && !el.contains(ev.target)) setUserMenuOpen(false);
+      const t = ev.target;
+      if (!(t instanceof Node)) return;
+
+      const userEl = userMenuRef.current;
+      if (userEl && !userEl.contains(t)) setUserMenuOpen(false);
+
+      const actEl = activityRef.current;
+      if (actEl && !actEl.contains(t)) setActivityOpen(false);
     }
+
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
@@ -178,6 +202,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const businessId = business?.id ?? bizIdFromUrl ?? "";
 
   const accountsQ = useAccounts(businessId || null);
+
+    // Activity cache must never leak across businesses.
+  useEffect(() => {
+    setActivityItems(null);
+    setActivityErr(null);
+    setActivityLoading(false);
+    activityFetchedAtRef.current = 0;
+  }, [businessId]);
 
   const firstActiveAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
@@ -363,6 +395,34 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
   const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.count ?? 0) || 0);
+
+  async function ensureActivityFresh(force = false) {
+    if (!businessId) return;
+
+    const now = Date.now();
+    const hasCache = Array.isArray(activityItems);
+    const fresh = hasCache && now - activityFetchedAtRef.current < ACTIVITY_TTL_MS;
+
+    if (!force && fresh) return;
+
+    setActivityLoading(true);
+    setActivityErr(null);
+
+    try {
+      const res = await getActivity(businessId, {
+        limit: 10,
+        accountId: accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined,
+      });
+
+      setActivityItems(res.items ?? []);
+      activityFetchedAtRef.current = Date.now();
+    } catch {
+      // Keep last-good items visible; just show a small error line.
+      setActivityErr("Couldn’t load activity.");
+    } finally {
+      setActivityLoading(false);
+    }
+  }
 
   const href = (path: string, needsAccountId: boolean) => {
     if (!businessId) return path;
@@ -623,14 +683,121 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               />
             ) : null}
 
-            <button
-              type="button"
-              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
-              title="Activity"
-              onClick={() => router.push("/settings?tab=activity")}
-            >
-              <Bell className={NAV_ICON_CLASS} />
-            </button>
+            <div className="relative" ref={activityRef}>
+              <button
+                type="button"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                title="Activity"
+                onClick={() => {
+                  // Close other menu; toggle activity
+                  setUserMenuOpen(false);
+
+                  setActivityOpen((v) => {
+                    const next = !v;
+                    if (next) {
+                      // Fetch-on-open with TTL. Keep last-good list visible.
+                      ensureActivityFresh(false);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <Bell className={NAV_ICON_CLASS} />
+              </button>
+
+              {activityOpen ? (
+                <div className="absolute right-0 mt-2 w-[420px] rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
+                  <div className="px-3 h-10 flex items-center justify-between border-b border-slate-200 bg-slate-50">
+                    <div className="text-xs font-semibold text-slate-700">Activity</div>
+
+                    <button
+                      type="button"
+                      className="text-xs text-slate-600 hover:text-slate-900"
+                      onClick={() => {
+                        setActivityOpen(false);
+
+                        // Route to existing activity surface in Settings (real page).
+                        const base = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
+                        router.push(base);
+                      }}
+                    >
+                      View all
+                    </button>
+                  </div>
+
+                  {/* Body */}
+                  <div className="max-h-[420px] overflow-auto">
+                    {/* Error line (never hides last-good list) */}
+                    {activityErr ? (
+                      <div className="px-3 py-2 text-xs text-rose-700 border-b border-slate-100 flex items-center justify-between gap-2">
+                        <span>{activityErr}</span>
+                        <button
+                          type="button"
+                          className="text-xs text-slate-700 hover:text-slate-900"
+                          onClick={() => ensureActivityFresh(true)}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {/* Skeleton-first: only show skeleton when no cache yet */}
+                    {activityLoading && (!activityItems || activityItems.length === 0) ? (
+                      <div className="p-3 space-y-2">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <div key={i} className="space-y-1">
+                            <Skeleton className="h-4 w-40" />
+                            <Skeleton className="h-3 w-64" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : !activityItems || activityItems.length === 0 ? (
+                      <div className="p-3 text-sm text-slate-600">No activity yet.</div>
+                    ) : (
+                      <div className="divide-y divide-slate-100">
+                        {activityItems.slice(0, 10).map((it) => {
+                          const who =
+                            currentUserId && String(it.actor_user_id) === String(currentUserId)
+                              ? "You"
+                              : it.actor_user_id
+                              ? "Member"
+                              : "System";
+
+                          // Never show raw IDs; keep event readable.
+                          const evt = String(it.event_type || "").replace(/_/g, " ");
+
+                          const when = (() => {
+                            try {
+                              return new Date(it.created_at).toLocaleString();
+                            } catch {
+                              return String(it.created_at ?? "");
+                            }
+                          })();
+
+                          return (
+                            <div key={it.id} className="px-3 py-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-slate-900 truncate">{evt}</div>
+                                  <div className="mt-0.5 text-[11px] text-slate-500 truncate">
+                                    {who} • {when}
+                                  </div>
+                                </div>
+
+                                {/* Keep last-good visible while refresh happens (no empty flash) */}
+                                {activityLoading ? (
+                                  <span className="text-[11px] text-slate-400">Updating…</span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
             <div className="relative" ref={userMenuRef}>
               <button

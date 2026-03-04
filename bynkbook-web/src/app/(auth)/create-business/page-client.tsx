@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function CreateBusinessClient() {
   const router = useRouter();
@@ -123,8 +124,28 @@ export default function CreateBusinessClient() {
 
   if (checkingSession) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="text-sm text-slate-600">Loading…</div>
+      <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+        <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-sky-200/40 blur-3xl" />
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <Skeleton className="h-5 w-40" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <div className="grid grid-cols-2 gap-2">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+            <Skeleton className="h-9 w-full" />
+            <div className="pt-2 flex items-center justify-center gap-3">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -132,9 +153,10 @@ export default function CreateBusinessClient() {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <Card className="w-full max-w-md">
-        <CardHeader className="space-y-0 pb-3">
+        <CardHeader className="space-y-1 pb-3">
+          <div className="text-xs font-semibold text-slate-500">BynkBook setup</div>
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>Create your business</CardTitle>
+            <CardTitle className="text-xl">Create your business</CardTitle>
             <Button variant="outline" className="h-8 px-3 text-xs" onClick={onSignOut}>
               Sign out
             </Button>
@@ -193,12 +215,23 @@ export default function CreateBusinessClient() {
 
             {error ? <div className="text-sm text-red-600">{error}</div> : null}
 
-            <Button type="submit" className="w-full" disabled={submitting || !name.trim()}>
+            <Button type="submit" className="w-full h-10" disabled={submitting || !name.trim()}>
               {submitting ? "Creating…" : "Create business"}
             </Button>
 
             <div className="text-xs text-slate-500">You need a business to continue into the app.</div>
           </form>
+
+          <div className="pt-4 flex items-center justify-center gap-3 text-xs text-slate-500">
+            <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/privacy")}>
+              Privacy
+            </button>
+            <span className="text-slate-300">•</span>
+            <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/terms")}>
+              Terms
+            </button>
+          </div>
+
         </CardContent>
       </Card>
     </div>

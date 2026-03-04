@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function LoginInner() {
   const router = useRouter();
@@ -74,17 +75,45 @@ function LoginInner() {
 
   if (checkingSession) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="text-sm text-slate-600">Loading…</div>
+      <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+        <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-sky-200/40 blur-3xl" />
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <Skeleton className="h-5 w-24" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-px w-full" />
+              <Skeleton className="h-3 w-10" />
+              <Skeleton className="h-px w-full" />
+            </div>
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-3 w-28" />
+            </div>
+            <div className="pt-2 flex items-center justify-center gap-3">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
+    <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-sky-200/40 blur-3xl" />
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Sign in</CardTitle>
+        <CardHeader className="space-y-1">
+          <div className="text-xs font-semibold text-slate-500">BynkBook</div>
+          <CardTitle className="text-xl">Sign in</CardTitle>
+          <div className="text-sm text-slate-600">Secure access to your businesses.</div>
         </CardHeader>
 
         <CardContent>
@@ -151,7 +180,7 @@ function LoginInner() {
             <div className="space-y-4">
               <Button
                 type="button"
-                className="w-full"
+                className="w-full h-10"
                 variant="outline"
                 onClick={async () => {
                   // Preserve deep-link intent across OAuth redirect
@@ -171,49 +200,67 @@ function LoginInner() {
               <form onSubmit={onSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username"
-                />
-              </div>
+                  <Input
+                    id="email"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    autoComplete="username"
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
 
-              {error ? <div className="text-sm text-red-600">{error}</div> : null}
+                {error ? <div className="text-sm text-red-600">{error}</div> : null}
 
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Signing in…" : "Sign in"}
-              </Button>
+                <Button type="submit" className="w-full h-10" disabled={submitting}>
+                  {submitting ? "Signing in…" : "Sign in"}
+                </Button>
 
-              <div className="flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  className="text-slate-600 hover:text-slate-800"
-                  onClick={() => router.replace(`/forgot-password?next=${encodeURIComponent(nextUrl)}`)}
-                >
-                  Forgot password
-                </button>
+                <div className="flex items-center justify-between text-xs">
+                  <button
+                    type="button"
+                    className="text-slate-600 hover:text-slate-800"
+                    onClick={() => router.replace(`/forgot-password?next=${encodeURIComponent(nextUrl)}`)}
+                  >
+                    Forgot password
+                  </button>
 
-                <button
-                  type="button"
-                  className="text-slate-600 hover:text-slate-800"
-                  onClick={() => router.replace(`/signup?next=${encodeURIComponent(nextUrl)}`)}
-                >
-                  Create account
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    className="text-slate-600 hover:text-slate-800"
+                    onClick={() => router.replace(`/signup?next=${encodeURIComponent(nextUrl)}`)}
+                  >
+                    Create account
+                  </button>
+                </div>
               </form>
+
+              <div className="pt-2 flex items-center justify-center gap-3 text-xs text-slate-500">
+                <button
+                  type="button"
+                  className="hover:text-slate-700"
+                  onClick={() => router.replace("/privacy")}
+                >
+                  Privacy
+                </button>
+                <span className="text-slate-300">•</span>
+                <button
+                  type="button"
+                  className="hover:text-slate-700"
+                  onClick={() => router.replace("/terms")}
+                >
+                  Terms
+                </button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -224,7 +271,35 @@ function LoginInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center p-6 text-sm text-slate-600">Loading…</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center p-6">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <Skeleton className="h-5 w-24" />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-9 w-full" />
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-px w-full" />
+                <Skeleton className="h-3 w-10" />
+                <Skeleton className="h-px w-full" />
+              </div>
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-28" />
+              </div>
+              <div className="pt-2 flex items-center justify-center gap-3">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-20" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      }
+    >
       <LoginInner />
     </Suspense>
   );
