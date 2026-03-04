@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { UploadCloud, X, CheckCircle2, AlertTriangle, Trash2, Download } from "lucide-react";
 import { useUploadController } from "./useUploadController";
 import { apiFetch } from "@/lib/api/client";
+
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+
 import {
   type UploadType,
   type UploadContext,
@@ -31,7 +34,7 @@ function norm(s: string) {
   return String(s || "").trim().toLowerCase();
 }
 
-// Convert various date strings into YYYY-MM-DD for <input type="date">
+// Convert various date strings into YYYY-MM-DD for date pickers (YYYY-MM-DD)
 function toIsoDate(v: string): string {
   const s = String(v || "").trim();
   if (!s) return "";
@@ -423,22 +426,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <div className="text-xs text-slate-600">Statement from</div>
-                <input
-                  type="date"
-                  className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
-                  value={statementFrom}
-                  onChange={(e) => setStatementFrom(e.target.value)}
-                />
+                <AppDatePicker value={statementFrom} onChange={(next) => setStatementFrom(next)} allowClear />
               </div>
 
               <div className="space-y-1">
                 <div className="text-xs text-slate-600">Statement to</div>
-                <input
-                  type="date"
-                  className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
-                  value={statementTo}
-                  onChange={(e) => setStatementTo(e.target.value)}
-                />
+                <AppDatePicker value={statementTo} onChange={(next) => setStatementTo(next)} allowClear />
               </div>
 
               <div className="col-span-2 text-xs text-slate-500">This stores the file + metadata.</div>
@@ -645,17 +638,17 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
 <td className="px-3 py-2 text-slate-700">
   {it.uploadId ? (
-    <input
-      type="date"
-      className="h-7 px-2 text-xs border border-slate-200 rounded-md"
-      value={entryDateByUploadId[it.uploadId] || ""}
-      onChange={(e) => {
-        const id = it.uploadId!;
-        setEntryDateByUploadId((m) => ({ ...m, [id]: e.target.value }));
-      }}
-      disabled={!selectedForEntry[it.uploadId]}
-      title="Ledger entry date"
-    />
+    <div className="w-[170px]">
+      <AppDatePicker
+        value={entryDateByUploadId[it.uploadId] || ""}
+        onChange={(next) => {
+          const id = it.uploadId!;
+          setEntryDateByUploadId((m) => ({ ...m, [id]: next }));
+        }}
+        disabled={!selectedForEntry[it.uploadId]}
+        allowClear
+      />
+    </div>
   ) : (
     "—"
   )}

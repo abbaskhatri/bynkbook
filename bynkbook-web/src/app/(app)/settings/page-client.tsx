@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { patchBusiness, deleteBusiness, getBusinessUsage, type Business } from "@/lib/api/businesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -331,7 +333,7 @@ export default function SettingsPageClient() {
   const [editOpeningBalance, setEditOpeningBalance] = useState("0.00");
   const [editOpeningDate, setEditOpeningDate] = useState(todayYmd());
   const [editBusy, setEditBusy] = useState(false);
-    // Delete account confirmation (AppDialog; no window.confirm)
+  // Delete account confirmation (AppDialog; no window.confirm)
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
   const [deleteAccountName, setDeleteAccountName] = useState<string>("");
@@ -1899,8 +1901,9 @@ export default function SettingsPageClient() {
                           </div>
                           <div className="space-y-1">
                             <Label>Opening date</Label>
-                            <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
-                          </div>
+                            <div className="w-full">
+                              <AppDatePicker value={openingDate} onChange={(next) => setOpeningDate(next)} allowClear={false} />
+                            </div>                          </div>
                         </div>
                       </>
                     ) : (
@@ -1912,8 +1915,9 @@ export default function SettingsPageClient() {
 
                         <div className="space-y-1">
                           <Label>Opening date</Label>
-                          <Input className={inputH7} type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
-                        </div>
+                          <div className="w-full">
+                            <AppDatePicker value={openingDate} onChange={(next) => setOpeningDate(next)} allowClear={false} />
+                          </div>                        </div>
 
                         <Button
                           className="h-8 px-3 text-xs"
@@ -2083,14 +2087,15 @@ export default function SettingsPageClient() {
 
                     <div className="space-y-1">
                       <Label>Opening balance date</Label>
-                      <Input
-                        className={inputH7}
-                        type="date"
-                        value={plaidDraft?.effectiveStartDate ?? todayYmd()}
-                        onChange={(e) =>
-                          setPlaidDraft((cur) => (cur ? { ...cur, effectiveStartDate: e.target.value } : cur))
-                        }
-                      />
+                      <div className="w-full">
+                        <AppDatePicker
+                          value={plaidDraft?.effectiveStartDate ?? todayYmd()}
+                          onChange={(next) =>
+                            setPlaidDraft((cur) => (cur ? { ...cur, effectiveStartDate: next } : cur))
+                          }
+                          allowClear={false}
+                        />
+                      </div>
                       <div className="text-[11px] text-slate-500">
                         This date controls how far back we retain transactions. Opening is computed after creation.
                       </div>
@@ -2289,14 +2294,14 @@ export default function SettingsPageClient() {
 
                           <div className="space-y-1">
                             <Label>Opening date</Label>
-                            <Input
-                              className={inputH7}
-                              type="date"
-                              value={editOpeningDate}
-                              onChange={(e) => setEditOpeningDate(e.target.value)}
-                              disabled={!canEditOpening}
-                              title={!canEditOpening ? "Opening fields can only be edited before any related data exists." : "Edit opening date"}
-                            />
+                            <div className="w-full">
+                              <AppDatePicker
+                                value={editOpeningDate}
+                                onChange={(next) => setEditOpeningDate(next)}
+                                disabled={!canEditOpening}
+                                allowClear={false}
+                              />
+                            </div>
                           </div>
                         </div>
                       );

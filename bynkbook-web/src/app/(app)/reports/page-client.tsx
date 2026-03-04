@@ -12,10 +12,12 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { PillToggle } from "@/components/primitives/PillToggle";
 import { ringFocus } from "@/components/primitives/tokens";
 
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
-import { FileText } from "lucide-react";
+import { FileText, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, PieChart as PieIcon, Landmark } from "lucide-react";
 
 import {
   ResponsiveContainer,
@@ -44,7 +46,7 @@ import {
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 
-type TabKey = "pnl" | "cashflow" | "accounts" | "ap" | "categories";
+type TabKey = "overview" | "pnl" | "cashflow" | "monthly";
 type RangeMode = "weekly" | "monthly" | "yearly" | "custom";
 
 function todayYmd() {
@@ -198,10 +200,69 @@ function formatUsdAccountingFromCents(centsStr: string) {
   return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
+function formatBucketLabel(raw: string, rangeMode: RangeMode) {
+  const s = String(raw ?? "").trim();
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // YEAR: "2026"
+  if (/^\d{4}$/.test(s)) return s;
+
+  // MONTH: "YYYY-MM" -> "Feb 26"
+  if (/^\d{4}-\d{2}$/.test(s)) {
+    const m = Number(s.slice(5, 7));
+    return `${mon[m - 1] ?? s} ${s.slice(2, 4)}`;
+  }
+
+  // DAY (used for weekly/custom day buckets): "YYYY-MM-DD" -> "Mar 04"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const m = Number(s.slice(5, 7));
+    const d = s.slice(8, 10);
+    return `${mon[m - 1] ?? s} ${d}`;
+  }
+
+  // WEEK keys (if backend returns "YYYY-W09" or "YYYY-W9" or "YYYY-09")
+  const wk = s.match(/^(\d{4})-W?(\d{1,2})$/i);
+  if (wk) {
+    const yy = wk[1].slice(2, 4);
+    const ww = wk[2].padStart(2, "0");
+    return `W${ww} ${yy}`;
+  }
+
+  // Never parse arbitrary strings into weekday names.
+  return s || "—";
+}
+
+function normalizeMonthKeysForChart(rawMonths: string[], rangeToYmd: string) {
+  const months = (rawMonths ?? []).map((m) => String(m ?? "").trim());
+  if (months.length === 0) return months;
+
+  // Accept already-good keys: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-W##.
+  const ok = (s: string) =>
+    /^\d{4}$/.test(s) ||
+    /^\d{4}-\d{2}$/.test(s) ||
+    /^\d{4}-\d{2}-\d{2}$/.test(s) ||
+    /^\d{4}-W?\d{1,2}$/i.test(s);
+
+  // If ALL are acceptable, do nothing.
+  if (months.every(ok)) return months;
+
+  // Otherwise: synthesize YYYY-MM buckets ending at rangeTo month.
+  // This fixes bad labels like "Fri Aug" while staying deterministic.
+  const end = new Date(`${rangeToYmd}T00:00:00`);
+  const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+  const n = months.length;
+  return months.map((_, i) => {
+    const d = new Date(endMonth.getFullYear(), endMonth.getMonth() - (n - 1 - i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
 function hasMultiMonthSeries(monthly: Array<{ month: string }>) {
   if (!Array.isArray(monthly)) return false;
   const uniq = new Set(monthly.map((m) => String(m.month)));
-  return uniq.size >= 2;
+  // Allow 1 bucket so charts still show for valid single-period ranges.
+  return uniq.size >= 1;
 }
 
 function NoTrendNote() {
@@ -230,8 +291,8 @@ function compactUsdTickFromCentsNumber(v: number) {
     const abs = Math.abs(n);
     const withSuffix =
       abs >= 1_000_000 ? `${(abs / 1_000_000).toFixed(1)}M`
-      : abs >= 1_000 ? `${(abs / 1_000).toFixed(1)}k`
-      : abs.toFixed(0);
+        : abs >= 1_000 ? `${(abs / 1_000).toFixed(1)}k`
+          : abs.toFixed(0);
 
     const base = `$${withSuffix}`;
     return fm.isNeg ? `(${base})` : base;
@@ -259,6 +320,8 @@ function ComboBarLineChart({
   aLabel,
   bLabel,
   lineLabel,
+  rangeMode,
+  rangeTo,
 }: {
   title: string;
   months: string[];
@@ -268,9 +331,12 @@ function ComboBarLineChart({
   aLabel: string;
   bLabel: string;
   lineLabel: string;
+  rangeMode: RangeMode;
+  rangeTo: string;
 }) {
-  const data = mkComboSeriesData(months, barA, barB, line);
-  if (data.length < 2) return <NoTrendNote />;
+  const normMonths = normalizeMonthKeysForChart(months, rangeTo);
+  const data = mkComboSeriesData(normMonths, barA, barB, line);
+  if (data.length < 1) return <NoTrendNote />;
 
   const tooltipFmt = (v: any) => {
     try {
@@ -282,35 +348,63 @@ function ComboBarLineChart({
   };
 
   return (
-    <div className="rounded-md border border-slate-200 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] text-slate-600">{title}</div>
-          <div className="text-[11px] text-slate-500">{data[data.length - 1]?.month}</div>
-        </div>
-      </div>
+    <div className="h-[260px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 6, left: 8 }}>
+          <CartesianGrid stroke="var(--bb-chart-grid)" strokeDasharray="3 3" />
 
-      <div className="mt-3 h-[360px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 10, right: 16, bottom: 8, left: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-            <YAxis
-              tick={{ fontSize: 11 }}
-              tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
-              width={72}
-            />
-            <Tooltip
-              formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
-              labelFormatter={(label: any) => String(label)}
-              contentStyle={{ fontSize: 12 }}
-            />
-            <Bar dataKey="a" name={aLabel} fill="hsl(var(--primary))" radius={[3, 3, 3, 3]} />
-            <Bar dataKey="b" name={bLabel} fill="rgb(239 68 68 / 0.70)" radius={[3, 3, 3, 3]} />
-            <Line dataKey="l" name={lineLabel} type="monotone" stroke="rgb(51 65 85)" strokeWidth={2.25} dot={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+          <XAxis
+            dataKey="month"
+            tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
+            tickFormatter={(v: any) => formatBucketLabel(String(v), rangeMode)}
+          />
+          <YAxis
+            tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
+            tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
+            width={72}
+          />
+
+          <Tooltip
+            formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
+            labelFormatter={(label: any) => formatBucketLabel(String(label), rangeMode)}
+            contentStyle={{
+              fontSize: 12,
+              background: "var(--bb-chart-tooltip-bg)",
+              border: "1px solid var(--bb-chart-tooltip-border)",
+              borderRadius: 10,
+            }}
+            labelStyle={{ color: "var(--bb-chart-tooltip-text)", fontWeight: 600 }}
+            itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
+          />
+
+          <Bar
+            dataKey="a"
+            name={aLabel}
+            fill="var(--bb-green-600)"
+            radius={[4, 4, 0, 0]}
+            isAnimationActive
+            animationDuration={200}
+          />
+          <Bar
+            dataKey="b"
+            name={bLabel}
+            fill="var(--bb-red-600)"
+            radius={[4, 4, 0, 0]}
+            isAnimationActive
+            animationDuration={200}
+          />
+          <Line
+            dataKey="l"
+            name={lineLabel}
+            type="monotone"
+            stroke="var(--bb-slate-600)"
+            strokeWidth={2.25}
+            dot={false}
+            isAnimationActive
+            animationDuration={200}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -342,19 +436,22 @@ function DonutBreakdown({
   ];
 
   const palette = [
-    "rgb(15 23 42)",
-    "rgb(51 65 85)",
-    "rgb(100 116 139)",
-    "rgb(148 163 184)",
-    "rgb(203 213 225)",
-    "hsl(var(--primary))",
-    "rgb(34 197 94)",
-    "rgb(59 130 246)",
+    "var(--bb-slate-400)",
+    "var(--bb-blue-500)",
+    "var(--bb-amber-500)",
+    "var(--bb-green-600)",
+    "var(--bb-red-600)",
+    "var(--bb-emerald-600)",
+    "rgb(147 51 234)", // purple
+    "rgb(14 165 233)", // sky
   ];
 
   return (
     <div className="rounded-md border border-slate-200 p-3">
-      <div className="text-[11px] text-slate-600">{title}</div>
+      <div className="flex items-center gap-2 text-[11px] text-slate-600">
+        <PieIcon className="h-4 w-4 text-slate-500" />
+        {title}
+      </div>
 
       <div className="mt-2 grid grid-cols-[260px_1fr] gap-6 items-start">
         <div className="h-[260px]">
@@ -427,7 +524,7 @@ export default function ReportsPageClient() {
     return b?.name ?? "Business";
   }, [businessId, businessesQ.data]);
 
-  const [tab, setTab] = useState<TabKey>("pnl"); // Default tab: P&L
+  const [tab, setTab] = useState<TabKey>("overview"); // Default tab: Financial Overview
 
   const [rangeMode, setRangeMode] = useState<RangeMode>("monthly");
   const [ym, setYm] = useState(monthNowYm()); // monthly
@@ -526,26 +623,60 @@ export default function ReportsPageClient() {
     setErr(null);
 
     try {
-      if (tab === "pnl") {
+      if (tab === "overview" || tab === "monthly" || tab === "pnl") {
         const prev = priorRangeForCurrent(rangeMode, from, to, ym, year, weekFrom, customFrom, customTo, ytd);
 
-        const [res, resPrev, cats, ap] = await Promise.all([
+        const [
+          resPnl,
+          resPnlPrev,
+          resCash,
+          resCashPrev,
+          cats,
+          ap,
+          endAcct,
+          endPrevAcct,
+        ] = await Promise.all([
           getPnlSummary(businessId, { from, to, accountId, ytd }),
           getPnlSummary(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
+          getCashflowSeries(businessId, { from, to, accountId, ytd }),
+          getCashflowSeries(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
           getCategories(businessId, { from, to, accountId }),
           getApAging(businessId, { asOf: to }),
+          getAccountsSummary(businessId, { asOf: to, accountId, includeArchived: false }),
+          getAccountsSummary(businessId, { asOf: prev.to, accountId, includeArchived: false }),
         ]);
 
         if (myEpoch !== runEpochRef.current) return;
 
-        setPnl(res);
-        setPnlPrev(resPrev);
+        setPnl(resPnl);
+        setPnlPrev(resPnlPrev);
+
+        setCashflow(resCash);
+        setCashflowPrev(resCashPrev);
+
+        // Categories + AP (used by Overview / Monthly)
+        setCategories(cats);
+        setApAging(ap);
 
         const catRows = (cats?.rows ?? []).map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents ?? "0") }));
-        setTopCats(topNByAbs(catRows, 5));
+        setTopCats(topNByAbs(catRows, 6));
 
         const vendorRows = (ap?.rows ?? []).map((r: any) => ({ label: String(r.vendor ?? "Vendor"), cents: String(r.total_cents ?? "0") }));
-        setTopVendorsAp(topNByAbs(vendorRows, 5));
+        setTopVendorsAp(topNByAbs(vendorRows, 6));
+
+        // Ending cash (Overview / Cashflow Statement)
+        const sumBalances = (rows: any[]) => {
+          let s = 0n;
+          for (const r of rows ?? []) {
+            try { s += BigInt(String(r.balance_cents ?? "0")); } catch { }
+          }
+          return String(s);
+        };
+        setCashEndingCents(sumBalances(endAcct?.rows ?? []));
+        setCashEndingPrevCents(sumBalances(endPrevAcct?.rows ?? []));
+
+        // Accounts summary list for Overview
+        setAccountsSummary(endAcct);
 
         return;
       }
@@ -570,7 +701,7 @@ export default function ReportsPageClient() {
         const sumBalances = (rows: any[]) => {
           let s = 0n;
           for (const r of rows ?? []) {
-            try { s += BigInt(String(r.balance_cents ?? "0")); } catch {}
+            try { s += BigInt(String(r.balance_cents ?? "0")); } catch { }
           }
           return String(s);
         };
@@ -587,31 +718,6 @@ export default function ReportsPageClient() {
         return;
       }
 
-      if (tab === "accounts") {
-        const res = await getAccountsSummary(businessId, { asOf, accountId, includeArchived: includeArchivedAccounts });
-        if (myEpoch !== runEpochRef.current) return;
-        setAccountsSummary(res);
-        return;
-      }
-
-      if (tab === "ap") {
-        const res = await getApAging(businessId, { asOf });
-        if (myEpoch !== runEpochRef.current) return;
-        setApAging(res);
-        setApVendorId(null);
-        setApVendorDetail(null);
-        return;
-      }
-
-      if (tab === "categories") {
-        const res = await getCategories(businessId, { from, to, accountId });
-        if (myEpoch !== runEpochRef.current) return;
-        setCategories(res);
-        setCatDetail(null);
-        setCatDetailCategoryId(null);
-        setCatPage(1);
-        return;
-      }
     } catch (e: any) {
       if (myEpoch !== runEpochRef.current) return;
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
@@ -735,11 +841,10 @@ export default function ReportsPageClient() {
         <div className="px-3 py-2">
           <div className="flex gap-1.5 text-sm">
             {[
-              { key: "pnl", label: "Profit & Loss" },
-              { key: "cashflow", label: "Cash Flow" },
-              { key: "accounts", label: "Accounts Summary" },
-              { key: "ap", label: "AP Aging" },
-              { key: "categories", label: "Categories" },
+              { key: "overview", label: "Financial Overview" },
+              { key: "pnl", label: "P&L Statement" },
+              { key: "cashflow", label: "Cash Flow Statement" },
+              { key: "monthly", label: "Monthly Review" },
             ].map((t) => (
               <button
                 key={t.key}
@@ -780,7 +885,15 @@ export default function ReportsPageClient() {
                 {rangeMode === "monthly" ? (
                   <div className="space-y-1">
                     <div className="text-[11px] text-slate-600">Month</div>
-                    <Input type="month" className="h-7 w-[140px] text-xs" value={ym} onChange={(e) => setYm(e.target.value)} />
+
+                    <div className="w-[140px]">
+                      <AppDatePicker
+                        value={ym ? `${ym}-01` : ""}
+                        onChange={(next) => setYm(next ? next.slice(0, 7) : "")}
+                        placeholder="Select month"
+                        allowClear
+                      />
+                    </div>
                   </div>
                 ) : null}
 
@@ -802,7 +915,14 @@ export default function ReportsPageClient() {
                 {rangeMode === "weekly" ? (
                   <div className="space-y-1">
                     <div className="text-[11px] text-slate-600">Week of</div>
-                    <Input type="date" className="h-7 w-[140px] text-xs" value={weekFrom} onChange={(e) => setWeekFrom(e.target.value)} />
+
+                    <div className="w-[140px]">
+                      <AppDatePicker
+                        value={weekFrom}
+                        onChange={(next) => setWeekFrom(next)}
+                        allowClear={false}
+                      />
+                    </div>
                   </div>
                 ) : null}
 
@@ -810,11 +930,26 @@ export default function ReportsPageClient() {
                   <div className="flex items-end gap-2">
                     <div className="space-y-1">
                       <div className="text-[11px] text-slate-600">From</div>
-                      <Input type="date" className="h-7 w-[140px] text-xs" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+
+                      <div className="w-[140px]">
+                        <AppDatePicker
+                          value={customFrom}
+                          onChange={(next) => setCustomFrom(next)}
+                          allowClear={false}
+                        />
+                      </div>
                     </div>
+
                     <div className="space-y-1">
                       <div className="text-[11px] text-slate-600">To</div>
-                      <Input type="date" className="h-7 w-[140px] text-xs" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+
+                      <div className="w-[140px]">
+                        <AppDatePicker
+                          value={customTo}
+                          onChange={(next) => setCustomTo(next)}
+                          allowClear={false}
+                        />
+                      </div>
                     </div>
                   </div>
                 ) : null}
@@ -832,17 +967,7 @@ export default function ReportsPageClient() {
                 </div>
 
                 <div className="ml-4 flex items-end gap-3">
-                  <div className="flex flex-col justify-end">
-                    {tab === "accounts" ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-600 whitespace-nowrap">Archived</span>
-                        <PillToggle
-                          checked={includeArchivedAccounts}
-                          onCheckedChange={(next) => setIncludeArchivedAccounts(next)}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
+                  <div className="flex flex-col justify-end" />
                 </div>
               </>
             }
@@ -857,11 +982,276 @@ export default function ReportsPageClient() {
           />
         </div>
 
+        {/* Financial Overview (Base44-style: charts-first, everything in one page) */}
+        {tab === "overview" ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Financial Overview</CardTitle>
+            </CardHeader>
+
+            <CardContent className="space-y-3 text-sm">
+              {!pnl || !cashflow ? (
+                <div className="text-sm text-slate-600">Run the report to view results.</div>
+              ) : (
+                <>
+                  {/* KPI strip (Income / Expenses / Net) */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {/* Income */}
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                          <TrendingUp className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs text-slate-600">Income</div>
+                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                            {formatUsdAccountingFromCents(pnl.period.income_cents).text}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expenses */}
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                          <TrendingDown className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs text-slate-600">Expenses</div>
+                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                            {formatUsdAccountingFromCents(pnl.period.expense_cents).text}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Net */}
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                          <Sigma className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs text-slate-600">Net</div>
+                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                            {formatUsdAccountingFromCents(pnl.period.net_cents).text}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Charts row: Income vs Expenses + Net, and Net Cash Flow */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                        <BarChart3 className="h-4 w-4 text-slate-500" />
+                        Income vs Expenses by Month
+                      </div>
+                      <div className="mt-2">
+                        {hasMultiMonthSeries(pnl.monthly ?? []) ? (
+                          <ComboBarLineChart
+                            title="Income vs Expenses (bars) + Net (line)"
+                            rangeMode={rangeMode}
+                            rangeTo={to}
+                            months={(pnl.monthly ?? []).map((m: any) => m.month)}
+                            barA={(pnl.monthly ?? []).map((m: any) => m.income_cents)}
+                            barB={(pnl.monthly ?? []).map((m: any) => m.expense_cents)}
+                            line={(pnl.monthly ?? []).map((m: any) => m.net_cents)}
+                            aLabel="Income"
+                            bLabel="Expenses"
+                            lineLabel="Net"
+                          />
+                        ) : (
+                          <NoTrendNote />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                        <LineChart className="h-4 w-4 text-slate-500" />
+                        Net Cash Flow (Last 6 Months)
+                      </div>
+                      <div className="mt-2">
+                        {hasMultiMonthSeries(cashflow.monthly ?? []) ? (
+                          <ComboBarLineChart
+                            title="Cash In vs Cash Out (bars) + Cumulative net change (line)"
+                            rangeMode={rangeMode}
+                            rangeTo={to}
+                            months={(cashflow.monthly ?? []).map((m: any) => m.month)}
+                            barA={(cashflow.monthly ?? []).map((m: any) => m.cash_in_cents)}
+                            barB={(cashflow.monthly ?? []).map((m: any) => m.cash_out_cents)}
+                            line={(() => {
+                              const src = (cashflow.monthly ?? []).map((m: any) => m.net_cents);
+                              let run = 0n;
+                              return src.map((c: any) => {
+                                try { run += BigInt(String(c ?? "0")); return String(run); } catch { return String(run); }
+                              });
+                            })()}
+                            aLabel="Cash In"
+                            bLabel="Cash Out"
+                            lineLabel="Cumulative"
+                          />
+                        ) : (
+                          <NoTrendNote />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Donut + top accounts */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div>
+                      {categories?.rows?.length ? (
+                        <DonutBreakdown
+                          title="Expenses by Category"
+                          rows={(categories.rows ?? [])
+                            .filter((r: any) => r && typeof r.amount_cents === "string")
+                            .map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents) }))}
+                        />
+                      ) : (
+                        <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-600">No category data.</div>
+                      )}
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 overflow-hidden">
+                      <div className="bg-slate-50 px-3 h-9 flex items-center justify-between text-xs font-semibold text-slate-700">
+                        <div className="flex items-center gap-2">
+                          <Landmark className="h-4 w-4 text-slate-500" />
+                          <span>Account Balances (as of {to})</span>
+                        </div>
+                        <div className="w-[180px] text-right">Balance</div>
+                      </div>
+
+                      <div className="divide-y divide-slate-100">
+                        {(accountsSummary?.rows ?? []).slice(0, 8).map((r: any, idx: number) => (
+                          <div key={`${r.account_id}-${idx}`} className="h-9 px-3 flex items-center text-sm">
+                            <div className="flex-1 min-w-0 truncate">{r.name}</div>
+                            <div
+                              className={`w-[180px] text-right tabular-nums font-semibold ${formatUsdAccountingFromCents(r.balance_cents).isNeg
+                                ? "text-red-600"
+                                : "text-slate-900"
+                                }`}
+                            >
+                              {formatUsdAccountingFromCents(r.balance_cents).text}
+                            </div>
+                          </div>
+                        ))}
+
+                        {(accountsSummary?.rows ?? []).length === 0 ? (
+                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No accounts found.</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <ReportFootnote
+                lines={[
+                  "Overview aggregates P&L, Cash Flow, Categories, and Account Balances for the selected range.",
+                  "Basis: Ledger effective date (entry date). Closed periods are read-only.",
+                ]}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {tab === "monthly" ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-3">
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                  <Sigma className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                </div>
+                <CardTitle className="text-sm">Monthly Review</CardTitle>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-3 text-sm">
+              {!pnl || !cashflow ? (
+                <div className="text-sm text-slate-600">Run the report to view results.</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs text-slate-600">Income</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-red-600" : ""}`}>
+                        {formatUsdAccountingFromCents(pnl.period.income_cents).text}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs text-slate-600">Expenses</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                        {formatUsdAccountingFromCents(pnl.period.expense_cents).text}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs text-slate-600">Net</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-red-600" : ""}`}>
+                        {formatUsdAccountingFromCents(pnl.period.net_cents).text}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs font-semibold text-slate-700">Top Categories</div>
+                      <div className="mt-2 space-y-1">
+                        {(topCats ?? []).map((r, i) => (
+                          <div key={`${r.label}-${i}`} className="flex items-center justify-between text-xs">
+                            <div className="truncate text-slate-700">{r.label}</div>
+                            <div className={`tabular-nums ${formatUsdAccountingFromCents(r.cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                              {formatUsdAccountingFromCents(r.cents).text}
+                            </div>
+                          </div>
+                        ))}
+                        {(topCats ?? []).length === 0 ? <div className="text-xs text-slate-500">No category data.</div> : null}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-xs font-semibold text-slate-700">Top Vendors (AP)</div>
+                      <div className="mt-2 space-y-1">
+                        {(topVendorsAp ?? []).map((r, i) => (
+                          <div key={`${r.label}-${i}`} className="flex items-center justify-between text-xs">
+                            <div className="truncate text-slate-700">{r.label}</div>
+                            <div className={`tabular-nums ${formatUsdAccountingFromCents(r.cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                              {formatUsdAccountingFromCents(r.cents).text}
+                            </div>
+                          </div>
+                        ))}
+                        {(topVendorsAp ?? []).length === 0 ? <div className="text-xs text-slate-500">No AP vendor data.</div> : null}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <ReportFootnote
+                lines={[
+                  "Monthly Review is deterministic: highlights top categories and AP vendors for the selected range.",
+                  "No AI output. Closed periods are read-only.",
+                ]}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
         {/* Content */}
         {tab === "pnl" ? (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Profit &amp; Loss</CardTitle>
+              <div className="flex items-center gap-3">
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                  <BarChart3 className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                </div>
+                <CardTitle className="text-sm">Profit &amp; Loss</CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="text-[11px] text-slate-600">
@@ -949,6 +1339,8 @@ export default function ReportsPageClient() {
                       {hasMultiMonthSeries(pnl.monthly ?? []) ? (
                         <ComboBarLineChart
                           title="Income vs Expenses (bars) + Net per period (line)"
+                          rangeMode={rangeMode}
+                          rangeTo={to}
                           months={(pnl.monthly ?? []).map((m: any) => m.month)}
                           barA={(pnl.monthly ?? []).map((m: any) => m.income_cents)}
                           barB={(pnl.monthly ?? []).map((m: any) => m.expense_cents)}
@@ -1007,7 +1399,7 @@ export default function ReportsPageClient() {
 
                       {(pnl.monthly ?? []).map((r: any, idx: number) => (
                         <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-4 items-center gap-3 text-sm">
-                          <div className="w-[90px] tabular-nums text-slate-700">{r.month}</div>
+                          <div className="w-[90px] tabular-nums text-slate-700">{formatBucketLabel(String(r.month), rangeMode)}</div>
                           <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-red-600" : ""}`}>
                             {formatUsdAccountingFromCents(r.income_cents).text}
                           </div>
@@ -1026,13 +1418,13 @@ export default function ReportsPageClient() {
                   </div>
                 </>
               )}
-            <ReportFootnote
-              lines={[
-                "Basis: Ledger effective date (entry date).",
-                "Scope: Selected account (or All accounts), excluding deleted entries.",
-                "Closed periods are read-only (no mutations allowed).",
-              ]}
-            />
+              <ReportFootnote
+                lines={[
+                  "Basis: Ledger effective date (entry date).",
+                  "Scope: Selected account (or All accounts), excluding deleted entries.",
+                  "Closed periods are read-only (no mutations allowed).",
+                ]}
+              />
             </CardContent>
           </Card>
         ) : null}
@@ -1040,7 +1432,12 @@ export default function ReportsPageClient() {
         {tab === "cashflow" ? (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Cash Flow</CardTitle>
+              <div className="flex items-center gap-3">
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
+                  <LineChart className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                </div>
+                <CardTitle className="text-sm">Cash Flow</CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="text-[11px] text-slate-600">
@@ -1134,444 +1531,80 @@ export default function ReportsPageClient() {
                     </div>
                   ) : null}
 
-                  <div className="rounded-md border border-slate-200 p-3">
-                    <div className="text-[11px] text-slate-500 mb-2">Trend</div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {/* Trend (left) */}
+                    <div className="rounded-md border border-slate-200 p-3">
+                      <div className="text-[11px] text-slate-500 mb-2">Trend</div>
 
-                    {hasMultiMonthSeries(cashflow.monthly ?? []) ? (
-                      <ComboBarLineChart
-                        title="Cash In vs Cash Out (bars) + Cumulative net cash change (line)"
-                        months={(cashflow.monthly ?? []).map((m: any) => m.month)}
-                        barA={(cashflow.monthly ?? []).map((m: any) => m.cash_in_cents)}
-                        barB={(cashflow.monthly ?? []).map((m: any) => m.cash_out_cents)}
-                        line={(() => {
-                          const src = (cashflow.monthly ?? []).map((m: any) => m.net_cents);
-                          let run = 0n;
-                          return src.map((c: any) => {
-                            try {
-                              run += BigInt(String(c ?? "0"));
-                              return String(run);
-                            } catch {
-                              return String(run);
-                            }
-                          });
-                        })()}
-                        aLabel="Cash In"
-                        bLabel="Cash Out"
-                        lineLabel="Cumulative"
-                      />
-                    ) : (
-                      <NoTrendNote />
-                    )}
-                  </div>
-
-                  {/* Cash Flow focuses on cash movement + ending cash. Category composition lives in Categories. */}
-
-                  <div className="rounded-md border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-                      <div className="text-xs font-semibold text-slate-700">Monthly</div>
-                      <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
+                      {hasMultiMonthSeries(cashflow.monthly ?? []) ? (
+                        <ComboBarLineChart
+                          title="Cash In vs Cash Out (bars) + Cumulative net cash change (line)"
+                          rangeMode={rangeMode}
+                          rangeTo={to}
+                          months={(cashflow.monthly ?? []).map((m: any) => m.month)}
+                          barA={(cashflow.monthly ?? []).map((m: any) => m.cash_in_cents)}
+                          barB={(cashflow.monthly ?? []).map((m: any) => m.cash_out_cents)}
+                          line={(() => {
+                            const src = (cashflow.monthly ?? []).map((m: any) => m.net_cents);
+                            let run = 0n;
+                            return src.map((c: any) => {
+                              try { run += BigInt(String(c ?? "0")); return String(run); } catch { return String(run); }
+                            });
+                          })()}
+                          aLabel="Cash In"
+                          bLabel="Cash Out"
+                          lineLabel="Cumulative"
+                        />
+                      ) : (
+                        <NoTrendNote />
+                      )}
                     </div>
 
-                    <div className="divide-y divide-slate-100">
-                      <div className="h-9 px-3 grid grid-cols-4 items-center text-[11px] font-semibold text-slate-700 bg-white">
-                        <div>Month</div>
-                        <div className="text-right">Cash In</div>
-                        <div className="text-right">Cash Out</div>
-                        <div className="text-right">Net</div>
+                    {/* Monthly table (right) */}
+                    <div className="rounded-md border border-slate-200 overflow-hidden">
+                      <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
+                        <div className="text-xs font-semibold text-slate-700">Monthly</div>
+                        <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
                       </div>
 
-                      {(cashflow.monthly ?? []).map((r: any, idx: number) => (
-                        <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-4 items-center gap-3 text-sm">
-                          <div className="w-[90px] tabular-nums text-slate-700">{r.month}</div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.cash_in_cents).text}
-                          </div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_out_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.cash_out_cents).text}
-                          </div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.net_cents).text}
-                          </div>
+                      <div className="divide-y divide-slate-100">
+                        <div className="h-9 px-3 grid grid-cols-[110px_1fr_1fr_1fr] items-center text-[11px] font-semibold text-slate-700 bg-white">
+                          <div>Period</div>
+                          <div className="text-right">Cash In</div>
+                          <div className="text-right">Cash Out</div>
+                          <div className="text-right">Net</div>
                         </div>
-                      ))}
-                      {(cashflow.monthly ?? []).length === 0 ? (
-                        <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
-                      ) : null}
+
+                        {(cashflow.monthly ?? []).map((r: any, idx: number) => (
+                          <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_1fr_1fr_1fr] items-center text-sm">
+                            <div className="tabular-nums text-slate-700">{formatBucketLabel(String(r.month), rangeMode)}</div>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(r.cash_in_cents).text}
+                            </div>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_out_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(r.cash_out_cents).text}
+                            </div>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(r.net_cents).text}
+                            </div>
+                          </div>
+                        ))}
+
+                        {(cashflow.monthly ?? []).length === 0 ? (
+                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </>
               )}
-            <ReportFootnote
-              lines={[
-                "Basis: Ledger effective date (entry date).",
-                "Cash in/out reflects INCOME/EXPENSE entries in the selected scope (excludes deleted entries).",
-                "Closed periods are read-only (no mutations allowed).",
-              ]}
-            />
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {tab === "accounts" ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Accounts Summary (as of {asOf})</CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-3 text-sm">
-              {!accountsSummary ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
-              ) : (accountsSummary.rows ?? []).length === 0 ? (
-                <div className="text-sm text-slate-600">No accounts match this view.</div>
-              ) : (
-                <>
-                  {/* Top accounts chart */}
-                  <div className="rounded-md border border-slate-200 p-3">
-                    <div className="text-xs font-semibold text-slate-700">Top accounts</div>
-                    <div className="mt-2 h-[320px]">
-                      {(() => {
-                        const rows = (accountsSummary.rows ?? []).map((r: any) => ({
-                          name: String(r.name ?? "Account"),
-                          balance: (() => {
-                            try {
-                              return Number(BigInt(String(r.balance_cents ?? "0")));
-                            } catch {
-                              return 0;
-                            }
-                          })(),
-                        }));
-
-                        rows.sort((a: any, b: any) => Math.abs(b.balance) - Math.abs(a.balance));
-                        const top = rows.slice(0, 10);
-
-                        return (
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={top} layout="vertical" margin={{ top: 10, right: 18, bottom: 10, left: 10 }}>
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis
-                                type="number"
-                                tick={{ fontSize: 11 }}
-                                tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
-                              />
-                              <YAxis type="category" dataKey="name" width={180} tick={{ fontSize: 11 }} />
-                              <Tooltip
-                                formatter={(value: any) => {
-                                  try {
-                                    const cents = BigInt(Math.round(Number(value) || 0));
-                                    return formatUsdAccountingFromCents(String(cents)).text;
-                                  } catch {
-                                    return "—";
-                                  }
-                                }}
-                                contentStyle={{ fontSize: 12 }}
-                              />
-                              <Bar dataKey="balance" name="Balance" fill="hsl(var(--primary))" radius={[3, 3, 3, 3]} />
-                            </ComposedChart>
-                          </ResponsiveContainer>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  {/* Table */}
-                  <div className="rounded-md border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 h-9 flex items-center text-xs font-semibold text-slate-700">
-                      <div className="flex-1">Account</div>
-                      <div className="w-[120px] text-right">Type</div>
-                      <div className="w-[180px] text-right">Balance</div>
-                    </div>
-
-                    <div className="divide-y divide-slate-100">
-                      {(accountsSummary.rows ?? []).map((r: any) => (
-                        <div key={r.account_id} className="h-9 px-3 flex items-center text-sm">
-                          <div className="flex-1 min-w-0 truncate">{r.name}</div>
-                          <div className="w-[120px] text-right text-slate-600">{r.type}</div>
-                          <div className={`w-[180px] text-right tabular-nums ${formatUsdAccountingFromCents(r.balance_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.balance_cents).text}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-
               <ReportFootnote
                 lines={[
                   "Basis: Ledger effective date (entry date).",
-                  "Scope: Selected account (or All accounts), excluding deleted entries.",
+                  "Cash in/out reflects INCOME/EXPENSE entries in the selected scope (excludes deleted entries).",
                   "Closed periods are read-only (no mutations allowed).",
                 ]}
               />
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {tab === "ap" ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">AP Aging (as of {asOf})</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {!apAging ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
-              ) : (apAging.rows ?? []).length === 0 ? (
-                <div className="text-sm text-slate-600">No outstanding AP as of {asOf}.</div>
-              ) : (
-                <>
-                  <div className="rounded-md border border-slate-200 p-3">
-                    <div className="text-xs font-semibold text-slate-700">AP bucket totals</div>
-                    <div className="mt-2 h-[260px]">
-                      {(() => {
-                        const sum = (k: string) => {
-                          let s = 0n;
-                          for (const r of apAging.rows ?? []) {
-                            try { s += BigInt(String((r as any)[k] ?? "0")); } catch {}
-                          }
-                          return Number(s);
-                        };
-
-                        const data = [{
-                          label: "AP",
-                          Current: sum("current_cents"),
-                          "1–30": sum("b1_30_cents"),
-                          "31–60": sum("b31_60_cents"),
-                          "61–90": sum("b61_90_cents"),
-                          "90+": sum("b90p_cents"),
-                        }];
-
-                        const fmt = (v: any) => {
-                          try {
-                            const cents = BigInt(Math.round(Number(v) || 0));
-                            return formatUsdAccountingFromCents(String(cents)).text;
-                          } catch {
-                            return "—";
-                          }
-                        };
-
-                        return (
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={data} margin={{ top: 10, right: 18, bottom: 10, left: 10 }}>
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))} width={72} />
-                              <Tooltip formatter={(value: any, name: any) => [fmt(value), String(name)]} contentStyle={{ fontSize: 12 }} />
-                              <Bar dataKey="Current" stackId="ap" fill="rgb(51 65 85)" />
-                              <Bar dataKey="1–30" stackId="ap" fill="rgb(100 116 139)" />
-                              <Bar dataKey="31–60" stackId="ap" fill="rgb(148 163 184)" />
-                              <Bar dataKey="61–90" stackId="ap" fill="rgb(203 213 225)" />
-                              <Bar dataKey="90+" stackId="ap" fill="hsl(var(--primary))" />
-                            </ComposedChart>
-                          </ResponsiveContainer>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  <div className="rounded-md border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 h-9 flex items-center text-xs font-semibold text-slate-700">
-                      <div className="flex-1">Vendor</div>
-                      <div className="w-[120px] text-right">Current</div>
-                      <div className="w-[120px] text-right">1–30</div>
-                      <div className="w-[120px] text-right">31–60</div>
-                      <div className="w-[120px] text-right">61–90</div>
-                      <div className="w-[120px] text-right">90+</div>
-                      <div className="w-[140px] text-right">Total</div>
-                    </div>
-
-                    <div className="divide-y divide-slate-100">
-                      {(apAging.rows ?? []).map((r: any) => (
-                        <button
-                          key={r.vendor_id}
-                          type="button"
-                          className="h-9 px-3 flex items-center text-sm w-full text-left hover:bg-slate-50"
-                          onClick={() => openApVendor(r.vendor_id)}
-                          title="View bill detail"
-                        >
-                          <div className="flex-1 min-w-0 truncate">{r.vendor}</div>
-                          <div className="w-[120px] text-right tabular-nums">{formatUsdAccountingFromCents(r.current_cents).text}</div>
-                          <div className="w-[120px] text-right tabular-nums">{formatUsdAccountingFromCents(r.b1_30_cents).text}</div>
-                          <div className="w-[120px] text-right tabular-nums">{formatUsdAccountingFromCents(r.b31_60_cents).text}</div>
-                          <div className="w-[120px] text-right tabular-nums">{formatUsdAccountingFromCents(r.b61_90_cents).text}</div>
-                          <div className="w-[120px] text-right tabular-nums">{formatUsdAccountingFromCents(r.b90p_cents).text}</div>
-                          <div className="w-[140px] text-right tabular-nums font-semibold">{formatUsdAccountingFromCents(r.total_cents).text}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {apVendorId && apVendorDetail ? (
-                    <div className="rounded-md border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-                        <div className="text-xs font-semibold text-slate-700">Vendor detail</div>
-                        <button type="button" className="text-xs text-slate-600 hover:text-slate-900" onClick={() => { setApVendorId(null); setApVendorDetail(null); }}>
-                          Close
-                        </button>
-                      </div>
-
-                      <div className="bg-white px-3 py-2 text-[11px] text-slate-500">
-                        Showing open/partial bills only. Outstanding = bill amount − applied payments.
-                      </div>
-
-                      <div className="divide-y divide-slate-100">
-                        <div className="px-3 py-2 text-[11px] font-semibold text-slate-700 bg-white flex items-center gap-3">
-                          <div className="flex-1">Bill</div>
-                          <div className="w-[160px] text-right">Outstanding</div>
-                          <div className="w-[90px] text-right">Age</div>
-                        </div>
-
-                        {(apVendorDetail.rows ?? []).map((b: any) => (
-                          <div key={b.bill_id} className="px-3 py-2 text-sm">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-xs text-slate-600">
-                                  Invoice {b.invoice_date} • Due {b.due_date} • {b.status}
-                                </div>
-                                {b.memo ? <div className="text-xs text-slate-500 truncate">{b.memo}</div> : null}
-                              </div>
-
-                              <div className="text-right tabular-nums">
-                                <div className="text-[11px] text-slate-500">Outstanding</div>
-                                <div className="font-semibold">{formatUsdAccountingFromCents(b.outstanding_cents).text}</div>
-                              </div>
-
-                              <div className="w-[90px] text-right tabular-nums text-xs text-slate-600">
-                                {b.past_due_days <= 0 ? "Current" : `${b.past_due_days}d`}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        {(apVendorDetail.rows ?? []).length === 0 ? (
-                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No open bills found.</div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            <ReportFootnote
-              lines={[
-                "As-of: Outstanding vendor bills at the selected date, excluding deleted entries.",
-                "Scope: Selected account (or All accounts) as applicable.",
-                "Closed periods are read-only (no mutations allowed).",
-              ]}
-            />
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {tab === "categories" ? (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Category Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {!categories ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
-              ) : (categories.rows ?? []).length === 0 ? (
-                <div className="text-sm text-slate-600">No categorized activity in range.</div>
-              ) : (
-                <>
-                  <DonutBreakdown
-                    title="Category composition"
-                    rows={(categories.rows ?? [])
-                      .filter((r: any) => r && typeof r.amount_cents === "string")
-                      .map((r: any) => ({
-                        label: String(r.category ?? "Category"),
-                        cents: String(r.amount_cents),
-                      }))}
-                  />
-
-                  <div className="rounded-md border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 h-9 flex items-center text-xs font-semibold text-slate-700">
-                      <div className="flex-1">Category</div>
-                      <div className="w-[160px] text-right">Amount</div>
-                      <div className="w-[90px] text-right">Count</div>
-                    </div>
-
-                    <div className="divide-y divide-slate-100">
-                      {(categories.rows ?? []).map((r: any, idx: number) => (
-                        <button
-                          key={`${r.category_id ?? "null"}-${idx}`}
-                          type="button"
-                          className="h-9 px-3 flex items-center text-sm w-full text-left hover:bg-slate-50"
-                          onClick={() => openCategoryDetail(r.category_id, 1)}
-                          title="Drill down"
-                        >
-                          <div className="flex-1 min-w-0 truncate">{r.category}</div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.amount_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.amount_cents).text}
-                          </div>
-                          <div className="w-[90px] text-right tabular-nums text-slate-600">{r.count}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {catDetail ? (
-                    <div className="rounded-md border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-                        <div className="text-xs font-semibold text-slate-700">Drilldown</div>
-                        <button type="button" className="text-xs text-slate-600 hover:text-slate-900" onClick={() => { setCatDetail(null); setCatDetailCategoryId(null); setCatPage(1); }}>
-                          Close
-                        </button>
-                      </div>
-
-                      <div className="bg-white px-3 py-2 text-[11px] text-slate-500">
-                        Showing entries for category {catDetailCategoryId === null ? "Uncategorized" : "selected"} • Page {catPage} of{" "}
-                        {Math.max(1, Math.ceil(Number(catDetail.total ?? 0) / Number(catDetail.take ?? 50)))}
-                      </div>
-
-                      <div className="divide-y divide-slate-100">
-                        <div className="h-9 px-3 flex items-center text-[11px] font-semibold text-slate-700 bg-white">
-                          <div className="w-[100px]">Date</div>
-                          <div className="flex-1">Payee / Memo</div>
-                          <div className="w-[180px] text-right">Amount</div>
-                        </div>
-
-                        {(catDetail.rows ?? []).map((e: any) => (
-                          <div key={e.entry_id} className="h-9 px-3 flex items-center text-sm">
-                            <div className="w-[100px] text-slate-600 tabular-nums">{e.date}</div>
-                            <div className="flex-1 min-w-0 truncate">{e.payee ?? e.memo ?? "—"}</div>
-                            <div className={`w-[180px] text-right tabular-nums ${formatUsdAccountingFromCents(e.amount_cents).isNeg ? "text-red-600" : ""}`}>
-                              {formatUsdAccountingFromCents(e.amount_cents).text}
-                            </div>
-                          </div>
-                        ))}
-                        {(catDetail.rows ?? []).length === 0 ? (
-                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No entries found.</div>
-                        ) : null}
-                      </div>
-
-                      <div className="px-3 py-2 flex items-center justify-between">
-                        <Button
-                          variant="outline"
-                          className="h-7 px-3 text-xs"
-                          disabled={catPage <= 1 || loading}
-                          onClick={() => openCategoryDetail(catDetailCategoryId, Math.max(1, catPage - 1))}
-                        >
-                          Prev
-                        </Button>
-                        <Button
-                          variant="outline"
-                          className="h-7 px-3 text-xs"
-                          disabled={catPage >= Math.ceil(Number(catDetail.total ?? 0) / Number(catDetail.take ?? 50)) || loading}
-                          onClick={() => openCategoryDetail(catDetailCategoryId, catPage + 1)}
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            <ReportFootnote
-              lines={[
-                "Basis: Ledger effective date (entry date).",
-                "Scope: Selected account (or All accounts), excluding deleted entries.",
-                "Closed periods are read-only (no mutations allowed).",
-              ]}
-            />
             </CardContent>
           </Card>
         ) : null}

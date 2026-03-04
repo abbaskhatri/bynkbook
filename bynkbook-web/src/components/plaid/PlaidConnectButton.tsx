@@ -5,6 +5,8 @@ import { Sparkles } from "lucide-react";
 import { plaidApplyOpening, plaidExchange, plaidLinkToken, plaidPreviewOpening, plaidSync } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
 
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+
 function TinySpinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />;
 }
@@ -363,12 +365,18 @@ export function PlaidConnectButton(props: Props) {
             {historyPreset === "custom" ? (
               <div className="mt-2">
                 <div className="text-[11px] text-slate-600 mb-1">Start date (end date is today)</div>
-                <input
-                  type="date"
-                  className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-ring"
+
+                <AppDatePicker
                   value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
-                  max={endDate}
+                  onChange={(next) => {
+                    // AppDatePicker doesn't support max; enforce here.
+                    if (!next) {
+                      setCustomStart("");
+                      return;
+                    }
+                    setCustomStart(next <= endDate ? next : endDate);
+                  }}
+                  allowClear
                 />
               </div>
             ) : null}

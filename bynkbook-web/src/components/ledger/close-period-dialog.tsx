@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { previewClosedPeriods, closeThroughDate } from "@/lib/api/closedPeriods";
 
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+
 type RangeMode = "MONTH" | "WEEK" | "CUSTOM";
 
 function todayYmdLocal() {
@@ -203,28 +205,46 @@ export function ClosePeriodDialog(props: {
           {mode === "MONTH" ? (
             <div className="space-y-1">
               <div className="text-[11px] text-slate-600">Month</div>
-              <Input type="month" className="h-7 w-[170px] text-xs" value={month} onChange={(e) => setMonth(e.target.value)} />
+
+              <div className="w-[170px]">
+                <AppDatePicker
+                  value={month ? `${month}-01` : ""}
+                  onChange={(next) => setMonth(next ? next.slice(0, 7) : "")}
+                  placeholder="Select month"
+                  allowClear
+                />
+              </div>
             </div>
           ) : mode === "WEEK" ? (
             <>
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">Week start</div>
-                <Input type="date" className="h-7 w-[170px] text-xs" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+                <div className="w-[170px]">
+                  <AppDatePicker value={weekStart} onChange={(next) => setWeekStart(next)} allowClear={false} />
+                </div>
               </div>
+
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">Week end</div>
-                <Input type="date" className="h-7 w-[170px] text-xs" value={effective.to} readOnly />
+                <div className="w-[170px]">
+                  <AppDatePicker value={effective.to} onChange={() => {}} disabled allowClear={false} />
+                </div>
               </div>
             </>
           ) : (
             <>
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">From</div>
-                <Input type="date" className="h-7 w-[170px] text-xs" value={from} onChange={(e) => setFrom(e.target.value)} />
+                <div className="w-[170px]">
+                  <AppDatePicker value={from} onChange={(next) => setFrom(next)} allowClear={false} />
+                </div>
               </div>
+
               <div className="space-y-1">
                 <div className="text-[11px] text-slate-600">To</div>
-                <Input type="date" className="h-7 w-[170px] text-xs" value={to} onChange={(e) => setTo(e.target.value)} />
+                <div className="w-[170px]">
+                  <AppDatePicker value={to} onChange={(next) => setTo(next)} allowClear={false} />
+                </div>
               </div>
             </>
           )}

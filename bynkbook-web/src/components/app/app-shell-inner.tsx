@@ -493,9 +493,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     <div className="min-h-screen flex">
       {/* Sidebar (sticky) */}
       <aside
-        className={(collapsed ? "w-16" : "w-56") + " border-r bg-background flex flex-col sticky top-0 h-screen"}
+        className={(collapsed ? "w-16" : "w-56") + " border-r border-slate-200 bg-white flex flex-col sticky top-0 h-screen"}
       >
-        <div className="h-14 px-3 border-b flex items-center">
+        <div className="h-14 px-3 border-b border-slate-200 flex items-center bg-white">
           <div className="text-sm font-semibold leading-none">{collapsed ? "BB" : "BynkBook"}</div>
         </div>
 
@@ -581,7 +581,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           })}
         </div>
 
-        <div className="p-3 border-t">
+        <div className="p-3 border-t border-slate-200 bg-white">
           <Button
             variant="outline"
             size="sm"
@@ -598,7 +598,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b flex items-center justify-between px-4 sticky top-0 z-40 bg-background">
+        <header className="h-14 border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-40 bg-white">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-3 min-w-0">
             <Pill title="Business">

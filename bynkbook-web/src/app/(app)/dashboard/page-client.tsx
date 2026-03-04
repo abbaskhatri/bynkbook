@@ -10,6 +10,8 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getIssuesCount } from "@/lib/api/issues";
 
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
@@ -1113,19 +1115,23 @@ export default function DashboardPageClient() {
 
                 {periodMode === "CUSTOM" ? (
                   <div className="flex items-center gap-2">
-                    <input
-                      className="h-6 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
-                      type="date"
-                      value={customFrom}
-                      onChange={(e) => setCustomFrom(e.target.value)}
-                    />
+                    <div className="w-[155px]">
+                      <AppDatePicker
+                        value={customFrom}
+                        onChange={(next) => setCustomFrom(next)}
+                        allowClear={false}
+                      />
+                    </div>
+
                     <span className="text-xs text-slate-400">→</span>
-                    <input
-                      className="h-6 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
-                      type="date"
-                      value={customTo}
-                      onChange={(e) => setCustomTo(e.target.value)}
-                    />
+
+                    <div className="w-[155px]">
+                      <AppDatePicker
+                        value={customTo}
+                        onChange={(next) => setCustomTo(next)}
+                        allowClear={false}
+                      />
+                    </div>
                   </div>
 
                 ) : null}
@@ -1289,9 +1295,9 @@ export default function DashboardPageClient() {
           >
             <BarChart
               data={cashBarsData}
-              barSize={24}
-              barGap={7}
-              barCategoryGap="35%"
+              barSize={20}
+              barGap={6}
+              barCategoryGap="30%"
               margin={{ top: 0, right: 10, bottom: 0, left: 8 }}
             >
               <MoneyGrid />

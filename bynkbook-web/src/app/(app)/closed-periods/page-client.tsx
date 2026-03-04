@@ -8,7 +8,11 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Lock } from "lucide-react";
+
+import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { AppDialog } from "@/components/primitives/AppDialog";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -356,53 +360,70 @@ export default function ClosedPeriodsPageClient() {
                         {mode === "MONTH" ? (
                           <div className="space-y-1">
                             <div className="text-[11px] text-slate-600">Month</div>
-                            <Input
-                              type="month"
-                              className="h-7 w-[170px] text-xs"
-                              value={monthMode}
-                              max={todayYmd.slice(0, 7)}
-                              onChange={(e) => setMonthMode(e.target.value)}
-                              disabled={loading || !businessId || !canClose}
-                            />
+
+                            <div className="w-[170px]">
+                              <AppDatePicker
+                                value={monthMode ? `${monthMode}-01` : ""}
+                                onChange={(next) => {
+                                  // Store as YYYY-MM (month selector), derived from picked date
+                                  setMonthMode(next ? next.slice(0, 7) : "");
+                                }}
+                                placeholder="Select month"
+                                disabled={loading || !businessId || !canClose}
+                                allowClear
+                              />
+                            </div>
                           </div>
                         ) : mode === "WEEK" ? (
                           <>
                             <div className="space-y-1">
                               <div className="text-[11px] text-slate-600">Week start</div>
-                              <Input
-                                type="date"
-                                className="h-7 w-[170px] text-xs"
-                                value={weekStart}
-                                onChange={(e) => setWeekStart(e.target.value)}
-                                disabled={loading || !businessId || !canClose}
-                              />
+                              <div className="w-[170px]">
+                                <AppDatePicker
+                                  value={weekStart}
+                                  onChange={(next) => setWeekStart(next)}
+                                  disabled={loading || !businessId || !canClose}
+                                  allowClear={false}
+                                />
+                              </div>
                             </div>
+
                             <div className="space-y-1">
                               <div className="text-[11px] text-slate-600">Week end</div>
-                              <Input type="date" className="h-7 w-[170px] text-xs" value={effective.to} readOnly />
+                              <div className="w-[170px]">
+                                <AppDatePicker
+                                  value={effective.to}
+                                  onChange={() => { /* read-only */ }}
+                                  disabled
+                                  allowClear={false}
+                                />
+                              </div>
                             </div>
                           </>
                         ) : (
                           <>
                             <div className="space-y-1">
                               <div className="text-[11px] text-slate-600">From</div>
-                              <Input
-                                type="date"
-                                className="h-7 w-[170px] text-xs"
-                                value={customFrom}
-                                onChange={(e) => setCustomFrom(e.target.value)}
-                                disabled={loading || !businessId || !canClose}
-                              />
+                              <div className="w-[170px]">
+                                <AppDatePicker
+                                  value={customFrom}
+                                  onChange={(next) => setCustomFrom(next)}
+                                  disabled={loading || !businessId || !canClose}
+                                  allowClear={false}
+                                />
+                              </div>
                             </div>
+
                             <div className="space-y-1">
                               <div className="text-[11px] text-slate-600">To</div>
-                              <Input
-                                type="date"
-                                className="h-7 w-[170px] text-xs"
-                                value={customTo}
-                                onChange={(e) => setCustomTo(e.target.value)}
-                                disabled={loading || !businessId || !canClose}
-                              />
+                              <div className="w-[170px]">
+                                <AppDatePicker
+                                  value={customTo}
+                                  onChange={(next) => setCustomTo(next)}
+                                  disabled={loading || !businessId || !canClose}
+                                  allowClear={false}
+                                />
+                              </div>
                             </div>
                           </>
                         )}

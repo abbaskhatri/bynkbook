@@ -3228,15 +3228,14 @@ export default function ReconcilePageClient() {
 
               <div className="p-3">
                 <div className="flex items-center gap-2">
-                  <input
-                    type="month"
-                    className={[
-                      "h-8 px-2 text-xs border border-slate-200 rounded-md bg-white",
-                      ringFocus,
-                    ].join(" ")}
-                    value={snapshotMonth}
-                    onChange={(e) => setSnapshotMonth(e.target.value)}
-                  />
+                  <div className="w-[170px]">
+                    <AppDatePicker
+                      value={snapshotMonth ? `${snapshotMonth}-01` : ""}
+                      onChange={(next) => setSnapshotMonth(next ? next.slice(0, 7) : "")}
+                      placeholder="Select month"
+                      allowClear={false}
+                    />
+                  </div>
 
                   <HintWrap
                     disabled={!canWriteSnapshotsEffective}
