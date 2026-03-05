@@ -42,9 +42,12 @@ import {
 
 import { listCategories, createCategory, type CategoryRow } from "@/lib/api/categories";
 import { getCategorySuggestions } from "@/lib/api/ai";
+import { aiSuggestCategory } from "@/lib/api/ai";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
 import { getBusinessIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
 import { listMatchGroups } from "@/lib/api/match-groups";
+
+import { aiExplainEntry, aiAnomalies, aiMerchantNormalize } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -93,6 +96,19 @@ import {
 // ================================
 const ZERO = BigInt(0);
 const HUNDRED = BigInt(100);
+
+function daysUntilYmd(ymd: string): number | null {
+  const s = String(ymd || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+
+  const [y, m, d] = s.split("-").map((x) => Number(x));
+  const target = new Date(y, m - 1, d);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const diffMs = target.getTime() - today.getTime();
+  return Math.floor(diffMs / 86400000);
+}
 
 function todayYmd() {
   const d = new Date();
@@ -191,6 +207,14 @@ function stripMoneyDisplay(s: string): string {
   const cleaned = (s || "").replace(/[$,]/g, "").trim();
   if (cleaned.startsWith("(") && cleaned.endsWith(")")) return cleaned.slice(1, -1);
   return cleaned;
+}
+
+function normMerchant(s: string) {
+  return String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function normVendorKey(s: string) {
+  return String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function normalizeCategoryName(name: string): string {
@@ -948,6 +972,31 @@ export default function LedgerPageClient() {
     includeDeleted: showDeleted,
   });
 
+  // ---------- Bundle F: Ledger anomalies (read-only) ----------
+  const anomaliesQ = useQuery({
+    queryKey: ["ledgerAnomalies", selectedBusinessId, selectedAccountId, filterFrom || allTimeStartYmd(), filterTo || todayYmd()],
+    enabled: !!selectedBusinessId && !!selectedAccountId,
+    placeholderData: (prev) => prev ?? null,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      return aiAnomalies({
+        businessId: selectedBusinessId as string,
+        accountId: selectedAccountId as string,
+        from: (filterFrom || allTimeStartYmd()) as string,
+        to: (filterTo || todayYmd()) as string,
+      });
+    },
+  });
+
+  const anomalySet = useMemo(() => {
+    const ids = new Set<string>();
+    const list = (anomaliesQ.data as any)?.anomalies ?? [];
+    for (const a of list) if (a?.entryId) ids.add(String(a.entryId));
+    return ids;
+  }, [anomaliesQ.data]);
+
   // MatchGroups (ACTIVE) drive ledger reconciliation status (Expected / Partial / Matched)
   const matchGroupsQ = useQuery({
     queryKey: ["matchGroups", selectedBusinessId, selectedAccountId],
@@ -1591,12 +1640,28 @@ export default function LedgerPageClient() {
           memo: "", // memo not in rowModels; keep blank (still works with payee history)
         }));
 
-        const res: any = await getCategorySuggestions({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          items,
-          limitPerItem: 1,
-        });
+        // LLM-first (Bundle F). Fallback to heuristic endpoint if unavailable.
+        let res: any = null;
+
+        try {
+          res = await aiSuggestCategory({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            items,
+            limitPerItem: 1,
+          });
+        } catch {
+          res = null;
+        }
+
+        if (!res?.ok) {
+          res = await getCategorySuggestions({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            items,
+            limitPerItem: 1,
+          });
+        }
 
         const next: Record<string, any> = {};
         for (const it of items) {
@@ -1792,6 +1857,13 @@ export default function LedgerPageClient() {
   const [ledgerSugTopByEntryId, setLedgerSugTopByEntryId] = useState<Record<string, any>>({});
   const ledgerSugKeyRef = useRef<string>("");
 
+  // Reset suggestion fetch guard on scope changes (prevents stuck "Loading…" after navigation)
+  useEffect(() => {
+    ledgerSugKeyRef.current = "";
+    setLedgerSugLoading(false);
+    // Keep last-good suggestions if we have them; do not clear ledgerSugTopByEntryId here.
+  }, [selectedBusinessId, selectedAccountId, ledgerSuggestionTargetIds]);
+
   // Ledger row-level pending state (memo/category optimistic saves)
   const [pendingById, setPendingById] = useState<Record<string, boolean>>({});
 
@@ -1869,6 +1941,41 @@ export default function LedgerPageClient() {
   }
 
   const [vendorsForBusiness, setVendorsForBusiness] = useState<any[]>([]);
+
+  const bestVendorForPayee = useMemo(() => {
+    const list = vendorsForBusiness ?? [];
+    const byNorm = new Map<string, { id: string; name: string }>();
+
+    for (const v of list) {
+      const id = String(v?.id ?? "");
+      const name = String(v?.name ?? "");
+      if (!id || !name) continue;
+      byNorm.set(normVendorKey(name), { id, name });
+    }
+
+    return (payee: string) => {
+      const q = String(payee || "").trim();
+      if (q.length < 2) return null;
+
+      const qn = normVendorKey(q);
+      if (!qn) return null;
+
+      const exact = byNorm.get(qn);
+      if (exact) return exact;
+
+      // Fallback 1: prefix-ish match
+      for (const [k, v] of byNorm.entries()) {
+        if (k && (k.startsWith(qn) || qn.startsWith(k))) return v;
+      }
+
+      // Fallback 2: contains match (safe enough for vendor names like "World Smart LLC")
+      for (const [k, v] of byNorm.entries()) {
+        if (k && (k.includes(qn) || qn.includes(k))) return v;
+      }
+
+      return null;
+    };
+  }, [vendorsForBusiness]);
 
   // Ledger: Apply payment dialog (no redirect)
   const [ledgerApplyOpen, setLedgerApplyOpen] = useState(false);
@@ -2050,6 +2157,88 @@ export default function LedgerPageClient() {
 
   // Edit state (ALL fields)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  // Prefetch merchant suggestions in background (bounded; no storms)
+  useEffect(() => {
+    if (!selectedBusinessId) return;
+    if (!pageRows || pageRows.length === 0) return;
+
+    let cancelled = false;
+
+    const candidates = pageRows
+      .filter((r: any) => !r.isDeleted && r.id !== "opening_balance")
+      .slice(0, 80)
+      .map((r: any) => ({
+        id: String(r.id),
+        payee: String(r.payee ?? ""),
+        memo: String(((rowModels.find((x) => x.id === r.id) as any)?.memo ?? "")),
+      }))
+      .filter((x) => /[#\d]{2,}|(POS|WEB|ACH|DEBIT|CREDIT)/i.test(x.payee) && x.payee.length >= 8);
+
+    const toFetch = candidates
+      .filter((x) => !merchantCacheRef.current[x.id])
+      .slice(0, 10);
+
+    if (!toFetch.length) return;
+
+    (async () => {
+      for (const c of toFetch) {
+        if (cancelled) return;
+        await getMerchantSuggestion(c.id, c.payee, c.memo);
+        // tiny spacing avoids burst-y feel client-side
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId, pageRows, rowModels]);
+
+  // ---------- Bundle F: AI Explain Entry (read-only) ----------
+
+  // ---------- Bundle F: Merchant normalization (suggestion-only) ----------
+  const merchantCacheRef = useRef<Record<string, { merchant: string; confidence: number; reason: string }>>({});
+
+  const [merchantBusyId, setMerchantBusyId] = useState<string | null>(null);
+  const [merchantErrId, setMerchantErrId] = useState<string | null>(null);
+
+  async function getMerchantSuggestion(entryId: string, payee: string, memo?: string) {
+    const cached = merchantCacheRef.current[entryId];
+    if (cached) return cached;
+
+    if (!selectedBusinessId) return null;
+
+    setMerchantBusyId(entryId);
+    setMerchantErrId(null);
+
+    try {
+      const res: any = await aiMerchantNormalize({ businessId: selectedBusinessId, payee, memo: memo ?? "" });
+      if (!res?.ok) throw new Error(res?.error || "Merchant normalize failed");
+
+      const out = {
+        merchant: String(res.merchant ?? "").trim(),
+        confidence: Number(res.confidence ?? 0),
+        reason: String(res.reason ?? "").trim(),
+      };
+
+      if (out.merchant) merchantCacheRef.current[entryId] = out;
+      return out;
+    } catch (e: any) {
+      const msg = String(e?.message ?? "Merchant normalize failed");
+      setMerchantErrId(msg.includes("429") ? "429" : "ERR");
+      return null;
+    } finally {
+      setMerchantBusyId(null);
+    }
+  }
+
+  const [aiExplainOpen, setAiExplainOpen] = useState(false);
+  const [aiExplainEntryId, setAiExplainEntryId] = useState<string | null>(null);
+  const [aiExplainLast, setAiExplainLast] = useState<string | null>(null);
+  const [aiExplainBusy, setAiExplainBusy] = useState(false);
+  const [aiExplainErr, setAiExplainErr] = useState<string | null>(null);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editedIds, setEditedIds] = useState<Record<string, boolean>>({});
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -2804,7 +2993,7 @@ export default function LedgerPageClient() {
           aria-label="Select all rows on this page"
         />
       </th>
-      <th className={th}>Date</th>
+      <th className={th + " whitespace-nowrap"}>Date</th>
       <th className={th}>Ref</th>
       <th className={th}>Payee</th>
       <th className={th}>Type</th>
@@ -2822,14 +3011,15 @@ export default function LedgerPageClient() {
 
   const addRow = (
     <tr>
-      <td className={td + " " + center}></td>
-
-      {/* Date */}
-      <td className={td}>
-        <div className="w-[140px]">
+      <td className={td + " " + center + " relative"}>
+        {/* Borrow the empty checkbox column space so Date doesn't crush Ref */}
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[116px] z-10">
           <AppDatePicker value={draftDate} onChange={setDraftDate} ariaLabel="Entry date" />
         </div>
       </td>
+
+      {/* Date (intentionally empty in add row; picker spans from checkbox area) */}
+      <td className={td}></td>
 
       {/* Ref */}
       <td className={td}>
@@ -3413,7 +3603,7 @@ export default function LedgerPageClient() {
       const deletedText = deletedRow ? "line-through" : "";
 
       const rowClass =
-        "h-[24px] border-b border-slate-200 bg-white " +
+        "min-h-[24px] border-b border-slate-200 bg-white " +
         (deletedRow ? "bg-slate-50 text-slate-400 " : "") +
         (!deletedRow && r.hasDup
           ? "bg-yellow-50 hover:bg-yellow-100 "
@@ -3441,7 +3631,7 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Date */}
-          <td className={td + " " + trunc + " " + deletedText}>
+          <td className={td + " whitespace-nowrap " + deletedText}>
             {isEditing && editDraft ? (
               <div className="w-[140px]">
                 <AppDatePicker
@@ -3484,7 +3674,36 @@ export default function LedgerPageClient() {
               </div>
             ) : (
               <div className="flex items-center gap-2 min-w-0">
-                <span className={trunc + " font-medium " + deletedText + " min-w-0"}>{r.payee}</span>
+                <span
+                  className={"font-medium " + deletedText + " min-w-0 whitespace-normal break-words leading-tight"}
+                  title={r.payee}
+                >
+                  {r.payee}
+                </span>
+
+                {!deletedRow ? (
+                  (() => {
+                    const isCheck = String(r.rawMethod ?? "").toUpperCase() === "CHECK";
+                    if (!isCheck) return null;
+
+                    const du = daysUntilYmd(String(r.date ?? ""));
+                    if (du === null) return null;
+
+                    // show only within 3 days before deposit date
+                    if (du <= 0 || du > 3) return null;
+
+                    const label = du === 1 ? "D+1" : `D+${du}`;
+
+                    return (
+                      <span
+                        className="inline-flex h-6 items-center rounded-full border border-sky-200 bg-sky-50 px-2 text-[11px] font-semibold text-sky-800 shrink-0"
+                        title={du === 1 ? "Deposits in 1 day" : `Deposits in ${du} days`}
+                      >
+                        {label}
+                      </span>
+                    );
+                  })()
+                ) : null}
 
                 {/* Single-line vendor indicator (persisted) */}
                 {!deletedRow && (r.vendorName || linkedVendorByEntryId[r.id]) ? (
@@ -3533,20 +3752,55 @@ export default function LedgerPageClient() {
                     </button>
                   </span>
 
-                ) : r.id === lastCreatedEntryId && (r.rawType || "").toString().toUpperCase() === "EXPENSE" ? (
-                  <VendorSuggestPill
-                    businessId={selectedBusinessId ?? ""}
-                    accountId={selectedAccountId ?? ""}
-                    entryId={r.id}
-                    payee={r.payee}
-                    onLinked={(v) => {
-                      setLinkedVendorByEntryId((m) => ({ ...m, [r.id]: v.name }));
-                      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorLink");
-                      setLastCreatedEntryId(null);
-                    }}
-                    onDismiss={() => setLastCreatedEntryId(null)}
-                  />
-                ) : null}
+                ) : (
+                  (() => {
+                    // Vendor suggestion for ANY row (deterministic; no AI; no extra fetch)
+                    if (deletedRow) return null;
+                    if (!selectedBusinessId || !selectedAccountId) return null;
+                    if (r.id === "opening_balance") return null;
+
+                    // Don’t show if already linked
+                    if (r.vendorId || r.vendorName || linkedVendorByEntryId[r.id]) return null;
+
+                    const hit = bestVendorForPayee(r.payee);
+                    if (!hit) return null;
+
+                    return (
+                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+                        <BookOpen className="h-3.5 w-3.5 text-slate-600" />
+                        <span className="font-medium text-slate-900">{hit.name}</span>
+
+                        <button
+                          type="button"
+                          className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-primary/10"
+                          title="Link to vendor"
+                          onClick={async () => {
+                            try {
+                              const res: any = await apiFetch(
+                                `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/entries/${r.id}`,
+                                {
+                                  method: "PATCH",
+                                  body: JSON.stringify({ vendor_id: hit.id, entry_kind: "VENDOR_PAYMENT" }),
+                                }
+                              );
+
+                              if (!res?.ok) return;
+
+                              setLinkedVendorByEntryId((m) => ({ ...m, [r.id]: hit.name }));
+                              scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "vendorLink");
+                            } catch {
+                              // non-blocking
+                            }
+                          }}
+                        >
+                          <Check className="h-3.5 w-3.5 text-primary" />
+                        </button>
+                      </div>
+                    );
+                  })()
+                )}
+
+                {/* VendorSuggestPill removed: use deterministic smart vendor match pill only */}
 
                 {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
                   <>
@@ -3612,6 +3866,39 @@ export default function LedgerPageClient() {
                   <span className="inline-flex items-center" title="Saving…">
                     <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
                   </span>
+                ) : null}
+
+                {!deletedRow ? (
+                  (() => {
+                    const id = String(r.id);
+                    const payee = String(r.payee ?? "");
+                    const cached = merchantCacheRef.current[id] ?? null;
+
+                    if (!cached?.merchant) return null;
+
+                    // Only show if confident + meaningfully different
+                    const good = (cached.confidence ?? 0) >= 0.7;
+                    const different = normMerchant(cached.merchant) && normMerchant(cached.merchant) !== normMerchant(payee);
+                    if (!good || !different) return null;
+
+                    return (
+                      <span className="inline-flex h-6 items-center gap-2 rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shrink-0">
+                        <span className="text-slate-500">Merchant:</span>
+                        <span className="font-semibold text-slate-900">{cached.merchant}</span>
+                        <span className="text-slate-400">{Math.round((cached.confidence || 0) * 100)}%</span>
+
+                        <button
+                          type="button"
+                          className="h-5 px-2 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] hover:bg-primary/15 disabled:opacity-60"
+                          disabled={!!pendingById[id]}
+                          onClick={() => void updateMut.mutateAsync({ entryId: id, updates: { payee: cached.merchant } } as any)}
+                          title="Apply merchant (explicit)"
+                        >
+                          Apply
+                        </button>
+                      </span>
+                    );
+                  })()
                 ) : null}
 
                 {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
@@ -3806,7 +4093,9 @@ export default function LedgerPageClient() {
                   (() => {
                     const s = ledgerSugTopByEntryId[r.id] ?? null;
                     if (!s) return ledgerSugLoading ? (
-                      <span className="text-[10px] text-slate-400">Loading…</span>
+                      <span className="inline-flex items-center">
+                        <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
+                      </span>
                     ) : null;
 
                     const catId = String(s?.category_id ?? "");
@@ -4031,6 +4320,39 @@ export default function LedgerPageClient() {
                           >
                             <Pencil className="h-3.5 w-3.5" />
                             Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2"
+                            onMouseDown={async (ev) => {
+                              ev.preventDefault();
+                              setMenuOpenId(null);
+
+                              if (!selectedBusinessId) return;
+
+                              setAiExplainOpen(true);
+                              setAiExplainEntryId(String(r.id));
+                              setAiExplainBusy(true);
+                              setAiExplainErr(null);
+
+                              try {
+                                const res: any = await aiExplainEntry({
+                                  businessId: selectedBusinessId,
+                                  entryId: String(r.id),
+                                });
+                                if (!res?.ok) throw new Error(res?.error || "Explain failed");
+                                setAiExplainLast(String(res.answer ?? ""));
+                              } catch (e: any) {
+                                const msg = String(e?.message ?? "Explain failed");
+                                setAiExplainErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
+                              } finally {
+                                setAiExplainBusy(false);
+                              }
+                            }}
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                            Explain
                           </button>
 
                           <button
@@ -4639,6 +4961,33 @@ export default function LedgerPageClient() {
               </table>
             </div>
           </div>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={aiExplainOpen}
+        onClose={() => setAiExplainOpen(false)}
+        title="AI Explain"
+        size="md"
+      >
+        <div className="space-y-3">
+          {aiExplainBusy && !aiExplainLast ? (
+            <div className="space-y-2">
+              <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
+              <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
+              <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+            </div>
+          ) : aiExplainErr ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {aiExplainErr}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-700 whitespace-pre-wrap">{aiExplainLast ?? ""}</div>
+          )}
+
+          {aiExplainBusy && aiExplainLast ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
+
+          {aiExplainEntryId ? <div className="text-[11px] text-slate-500">Entry: {aiExplainEntryId}</div> : null}
         </div>
       </AppDialog>
 

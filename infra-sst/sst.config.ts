@@ -471,6 +471,38 @@ const aiCategorySuggestionsHandler = {
   handler: "packages/functions/src/aiCategorySuggestions.handler",
 } satisfies ApiHandler;
 
+// ---------- AI (Bundle E) ----------
+const stagePrefix = $app.stage === "prod" ? "ledrigo-prod" : "ledrigo-dev";
+
+const aiHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/ai.handler",
+  environment: {
+    ...bizHandler.environment,
+
+    // Secret IDs (repo pattern; stage-specific prefix)
+    OPENAI_API_KEY_SECRET_ID: `${stagePrefix}/openai/api_key`,
+    OPENAI_MODEL_SECRET_ID: `${stagePrefix}/openai/model`,
+
+    // Usage limits (per business, daily)
+    AI_DAILY_LIMIT: $app.stage === "prod" ? "500" : "200",
+  },
+  permissions: [
+    ...(bizHandler as any).permissions,
+
+    // OpenAI secrets (dev + prod ARNs allowed; stagePrefix selects which SecretId is used)
+    {
+      actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+      resources: [
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/api_key-*",
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/model-*",
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/api_key-*",
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/model-*",
+      ],
+    },
+  ],
+} satisfies ApiHandler;
+
 const insightsDashboardHandler = {
   ...bizHandler,
   handler: "packages/functions/src/insightsDashboard.handler",
@@ -499,6 +531,16 @@ api.route(
   aiCategorySuggestionsHandler,
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
+
+// Bundle E/F: AI surfaces (read-only + suggestion-only; businessId in body)
+api.route("POST /v1/ai/explain-entry", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/ai/explain-report", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/ai/suggest-category", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/ai/chat", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// Bundle F additions
+api.route("POST /v1/ai/anomalies", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/ai/merchant-normalize", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // Phase F4: dashboard insights (computed; non-hallucinated)
 api.route(

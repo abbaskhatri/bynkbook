@@ -10,12 +10,15 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getIssuesCount } from "@/lib/api/issues";
 
+import { aiExplainReport, aiAnomalies, aiChatAggregates } from "@/lib/api/ai";
+
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import {
   AreaChart,
   Area,
@@ -484,6 +487,52 @@ export default function DashboardPageClient() {
     placeholderData: (prev) => prev,
   });
 
+    // ---------- Bundle F: AI narrative + anomalies (read-only) ----------
+  const aiNarrativeQ = useQuery({
+    queryKey: ["aiNarrative", selectedBusinessId, accountScopeId, range.from, range.to, range.mode],
+    enabled: !!selectedBusinessId && !!range?.from && !!range?.to,
+    placeholderData: (prev) => prev ?? null,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const summary = {
+        pnl: pnlQ.data ?? null,
+        cashflow: cashflowQ.data ?? null,
+        categories: categoriesQ.data ?? null,
+        accounts: accountsSummaryQ.data ?? null,
+      };
+
+      return aiExplainReport({
+        businessId: selectedBusinessId as string,
+        reportTitle: "Dashboard summary",
+        period: { mode: range.mode, from: range.from, to: range.to, accountId: accountScopeId ?? "all" },
+        summary,
+      });
+    },
+  });
+
+  const aiAnomaliesQ = useQuery({
+    queryKey: ["aiAnomalies", selectedBusinessId, accountScopeId, range.from, range.to],
+    enabled: !!selectedBusinessId && !!range?.from && !!range?.to,
+    placeholderData: (prev) => prev ?? null,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      return aiAnomalies({
+        businessId: selectedBusinessId as string,
+        accountId: accountScopeId && accountScopeId !== "all" ? accountScopeId : undefined,
+        from: range.from,
+        to: range.to,
+      });
+    },
+  });
+
+  const ai429 =
+    String((aiNarrativeQ.error as any)?.message ?? "").includes("429") ||
+    String((aiAnomaliesQ.error as any)?.message ?? "").includes("429");
+
   const dashErr = useMemo(() => {
     const errs = [pnlQ.error, cashflowQ.error, categoriesQ.error, accountsSummaryQ.error].filter(Boolean) as any[];
     if (errs.length === 0) return null;
@@ -614,6 +663,60 @@ export default function DashboardPageClient() {
   // Hover (tooltip) for Cash Position chart
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
+
+  // ---------- Bundle F: Ask Your Business (aggregates-only chat) ----------
+  type ChatMsg = { role: "user" | "assistant"; text: string; ts: number };
+
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatQ, setChatQ] = useState("");
+  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatErr, setChatErr] = useState<string | null>(null);
+
+  const chatAggregates = useMemo(() => {
+    return {
+      period: { mode: range.mode, from: range.from, to: range.to, accountId: accountScopeId ?? "all" },
+      pnl: pnlQ.data ?? null,
+      cashflow: cashflowQ.data ?? null,
+      categories: categoriesQ.data ?? null,
+      accounts: accountsSummaryQ.data ?? null,
+      // Links the assistant can use (app-relative only)
+      links: {
+        dashboard: "/dashboard",
+        ledger: `/ledger?businessId=${selectedBusinessId ?? ""}&accountId=${accountScopeId ?? "all"}&from=${range.from}&to=${range.to}`,
+        reports: `/reports?businessId=${selectedBusinessId ?? ""}&accountId=${accountScopeId ?? "all"}&from=${range.from}&to=${range.to}`,
+        reconcile: `/reconcile?businessId=${selectedBusinessId ?? ""}&accountId=${accountScopeId ?? "all"}`,
+      },
+    };
+  }, [range, accountScopeId, selectedBusinessId, pnlQ.data, cashflowQ.data, categoriesQ.data, accountsSummaryQ.data]);
+
+  async function sendChat() {
+    if (!selectedBusinessId) return;
+    const q = chatQ.trim();
+    if (!q) return;
+
+    setChatErr(null);
+    setChatBusy(true);
+    setChatMsgs((m) => [...m, { role: "user", text: q, ts: Date.now() }]);
+    setChatQ("");
+
+    try {
+      const res: any = await aiChatAggregates({
+        businessId: selectedBusinessId,
+        question: q,
+        aggregates: chatAggregates,
+      });
+
+      if (!res?.ok) throw new Error(res?.error || "Chat failed");
+
+      setChatMsgs((m) => [...m, { role: "assistant", text: String(res.answer ?? ""), ts: Date.now() }]);
+    } catch (e: any) {
+      const msg = String(e?.message ?? "Chat failed");
+      setChatErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
+    } finally {
+      setChatBusy(false);
+    }
+  }
 
   // Area chart animation: tween values over 200ms when series length matches.
   const [animCashMonthly, setAnimCashMonthly] = useState(cashMonthly);
@@ -1659,6 +1762,133 @@ export default function DashboardPageClient() {
               )}
             </CardContent>
           </Card>
+
+                {/* AI Summary (read-only; aggregates only) */}
+      <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-emerald-600" />
+            <CardTitle className="text-sm">AI Summary</CardTitle>
+          </div>
+          {aiNarrativeQ.isFetching && aiNarrativeQ.data?.ok ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
+        </CHeader>
+
+        <CardContent className="space-y-2">
+          {ai429 ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              AI daily limit reached for this business. Try again tomorrow.
+            </div>
+          ) : aiNarrativeQ.isLoading && !aiNarrativeQ.data ? (
+            <div className="space-y-2">
+              <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
+              <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
+              <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+            </div>
+          ) : aiNarrativeQ.data?.ok ? (
+            <div className="text-sm text-slate-700 whitespace-pre-wrap">{String(aiNarrativeQ.data.answer ?? "")}</div>
+          ) : (
+            <div className="text-sm text-slate-600">AI summary is unavailable right now.</div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* AI Anomalies (deterministic; read-only) */}
+      <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <CardTitle className="text-sm">Anomalies</CardTitle>
+          </div>
+          {aiAnomaliesQ.isFetching && aiAnomaliesQ.data?.ok ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
+        </CHeader>
+
+        <CardContent className="space-y-2">
+          {aiAnomaliesQ.isLoading && !aiAnomaliesQ.data ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="space-y-1">
+                  <div className="h-4 w-48 rounded bg-slate-200 animate-pulse" />
+                  <div className="h-3 w-full rounded bg-slate-200 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : aiAnomaliesQ.data?.ok && Array.isArray(aiAnomaliesQ.data.anomalies) && aiAnomaliesQ.data.anomalies.length ? (
+            <div className="divide-y divide-slate-100 rounded-md border border-slate-200 overflow-hidden">
+              {aiAnomaliesQ.data.anomalies.slice(0, 5).map((a: any) => (
+                <div key={a.entryId} className="px-3 py-2">
+                  <div className="text-sm font-semibold text-slate-900">{a.title ?? "Anomaly"}</div>
+                  <div className="mt-0.5 text-[11px] text-slate-600">{a.reason ?? ""}</div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">
+                    Baseline median: {a?.baseline?.median_abs_cents ?? "—"}¢ • Sample: {a?.baseline?.sample_size ?? "—"} • Confidence:{" "}
+                    {typeof a?.confidence === "number" ? Math.round(a.confidence * 100) + "%" : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-600">No anomalies detected in the current range.</div>
+          )}
+        </CardContent>
+      </Card>
+
+            {/* Ask Your Business (aggregates-only; read-only) */}
+      <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
+        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-emerald-600" />
+            <CardTitle className="text-sm">Ask your business</CardTitle>
+          </div>
+          {chatBusy ? <div className="text-[11px] text-slate-500">Thinking…</div> : null}
+        </CHeader>
+
+        <CardContent className="space-y-2">
+          {chatErr ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {chatErr}
+            </div>
+          ) : null}
+
+          <div className="rounded-md border border-slate-200 bg-white p-2 h-44 overflow-auto space-y-2">
+            {chatMsgs.length === 0 ? (
+              <div className="text-sm text-slate-600">
+                Ask questions about cash flow, income/expenses, trends, and top categories.
+              </div>
+            ) : (
+              chatMsgs.map((m, i) => (
+                <div key={i} className={m.role === "user" ? "text-sm text-slate-900" : "text-sm text-slate-700"}>
+                  <span className="text-[11px] font-semibold text-slate-500 mr-2">
+                    {m.role === "user" ? "You" : "AI"}
+                  </span>
+                  <span className="whitespace-pre-wrap">{m.text}</span>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              value={chatQ}
+              onChange={(e) => setChatQ(e.target.value)}
+              placeholder="Ask: Why did net income change?"
+              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-200"
+              disabled={chatBusy}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendChat();
+                }
+              }}
+            />
+            <Button className="h-9 px-3" disabled={chatBusy || !chatQ.trim()} onClick={() => void sendChat()}>
+              Ask
+            </Button>
+          </div>
+
+          <div className="text-[11px] text-slate-500">
+            Uses dashboard aggregates only • No ledger dump • Includes links in answers when possible
+          </div>
+        </CardContent>
+      </Card>
 
           {/* Monthly Summary (Base44 card structure) */}
           <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">

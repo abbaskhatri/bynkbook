@@ -159,6 +159,62 @@ function tokenOverlap(a: string, b: string): number {
   return hit;
 }
 
+function scoreEntryCandidate(bank: any, entry: any) {
+  const bankAmt = toBigIntSafe(bank?.amount_cents);
+  const bankAbs = absBig(bankAmt);
+  const bankTime = bank?.posted_date ? new Date(bank.posted_date).getTime() : 0;
+
+  const entryAmt = toBigIntSafe(entry?.amount_cents);
+  const entryAbs = absBig(entryAmt);
+
+  const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+  const dtMs = bankTime ? Math.abs(new Date(`${entry?.date}T00:00:00Z`).getTime() - bankTime) : 0;
+  const dtDays = bankTime ? Math.floor(dtMs / 86_400_000) : 9999;
+
+  const overlapRaw = tokenOverlap(String(bank?.name ?? ""), String(entry?.payee ?? ""));
+  const overlap = Math.min(overlapRaw, 3);
+
+  const diffN = Number(diff);
+  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
+  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+
+  return {
+    score,
+    diff,
+    dtDays,
+    overlap,
+    exactAmount: diff === 0n,
+  };
+}
+
+function scoreBankCandidate(entry: any, bank: any) {
+  const entryAmt = toBigIntSafe(entry?.amount_cents);
+  const entryAbs = absBig(entryAmt);
+  const entryTime = entry?.date ? new Date(`${entry.date}T00:00:00Z`).getTime() : 0;
+
+  const bankAmt = toBigIntSafe(bank?.amount_cents);
+  const bankAbs = absBig(bankAmt);
+
+  const diff = bankAbs > entryAbs ? bankAbs - entryAbs : entryAbs - bankAbs;
+  const dtMs = entryTime ? Math.abs(new Date(bank?.posted_date).getTime() - entryTime) : 0;
+  const dtDays = entryTime ? Math.floor(dtMs / 86_400_000) : 9999;
+
+  const overlapRaw = tokenOverlap(String(entry?.payee ?? ""), String(bank?.name ?? ""));
+  const overlap = Math.min(overlapRaw, 3);
+
+  const diffN = Number(diff);
+  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
+  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+
+  return {
+    score,
+    diff,
+    dtDays,
+    overlap,
+    exactAmount: diff === 0n,
+  };
+}
+
 export default function ReconcilePageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -583,6 +639,7 @@ export default function ReconcilePageClient() {
   const [matchSelectedEntryIds, setMatchSelectedEntryIds] = useState<Set<string>>(() => new Set());
   const [matchBusy, setMatchBusy] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
+  const [matchSuggestLoading, setMatchSuggestLoading] = useState(false);
 
   // Phase 4D: Adjustment dialog
   const [openAdjust, setOpenAdjust] = useState(false);
@@ -598,6 +655,7 @@ export default function ReconcilePageClient() {
   const [entryMatchSearch, setEntryMatchSearch] = useState("");
   const [entryMatchBusy, setEntryMatchBusy] = useState(false);
   const [entryMatchError, setEntryMatchError] = useState<string | null>(null);
+  const [entrySuggestLoading, setEntrySuggestLoading] = useState(false);
 
   // Hide adjusted entries locally (until we refetch entries with adjustment status)
   const [locallyAdjusted, setLocallyAdjusted] = useState<Set<string>>(() => new Set());
@@ -1804,7 +1862,7 @@ export default function ReconcilePageClient() {
             setOpenAutoReconcile(true);
           }}
         >
-          <Sparkles className="h-3.5 w-3.5" /> Auto-reconcile
+          <Sparkles className="h-3.5 w-3.5" /> AI auto-reconcile
         </button>
       </HintWrap>
 
@@ -2580,7 +2638,52 @@ export default function ReconcilePageClient() {
                                       <GitMerge className="h-4 w-4 text-slate-700" />
                                     </button>
                                   </HintWrap>
+                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                    <button
+                                      type="button"
+                                      className={`h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
+                                      disabled={!canWriteReconcileEffective}
+                                      title={canWriteReconcileEffective ? "AI suggest bank match" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="AI suggest bank match"
+                                      onClick={() => {
+                                        if (!canWriteReconcileEffective) return;
+                                        setEntryMatchEntryId(e.id);
+                                        setEntryMatchSelectedBankTxnIds(new Set());
+                                        setEntryMatchSearch("");
+                                        setEntryMatchError(null);
+                                        setEntrySuggestLoading(true);
+                                        setOpenEntryMatch(true);
 
+                                        setTimeout(() => {
+                                          const entryAmt = toBigIntSafe(e.amount_cents);
+                                          const entrySign = entryAmt < 0n ? -1n : 1n;
+
+                                          const ranked = bankTxSorted
+                                            .filter((t: any) => {
+                                              const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+                                              if (remaining <= 0n) return false;
+
+                                              const bankAmt = toBigIntSafe(t.amount_cents);
+                                              const bankSign = bankAmt < 0n ? -1n : 1n;
+                                              return bankSign === entrySign;
+                                            })
+                                            .map((t: any) => ({ t, meta: scoreBankCandidate(e, t) }))
+                                            .sort((a: any, b: any) => a.meta.score - b.meta.score);
+
+                                          const best = ranked[0]?.t ?? null;
+
+                                          setEntryMatchSelectedBankTxnIds(() => {
+                                            const s = new Set<string>();
+                                            if (best?.id) s.add(String(best.id));
+                                            return s;
+                                          });
+                                          setEntrySuggestLoading(false);
+                                        }, 120);
+                                      }}
+                                    >
+                                      <Sparkles className="h-3.5 w-3.5 text-slate-700" />
+                                    </button>
+                                  </HintWrap>
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
@@ -2972,63 +3075,109 @@ export default function ReconcilePageClient() {
                                   <Undo2 className="h-4 w-4 text-slate-700" />
                                 </button>
                               ) : (
-                                <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-                                  <button
-                                    type="button"
-                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                      }`}
-                                    disabled={!canWriteReconcileEffective}
-                                    title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
-                                    aria-label="Match bank transaction"
-                                    onClick={() => {
-                                      if (!canWriteReconcileEffective) return;
-                                      setMatchBankTxnId(t.id);
-                                      setMatchSearch("");
-                                      setMatchSelectedEntryIds(new Set());
-                                      setMatchError(null);
+                                <>
+                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                    <button
+                                      type="button"
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                        }`}
+                                      disabled={!canWriteReconcileEffective}
+                                      title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="Match bank transaction"
+                                      onClick={() => {
+                                        if (!canWriteReconcileEffective) return;
+                                        setMatchBankTxnId(t.id);
+                                        setMatchSearch("");
+                                        setMatchSelectedEntryIds(new Set());
+                                        setMatchError(null);
 
-                                      // Best initial seed: closest abs amount, then closest date
-                                      const bankAmt = toBigIntSafe(t.amount_cents);
-                                      const bankAbs = absBig(bankAmt);
-                                      const bankSign = bankAmt < 0n ? -1n : 1n;
-                                      const bankDateYmd = isoToYmd(t.posted_date);
-                                      const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
+                                        const bankAmt = toBigIntSafe(t.amount_cents);
+                                        const bankAbs = absBig(bankAmt);
+                                        const bankSign = bankAmt < 0n ? -1n : 1n;
+                                        const bankDateYmd = isoToYmd(t.posted_date);
+                                        const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
 
-                                      const eligible = allEntriesSorted.filter((e: any) => {
-                                        if (matchByEntryId.has(e.id)) return false;
-                                        const entryAmt = toBigIntSafe(e.amount_cents);
-                                        const entrySign = entryAmt < 0n ? -1n : 1n;
-                                        if (entrySign !== bankSign) return false;
-                                        return true;
-                                      });
+                                        const eligible = allEntriesSorted.filter((e: any) => {
+                                          if (matchByEntryId.has(e.id)) return false;
+                                          const entryAmt = toBigIntSafe(e.amount_cents);
+                                          const entrySign = entryAmt < 0n ? -1n : 1n;
+                                          if (entrySign !== bankSign) return false;
+                                          return true;
+                                        });
 
-                                      let bestId: string | null = null;
-                                      let bestScore = Number.POSITIVE_INFINITY;
+                                        let bestId: string | null = null;
+                                        let bestScore = Number.POSITIVE_INFINITY;
 
-                                      for (const e of eligible) {
-                                        const entryAmt = toBigIntSafe(e.amount_cents);
-                                        const entryAbs = absBig(entryAmt);
-                                        const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                                        const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
-                                        const score = Number(diff) * 1_000_000 + dt;
-                                        if (score < bestScore) {
-                                          bestScore = score;
-                                          bestId = e.id;
+                                        for (const e of eligible) {
+                                          const entryAmt = toBigIntSafe(e.amount_cents);
+                                          const entryAbs = absBig(entryAmt);
+                                          const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
+                                          const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
+                                          const score = Number(diff) * 1_000_000 + dt;
+                                          if (score < bestScore) {
+                                            bestScore = score;
+                                            bestId = e.id;
+                                          }
                                         }
-                                      }
 
-                                      setMatchSelectedEntryIds(() => {
-                                        const s = new Set<string>();
-                                        if (bestId) s.add(bestId);
-                                        return s;
-                                      });
+                                        setMatchSelectedEntryIds(() => {
+                                          const s = new Set<string>();
+                                          if (bestId) s.add(bestId);
+                                          return s;
+                                        });
 
-                                      setOpenMatch(true);
-                                    }}
-                                  >
-                                    <GitMerge className="h-4 w-4 text-slate-700" />
-                                  </button>
-                                </HintWrap>
+                                        setOpenMatch(true);
+                                      }}
+                                    >
+                                      <GitMerge className="h-4 w-4 text-slate-700" />
+                                    </button>
+                                  </HintWrap>
+
+                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                    <button
+                                      type="button"
+                                      className={`h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
+                                      disabled={!canWriteReconcileEffective}
+                                      title={canWriteReconcileEffective ? "AI suggest match" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="AI suggest match"
+                                      onClick={() => {
+                                        if (!canWriteReconcileEffective) return;
+                                        setMatchBankTxnId(t.id);
+                                        setMatchSearch("");
+                                        setMatchSelectedEntryIds(new Set());
+                                        setMatchError(null);
+                                        setMatchSuggestLoading(true);
+                                        setOpenMatch(true);
+
+                                        setTimeout(() => {
+                                          const bankAmt = toBigIntSafe(t.amount_cents);
+                                          const bankSign = bankAmt < 0n ? -1n : 1n;
+
+                                          const ranked = allEntriesSorted
+                                            .filter((e: any) => {
+                                              if (matchByEntryId.has(e.id)) return false;
+                                              const entryAmt = toBigIntSafe(e.amount_cents);
+                                              const entrySign = entryAmt < 0n ? -1n : 1n;
+                                              return entrySign === bankSign;
+                                            })
+                                            .map((e: any) => ({ e, meta: scoreEntryCandidate(t, e) }))
+                                            .sort((a: any, b: any) => a.meta.score - b.meta.score);
+
+                                          const best = ranked[0]?.e ?? null;
+
+                                          setMatchSelectedEntryIds(() => {
+                                            const s = new Set<string>();
+                                            if (best?.id) s.add(best.id);
+                                            return s;
+                                          });
+                                          setMatchSuggestLoading(false);
+                                        }, 120);
+                                      }}
+                                    >
+                                      <Sparkles className="h-3.5 w-3.5 text-slate-700" />
+                                    </button>
+                                  </HintWrap>
+                                </>
                               )}
 
                               <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
@@ -3445,6 +3594,7 @@ export default function ReconcilePageClient() {
           setMatchSearch("");
           setMatchSelectedEntryIds(new Set());
           setMatchBankTxnId(null);
+          setMatchSuggestLoading(false);
         }}
         title="Match bank transaction"
         size="lg"
@@ -3463,6 +3613,7 @@ export default function ReconcilePageClient() {
                     setMatchSearch("");
                     setMatchSelectedEntryIds(new Set());
                     setMatchBankTxnId(null);
+                    setMatchSuggestLoading(false);
                   }}
                   disabled={matchBusy}
                 >
@@ -3545,7 +3696,6 @@ export default function ReconcilePageClient() {
                           return;
                         }
 
-                        // Optimistic: inject created group so rows move instantly (no waiting for refresh).
                         const createdGroup =
                           (first as any)?.match_group ??
                           (first as any)?.matchGroup ??
@@ -3589,7 +3739,6 @@ export default function ReconcilePageClient() {
         }
       >
         <div className="flex flex-col max-h-[70vh]">
-          {/* Body (scroll only this area) */}
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-slate-600 mb-2">Select entries to match (same sign; full-match only).</div>
 
@@ -3647,16 +3796,13 @@ export default function ReconcilePageClient() {
 
             {matchError ? <div className="text-xs text-red-700 mb-2">{matchError}</div> : null}
 
-            {/* Suggested (top candidates) */}
+            {/* AI suggested (deterministic; amount first, then date, then text) */}
             {(() => {
               const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
               if (!bank) return null;
 
               const bankAmt = toBigIntSafe(bank.amount_cents);
-              const bankAbs = absBig(bankAmt);
               const bankSign = bankAmt < 0n ? -1n : 1n;
-              const bankTime = bank?.posted_date ? new Date(bank.posted_date).getTime() : 0;
-
               const q = matchSearch.trim().toLowerCase();
 
               const ranked = allEntriesSorted
@@ -3667,78 +3813,60 @@ export default function ReconcilePageClient() {
                   if (entrySign !== bankSign) return false;
 
                   if (!q) return true;
-                  const payee = (e.payee ?? "").toString().toLowerCase();
-                  const date = (e.date ?? "").toString().toLowerCase();
+                  const payee = String(e.payee ?? "").toLowerCase();
+                  const date = String(e.date ?? "").toLowerCase();
                   return payee.includes(q) || date.includes(q);
                 })
-                .map((e: any) => {
-                  const entryAmt = toBigIntSafe(e.amount_cents);
-                  const entryAbs = absBig(entryAmt);
-                  const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                  const dt = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
-                  const overlapRaw = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
-                  const overlap = Math.min(overlapRaw, 3); // cap token influence
-
-                  const dtDays = bankTime ? Math.floor(dt / 86_400_000) : 9999;
-                  const diffN = Number(diff); // cents; safe here
-
-                  // Deterministic scoring (tolerance=0):
-                  // 1) Amount diff dominates always
-                  // 2) Date dominates token overlap
-                  // 3) Token overlap only helps when amount is exact AND date is close (<=3 days)
-                  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-                  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
-
-                  return { e, score };
-                })
-                .sort((a: any, b: any) => a.score - b.score)
-                .map((x: any) => x.e);
-
-              // Suggested = exact amount matches only (tolerance=0)
-              const suggested = ranked
-                .filter((e: any) => {
-                  const entryAbs = absBig(toBigIntSafe(e.amount_cents));
-                  return entryAbs === bankAbs;
-                })
+                .map((e: any) => ({ e, meta: scoreEntryCandidate(bank, e) }))
+                .sort((a: any, b: any) => a.meta.score - b.meta.score)
                 .slice(0, 3);
 
-              if (suggested.length === 0) return null;
+              if (matchSuggestLoading) {
+                return (
+                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggested</div>
+                    <div className="space-y-2">
+                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
+                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
+                    </div>
+                  </div>
+                );
+              }
+
+              if (ranked.length === 0) return null;
 
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                  <div className="text-[11px] font-semibold text-slate-600 mb-1">Suggested</div>
-                  <div className="flex flex-col gap-1">
-                    {suggested.map((e: any) => {
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-slate-600">AI suggested</div>
+                    <div className="text-[11px] text-slate-500">Deterministic • full-match only</div>
+                  </div>
+
+                  <div className="mt-2 flex flex-col gap-1">
+                    {ranked.map(({ e, meta }: any, idx: number) => {
                       const amt = toBigIntSafe(e.amount_cents);
                       const selected = matchSelectedEntryIds.has(e.id);
+                      const reason = `Amount Δ ${formatUsdFromCents(meta.diff)} • Δdays ${meta.dtDays} • Text similarity ${meta.overlap}`;
+
                       return (
                         <button
                           key={e.id}
                           type="button"
-                          className={`w-full text-left h-10 px-2 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"
-                            } flex items-center justify-between gap-2`}
+                          className={`w-full text-left min-h-[42px] px-2 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-2`}
                           onClick={() => {
-                            setMatchSelectedEntryIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(e.id)) next.delete(e.id);
-                              else next.add(e.id);
-                              return next;
+                            setMatchSelectedEntryIds(() => {
+                              const s = new Set<string>();
+                              s.add(e.id);
+                              return s;
                             });
                           }}
-                          title="Toggle suggested entry"
+                          title="Use suggested entry"
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">{e.payee}</span>
-                            <span className="truncate text-[11px] text-slate-500">
-                              {(() => {
-                                const bankAbs = absBig(toBigIntSafe(bank.amount_cents));
-                                const entryAbs = absBig(toBigIntSafe(e.amount_cents));
-                                const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                                const overlap = Math.min(tokenOverlap(String(bank.name ?? ""), String(e.payee ?? "")), 3);
-                                const dtDays = bank?.posted_date ? Math.abs(Math.round((new Date(`${e.date}T00:00:00Z`).getTime() - new Date(bank.posted_date).getTime()) / 86_400_000)) : 0;
-                                return `Amount Δ ${formatUsdFromCents(diff)} • Δdays ${dtDays} • Text similarity ${overlap}`;
-                              })()}
+                            <span className="truncate text-xs font-medium text-slate-800">
+                              {idx === 0 ? "Best match • " : ""}{e.payee}
                             </span>
+                            <span className="truncate text-[11px] text-slate-500">{reason}</span>
                           </span>
                           <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
                             {formatUsdFromCents(amt)}
@@ -3747,7 +3875,6 @@ export default function ReconcilePageClient() {
                       );
                     })}
                   </div>
-                  <div className="mt-2 text-[11px] font-semibold text-slate-600">All eligible</div>
                 </div>
               );
             })()}
@@ -3756,14 +3883,12 @@ export default function ReconcilePageClient() {
               <div className="max-h-[44vh] overflow-y-auto">
                 <table className="w-full table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 36 }} />
                     <col style={{ width: 110 }} />
                     <col />
                     <col style={{ width: 140 }} />
                   </colgroup>
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                     <tr className="h-[28px]">
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left"></th>
                       <th className="px-2 text-xs font-semibold text-slate-600 text-left">DATE</th>
                       <th className="px-2 text-xs font-semibold text-slate-600 text-left">PAYEE</th>
                       <th className="px-2 text-xs font-semibold text-slate-600 text-right">AMOUNT</th>
@@ -3775,98 +3900,53 @@ export default function ReconcilePageClient() {
                       if (!bank) return null;
 
                       const bankAmt = toBigIntSafe(bank.amount_cents);
-                      const bankAbs = absBig(bankAmt);
                       const bankSign = bankAmt < 0n ? -1n : 1n;
-                      const bankTime = bank.posted_date ? new Date(bank.posted_date).getTime() : 0;
 
-                      const q = matchSearch.trim().toLowerCase();
-
-                      const eligible = allEntriesSorted
+                      return allEntriesSorted
                         .filter((e: any) => {
+                          const q = matchSearch.trim().toLowerCase();
+                          if (q) {
+                            const payee = (e.payee ?? "").toString().toLowerCase();
+                            const date = (e.date ?? "").toString().toLowerCase();
+                            if (!payee.includes(q) && !date.includes(q)) return false;
+                          }
+
                           if (matchByEntryId.has(e.id)) return false;
+
                           const entryAmt = toBigIntSafe(e.amount_cents);
                           const entrySign = entryAmt < 0n ? -1n : 1n;
-                          if (entrySign !== bankSign) return false;
-
-                          if (!q) return true;
-                          const payee = (e.payee ?? "").toString().toLowerCase();
-                          const date = (e.date ?? "").toString().toLowerCase();
-                          return payee.includes(q) || date.includes(q);
+                          return entrySign === bankSign;
                         })
-                        .map((e: any) => {
-                          const entryAmt = toBigIntSafe(e.amount_cents);
-                          const entryAbs = absBig(entryAmt);
-                          const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-
-                          const dtMs = bankTime ? Math.abs(new Date(`${e.date}T00:00:00Z`).getTime() - bankTime) : 0;
-                          const dtDays = bankTime ? Math.floor(dtMs / 86_400_000) : 9999;
-
-                          const overlapRaw = tokenOverlap(String(bank.name ?? ""), String(e.payee ?? ""));
-                          const overlap = Math.min(overlapRaw, 3);
-
-                          const diffN = Number(diff); // cents
-
-                          // Deterministic scoring (tolerance=0):
-                          // - Amount diff dominates always
-                          // - Date dominates token overlap
-                          // - Token overlap only helps when amount is exact AND date is close (<=3 days)
-                          const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-                          const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
-
-                          return { e, score };
-                        })
-                        .sort((a: any, b: any) => a.score - b.score)
                         .slice(0, 200)
-                        .map((x: any) => x.e);
+                        .map((e: any) => {
+                          const amt = toBigIntSafe(e.amount_cents);
+                          const selected = matchSelectedEntryIds.has(e.id);
 
-                      return eligible.map((e: any) => {
-                        const amt = toBigIntSafe(e.amount_cents);
-                        const selected = matchSelectedEntryIds.has(e.id);
-
-                        return (
-                          <tr
-                            key={e.id}
-                            className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-slate-50"}`}
-                            onClick={() => {
-                              setMatchSelectedEntryIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(e.id)) next.delete(e.id);
-                                else next.add(e.id);
-                                return next;
-                              });
-                            }}
-                          >
-                            <td className="px-2">
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={() => {
-                                  setMatchSelectedEntryIds((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(e.id)) next.delete(e.id);
-                                    else next.add(e.id);
-                                    return next;
-                                  });
-                                }}
-                                onClick={(ev) => ev.stopPropagation()}
-                                aria-label="Select entry"
-                                className="h-4 w-4"
-                              />
-                            </td>
-                            <td className="px-2 text-xs text-slate-800">{e.date}</td>
-                            <td className="px-2 text-xs text-slate-800 font-medium truncate">{e.payee}</td>
-                            <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
-                          </tr>
-                        );
-                      });
+                          return (
+                            <tr
+                              key={e.id}
+                              className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-slate-50"}`}
+                              onClick={() => {
+                                setMatchSelectedEntryIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(e.id)) next.delete(e.id);
+                                  else next.add(e.id);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <td className="px-2 text-xs text-slate-800">{e.date}</td>
+                              <td className="px-2 text-xs text-slate-800 font-medium truncate">{e.payee}</td>
+                              <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
+                            </tr>
+                          );
+                        });
                     })()}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
-
-          {null}
         </div>
       </AppDialog>
 
@@ -4136,6 +4216,91 @@ export default function ReconcilePageClient() {
             </div>
 
             {entryMatchError ? <div className="text-xs text-red-700 mb-2">{entryMatchError}</div> : null}
+
+            {/* AI suggested bank txns */}
+            {(() => {
+              const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
+              if (!entry) return null;
+
+              const entryAmt = toBigIntSafe(entry.amount_cents);
+              const entrySign = entryAmt < 0n ? -1n : 1n;
+              const q = entryMatchSearch.trim().toLowerCase();
+
+              const ranked = bankTxSorted
+                .filter((t: any) => {
+                  const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+                  if (remaining <= 0n) return false;
+
+                  const bankAmt = toBigIntSafe(t.amount_cents);
+                  const bankSign = bankAmt < 0n ? -1n : 1n;
+                  if (bankSign !== entrySign) return false;
+
+                  if (!q) return true;
+                  const name = String(t.name ?? "").toLowerCase();
+                  const date = String(t.posted_date ?? "").toLowerCase();
+                  return name.includes(q) || date.includes(q);
+                })
+                .map((t: any) => ({ t, meta: scoreBankCandidate(entry, t) }))
+                .sort((a: any, b: any) => a.meta.score - b.meta.score)
+                .slice(0, 3);
+
+              if (entrySuggestLoading) {
+                return (
+                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggested</div>
+                    <div className="space-y-2">
+                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
+                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
+                    </div>
+                  </div>
+                );
+              }
+
+              if (ranked.length === 0) return null;
+
+              return (
+                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-slate-600">AI suggested</div>
+                    <div className="text-[11px] text-slate-500">Deterministic • full-match only</div>
+                  </div>
+
+                  <div className="mt-2 flex flex-col gap-1">
+                    {ranked.map(({ t, meta }: any, idx: number) => {
+                      const amt = toBigIntSafe(t.amount_cents);
+                      const selected = entryMatchSelectedBankTxnIds.has(String(t.id));
+                      const reason = `Amount Δ ${formatUsdFromCents(meta.diff)} • Δdays ${meta.dtDays} • Text similarity ${meta.overlap}`;
+
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`w-full text-left min-h-[42px] px-2 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-2`}
+                          onClick={() => {
+                            setEntryMatchSelectedBankTxnIds(() => {
+                              const s = new Set<string>();
+                              s.add(String(t.id));
+                              return s;
+                            });
+                          }}
+                          title="Use suggested bank transaction"
+                        >
+                          <span className="min-w-0 flex flex-col">
+                            <span className="truncate text-xs font-medium text-slate-800">
+                              {idx === 0 ? "Best match • " : ""}{t.name}
+                            </span>
+                            <span className="truncate text-[11px] text-slate-500">{reason}</span>
+                          </span>
+                          <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
+                            {formatUsdFromCents(amt)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* COMBINE summary */}
             {(() => {

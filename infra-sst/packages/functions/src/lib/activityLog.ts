@@ -29,7 +29,11 @@ export type ActivityEventType =
   | "AP_BILL_UPDATED"
   | "AP_BILL_VOIDED"
   | "AP_PAYMENT_APPLIED"
-  | "AP_PAYMENT_UNAPPLIED";
+  | "AP_PAYMENT_UNAPPLIED"
+  | "AI_EXPLAIN_ENTRY"
+  | "AI_EXPLAIN_REPORT"
+  | "AI_SUGGEST_CATEGORY"
+  | "AI_CHAT";
 
 export async function logActivity(prisma: any, args: {
   businessId: string;

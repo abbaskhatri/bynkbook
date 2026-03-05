@@ -10,7 +10,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
-import { applyCategoryBatch, getCategorySuggestions } from "@/lib/api/ai";
+import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry, aiMerchantNormalize, getCategorySuggestions } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
@@ -189,6 +189,15 @@ export default function CategoryReviewPageClient() {
     appErrorMessageOrNull(accountsQ.error) ||
     null;
 
+  const whyOpenRef = useRef<string | null>(null);
+  const [whyEntryId, setWhyEntryId] = useState<string | null>(null);
+  const [whyBusy, setWhyBusy] = useState(false);
+  const [whyText, setWhyText] = useState<string | null>(null);
+  const [whyErr, setWhyErr] = useState<string | null>(null);
+
+  const merchantCacheRef = useRef<Record<string, { merchant: string; confidence: number; reason: string }>>({});
+  const [merchantBusyId, setMerchantBusyId] = useState<string | null>(null);
+  const [merchantErrId, setMerchantErrId] = useState<string | null>(null);
   // Now that entriesQ exists, include it in the banner mapping
   const bannerMsgWithEntries =
     bannerMsg || appErrorMessageOrNull(entriesQ.error) || null;
@@ -255,15 +264,15 @@ export default function CategoryReviewPageClient() {
   }, [categories]);
 
   // Filters (inputs)
-  const [from, setFrom] = useState(firstOfThisMonth());
-  const [to, setTo] = useState(todayYmd());
+  const [from, setFrom] = useState<string>("");
+  const [to, setTo] = useState<string>("");
   const [search, setSearch] = useState("");
   const [onlyUncategorized, setOnlyUncategorized] = useState(true);
 
   // Applied filters (set only on Run)
   const [applied, setApplied] = useState({
-    from: firstOfThisMonth(),
-    to: todayYmd(),
+    from: "",
+    to: "",
     search: "",
     onlyUncategorized: true,
   });
@@ -274,6 +283,16 @@ export default function CategoryReviewPageClient() {
     setSelectedIds(new Set());
     setFailedById({});
   }
+
+  // Auto-run once so the list is visible by default (no blank state)
+  const didAutoRunRef = useRef(false);
+  useEffect(() => {
+    if (didAutoRunRef.current) return;
+    if (entriesQ.isLoading) return;
+    didAutoRunRef.current = true;
+    runFilters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entriesQ.isLoading]);
 
   const allEntries = (entriesQ.data ?? []) as any[];
 
@@ -357,12 +376,28 @@ export default function CategoryReviewPageClient() {
       if (!selectedBusinessId || !selectedAccountId) return {} as Record<string, any[]>;
       if (!suggestionTargets.length) return {} as Record<string, any[]>;
 
-      const res: any = await getCategorySuggestions({
-        businessId: selectedBusinessId,
-        accountId: selectedAccountId,
-        items: suggestionTargets,
-        limitPerItem: 3,
-      });
+      let res: any = null;
+
+      // Prefer LLM endpoint (Bundle E). Fallback to heuristic endpoint if unavailable.
+      try {
+        res = await aiSuggestCategory({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          items: suggestionTargets,
+          limitPerItem: 3,
+        });
+      } catch {
+        res = null;
+      }
+
+      if (!res?.ok) {
+        res = await getCategorySuggestions({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          items: suggestionTargets,
+          limitPerItem: 3,
+        });
+      }
 
       const next: Record<string, any[]> = {};
       for (const it of suggestionTargets) {
@@ -375,6 +410,7 @@ export default function CategoryReviewPageClient() {
 
   const sugByEntryId = (suggestionsQ.data ?? {}) as Record<string, any[]>;
   const sugLoading = suggestionsQ.isFetching;
+  const sugUpdating = suggestionsQ.isFetching && !!suggestionsQ.data && Object.keys(suggestionsQ.data as any).length > 0;
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -504,9 +540,9 @@ export default function CategoryReviewPageClient() {
         updates: { category_id: categoryId },
       });
 
-            // One targeted refresh: entries for this business+account only.
+      // One targeted refresh: entries for this business+account only.
       void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
-      
+
     } catch (e: any) {
       // Revert this entry only
       if (idx >= 0 && prevEntry) {
@@ -525,6 +561,89 @@ export default function CategoryReviewPageClient() {
       }
 
       throw e;
+    } finally {
+      setPendingIds((m) => {
+        const next = { ...m };
+        delete next[entryId];
+        return next;
+      });
+    }
+  }
+
+  async function runWhy(entryId: string) {
+    if (!selectedBusinessId) return;
+
+    setWhyEntryId(entryId);
+    setWhyBusy(true);
+    setWhyErr(null);
+    setWhyText(null);
+
+    try {
+      const res: any = await aiExplainEntry({ businessId: selectedBusinessId, entryId });
+      if (!res?.ok) throw new Error(res?.error || "Explain failed");
+      setWhyText(String(res.answer ?? ""));
+    } catch (e: any) {
+      const msg = String(e?.message ?? "Explain failed");
+      setWhyErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
+    } finally {
+      setWhyBusy(false);
+    }
+  }
+
+  async function getMerchant(entryId: string, payee: string, memo?: string) {
+    const cached = merchantCacheRef.current[entryId];
+    if (cached) return cached;
+
+    if (!selectedBusinessId) return null;
+
+    setMerchantBusyId(entryId);
+    setMerchantErrId(null);
+
+    try {
+      const res: any = await aiMerchantNormalize({ businessId: selectedBusinessId, payee, memo: memo ?? "" });
+      if (!res?.ok) throw new Error(res?.error || "Merchant detect failed");
+
+      const out = {
+        merchant: String(res.merchant ?? "").trim(),
+        confidence: Number(res.confidence ?? 0),
+        reason: String(res.reason ?? "").trim(),
+      };
+
+      if (out.merchant) merchantCacheRef.current[entryId] = out;
+      return out;
+    } catch (e: any) {
+      const msg = String(e?.message ?? "Merchant detect failed");
+      setMerchantErrId(msg.includes("429") ? "429" : "ERR");
+      return null;
+    } finally {
+      setMerchantBusyId(null);
+    }
+  }
+
+  async function applyMerchant(entryId: string, merchant: string) {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    // Suggestion-only: apply only on explicit click (writes through existing entry update API)
+    setPendingIds((m) => ({ ...m, [entryId]: true }));
+    setFailedById((m) => {
+      const next = { ...m };
+      delete next[entryId];
+      return next;
+    });
+
+    try {
+      await updateEntry({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        entryId,
+        updates: { payee: merchant },
+      });
+
+      // Keep last-good; one targeted refresh (no storm)
+      void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+    } catch (e: any) {
+      const r = applyMutationError(e, "Can’t apply merchant");
+      if (!r.isClosed) setFailedById((m) => ({ ...m, [entryId]: r.msg }));
     } finally {
       setPendingIds((m) => {
         const next = { ...m };
@@ -708,6 +827,7 @@ export default function CategoryReviewPageClient() {
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
                 {visibleRows.filter((e: any) => !e.category_id).length}
               </span>
+              {sugUpdating ? <span className="text-[11px] text-slate-500">Updating…</span> : null}
             </CardTitle>
           </div>
         </CHeader>
@@ -784,7 +904,55 @@ export default function CategoryReviewPageClient() {
 
                           <td className="px-2 text-xs text-slate-700 whitespace-nowrap">{dateYmd}</td>
 
-                          <td className="px-2 text-xs text-slate-900 truncate font-medium">{payee}</td>
+                          <td className="px-2">
+                            <div className="flex flex-col min-w-0">
+                              <div className="text-xs text-slate-900 truncate font-medium">{payee}</div>
+
+                              {(() => {
+                                const memo = String(e.memo ?? "");
+                                const looksNoisy = /[#\d]{2,}|(POS|WEB|ACH|DEBIT|CREDIT)/i.test(payee) && payee.length >= 8;
+                                if (!looksNoisy) return null;
+
+                                const cached = merchantCacheRef.current[id] ?? null;
+
+                                if (merchantErrId === "429") {
+                                  return <div className="mt-0.5 text-[11px] text-amber-700">AI limit reached. Merchant suggestion unavailable.</div>;
+                                }
+
+                                return (
+                                  <div className="mt-0.5 flex items-center gap-2">
+                                    {cached ? (
+                                      <>
+                                        <div className="text-[11px] text-slate-600">
+                                          Merchant detected: <span className="font-semibold text-slate-900">{cached.merchant}</span>
+                                          <span className="text-slate-400"> • {Math.round((cached.confidence || 0) * 100)}%</span>
+                                        </div>
+
+                                        <button
+                                          type="button"
+                                          className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                                          disabled={!!pendingIds[id]}
+                                          onClick={() => void applyMerchant(id, cached.merchant)}
+                                        >
+                                          Apply
+                                        </button>
+                                      </>
+                                    ) : merchantBusyId === id ? (
+                                      <div className="h-3 w-44 rounded bg-slate-200 animate-pulse" />
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="text-[11px] text-slate-600 hover:text-slate-900 underline"
+                                        onClick={() => void getMerchant(id, payee, memo)}
+                                      >
+                                        Detect merchant
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </td>
 
                           <td
                             className={`px-2 text-xs text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
@@ -964,46 +1132,60 @@ export default function CategoryReviewPageClient() {
 
                                     return (
                                       <>
-                                        {top.map((s: any) => {
+                                        {top.map((s: any, idx: number) => {
                                           const catId = String(s?.category_id ?? "");
-                                          const name = String(s?.category_name ?? "—");
+                                          const name = String(
+                                            s?.category_name ??
+                                            categoryNameById[String(s?.category_id ?? "")] ??
+                                            "—"
+                                          );
                                           const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
 
                                           return (
-                                            <button
-                                              key={catId || name}
-                                              type="button"
-                                              className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
-                                              title={String(s?.reason ?? "")}
-                                              disabled={!!pendingIds[id]}
-                                              onClick={async () => {
-                                                if (!catId) return;
+                                            <div key={`${id}:${catId || name}:${idx}`} className="flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
+                                                title={String(s?.reason ?? "")}
+                                                disabled={!!pendingIds[id]}
+                                                onClick={async () => {
+                                                  if (!catId) return;
 
-                                                // Auto-apply immediately (explicit click on suggestion)
-                                                if (!selectedBusinessId || !selectedAccountId) return;
+                                                  // Auto-apply immediately (explicit click on suggestion)
+                                                  if (!selectedBusinessId || !selectedAccountId) return;
 
-                                                // Prevent double-submit
-                                                if (pendingIds[id]) return;
+                                                  // Prevent double-submit
+                                                  if (pendingIds[id]) return;
 
-                                                clearMutErr();
+                                                  clearMutErr();
 
-                                                // Snapshot previous category for undo (session-local)
-                                                const prevCategoryId = e.category_id ? String(e.category_id) : null;
+                                                  // Snapshot previous category for undo (session-local)
+                                                  const prevCategoryId = e.category_id ? String(e.category_id) : null;
 
-                                                try {
-                                                  await applyCategoryToEntry(id, catId);
+                                                  try {
+                                                    await applyCategoryToEntry(id, catId);
 
-                                                  // SUCCESS: mark AI attribution + start undo window (10s)
-                                                  setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                                  setUndoWindow(id, prevCategoryId, catId);
-                                                } catch {
-                                                  // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
-                                                }
-                                              }}
-                                            >
-                                              <span className="font-semibold truncate max-w-[88px]">{name}</span>
-                                              <span className="text-primary">{conf}%</span>
-                                            </button>
+                                                    // SUCCESS: mark AI attribution + start undo window (10s)
+                                                    setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                                    setUndoWindow(id, prevCategoryId, catId);
+                                                  } catch {
+                                                    // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
+                                                  }
+                                                }}
+                                              >
+                                                <span className="font-semibold truncate max-w-[88px]">{name}</span>
+                                                <span className="text-primary">{conf}%</span>
+                                              </button>
+
+                                              <button
+                                                type="button"
+                                                className="h-5 px-1.5 rounded-full border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
+                                                disabled={!!pendingIds[id] || whyBusy}
+                                                onClick={() => void runWhy(id)}
+                                              >
+                                                Why?
+                                              </button>
+                                            </div>
                                           );
                                         })}
 
@@ -1025,6 +1207,40 @@ export default function CategoryReviewPageClient() {
                                       </>
                                     );
                                   })()}
+                                </div>
+                              ) : null}
+                              {whyEntryId === id ? (
+                                <div className="mt-1 w-full rounded-md border border-slate-200 bg-white p-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[11px] font-semibold text-slate-700">Why this suggestion</div>
+                                    <button
+                                      type="button"
+                                      className="text-[11px] text-slate-500 hover:text-slate-900"
+                                      onClick={() => {
+                                        setWhyEntryId(null);
+                                        setWhyText(null);
+                                        setWhyErr(null);
+                                      }}
+                                    >
+                                      Close
+                                    </button>
+                                  </div>
+
+                                  {whyBusy && !whyText ? (
+                                    <div className="mt-2 space-y-2">
+                                      <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
+                                      <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
+                                      <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+                                    </div>
+                                  ) : whyErr ? (
+                                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+                                      {whyErr}
+                                    </div>
+                                  ) : (
+                                    <div className="mt-2 text-[11px] text-slate-700 whitespace-pre-wrap">{whyText ?? ""}</div>
+                                  )}
+
+                                  {whyBusy && whyText ? <div className="mt-1 text-[11px] text-slate-500">Updating…</div> : null}
                                 </div>
                               ) : null}
                             </div>

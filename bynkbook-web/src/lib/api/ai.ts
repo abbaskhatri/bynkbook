@@ -1,5 +1,14 @@
 import { apiFetch } from "./client";
 
+export async function queryGlobalSearch(args: { businessId: string; accountId?: string; q: string; limit?: number }) {
+  const { businessId, accountId, q, limit } = args;
+
+  return apiFetch(`/v1/businesses/${encodeURIComponent(businessId)}/search/query`, {
+    method: "POST",
+    body: JSON.stringify({ q, accountId, limit }),
+  });
+}
+
 export async function getCategorySuggestions(args: {
   businessId: string;
   accountId: string;
@@ -53,11 +62,71 @@ export async function getDashboardInsights(args: { businessId: string; from?: st
   });
 }
 
-export async function queryGlobalSearch(args: { businessId: string; accountId?: string; q: string; limit?: number }) {
-  const { businessId, accountId, q, limit } = args;
-
-  return apiFetch(`/v1/businesses/${encodeURIComponent(businessId)}/search/query`, {
+// ---------- Bundle E AI surfaces (LLM) ----------
+export async function aiExplainEntry(args: { businessId: string; entryId: string }) {
+  const { businessId, entryId } = args;
+  return apiFetch(`/v1/ai/explain-entry`, {
     method: "POST",
-    body: JSON.stringify({ q, accountId, limit }),
+    body: JSON.stringify({ businessId, entryId }),
+  });
+}
+
+export async function aiExplainReport(args: { businessId: string; reportTitle: string; period?: any; summary?: any }) {
+  const { businessId, reportTitle, period, summary } = args;
+  return apiFetch(`/v1/ai/explain-report`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, reportTitle, period, summary }),
+  });
+}
+
+export async function aiSuggestCategory(args: {
+  businessId: string;
+  accountId: string;
+  items: Array<{
+    id: string;
+    date?: string;
+    amount_cents?: string | number;
+    payee_or_name?: string;
+    memo?: string;
+  }>;
+  limitPerItem?: number;
+}) {
+  const { businessId, accountId, items, limitPerItem } = args;
+  return apiFetch(`/v1/ai/suggest-category`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, accountId, items, limitPerItem: limitPerItem ?? 3 }),
+  });
+}
+
+export async function aiChat(args: { businessId: string; question: string; accountId?: string; from?: string; to?: string }) {
+  const { businessId, question, accountId, from, to } = args;
+  return apiFetch(`/v1/ai/chat`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, question, accountId, from, to }),
+  });
+}
+
+export async function aiAnomalies(args: { businessId: string; accountId?: string; from?: string; to?: string }) {
+  const { businessId, accountId, from, to } = args;
+  return apiFetch(`/v1/ai/anomalies`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, accountId, from, to }),
+  });
+}
+
+export async function aiMerchantNormalize(args: { businessId: string; payee: string; memo?: string }) {
+  const { businessId, payee, memo } = args;
+  return apiFetch(`/v1/ai/merchant-normalize`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, payee, memo }),
+  });
+}
+
+// Aggregates-only chat (F4)
+export async function aiChatAggregates(args: { businessId: string; question: string; aggregates: any }) {
+  const { businessId, question, aggregates } = args;
+  return apiFetch(`/v1/ai/chat`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, question, aggregates }),
   });
 }
