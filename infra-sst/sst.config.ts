@@ -485,7 +485,7 @@ const aiHandler = {
     OPENAI_MODEL_SECRET_ID: `${stagePrefix}/openai/model`,
 
     // Usage limits (per business, daily)
-    AI_DAILY_LIMIT: $app.stage === "prod" ? "500" : "200",
+    AI_DAILY_LIMIT: $app.stage === "prod" ? "1000" : "500",
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -536,6 +536,8 @@ api.route(
 api.route("POST /v1/ai/explain-entry", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/ai/explain-report", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/ai/suggest-category", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/ai/suggest-reconcile-bank", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/ai/suggest-reconcile-entry", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/ai/chat", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // Bundle F additions

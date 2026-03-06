@@ -197,7 +197,7 @@ export default function CategoryReviewPageClient() {
 
   const merchantCacheRef = useRef<Record<string, { merchant: string; confidence: number; reason: string }>>({});
   const [merchantBusyId, setMerchantBusyId] = useState<string | null>(null);
-  const [merchantErrId, setMerchantErrId] = useState<string | null>(null);
+  const [merchantErrByEntryId, setMerchantErrByEntryId] = useState<Record<string, "429" | "ERR">>({});
   // Now that entriesQ exists, include it in the banner mapping
   const bannerMsgWithEntries =
     bannerMsg || appErrorMessageOrNull(entriesQ.error) || null;
@@ -390,7 +390,19 @@ export default function CategoryReviewPageClient() {
         res = null;
       }
 
-      if (!res?.ok) {
+      const aiLooksEmpty = (() => {
+        if (!res?.ok) return true;
+        const byId = res?.suggestionsById;
+        if (!byId || typeof byId !== "object") return true;
+
+        for (const it of suggestionTargets) {
+          const arr = byId?.[it.id];
+          if (Array.isArray(arr) && arr.length > 0) return false;
+        }
+        return true;
+      })();
+
+      if (aiLooksEmpty) {
         res = await getCategorySuggestions({
           businessId: selectedBusinessId,
           accountId: selectedAccountId,
@@ -400,10 +412,27 @@ export default function CategoryReviewPageClient() {
       }
 
       const next: Record<string, any[]> = {};
+
       for (const it of suggestionTargets) {
-        const s = res?.suggestionsById?.[it.id] ?? [];
+        let s: any[] = [];
+
+        if (Array.isArray(res?.suggestionsById?.[it.id])) {
+          s = res.suggestionsById[it.id];
+        } else if (Array.isArray(res?.items)) {
+          const hit = res.items.find(
+            (x: any) =>
+              String(x?.id ?? x?.entryId ?? "") === String(it.id)
+          );
+          if (Array.isArray(hit?.suggestions)) s = hit.suggestions;
+        } else if (Array.isArray(res?.suggestions)) {
+          s = res.suggestions.filter(
+            (x: any) => String(x?.entryId ?? x?.id ?? "") === String(it.id)
+          );
+        }
+
         next[it.id] = Array.isArray(s) ? s : [];
       }
+
       return next;
     },
   });
@@ -597,7 +626,11 @@ export default function CategoryReviewPageClient() {
     if (!selectedBusinessId) return null;
 
     setMerchantBusyId(entryId);
-    setMerchantErrId(null);
+    setMerchantErrByEntryId((m) => {
+      const next = { ...m };
+      delete next[entryId];
+      return next;
+    });
 
     try {
       const res: any = await aiMerchantNormalize({ businessId: selectedBusinessId, payee, memo: memo ?? "" });
@@ -613,7 +646,10 @@ export default function CategoryReviewPageClient() {
       return out;
     } catch (e: any) {
       const msg = String(e?.message ?? "Merchant detect failed");
-      setMerchantErrId(msg.includes("429") ? "429" : "ERR");
+      setMerchantErrByEntryId((m) => ({
+        ...m,
+        [entryId]: msg.includes("429") ? "429" : "ERR",
+      }));
       return null;
     } finally {
       setMerchantBusyId(null);
@@ -914,9 +950,14 @@ export default function CategoryReviewPageClient() {
                                 if (!looksNoisy) return null;
 
                                 const cached = merchantCacheRef.current[id] ?? null;
+                                const merchantErr = merchantErrByEntryId[id] ?? null;
 
-                                if (merchantErrId === "429") {
+                                if (merchantErr === "429") {
                                   return <div className="mt-0.5 text-[11px] text-amber-700">AI limit reached. Merchant suggestion unavailable.</div>;
+                                }
+
+                                if (merchantErr === "ERR") {
+                                  return <div className="mt-0.5 text-[11px] text-slate-500">AI merchant suggestion unavailable right now.</div>;
                                 }
 
                                 return (
@@ -1133,10 +1174,11 @@ export default function CategoryReviewPageClient() {
                                     return (
                                       <>
                                         {top.map((s: any, idx: number) => {
-                                          const catId = String(s?.category_id ?? "");
+                                          const catId = String(s?.category_id ?? s?.categoryId ?? "");
                                           const name = String(
                                             s?.category_name ??
-                                            categoryNameById[String(s?.category_id ?? "")] ??
+                                            s?.categoryName ??
+                                            categoryNameById[String(s?.category_id ?? s?.categoryId ?? "")] ??
                                             "—"
                                           );
                                           const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
@@ -1195,14 +1237,22 @@ export default function CategoryReviewPageClient() {
                                             <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
                                           </span>
                                         ) : null}
-                                        {suggestionsQ.error && !list.length ? (
-                                          <button
-                                            type="button"
-                                            className="text-[10px] text-primary hover:underline"
-                                            onClick={() => void suggestionsQ.refetch()}
-                                          >
-                                            Retry
-                                          </button>
+
+                                        {!sugLoading && suggestionsQ.error && !list.length ? (
+                                          <div className="inline-flex items-center gap-2 min-w-0">
+                                            <span className="text-[10px] text-slate-500">AI suggestions unavailable</span>
+                                            <button
+                                              type="button"
+                                              className="text-[10px] text-primary hover:underline"
+                                              onClick={() => void suggestionsQ.refetch()}
+                                            >
+                                              Retry
+                                            </button>
+                                          </div>
+                                        ) : null}
+
+                                        {!sugLoading && !suggestionsQ.error && !list.length ? (
+                                          <span className="text-[10px] text-slate-400">No AI suggestions</span>
                                         ) : null}
                                       </>
                                     );
@@ -1212,7 +1262,7 @@ export default function CategoryReviewPageClient() {
                               {whyEntryId === id ? (
                                 <div className="mt-1 w-full rounded-md border border-slate-200 bg-white p-2">
                                   <div className="flex items-center justify-between gap-2">
-                                    <div className="text-[11px] font-semibold text-slate-700">Why this suggestion</div>
+                                    <div className="text-[11px] font-semibold text-slate-700">AI explanation</div>
                                     <button
                                       type="button"
                                       className="text-[11px] text-slate-500 hover:text-slate-900"

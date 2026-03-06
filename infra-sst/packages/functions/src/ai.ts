@@ -141,6 +141,53 @@ async function openAiText(args: {
   return String(out ?? "").trim();
 }
 
+function parseJsonModelOutput(raw: string) {
+  const txt = String(raw ?? "").trim();
+  const unfenced = txt.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  return safeJsonParse(unfenced) ?? safeJsonParse(txt) ?? {};
+}
+
+function clampConfidence(v: any) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
+}
+
+function shortReason(v: any) {
+  const s = String(v ?? "").replace(/\s+/g, " ").trim();
+  return s.length <= 140 ? s : `${s.slice(0, 137).trim()}...`;
+}
+
+function normalizeReconcileSuggestions(args: {
+  raw: any;
+  allowedIds: Set<string>;
+  idKey: "entryId" | "bankTransactionId";
+}) {
+  const arr = Array.isArray(args.raw?.suggestions) ? args.raw.suggestions : [];
+  const seen = new Set<string>();
+  const out: Array<Record<string, any>> = [];
+
+  for (const item of arr) {
+    const id = String(item?.[args.idKey] ?? "").trim();
+    if (!id) continue;
+    if (!args.allowedIds.has(id)) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    out.push({
+      [args.idKey]: id,
+      confidence: clampConfidence(item?.confidence),
+      reason: shortReason(item?.reason),
+    });
+
+    if (out.length >= 3) break;
+  }
+
+  return out;
+}
+
 // -------------------- handler --------------------
 export async function handler(event: any) {
   const method = (event?.requestContext?.http?.method ?? "").toString().toUpperCase();
@@ -421,6 +468,120 @@ export async function handler(event: any) {
       });
 
       return json(200, { ok: true, suggestionsById, usage: { ...quota, remaining: quota.remaining - 1 } });
+    }
+
+    // /v1/ai/suggest-reconcile-bank
+    if (path.endsWith("/v1/ai/suggest-reconcile-bank")) {
+      const bankTransaction = body.bankTransaction ?? null;
+      const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 12) : [];
+
+      const bankTxnId = String(bankTransaction?.id ?? "").trim();
+      if (!bankTxnId) return json(400, { ok: false, error: "Missing bankTransaction.id" });
+      if (!candidates.length) return json(200, { ok: true, suggestions: [], usage: { ...quota, remaining: quota.remaining - 1 } });
+
+      const shapedBank = {
+        id: bankTxnId,
+        posted_date: String(bankTransaction?.posted_date ?? "").slice(0, 10),
+        amount_cents: Number(bankTransaction?.amount_cents ?? 0),
+        name: String(bankTransaction?.name ?? ""),
+      };
+
+      const shapedCandidates = candidates.map((it: any) => ({
+        entryId: String(it?.entryId ?? "").trim(),
+        date: String(it?.date ?? "").slice(0, 10),
+        amount_cents: Number(it?.amount_cents ?? 0),
+        payee: String(it?.payee ?? ""),
+        amount_delta_cents: Number(it?.amount_delta_cents ?? 0),
+        date_delta_days: Number(it?.date_delta_days ?? 0),
+        text_similarity: Number(it?.text_similarity ?? 0),
+        exact_amount: Boolean(it?.exact_amount),
+        heuristic_score: Number(it?.heuristic_score ?? 0),
+      })).filter((it: any) => it.entryId);
+
+      const allowedIds = new Set<string>(shapedCandidates.map((it: any) => it.entryId));
+      if (!allowedIds.size) return json(200, { ok: true, suggestions: [], usage: { ...quota, remaining: quota.remaining - 1 } });
+
+      const system =
+        "You rerank bookkeeping reconcile candidates. Use ONLY the provided bank transaction and candidate entries. " +
+        "Never invent ids. Never suggest matching actions, posting actions, or mutations. Return JSON only.\n\n" +
+        "Schema:\n" +
+        '{"suggestions":[{"entryId":"...","confidence":0.0,"reason":"short reason"}]}\n' +
+        "Return at most 3 suggestions sorted best-first. Prefer exact amount match, smaller date delta, stronger text similarity, and realistic bookkeeping matches.";
+
+      const user =
+        `Bank transaction:\n${JSON.stringify(shapedBank, null, 2)}\n\n` +
+        `Candidate entries:\n${JSON.stringify(shapedCandidates, null, 2)}`;
+
+      const raw = await openAiText({ model, apiKey, system, user, maxTokens: 420 });
+      const parsed = parseJsonModelOutput(raw);
+      const suggestions = normalizeReconcileSuggestions({ raw: parsed, allowedIds, idKey: "entryId" });
+
+      await logActivity(prisma, {
+        businessId,
+        actorUserId: sub,
+        eventType: "AI_CHAT" as ActivityEventType,
+        payloadJson: { scope: "suggest-reconcile-bank", bankTxnId, count: shapedCandidates.length, model },
+        scopeAccountId: null,
+      });
+
+      return json(200, { ok: true, suggestions, usage: { ...quota, remaining: quota.remaining - 1 } });
+    }
+
+    // /v1/ai/suggest-reconcile-entry
+    if (path.endsWith("/v1/ai/suggest-reconcile-entry")) {
+      const entry = body.entry ?? null;
+      const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 12) : [];
+
+      const entryId = String(entry?.id ?? "").trim();
+      if (!entryId) return json(400, { ok: false, error: "Missing entry.id" });
+      if (!candidates.length) return json(200, { ok: true, suggestions: [], usage: { ...quota, remaining: quota.remaining - 1 } });
+
+      const shapedEntry = {
+        id: entryId,
+        date: String(entry?.date ?? "").slice(0, 10),
+        amount_cents: Number(entry?.amount_cents ?? 0),
+        payee: String(entry?.payee ?? ""),
+      };
+
+      const shapedCandidates = candidates.map((it: any) => ({
+        bankTransactionId: String(it?.bankTransactionId ?? "").trim(),
+        posted_date: String(it?.posted_date ?? "").slice(0, 10),
+        amount_cents: Number(it?.amount_cents ?? 0),
+        name: String(it?.name ?? ""),
+        amount_delta_cents: Number(it?.amount_delta_cents ?? 0),
+        date_delta_days: Number(it?.date_delta_days ?? 0),
+        text_similarity: Number(it?.text_similarity ?? 0),
+        exact_amount: Boolean(it?.exact_amount),
+        heuristic_score: Number(it?.heuristic_score ?? 0),
+      })).filter((it: any) => it.bankTransactionId);
+
+      const allowedIds = new Set<string>(shapedCandidates.map((it: any) => it.bankTransactionId));
+      if (!allowedIds.size) return json(200, { ok: true, suggestions: [], usage: { ...quota, remaining: quota.remaining - 1 } });
+
+      const system =
+        "You rerank bookkeeping reconcile candidates. Use ONLY the provided entry and candidate bank transactions. " +
+        "Never invent ids. Never suggest matching actions, posting actions, or mutations. Return JSON only.\n\n" +
+        "Schema:\n" +
+        '{"suggestions":[{"bankTransactionId":"...","confidence":0.0,"reason":"short reason"}]}\n' +
+        "Return at most 3 suggestions sorted best-first. Prefer exact amount match, smaller date delta, stronger text similarity, and realistic bookkeeping matches.";
+
+      const user =
+        `Entry:\n${JSON.stringify(shapedEntry, null, 2)}\n\n` +
+        `Candidate bank transactions:\n${JSON.stringify(shapedCandidates, null, 2)}`;
+
+      const raw = await openAiText({ model, apiKey, system, user, maxTokens: 420 });
+      const parsed = parseJsonModelOutput(raw);
+      const suggestions = normalizeReconcileSuggestions({ raw: parsed, allowedIds, idKey: "bankTransactionId" });
+
+      await logActivity(prisma, {
+        businessId,
+        actorUserId: sub,
+        eventType: "AI_CHAT" as ActivityEventType,
+        payloadJson: { scope: "suggest-reconcile-entry", entryId, count: shapedCandidates.length, model },
+        scopeAccountId: null,
+      });
+
+      return json(200, { ok: true, suggestions, usage: { ...quota, remaining: quota.remaining - 1 } });
     }
 
     // /v1/ai/chat (F4: aggregates-only; no raw ledger dump)

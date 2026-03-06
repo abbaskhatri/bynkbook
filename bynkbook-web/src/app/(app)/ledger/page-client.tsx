@@ -1599,6 +1599,7 @@ export default function LedgerPageClient() {
 
     if (!ledgerSuggestionTargetIds) {
       setLedgerSugTopByEntryId({});
+      setLedgerSugNotice(null);
       ledgerSugKeyRef.current = "";
       setLedgerSugLoading(false);
       return;
@@ -1619,6 +1620,7 @@ export default function LedgerPageClient() {
     const key = `${selectedBusinessId}|${selectedAccountId}|${ledgerSuggestionTargetIds}`;
     if (!targets.length) {
       setLedgerSugTopByEntryId({});
+      setLedgerSugNotice(null);
       ledgerSugKeyRef.current = "";
       setLedgerSugLoading(false);
       return;
@@ -1630,6 +1632,7 @@ export default function LedgerPageClient() {
 
     (async () => {
       setLedgerSugLoading(true);
+      setLedgerSugNotice(null);
       try {
         const items = targets.map((r: any) => ({
           kind: "ENTRY" as const,
@@ -1671,8 +1674,11 @@ export default function LedgerPageClient() {
         }
 
         if (!cancelled) setLedgerSugTopByEntryId(next);
-      } catch {
-        if (!cancelled) setLedgerSugTopByEntryId({});
+      } catch (e: any) {
+        if (!cancelled) {
+          setLedgerSugTopByEntryId({});
+          setLedgerSugNotice(aiFriendlyMessage(e, "AI suggestions are unavailable right now."));
+        }
       } finally {
         if (!cancelled) setLedgerSugLoading(false);
       }
@@ -1855,12 +1861,14 @@ export default function LedgerPageClient() {
   // Phase F2+: Ledger top-1 category suggestion (batch; no per-row calls)
   const [ledgerSugLoading, setLedgerSugLoading] = useState(false);
   const [ledgerSugTopByEntryId, setLedgerSugTopByEntryId] = useState<Record<string, any>>({});
+  const [ledgerSugNotice, setLedgerSugNotice] = useState<string | null>(null);
   const ledgerSugKeyRef = useRef<string>("");
 
   // Reset suggestion fetch guard on scope changes (prevents stuck "Loading…" after navigation)
   useEffect(() => {
     ledgerSugKeyRef.current = "";
     setLedgerSugLoading(false);
+    setLedgerSugNotice(null);
     // Keep last-good suggestions if we have them; do not clear ledgerSugTopByEntryId here.
   }, [selectedBusinessId, selectedAccountId, ledgerSuggestionTargetIds]);
 
@@ -2040,22 +2048,57 @@ export default function LedgerPageClient() {
     };
   }, [selectedBusinessId]);
 
-  function formatScanLabel(iso: string | null) {
-    if (!iso) return "Never";
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return "Unknown";
-    const diffMs = Date.now() - t;
+function formatScanLabel(iso: string | null) {
+  if (!iso) return "Never";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "Unknown";
+  const diffMs = Date.now() - t;
 
-    const min = Math.floor(diffMs / 60000);
-    if (min < 1) return "Just now";
-    if (min < 60) return `${min}m ago`;
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "Just now";
+  if (min < 60) return `${min}m ago`;
 
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return `${hr}h ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
 
-    const d = Math.floor(hr / 24);
-    return `${d}d ago`;
+  const d = Math.floor(hr / 24);
+  return `${d}d ago`;
+}
+
+function aiFriendlyMessage(err: any, fallback = "AI is unavailable right now.") {
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
+  const raw = String(
+    err?.message ??
+    err?.payload?.message ??
+    err?.response?.data?.message ??
+    ""
+  ).toLowerCase();
+
+  if (
+    status === 429 ||
+    raw.includes("quota") ||
+    raw.includes("rate limit") ||
+    raw.includes("too many requests")
+  ) {
+    return "AI daily limit reached for this business. Try again tomorrow.";
   }
+
+  return fallback;
+}
+
+function scanFriendlyMessage(err: any) {
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
+
+  if (status === 401 || status === 403) {
+    return "Your session expired. Refresh and try again.";
+  }
+
+  if (status === 429) {
+    return "Issue scan is temporarily unavailable. Try again in a little while.";
+  }
+
+  return "Issue scan is unavailable right now.";
+}
 
   // Issues scan (Stage B)
   const [scanBusy, setScanBusy] = useState(false);
@@ -2106,8 +2149,12 @@ export default function LedgerPageClient() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Scan failed: ${res.status} ${text}`);
+        try {
+          await res.text();
+        } catch { }
+        const err: any = new Error("Issue scan failed");
+        err.status = res.status;
+        throw err;
       }
 
       // Targeted refresh: only issues queries for this account (no storms)
@@ -2129,7 +2176,7 @@ export default function LedgerPageClient() {
 
       // No success toast/message (keep UI quiet)
     } catch (e: any) {
-      if (myEpoch === scanEpochRef.current) setErr(e?.message || "Scan failed");
+      if (myEpoch === scanEpochRef.current) setErr(scanFriendlyMessage(e));
     } finally {
       if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
@@ -2158,41 +2205,10 @@ export default function LedgerPageClient() {
   // Edit state (ALL fields)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
-  // Prefetch merchant suggestions in background (bounded; no storms)
+  // Merchant normalization pills are disabled in Ledger.
+  // Keep deterministic vendor linking only to avoid noisy pills and request storms.
   useEffect(() => {
-    if (!selectedBusinessId) return;
-    if (!pageRows || pageRows.length === 0) return;
-
-    let cancelled = false;
-
-    const candidates = pageRows
-      .filter((r: any) => !r.isDeleted && r.id !== "opening_balance")
-      .slice(0, 80)
-      .map((r: any) => ({
-        id: String(r.id),
-        payee: String(r.payee ?? ""),
-        memo: String(((rowModels.find((x) => x.id === r.id) as any)?.memo ?? "")),
-      }))
-      .filter((x) => /[#\d]{2,}|(POS|WEB|ACH|DEBIT|CREDIT)/i.test(x.payee) && x.payee.length >= 8);
-
-    const toFetch = candidates
-      .filter((x) => !merchantCacheRef.current[x.id])
-      .slice(0, 10);
-
-    if (!toFetch.length) return;
-
-    (async () => {
-      for (const c of toFetch) {
-        if (cancelled) return;
-        await getMerchantSuggestion(c.id, c.payee, c.memo);
-        // tiny spacing avoids burst-y feel client-side
-        await new Promise((r) => setTimeout(r, 120));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    return;
   }, [selectedBusinessId, pageRows, rowModels]);
 
   // ---------- Bundle F: AI Explain Entry (read-only) ----------
@@ -3868,38 +3884,7 @@ export default function LedgerPageClient() {
                   </span>
                 ) : null}
 
-                {!deletedRow ? (
-                  (() => {
-                    const id = String(r.id);
-                    const payee = String(r.payee ?? "");
-                    const cached = merchantCacheRef.current[id] ?? null;
-
-                    if (!cached?.merchant) return null;
-
-                    // Only show if confident + meaningfully different
-                    const good = (cached.confidence ?? 0) >= 0.7;
-                    const different = normMerchant(cached.merchant) && normMerchant(cached.merchant) !== normMerchant(payee);
-                    if (!good || !different) return null;
-
-                    return (
-                      <span className="inline-flex h-6 items-center gap-2 rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 shrink-0">
-                        <span className="text-slate-500">Merchant:</span>
-                        <span className="font-semibold text-slate-900">{cached.merchant}</span>
-                        <span className="text-slate-400">{Math.round((cached.confidence || 0) * 100)}%</span>
-
-                        <button
-                          type="button"
-                          className="h-5 px-2 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] hover:bg-primary/15 disabled:opacity-60"
-                          disabled={!!pendingById[id]}
-                          onClick={() => void updateMut.mutateAsync({ entryId: id, updates: { payee: cached.merchant } } as any)}
-                          title="Apply merchant (explicit)"
-                        >
-                          Apply
-                        </button>
-                      </span>
-                    );
-                  })()
-                ) : null}
+                {null}
 
                 {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
               </div>
@@ -4092,11 +4077,28 @@ export default function LedgerPageClient() {
                 {!deletedRow && !r.categoryId ? (
                   (() => {
                     const s = ledgerSugTopByEntryId[r.id] ?? null;
-                    if (!s) return ledgerSugLoading ? (
-                      <span className="inline-flex items-center">
-                        <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
-                      </span>
-                    ) : null;
+                    if (!s) {
+                      if (ledgerSugLoading) {
+                        return (
+                          <span className="inline-flex items-center">
+                            <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
+                          </span>
+                        );
+                      }
+
+                      if (ledgerSugNotice) {
+                        return (
+                          <span
+                            className="h-5 px-2 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] inline-flex items-center shrink-0"
+                            title={ledgerSugNotice}
+                          >
+                            AI unavailable
+                          </span>
+                        );
+                      }
+
+                      return null;
+                    }
 
                     const catId = String(s?.category_id ?? "");
                     const name = String(s?.category_name ?? "—");
@@ -4344,8 +4346,7 @@ export default function LedgerPageClient() {
                                 if (!res?.ok) throw new Error(res?.error || "Explain failed");
                                 setAiExplainLast(String(res.answer ?? ""));
                               } catch (e: any) {
-                                const msg = String(e?.message ?? "Explain failed");
-                                setAiExplainErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
+                                setAiExplainErr(aiFriendlyMessage(e, "AI is unavailable right now."));
                               } finally {
                                 setAiExplainBusy(false);
                               }
@@ -4987,7 +4988,9 @@ export default function LedgerPageClient() {
 
           {aiExplainBusy && aiExplainLast ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
 
-          {aiExplainEntryId ? <div className="text-[11px] text-slate-500">Entry: {aiExplainEntryId}</div> : null}
+          {!aiExplainBusy && !aiExplainErr ? (
+            <div className="text-[11px] text-slate-500">AI guidance only. Review before saving changes.</div>
+          ) : null}
         </div>
       </AppDialog>
 

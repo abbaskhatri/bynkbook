@@ -270,7 +270,29 @@ export function FixIssueDialog(props: {
                       setMergeSurvivorId("");
                       setMergeDuplicateId("");
                     } catch (e: any) {
-                      setErr(e?.message ?? "Merge failed");
+                      const raw = String(e?.message ?? "Merge failed");
+
+                      let payload: any = null;
+                      const m = raw.match(/\{[\s\S]*\}$/);
+                      if (m?.[0]) {
+                        try {
+                          payload = JSON.parse(m[0]);
+                        } catch {
+                          payload = null;
+                        }
+                      }
+
+                      const code = String(payload?.code ?? "").toUpperCase();
+                      const reason = String(payload?.reason ?? "").toUpperCase();
+                      const rawUpper = raw.toUpperCase();
+
+                      if (code === "MERGE_BLOCKED" && reason === "SOURCE_MISMATCH") {
+                        setErr("Merge blocked: these entries have different source linkage. Keep both if they are legitimate, or use Delete/Legitimize instead of Merge.");
+                      } else if (code === "MERGE_BLOCKED" && (reason === "ENTRY_RECONCILED" || rawUpper.includes("RECONCILED"))) {
+                        setErr("Entry is reconciled; merge blocked. Unmatch it first if this is truly a duplicate, otherwise keep both or Legitimize.");
+                      } else {
+                        setErr(String(payload?.error ?? raw ?? "Merge failed"));
+                      }
                     } finally {
                       setBusy(false);
                     }

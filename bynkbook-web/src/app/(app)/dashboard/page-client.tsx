@@ -505,7 +505,7 @@ export default function DashboardPageClient() {
 
       return aiExplainReport({
         businessId: selectedBusinessId as string,
-        reportTitle: "Dashboard summary",
+        reportTitle: "AI Summary",
         period: { mode: range.mode, from: range.from, to: range.to, accountId: accountScopeId ?? "all" },
         summary,
       });
@@ -528,6 +528,28 @@ export default function DashboardPageClient() {
       });
     },
   });
+
+  function dashboardAiMessage(err: any, fallback = "AI is unavailable right now.") {
+    const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
+    const raw = String(
+      err?.message ??
+      err?.payload?.message ??
+      err?.response?.data?.message ??
+      ""
+    ).toLowerCase();
+
+    if (
+      status === 429 ||
+      raw.includes("429") ||
+      raw.includes("quota") ||
+      raw.includes("rate limit") ||
+      raw.includes("too many requests")
+    ) {
+      return "AI daily limit reached for this business. Try again tomorrow.";
+    }
+
+    return fallback;
+  }
 
   const ai429 =
     String((aiNarrativeQ.error as any)?.message ?? "").includes("429") ||
@@ -711,8 +733,7 @@ export default function DashboardPageClient() {
 
       setChatMsgs((m) => [...m, { role: "assistant", text: String(res.answer ?? ""), ts: Date.now() }]);
     } catch (e: any) {
-      const msg = String(e?.message ?? "Chat failed");
-      setChatErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
+      setChatErr(dashboardAiMessage(e, "AI is unavailable right now."));
     } finally {
       setChatBusy(false);
     }
@@ -1722,7 +1743,7 @@ export default function DashboardPageClient() {
             </CardContent>
           </Card>
 
-          {/* AI Insights (Base44 card structure; deterministic for now) */}
+          {/* AI Insights */}
           <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
             <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
               <div className="flex items-center justify-between leading-none">
@@ -1733,7 +1754,7 @@ export default function DashboardPageClient() {
                   <CardTitle className="text-sm font-semibold text-slate-900 leading-none">AI Insights</CardTitle>
                 </div>
 
-                <div className="text-xs text-slate-500 leading-none">Deterministic</div>
+                <div className="text-xs text-slate-500 leading-none">Suggestion-only</div>
               </div>
             </CHeader>
 
@@ -1774,9 +1795,11 @@ export default function DashboardPageClient() {
         </CHeader>
 
         <CardContent className="space-y-2">
+          <div className="text-[11px] text-slate-500">Read-only guidance based on dashboard totals and trends.</div>
+
           {ai429 ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              AI daily limit reached for this business. Try again tomorrow.
+              {dashboardAiMessage(aiNarrativeQ.error)}
             </div>
           ) : aiNarrativeQ.isLoading && !aiNarrativeQ.data ? (
             <div className="space-y-2">
@@ -1787,7 +1810,7 @@ export default function DashboardPageClient() {
           ) : aiNarrativeQ.data?.ok ? (
             <div className="text-sm text-slate-700 whitespace-pre-wrap">{String(aiNarrativeQ.data.answer ?? "")}</div>
           ) : (
-            <div className="text-sm text-slate-600">AI summary is unavailable right now.</div>
+            <div className="text-sm text-slate-600">{dashboardAiMessage(aiNarrativeQ.error, "AI summary is unavailable right now.")}</div>
           )}
         </CardContent>
       </Card>
@@ -1826,17 +1849,17 @@ export default function DashboardPageClient() {
               ))}
             </div>
           ) : (
-            <div className="text-sm text-slate-600">No anomalies detected in the current range.</div>
+            <div className="text-sm text-slate-600">No unusual transactions detected in the current range.</div>
           )}
         </CardContent>
       </Card>
 
-            {/* Ask Your Business (aggregates-only; read-only) */}
+            {/* Ask AI (aggregates-only; read-only) */}
       <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
         <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-emerald-600" />
-            <CardTitle className="text-sm">Ask your business</CardTitle>
+            <CardTitle className="text-sm">Ask AI</CardTitle>
           </div>
           {chatBusy ? <div className="text-[11px] text-slate-500">Thinking…</div> : null}
         </CHeader>
@@ -1851,7 +1874,7 @@ export default function DashboardPageClient() {
           <div className="rounded-md border border-slate-200 bg-white p-2 h-44 overflow-auto space-y-2">
             {chatMsgs.length === 0 ? (
               <div className="text-sm text-slate-600">
-                Ask questions about cash flow, income/expenses, trends, and top categories.
+                Ask about cash flow, income and expenses, trends, or top categories. AI answers are read-only and based on the current dashboard range.
               </div>
             ) : (
               chatMsgs.map((m, i) => (
@@ -1869,7 +1892,7 @@ export default function DashboardPageClient() {
             <input
               value={chatQ}
               onChange={(e) => setChatQ(e.target.value)}
-              placeholder="Ask: Why did net income change?"
+              placeholder="Ask AI: Why did net income change?"
               className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-200"
               disabled={chatBusy}
               onKeyDown={(e) => {
@@ -1880,7 +1903,7 @@ export default function DashboardPageClient() {
               }}
             />
             <Button className="h-9 px-3" disabled={chatBusy || !chatQ.trim()} onClick={() => void sendChat()}>
-              Ask
+              Ask AI
             </Button>
           </div>
 

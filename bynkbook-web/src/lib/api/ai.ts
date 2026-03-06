@@ -98,6 +98,60 @@ export async function aiSuggestCategory(args: {
   });
 }
 
+export async function aiSuggestReconcileBank(args: {
+  businessId: string;
+  bankTransaction: {
+    id: string;
+    posted_date?: string;
+    amount_cents?: string | number;
+    name?: string;
+  };
+  candidates: Array<{
+    entryId: string;
+    date?: string;
+    amount_cents?: string | number;
+    payee?: string;
+    amount_delta_cents?: string | number;
+    date_delta_days?: number;
+    text_similarity?: number;
+    exact_amount?: boolean;
+    heuristic_score?: number;
+  }>;
+}) {
+  const { businessId, bankTransaction, candidates } = args;
+  return apiFetch(`/v1/ai/suggest-reconcile-bank`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, bankTransaction, candidates }),
+  });
+}
+
+export async function aiSuggestReconcileEntry(args: {
+  businessId: string;
+  entry: {
+    id: string;
+    date?: string;
+    amount_cents?: string | number;
+    payee?: string;
+  };
+  candidates: Array<{
+    bankTransactionId: string;
+    posted_date?: string;
+    amount_cents?: string | number;
+    name?: string;
+    amount_delta_cents?: string | number;
+    date_delta_days?: number;
+    text_similarity?: number;
+    exact_amount?: boolean;
+    heuristic_score?: number;
+  }>;
+}) {
+  const { businessId, entry, candidates } = args;
+  return apiFetch(`/v1/ai/suggest-reconcile-entry`, {
+    method: "POST",
+    body: JSON.stringify({ businessId, entry, candidates }),
+  });
+}
+
 export async function aiChat(args: { businessId: string; question: string; accountId?: string; from?: string; to?: string }) {
   const { businessId, question, accountId, from, to } = args;
   return apiFetch(`/v1/ai/chat`, {

@@ -50,6 +50,7 @@ import {
   type ReconcileSnapshot,
 } from "@/lib/api/reconcileSnapshots";
 import { getTeam } from "@/lib/api/team";
+import { aiSuggestReconcileBank, aiSuggestReconcileEntry } from "@/lib/api/ai";
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
 import { AutoReconcileDialog } from "@/components/reconcile/auto-reconcile-dialog";
@@ -213,6 +214,50 @@ function scoreBankCandidate(entry: any, bank: any) {
     overlap,
     exactAmount: diff === 0n,
   };
+}
+
+type ReconcileBankSuggestion = {
+  entryId: string;
+  confidence: number;
+  reason: string;
+};
+
+type ReconcileEntrySuggestion = {
+  bankTransactionId: string;
+  confidence: number;
+  reason: string;
+};
+
+function pctConfidence(v: number) {
+  const n = Math.round(Math.max(0, Math.min(1, Number(v) || 0)) * 100);
+  return `${n}%`;
+}
+
+function aiUiMessage(err: any, fallback = "AI suggestions are unavailable right now.") {
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
+  const raw = String(
+    err?.message ??
+    err?.payload?.message ??
+    err?.response?.data?.message ??
+    ""
+  ).toLowerCase();
+
+  if (
+    status === 429 ||
+    raw.includes("quota") ||
+    raw.includes("rate limit") ||
+    raw.includes("too many requests")
+  ) {
+    return "AI quota reached. Try again in a little while.";
+  }
+
+  return fallback;
+}
+
+function truncateAiReason(reason: string, max = 120) {
+  const s = String(reason ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
 }
 
 export default function ReconcilePageClient() {
@@ -640,6 +685,8 @@ export default function ReconcilePageClient() {
   const [matchBusy, setMatchBusy] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
   const [matchSuggestLoading, setMatchSuggestLoading] = useState(false);
+  const [matchAiSuggestions, setMatchAiSuggestions] = useState<ReconcileBankSuggestion[]>([]);
+  const [matchSuggestError, setMatchSuggestError] = useState<string | null>(null);
 
   // Phase 4D: Adjustment dialog
   const [openAdjust, setOpenAdjust] = useState(false);
@@ -656,6 +703,8 @@ export default function ReconcilePageClient() {
   const [entryMatchBusy, setEntryMatchBusy] = useState(false);
   const [entryMatchError, setEntryMatchError] = useState<string | null>(null);
   const [entrySuggestLoading, setEntrySuggestLoading] = useState(false);
+  const [entryAiSuggestions, setEntryAiSuggestions] = useState<ReconcileEntrySuggestion[]>([]);
+  const [entrySuggestError, setEntrySuggestError] = useState<string | null>(null);
 
   // Hide adjusted entries locally (until we refetch entries with adjustment status)
   const [locallyAdjusted, setLocallyAdjusted] = useState<Set<string>>(() => new Set());
@@ -1209,6 +1258,182 @@ export default function ReconcilePageClient() {
     }
     return m;
   }, [bankTxSorted, activeGroupByBankTxnId]);
+
+    function buildBankAiCandidates(bank: any) {
+    const bankAmt = toBigIntSafe(bank?.amount_cents);
+    const bankSign = bankAmt < 0n ? -1n : 1n;
+
+    return allEntriesSorted
+      .filter((e: any) => {
+        if (matchByEntryId.has(e.id)) return false;
+        const entryAmt = toBigIntSafe(e.amount_cents);
+        const entrySign = entryAmt < 0n ? -1n : 1n;
+        return entrySign === bankSign;
+      })
+      .map((e: any) => {
+        const meta = scoreEntryCandidate(bank, e);
+        return {
+          e,
+          meta,
+          payload: {
+            entryId: String(e.id),
+            date: String(e.date ?? "").slice(0, 10),
+            amount_cents: String(e.amount_cents ?? 0),
+            payee: String(e.payee ?? ""),
+            amount_delta_cents: meta.diff.toString(),
+            date_delta_days: meta.dtDays,
+            text_similarity: meta.overlap,
+            exact_amount: meta.exactAmount,
+            heuristic_score: meta.score,
+          },
+        };
+      })
+      .sort((a: any, b: any) => a.meta.score - b.meta.score)
+      .slice(0, 12);
+  }
+
+  function buildEntryAiCandidates(entry: any) {
+    const entryAmt = toBigIntSafe(entry.amount_cents);
+    const entrySign = entryAmt < 0n ? -1n : 1n;
+
+    return bankTxSorted
+      .filter((t: any) => {
+        const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+        if (remaining <= 0n) return false;
+
+        const bankAmt = toBigIntSafe(t.amount_cents);
+        const bankSign = bankAmt < 0n ? -1n : 1n;
+        return bankSign === entrySign;
+      })
+      .map((t: any) => {
+        const meta = scoreBankCandidate(entry, t);
+        return {
+          t,
+          meta,
+          payload: {
+            bankTransactionId: String(t.id),
+            posted_date: String(t.posted_date ?? "").slice(0, 10),
+            amount_cents: String(t.amount_cents ?? 0),
+            name: String(t.name ?? ""),
+            amount_delta_cents: meta.diff.toString(),
+            date_delta_days: meta.dtDays,
+            text_similarity: meta.overlap,
+            exact_amount: meta.exactAmount,
+            heuristic_score: meta.score,
+          },
+        };
+      })
+      .sort((a: any, b: any) => a.meta.score - b.meta.score)
+      .slice(0, 12);
+  }
+
+  async function runAiSuggestForBank(bank: any) {
+    if (!selectedBusinessId) return;
+
+    setMatchAiSuggestions([]);
+    setMatchSuggestError(null);
+    setMatchSuggestLoading(true);
+
+    try {
+      const ranked = buildBankAiCandidates(bank);
+      const best = ranked[0]?.e ?? null;
+
+      if (!ranked.length) {
+        setMatchSelectedEntryIds(new Set());
+        setMatchAiSuggestions([]);
+        return;
+      }
+
+      const res: any = await aiSuggestReconcileBank({
+        businessId: selectedBusinessId,
+        bankTransaction: {
+          id: String(bank.id),
+          posted_date: String(bank.posted_date ?? "").slice(0, 10),
+          amount_cents: String(bank.amount_cents ?? 0),
+          name: String(bank.name ?? ""),
+        },
+        candidates: ranked.map((x: any) => x.payload),
+      });
+
+      const suggestions = Array.isArray(res?.suggestions) ? res.suggestions.slice(0, 3) : [];
+      setMatchAiSuggestions(suggestions);
+
+      const selectedId = String(suggestions[0]?.entryId ?? best?.id ?? "").trim();
+      setMatchSelectedEntryIds(() => {
+        const s = new Set<string>();
+        if (selectedId) s.add(selectedId);
+        return s;
+      });
+    } catch (e: any) {
+      setMatchSuggestError(
+        aiUiMessage(e, "AI suggestions are unavailable right now. Review the top candidates below.")
+      );
+      const ranked = buildBankAiCandidates(bank);
+      const best = ranked[0]?.e ?? null;
+      setMatchAiSuggestions([]);
+      setMatchSelectedEntryIds(() => {
+        const s = new Set<string>();
+        if (best?.id) s.add(String(best.id));
+        return s;
+      });
+    } finally {
+      setMatchSuggestLoading(false);
+    }
+  }
+
+  async function runAiSuggestForEntry(entry: any) {
+    if (!selectedBusinessId) return;
+
+    setEntryAiSuggestions([]);
+    setEntrySuggestError(null);
+    setEntrySuggestLoading(true);
+
+    try {
+      const ranked = buildEntryAiCandidates(entry);
+      const best = ranked[0]?.t ?? null;
+
+      if (!ranked.length) {
+        setEntryMatchSelectedBankTxnIds(new Set());
+        setEntryAiSuggestions([]);
+        return;
+      }
+
+      const res: any = await aiSuggestReconcileEntry({
+        businessId: selectedBusinessId,
+        entry: {
+          id: String(entry.id),
+          date: String(entry.date ?? "").slice(0, 10),
+          amount_cents: String(entry.amount_cents ?? 0),
+          payee: String(entry.payee ?? ""),
+        },
+        candidates: ranked.map((x: any) => x.payload),
+      });
+
+      const suggestions = Array.isArray(res?.suggestions) ? res.suggestions.slice(0, 3) : [];
+      setEntryAiSuggestions(suggestions);
+
+      const selectedId = String(suggestions[0]?.bankTransactionId ?? best?.id ?? "").trim();
+      setEntryMatchSelectedBankTxnIds(() => {
+        const s = new Set<string>();
+        if (selectedId) s.add(selectedId);
+        return s;
+      });
+    } catch (e: any) {
+      setEntrySuggestError(
+        aiUiMessage(e, "AI suggestions are unavailable right now. Review the top candidates below.")
+      );
+      const ranked = buildEntryAiCandidates(entry);
+      const best = ranked[0]?.t ?? null;
+      setEntryAiSuggestions([]);
+      setEntryMatchSelectedBankTxnIds(() => {
+        const s = new Set<string>();
+        if (best?.id) s.add(String(best.id));
+        return s;
+      });
+    } finally {
+      setEntrySuggestLoading(false);
+    }
+  }
 
   // -------------------------
   // -------------------------
@@ -1853,16 +2078,16 @@ export default function ReconcilePageClient() {
               ? (reconcileWriteReason ?? noPermTitle)
               : bankUnmatchedList.length === 0
                 ? "No unmatched bank transactions"
-                : entriesExpectedList.length === 0
+              : entriesExpectedList.length === 0
                   ? "No expected entries"
-                  : "Generate deterministic suggestions"
+                  : "Review AI suggestions"
           }
           onClick={() => {
             if (!canWriteReconcileEffective) return;
             setOpenAutoReconcile(true);
           }}
         >
-          <Sparkles className="h-3.5 w-3.5" /> AI auto-reconcile
+          <Sparkles className="h-3.5 w-3.5" /> AI suggestions
         </button>
       </HintWrap>
 
@@ -2632,6 +2857,8 @@ export default function ReconcilePageClient() {
                                         setEntryMatchSelectedBankTxnIds(new Set());
                                         setEntryMatchSearch("");
                                         setEntryMatchError(null);
+                                        setEntryAiSuggestions([]);
+                                        setEntrySuggestError(null);
                                         setOpenEntryMatch(true);
                                       }}
                                     >
@@ -2643,42 +2870,18 @@ export default function ReconcilePageClient() {
                                       type="button"
                                       className={`h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "AI suggest bank match" : (reconcileWriteReason ?? noPermTitle)}
-                                      aria-label="AI suggest bank match"
+                                      title={canWriteReconcileEffective ? "AI suggestions" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="AI suggestions"
                                       onClick={() => {
                                         if (!canWriteReconcileEffective) return;
                                         setEntryMatchEntryId(e.id);
                                         setEntryMatchSelectedBankTxnIds(new Set());
                                         setEntryMatchSearch("");
                                         setEntryMatchError(null);
-                                        setEntrySuggestLoading(true);
+                                        setEntryAiSuggestions([]);
+                                        setEntrySuggestError(null);
                                         setOpenEntryMatch(true);
-
-                                        setTimeout(() => {
-                                          const entryAmt = toBigIntSafe(e.amount_cents);
-                                          const entrySign = entryAmt < 0n ? -1n : 1n;
-
-                                          const ranked = bankTxSorted
-                                            .filter((t: any) => {
-                                              const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
-                                              if (remaining <= 0n) return false;
-
-                                              const bankAmt = toBigIntSafe(t.amount_cents);
-                                              const bankSign = bankAmt < 0n ? -1n : 1n;
-                                              return bankSign === entrySign;
-                                            })
-                                            .map((t: any) => ({ t, meta: scoreBankCandidate(e, t) }))
-                                            .sort((a: any, b: any) => a.meta.score - b.meta.score);
-
-                                          const best = ranked[0]?.t ?? null;
-
-                                          setEntryMatchSelectedBankTxnIds(() => {
-                                            const s = new Set<string>();
-                                            if (best?.id) s.add(String(best.id));
-                                            return s;
-                                          });
-                                          setEntrySuggestLoading(false);
-                                        }, 120);
+                                        void runAiSuggestForEntry(e);
                                       }}
                                     >
                                       <Sparkles className="h-3.5 w-3.5 text-slate-700" />
@@ -3090,42 +3293,8 @@ export default function ReconcilePageClient() {
                                         setMatchSearch("");
                                         setMatchSelectedEntryIds(new Set());
                                         setMatchError(null);
-
-                                        const bankAmt = toBigIntSafe(t.amount_cents);
-                                        const bankAbs = absBig(bankAmt);
-                                        const bankSign = bankAmt < 0n ? -1n : 1n;
-                                        const bankDateYmd = isoToYmd(t.posted_date);
-                                        const bankTime = bankDateYmd ? ymdToTime(bankDateYmd) : 0;
-
-                                        const eligible = allEntriesSorted.filter((e: any) => {
-                                          if (matchByEntryId.has(e.id)) return false;
-                                          const entryAmt = toBigIntSafe(e.amount_cents);
-                                          const entrySign = entryAmt < 0n ? -1n : 1n;
-                                          if (entrySign !== bankSign) return false;
-                                          return true;
-                                        });
-
-                                        let bestId: string | null = null;
-                                        let bestScore = Number.POSITIVE_INFINITY;
-
-                                        for (const e of eligible) {
-                                          const entryAmt = toBigIntSafe(e.amount_cents);
-                                          const entryAbs = absBig(entryAmt);
-                                          const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-                                          const dt = bankTime ? Math.abs(ymdToTime(e.date) - bankTime) : 0;
-                                          const score = Number(diff) * 1_000_000 + dt;
-                                          if (score < bestScore) {
-                                            bestScore = score;
-                                            bestId = e.id;
-                                          }
-                                        }
-
-                                        setMatchSelectedEntryIds(() => {
-                                          const s = new Set<string>();
-                                          if (bestId) s.add(bestId);
-                                          return s;
-                                        });
-
+                                        setMatchAiSuggestions([]);
+                                        setMatchSuggestError(null);
                                         setOpenMatch(true);
                                       }}
                                     >
@@ -3138,40 +3307,18 @@ export default function ReconcilePageClient() {
                                       type="button"
                                       className={`h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "AI suggest match" : (reconcileWriteReason ?? noPermTitle)}
-                                      aria-label="AI suggest match"
+                                      title={canWriteReconcileEffective ? "AI suggestions" : (reconcileWriteReason ?? noPermTitle)}
+                                      aria-label="AI suggestions"
                                       onClick={() => {
                                         if (!canWriteReconcileEffective) return;
                                         setMatchBankTxnId(t.id);
                                         setMatchSearch("");
                                         setMatchSelectedEntryIds(new Set());
                                         setMatchError(null);
-                                        setMatchSuggestLoading(true);
+                                        setMatchAiSuggestions([]);
+                                        setMatchSuggestError(null);
                                         setOpenMatch(true);
-
-                                        setTimeout(() => {
-                                          const bankAmt = toBigIntSafe(t.amount_cents);
-                                          const bankSign = bankAmt < 0n ? -1n : 1n;
-
-                                          const ranked = allEntriesSorted
-                                            .filter((e: any) => {
-                                              if (matchByEntryId.has(e.id)) return false;
-                                              const entryAmt = toBigIntSafe(e.amount_cents);
-                                              const entrySign = entryAmt < 0n ? -1n : 1n;
-                                              return entrySign === bankSign;
-                                            })
-                                            .map((e: any) => ({ e, meta: scoreEntryCandidate(t, e) }))
-                                            .sort((a: any, b: any) => a.meta.score - b.meta.score);
-
-                                          const best = ranked[0]?.e ?? null;
-
-                                          setMatchSelectedEntryIds(() => {
-                                            const s = new Set<string>();
-                                            if (best?.id) s.add(best.id);
-                                            return s;
-                                          });
-                                          setMatchSuggestLoading(false);
-                                        }, 120);
+                                        void runAiSuggestForBank(t);
                                       }}
                                     >
                                       <Sparkles className="h-3.5 w-3.5 text-slate-700" />
@@ -3595,6 +3742,8 @@ export default function ReconcilePageClient() {
           setMatchSelectedEntryIds(new Set());
           setMatchBankTxnId(null);
           setMatchSuggestLoading(false);
+          setMatchAiSuggestions([]);
+          setMatchSuggestError(null);
         }}
         title="Match bank transaction"
         size="lg"
@@ -3712,11 +3861,16 @@ export default function ReconcilePageClient() {
                           });
                         }
 
-                        await refreshBankAndMatches({ preserveOnEmpty: true });
-                        await entriesQ.refetch?.();
-
                         clearMutErr();
                         setOpenMatch(false);
+                        setMatchBankTxnId(null);
+                        setMatchSearch("");
+                        setMatchSelectedEntryIds(new Set());
+                        setMatchAiSuggestions([]);
+                        setMatchSuggestError(null);
+
+                        void refreshBankAndMatches({ preserveOnEmpty: true });
+                        void entriesQ.refetch?.();
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t match transactions");
                         if (!r.isClosed) setMatchError(r.msg);
@@ -3796,20 +3950,20 @@ export default function ReconcilePageClient() {
 
             {matchError ? <div className="text-xs text-red-700 mb-2">{matchError}</div> : null}
 
-            {/* AI suggested (deterministic; amount first, then date, then text) */}
+            {/* AI suggestions (LLM rerank on deterministic candidate gate; full-match only) */}
             {(() => {
-              const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
+              const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
               if (!bank) return null;
 
-              const bankAmt = toBigIntSafe(bank.amount_cents);
-              const bankSign = bankAmt < 0n ? -1n : 1n;
               const q = matchSearch.trim().toLowerCase();
 
               const ranked = allEntriesSorted
                 .filter((e: any) => {
                   if (matchByEntryId.has(e.id)) return false;
                   const entryAmt = toBigIntSafe(e.amount_cents);
+                  const bankAmt = toBigIntSafe(bank.amount_cents);
                   const entrySign = entryAmt < 0n ? -1n : 1n;
+                  const bankSign = bankAmt < 0n ? -1n : 1n;
                   if (entrySign !== bankSign) return false;
 
                   if (!q) return true;
@@ -3824,7 +3978,7 @@ export default function ReconcilePageClient() {
               if (matchSuggestLoading) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggested</div>
+                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggestions</div>
                     <div className="space-y-2">
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
@@ -3833,20 +3987,48 @@ export default function ReconcilePageClient() {
                 );
               }
 
-              if (ranked.length === 0) return null;
+              const aiRows = matchAiSuggestions
+                .map((s) => {
+                  const e = allEntriesSorted.find((row: any) => String(row.id) === String(s.entryId));
+                  if (!e) return null;
+                  return { e, meta: scoreEntryCandidate(bank, e), ai: s };
+                })
+                .filter(Boolean) as Array<{ e: any; meta: any; ai: ReconcileBankSuggestion }>;
+
+              const rows = aiRows.length > 0 ? aiRows : ranked.map(({ e, meta }: any) => ({ e, meta, ai: null }));
+
+              if (rows.length === 0) {
+                return (
+                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      No eligible suggestions found for this bank transaction.
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-slate-600">AI suggested</div>
-                    <div className="text-[11px] text-slate-500">Deterministic • full-match only</div>
+                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="text-[11px] text-slate-500">LLM rerank • full-match only</div>
                   </div>
 
+                  {matchSuggestError ? (
+                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+                      {matchSuggestError}
+                    </div>
+                  ) : null}
+
                   <div className="mt-2 flex flex-col gap-1">
-                    {ranked.map(({ e, meta }: any, idx: number) => {
+                    {rows.map(({ e, meta, ai }, idx: number) => {
                       const amt = toBigIntSafe(e.amount_cents);
                       const selected = matchSelectedEntryIds.has(e.id);
-                      const reason = `Amount Δ ${formatUsdFromCents(meta.diff)} • Δdays ${meta.dtDays} • Text similarity ${meta.overlap}`;
+                      const rankLabel = idx === 0 ? "Best match" : `${idx + 1} Alternative`;
+                      const fullReason =
+                        ai?.reason || `Amount Δ ${formatUsdFromCents(meta.diff)} • Δdays ${meta.dtDays} • Text similarity ${meta.overlap}`;
+                      const reason = truncateAiReason(fullReason);
 
                       return (
                         <button
@@ -3856,20 +4038,21 @@ export default function ReconcilePageClient() {
                           onClick={() => {
                             setMatchSelectedEntryIds(() => {
                               const s = new Set<string>();
-                              s.add(e.id);
+                              s.add(String(e.id));
                               return s;
                             });
                           }}
-                          title="Use suggested entry"
+                          title={fullReason}
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">
-                              {idx === 0 ? "Best match • " : ""}{e.payee}
-                            </span>
-                            <span className="truncate text-[11px] text-slate-500">{reason}</span>
+                            <span className="truncate text-xs font-medium text-slate-800">{rankLabel} • {e.payee}</span>
+                            <span className="truncate max-w-[340px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
                           </span>
-                          <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
-                            {formatUsdFromCents(amt)}
+                          <span className="shrink-0 flex items-center gap-2">
+                            {ai ? <span className="text-[11px] font-medium text-slate-500">{pctConfidence(ai.confidence)}</span> : null}
+                            <span className={`text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
+                              {formatUsdFromCents(amt)}
+                            </span>
                           </span>
                         </button>
                       );
@@ -4062,6 +4245,9 @@ export default function ReconcilePageClient() {
           setEntryMatchSearch("");
           setEntryMatchEntryId(null);
           setEntryMatchSelectedBankTxnIds(new Set());
+          setEntrySuggestLoading(false);
+          setEntryAiSuggestions([]);
+          setEntrySuggestError(null);
         }}
         title="Match entry"
         size="lg"
@@ -4176,11 +4362,16 @@ export default function ReconcilePageClient() {
                           });
                         }
 
-                        await refreshBankAndMatches({ preserveOnEmpty: true });
-                        await entriesQ.refetch?.();
-
                         clearMutErr();
                         setOpenEntryMatch(false);
+                        setEntryMatchEntryId(null);
+                        setEntryMatchSearch("");
+                        setEntryMatchSelectedBankTxnIds(new Set());
+                        setEntryAiSuggestions([]);
+                        setEntrySuggestError(null);
+
+                        void refreshBankAndMatches({ preserveOnEmpty: true });
+                        void entriesQ.refetch?.();
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t create match");
                         if (!r.isClosed) setEntryMatchError(r.msg);
@@ -4217,13 +4408,11 @@ export default function ReconcilePageClient() {
 
             {entryMatchError ? <div className="text-xs text-red-700 mb-2">{entryMatchError}</div> : null}
 
-            {/* AI suggested bank txns */}
+            {/* AI suggestions */}
             {(() => {
               const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
               if (!entry) return null;
 
-              const entryAmt = toBigIntSafe(entry.amount_cents);
-              const entrySign = entryAmt < 0n ? -1n : 1n;
               const q = entryMatchSearch.trim().toLowerCase();
 
               const ranked = bankTxSorted
@@ -4232,7 +4421,9 @@ export default function ReconcilePageClient() {
                   if (remaining <= 0n) return false;
 
                   const bankAmt = toBigIntSafe(t.amount_cents);
+                  const entryAmt = toBigIntSafe(entry.amount_cents);
                   const bankSign = bankAmt < 0n ? -1n : 1n;
+                  const entrySign = entryAmt < 0n ? -1n : 1n;
                   if (bankSign !== entrySign) return false;
 
                   if (!q) return true;
@@ -4247,7 +4438,7 @@ export default function ReconcilePageClient() {
               if (entrySuggestLoading) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggested</div>
+                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggestions</div>
                     <div className="space-y-2">
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
@@ -4256,20 +4447,48 @@ export default function ReconcilePageClient() {
                 );
               }
 
-              if (ranked.length === 0) return null;
+              const aiRows = entryAiSuggestions
+                .map((s) => {
+                  const t = bankTxSorted.find((row: any) => String(row.id) === String(s.bankTransactionId));
+                  if (!t) return null;
+                  return { t, meta: scoreBankCandidate(entry, t), ai: s };
+                })
+                .filter(Boolean) as Array<{ t: any; meta: any; ai: ReconcileEntrySuggestion }>;
+
+              const rows = aiRows.length > 0 ? aiRows : ranked.map(({ t, meta }: any) => ({ t, meta, ai: null }));
+
+              if (rows.length === 0) {
+                return (
+                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      No eligible suggestions found for this entry.
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-slate-600">AI suggested</div>
-                    <div className="text-[11px] text-slate-500">Deterministic • full-match only</div>
+                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="text-[11px] text-slate-500">LLM rerank • full-match only</div>
                   </div>
 
+                  {entrySuggestError ? (
+                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+                      {entrySuggestError}
+                    </div>
+                  ) : null}
+
                   <div className="mt-2 flex flex-col gap-1">
-                    {ranked.map(({ t, meta }: any, idx: number) => {
+                    {rows.map(({ t, meta, ai }, idx: number) => {
                       const amt = toBigIntSafe(t.amount_cents);
                       const selected = entryMatchSelectedBankTxnIds.has(String(t.id));
-                      const reason = `Amount Δ ${formatUsdFromCents(meta.diff)} • Δdays ${meta.dtDays} • Text similarity ${meta.overlap}`;
+                      const rankLabel = idx === 0 ? "Best match" : `${idx + 1} Alternative`;
+                      const fullReason =
+                        ai?.reason || `Amount Δ ${formatUsdFromCents(meta.diff)} • Δdays ${meta.dtDays} • Text similarity ${meta.overlap}`;
+                      const reason = truncateAiReason(fullReason);
 
                       return (
                         <button
@@ -4283,16 +4502,17 @@ export default function ReconcilePageClient() {
                               return s;
                             });
                           }}
-                          title="Use suggested bank transaction"
+                          title={fullReason}
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">
-                              {idx === 0 ? "Best match • " : ""}{t.name}
-                            </span>
-                            <span className="truncate text-[11px] text-slate-500">{reason}</span>
+                            <span className="truncate text-xs font-medium text-slate-800">{rankLabel} • {t.name}</span>
+                            <span className="truncate max-w-[340px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
                           </span>
-                          <span className={`shrink-0 text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
-                            {formatUsdFromCents(amt)}
+                          <span className="shrink-0 flex items-center gap-2">
+                            {ai ? <span className="text-[11px] font-medium text-slate-500">{pctConfidence(ai.confidence)}</span> : null}
+                            <span className={`text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
+                              {formatUsdFromCents(amt)}
+                            </span>
                           </span>
                         </button>
                       );
