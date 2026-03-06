@@ -45,6 +45,17 @@ function formatUsdAccountingFromCents(raw: unknown) {
   return neg ? `(${core})` : core;
 }
 
+function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function todayYmd() {
   const d = new Date();
   const y = d.getFullYear();
@@ -496,6 +507,13 @@ export default function CategoryReviewPageClient() {
   const [pendingIds, setPendingIds] = useState<Record<string, boolean>>({});
   const [failedById, setFailedById] = useState<Record<string, string>>({});
 
+  const tableUpdating =
+    (entriesQ.isFetching && !!(entriesQ.data ?? []).length) ||
+    sugUpdating ||
+    whyBusy ||
+    applyBusy ||
+    Object.keys(pendingIds).length > 0;
+
   // F7a (session-local): AI attribution + undo (suggestion-pill applies only; dropdown does NOT set AI)
   const [aiAppliedById, setAiAppliedById] = useState<Record<string, boolean>>({});
   const [undoByEntryId, setUndoByEntryId] = useState<
@@ -880,8 +898,10 @@ export default function CategoryReviewPageClient() {
           ) : visibleRows.length === 0 ? (
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <LedgerTableShell scrollMode="visible"
+            <div className="relative rounded-lg border border-slate-200 overflow-hidden">
+              {tableUpdating ? <UpdatingOverlay /> : null}
+              <div className={tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}>
+                <LedgerTableShell scrollMode="visible"
                 colgroup={
                   <>
                     <col style={{ width: 36 }} />
@@ -1302,6 +1322,7 @@ export default function CategoryReviewPageClient() {
                 }
                 footer={null}
               />
+              </div>
             </div>
           )}
 

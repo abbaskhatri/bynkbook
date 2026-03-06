@@ -121,6 +121,17 @@ async function apiFetchWithRetry(path: string, init: any, retries: number = 1) {
   }
 }
 
+function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center rounded-xl bg-white/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function presetRange(preset: string) {
   const now = new Date();
   if (preset === "this_week") return { from: ymd(startOfWeekUTC(now)), to: ymd(endOfWeekUTC(now)) };
@@ -256,6 +267,9 @@ export default function VendorDetailPageClient() {
 
   const [billsLoading, setBillsLoading] = useState(false);
 
+  const summaryUpdating = loading && !!vendor;
+  const apUpdating = loading && (!!apSummary || bills.length > 0 || vendorPayments.length > 0);
+
   const [billDialogOpen, setBillDialogOpen] = useState(false);
   const [billEditId, setBillEditId] = useState<string | null>(null);
   const [billInvoiceDate, setBillInvoiceDate] = useState(todayYmd());
@@ -292,6 +306,7 @@ export default function VendorDetailPageClient() {
 
   const [invoiceUploads, setInvoiceUploads] = useState<any[]>([]);
   const [uploadsLoading, setUploadsLoading] = useState(false);
+  const uploadsUpdating = loading && invoiceUploads.length > 0;
 
   // Statement dialog
   const [statementOpen, setStatementOpen] = useState(false);
@@ -593,7 +608,7 @@ export default function VendorDetailPageClient() {
                 <button
                   type="button"
                   className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
-                  disabled={!businessId}
+                  disabled={!businessId || loading}
                   onClick={() => {
                     if (!businessId) return;
 
@@ -639,7 +654,7 @@ export default function VendorDetailPageClient() {
                 <button
                   type="button"
                   className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
-                  disabled={!canWrite}
+                  disabled={!canWrite || loading}
                   title={!canWrite ? "Insufficient permissions" : "Edit vendor"}
                   onClick={() => setEditOpen(true)}
                 >
@@ -685,7 +700,9 @@ export default function VendorDetailPageClient() {
         </div>
       </div>
 
-      <Card>
+      <Card className="relative">
+        {summaryUpdating ? <UpdatingOverlay /> : null}
+        <div className={summaryUpdating ? "pointer-events-none select-none blur-[1px]" : ""}>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Basic info</CardTitle>
         </CardHeader>
@@ -708,9 +725,12 @@ export default function VendorDetailPageClient() {
             <div className="text-sm text-slate-600">Vendor not loaded.</div>
           )}
         </CardContent>
+        </div>
       </Card>
 
-      <Card>
+      <Card className="relative">
+        {apUpdating ? <UpdatingOverlay /> : null}
+        <div className={apUpdating ? "pointer-events-none select-none blur-[1px]" : ""}>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1112,14 +1132,16 @@ export default function VendorDetailPageClient() {
             </div>
           )}
         </CardContent>
+        </div>
       </Card>
 
       <div className="space-y-2">
 
-        <Card>
-
+      <Card className="relative">
+        {uploadsUpdating ? <UpdatingOverlay /> : null}
+        <div className={uploadsUpdating ? "pointer-events-none select-none blur-[1px]" : ""}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Invoice uploads</CardTitle>
+            <CardTitle className="text-sm">Invoices</CardTitle>
           </CardHeader>
 
           <CardContent>
@@ -1188,7 +1210,8 @@ export default function VendorDetailPageClient() {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </div>
+      </Card>
 
         <UploadPanel
           open={openUpload}

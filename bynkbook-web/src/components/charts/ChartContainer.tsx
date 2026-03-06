@@ -111,6 +111,12 @@ export function ChartContainer({
     children,
 }: ChartContainerProps) {
     const h = HEIGHT_PX[height];
+    const [responsiveReady, setResponsiveReady] = React.useState(false);
+
+    React.useEffect(() => {
+        const id = window.requestAnimationFrame(() => setResponsiveReady(true));
+        return () => window.cancelAnimationFrame(id);
+    }, []);
 
     return (
         <Card className={`rounded-[10px] border border-slate-200 shadow-sm ${motionFast}`}>
@@ -147,9 +153,13 @@ export function ChartContainer({
                     </div>
                 ) : (
                     <div style={{ height: h, minWidth: 0, minHeight: 0 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                            {children as any}
-                        </ResponsiveContainer>
+                        {responsiveReady ? (
+                            <ResponsiveContainer width="99%" height="99%">
+                                {children as any}
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-full w-full rounded-md bg-slate-50" />
+                        )}
                     </div>
                 )}
             </CardContent>

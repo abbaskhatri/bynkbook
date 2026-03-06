@@ -43,6 +43,7 @@ import {
 import { listCategories, createCategory, type CategoryRow } from "@/lib/api/categories";
 import { getCategorySuggestions } from "@/lib/api/ai";
 import { aiSuggestCategory } from "@/lib/api/ai";
+import { listClosedPeriods } from "@/lib/api/closedPeriods";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
 import { getBusinessIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
 import { listMatchGroups } from "@/lib/api/match-groups";
@@ -89,6 +90,8 @@ import {
   Check,
   X,
   BookOpen,
+  Lock,
+  RefreshCw,
 } from "lucide-react";
 
 // ================================
@@ -678,6 +681,17 @@ function uiMethodLabel(m: UiMethod): string {
   return "Other";
 }
 
+function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 // ================================
 // SECTION: Component
 // ================================
@@ -927,7 +941,49 @@ export default function LedgerPageClient() {
   // Filters + toggle
   const [searchPayee, setSearchPayee] = useState("");
   const [debouncedPayee, setDebouncedPayee] = useState("");
+  const deletedToggleKey = useMemo(() => {
+    if (!selectedBusinessId || !selectedAccountId) return "";
+    return `bynkbook:ledger:showDeleted:${selectedBusinessId}:${selectedAccountId}`;
+  }, [selectedBusinessId, selectedAccountId]);
+
   const [showDeleted, setShowDeleted] = useState(false);
+
+  useEffect(() => {
+    if (!deletedToggleKey) return;
+    try {
+      setShowDeleted(localStorage.getItem(deletedToggleKey) === "1");
+    } catch { }
+  }, [deletedToggleKey]);
+
+  useEffect(() => {
+    if (!deletedToggleKey) return;
+    try {
+      localStorage.setItem(deletedToggleKey, showDeleted ? "1" : "0");
+    } catch { }
+  }, [deletedToggleKey, showDeleted]);
+
+  const [closedThroughDate, setClosedThroughDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedBusinessId) {
+      setClosedThroughDate(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res: any = await listClosedPeriods(selectedBusinessId);
+        if (!cancelled) setClosedThroughDate(String(res?.closed_through_date ?? "") || null);
+      } catch {
+        if (!cancelled) setClosedThroughDate(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId]);
 
   // Advanced filters (UI-only; local filtering on cached rows)
   const [filterType, setFilterType] = useState<"ALL" | UiType>("ALL");
@@ -1186,6 +1242,12 @@ export default function LedgerPageClient() {
     return list;
   }, [entriesSorted, openingEntry]);
 
+    const entryById = useMemo(() => {
+    const m = new Map<string, Entry>();
+    for (const e of entriesWithOpening) m.set(String(e.id), e);
+    return m;
+  }, [entriesWithOpening]);
+
   useEffect(() => {
     if (!selectedBusinessId) return;
     // One refresh on navigation / business scope change (prevents stale category list)
@@ -1366,10 +1428,16 @@ export default function LedgerPageClient() {
 
         hasAdjustment: hasAdjustmentByEntryId.get(String(e.id)) ?? false,
         isDeleted,
+        isClosedPeriod:
+          !!closedThroughDate &&
+          String(e.id) !== "opening_balance" &&
+          !isDeleted &&
+          String(e.date ?? "").slice(0, 10) !== "" &&
+          String(e.date ?? "").slice(0, 10) <= closedThroughDate,
         canDelete: e.id !== "opening_balance",
       };
     });
-  }, [entriesWithOpening, openingBalanceCents]);
+  }, [entriesWithOpening, openingBalanceCents, closedThroughDate]);
 
   // Header "Uncategorized" chip count (Stage A attention indicator; instant, no backend calls).
   // NOTE: Visibility only; Category Review page is the workflow destination.
@@ -1598,8 +1666,6 @@ export default function LedgerPageClient() {
     if (!selectedBusinessId || !selectedAccountId) return;
 
     if (!ledgerSuggestionTargetIds) {
-      setLedgerSugTopByEntryId({});
-      setLedgerSugNotice(null);
       ledgerSugKeyRef.current = "";
       setLedgerSugLoading(false);
       return;
@@ -1619,8 +1685,6 @@ export default function LedgerPageClient() {
 
     const key = `${selectedBusinessId}|${selectedAccountId}|${ledgerSuggestionTargetIds}`;
     if (!targets.length) {
-      setLedgerSugTopByEntryId({});
-      setLedgerSugNotice(null);
       ledgerSugKeyRef.current = "";
       setLedgerSugLoading(false);
       return;
@@ -1633,38 +1697,26 @@ export default function LedgerPageClient() {
     (async () => {
       setLedgerSugLoading(true);
       setLedgerSugNotice(null);
-      try {
-        const items = targets.map((r: any) => ({
+
+      const items = targets.map((r: any) => {
+        const raw = entryById.get(String(r.id));
+        return {
           kind: "ENTRY" as const,
           id: String(r.id),
           date: String(r.date ?? "").slice(0, 10),
           amount_cents: r.amountCents,
           payee_or_name: String(r.payee ?? ""),
-          memo: "", // memo not in rowModels; keep blank (still works with payee history)
-        }));
+          memo: String(raw?.memo ?? "").trim(),
+        };
+      });
 
-        // LLM-first (Bundle F). Fallback to heuristic endpoint if unavailable.
-        let res: any = null;
-
-        try {
-          res = await aiSuggestCategory({
-            businessId: selectedBusinessId,
-            accountId: selectedAccountId,
-            items,
-            limitPerItem: 1,
-          });
-        } catch {
-          res = null;
-        }
-
-        if (!res?.ok) {
-          res = await getCategorySuggestions({
-            businessId: selectedBusinessId,
-            accountId: selectedAccountId,
-            items,
-            limitPerItem: 1,
-          });
-        }
+      try {
+        const res: any = await getCategorySuggestions({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          items,
+          limitPerItem: 1,
+        });
 
         const next: Record<string, any> = {};
         for (const it of items) {
@@ -1673,11 +1725,22 @@ export default function LedgerPageClient() {
           if (top) next[it.id] = top;
         }
 
-        if (!cancelled) setLedgerSugTopByEntryId(next);
+        if (!cancelled) {
+          setLedgerSugTopByEntryId((prev) => ({ ...prev, ...next }));
+          setLedgerSugTriedByEntryId((prev) => {
+            const done = { ...prev };
+            for (const it of items) done[String(it.id)] = true;
+            return done;
+          });
+        }
       } catch (e: any) {
         if (!cancelled) {
-          setLedgerSugTopByEntryId({});
           setLedgerSugNotice(aiFriendlyMessage(e, "AI suggestions are unavailable right now."));
+          setLedgerSugTriedByEntryId((prev) => {
+            const done = { ...prev };
+            for (const it of items) done[String(it.id)] = true;
+            return done;
+          });
         }
       } finally {
         if (!cancelled) setLedgerSugLoading(false);
@@ -1687,7 +1750,7 @@ export default function LedgerPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBusinessId, selectedAccountId, ledgerSuggestionTargetIds]);
+  }, [selectedBusinessId, selectedAccountId, ledgerSuggestionTargetIds, entryById]);
 
   // ================================
   // WYSIWYG footer totals (current visible rows only)
@@ -1861,6 +1924,7 @@ export default function LedgerPageClient() {
   // Phase F2+: Ledger top-1 category suggestion (batch; no per-row calls)
   const [ledgerSugLoading, setLedgerSugLoading] = useState(false);
   const [ledgerSugTopByEntryId, setLedgerSugTopByEntryId] = useState<Record<string, any>>({});
+  const [ledgerSugTriedByEntryId, setLedgerSugTriedByEntryId] = useState<Record<string, boolean>>({});
   const [ledgerSugNotice, setLedgerSugNotice] = useState<string | null>(null);
   const ledgerSugKeyRef = useRef<string>("");
 
@@ -2048,57 +2112,57 @@ export default function LedgerPageClient() {
     };
   }, [selectedBusinessId]);
 
-function formatScanLabel(iso: string | null) {
-  if (!iso) return "Never";
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "Unknown";
-  const diffMs = Date.now() - t;
+  function formatScanLabel(iso: string | null) {
+    if (!iso) return "Never";
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return "Unknown";
+    const diffMs = Date.now() - t;
 
-  const min = Math.floor(diffMs / 60000);
-  if (min < 1) return "Just now";
-  if (min < 60) return `${min}m ago`;
+    const min = Math.floor(diffMs / 60000);
+    if (min < 1) return "Just now";
+    if (min < 60) return `${min}m ago`;
 
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
 
-  const d = Math.floor(hr / 24);
-  return `${d}d ago`;
-}
-
-function aiFriendlyMessage(err: any, fallback = "AI is unavailable right now.") {
-  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
-  const raw = String(
-    err?.message ??
-    err?.payload?.message ??
-    err?.response?.data?.message ??
-    ""
-  ).toLowerCase();
-
-  if (
-    status === 429 ||
-    raw.includes("quota") ||
-    raw.includes("rate limit") ||
-    raw.includes("too many requests")
-  ) {
-    return "AI daily limit reached for this business. Try again tomorrow.";
+    const d = Math.floor(hr / 24);
+    return `${d}d ago`;
   }
 
-  return fallback;
-}
+  function aiFriendlyMessage(err: any, fallback = "AI is unavailable right now.") {
+    const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
+    const raw = String(
+      err?.message ??
+      err?.payload?.message ??
+      err?.response?.data?.message ??
+      ""
+    ).toLowerCase();
 
-function scanFriendlyMessage(err: any) {
-  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
+    if (
+      status === 429 ||
+      raw.includes("quota") ||
+      raw.includes("rate limit") ||
+      raw.includes("too many requests")
+    ) {
+      return "AI daily limit reached for this business. Try again tomorrow.";
+    }
 
-  if (status === 401 || status === 403) {
-    return "Your session expired. Refresh and try again.";
+    return fallback;
   }
 
-  if (status === 429) {
-    return "Issue scan is temporarily unavailable. Try again in a little while.";
-  }
+  function scanFriendlyMessage(err: any) {
+    const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
 
-  return "Issue scan is unavailable right now.";
-}
+    if (status === 401 || status === 403) {
+      return "Your session expired. Refresh and try again.";
+    }
+
+    if (status === 429) {
+      return "Issue scan is temporarily unavailable. Try again in a little while.";
+    }
+
+    return "Issue scan is unavailable right now.";
+  }
 
   // Issues scan (Stage B)
   const [scanBusy, setScanBusy] = useState(false);
@@ -3532,6 +3596,17 @@ function scanFriendlyMessage(err: any) {
   const [quickCatBusy, setQuickCatBusy] = useState(false);
   const [quickCatErr, setQuickCatErr] = useState<string | null>(null);
 
+  const ledgerUpdating =
+    (entriesQ.isFetching && !!(entriesQ.data ?? []).length) ||
+    createMut.isPending ||
+    updateMut.isPending ||
+    deleteMut.isPending ||
+    restoreMut.isPending ||
+    hardDeleteMut.isPending ||
+    bulkDeleteMut.isPending ||
+    quickCatBusy ||
+    scanBusy;
+
   const cancelQuickCat = () => {
     setQuickCatEntryId(null);
     setQuickCatValue("");
@@ -3618,14 +3693,19 @@ function scanFriendlyMessage(err: any) {
       const deletedRow = r.isDeleted;
       const deletedText = deletedRow ? "line-through" : "";
 
+      const rowTone =
+        deletedRow
+          ? "!bg-slate-50 text-slate-400 "
+          : r.isClosedPeriod
+            ? "!bg-emerald-50 hover:!bg-emerald-50 "
+            : r.hasDup
+              ? "!bg-yellow-50 hover:!bg-yellow-100 "
+              : r.hasStale
+                ? "!bg-blue-50 hover:!bg-blue-100 "
+                : "hover:bg-slate-50 ";
+
       const rowClass =
-        "min-h-[24px] border-b border-slate-200 bg-white " +
-        (deletedRow ? "bg-slate-50 text-slate-400 " : "") +
-        (!deletedRow && r.hasDup
-          ? "bg-yellow-50 hover:bg-yellow-100 "
-          : !deletedRow && r.hasStale
-            ? "bg-blue-50 hover:bg-blue-100 "
-            : "hover:bg-slate-50");
+        "min-h-[24px] border-b border-slate-200 bg-white " + rowTone;
 
       const onEditKeyDown = (e: any) => {
         if (e.key === "Escape") cancelEdit();
@@ -3689,7 +3769,8 @@ function scanFriendlyMessage(err: any) {
                 />
               </div>
             ) : (
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1 min-w-0">
+                {null}
                 <span
                   className={"font-medium " + deletedText + " min-w-0 whitespace-normal break-words leading-tight"}
                   title={r.payee}
@@ -4078,7 +4159,9 @@ function scanFriendlyMessage(err: any) {
                   (() => {
                     const s = ledgerSugTopByEntryId[r.id] ?? null;
                     if (!s) {
-                      if (ledgerSugLoading) {
+                      const tried = !!ledgerSugTriedByEntryId[r.id];
+
+                      if (ledgerSugLoading && !tried) {
                         return (
                           <span className="inline-flex items-center">
                             <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
@@ -4088,16 +4171,39 @@ function scanFriendlyMessage(err: any) {
 
                       if (ledgerSugNotice) {
                         return (
-                          <span
-                            className="h-5 px-2 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] inline-flex items-center shrink-0"
+                          <button
+                            type="button"
+                            className="h-5 px-2 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] inline-flex items-center shrink-0 hover:bg-slate-100"
                             title={ledgerSugNotice}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setQuickCatEntryId(r.id);
+                              setQuickCatValue("");
+                              setQuickCatErr(null);
+                              setQuickCatBusy(false);
+                            }}
                           >
-                            AI unavailable
-                          </span>
+                            Choose category
+                          </button>
                         );
                       }
 
-                      return null;
+                      return (
+                        <button
+                          type="button"
+                          className="h-5 px-2 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] inline-flex items-center shrink-0 hover:bg-slate-100"
+                          title="Choose category"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setQuickCatEntryId(r.id);
+                            setQuickCatValue("");
+                            setQuickCatErr(null);
+                            setQuickCatBusy(false);
+                          }}
+                        >
+                          Choose category
+                        </button>
+                      );
                     }
 
                     const catId = String(s?.category_id ?? "");
@@ -4468,7 +4574,37 @@ function scanFriendlyMessage(err: any) {
         </tr>
       );
     });
-  }, [pageRows, menuOpenId, editingId, editDraft, selectedIds, editedIds, editTypeOpen, editMethodOpen, showDeleted]);
+  }, [
+    pageRows,
+    menuOpenId,
+    editingId,
+    editDraft,
+    selectedIds,
+    editedIds,
+    editTypeOpen,
+    editMethodOpen,
+    showDeleted,
+    rowModels,
+    selectedBusinessId,
+    selectedAccountId,
+    linkedVendorByEntryId,
+    bestVendorForPayee,
+    pendingById,
+    quickCatEntryId,
+    quickCatValue,
+    quickCatBusy,
+    quickCatErr,
+    aiAppliedById,
+    undoByEntryId,
+    ledgerSugTopByEntryId,
+    ledgerSugTriedByEntryId,
+    ledgerSugLoading,
+    ledgerSugNotice,
+    apTotalsByEntryId,
+    deletingId,
+    deleteMut.isPending,
+    categoryOptions,
+  ]);
 
   // Auth handled by AppShell
 

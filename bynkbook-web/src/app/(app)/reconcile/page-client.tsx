@@ -59,6 +59,17 @@ function TinySpinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />;
 }
 
+function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function getApiBaseFromEnv(): string {
   const v =
     (process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -258,6 +269,30 @@ function truncateAiReason(reason: string, max = 120) {
   const s = String(reason ?? "").replace(/\s+/g, " ").trim();
   if (!s) return "";
   return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+}
+
+function bankSignature(items: any[]): string {
+  const count = Array.isArray(items) ? items.length : 0;
+  let newest = "";
+  for (const t of items ?? []) {
+    const d = String(t?.posted_date ?? "");
+    if (d && d > newest) newest = d;
+  }
+  return `${count}|${newest}`;
+}
+
+function matchGroupSignature(items: any[]): string {
+  const active = (items ?? [])
+    .filter((g: any) => String(g?.status ?? "").toUpperCase() === "ACTIVE")
+    .map((g: any) => String(g?.id ?? ""))
+    .filter(Boolean)
+    .sort();
+  return active.join("|");
+}
+
+function entriesSignature(items: any[]): string {
+  const arr = Array.isArray(items) ? items : [];
+  return String(arr.length);
 }
 
 export default function ReconcilePageClient() {
@@ -559,7 +594,7 @@ export default function ReconcilePageClient() {
 
   // B2: Bulk create entries from selected bank txns (unmatched tab)
   const [selectedBankTxnIds, setSelectedBankTxnIds] = useState<Set<string>>(new Set());
-  const [bulkCreateAutoMatch, setBulkCreateAutoMatch] = useState(false);
+  const [bulkCreateAutoMatch, setBulkCreateAutoMatch] = useState(true);
   const [bulkCreateResultByBankTxnId, setBulkCreateResultByBankTxnId] = useState<Record<string, any>>({});
   const [bulkCreateBusy, setBulkCreateBusy] = useState(false);
 
@@ -750,8 +785,10 @@ export default function ReconcilePageClient() {
     return max;
   }
 
-  async function refreshBankAndMatches(opts?: { preserveOnEmpty?: boolean }) {
-    if (!selectedBusinessId || !selectedAccountId) return { bank: [] as any[], matches: [] as any[] };
+  async function refreshBankAndMatches(opts?: { preserveOnEmpty?: boolean; skipLegacyMatches?: boolean }) {
+    if (!selectedBusinessId || !selectedAccountId) {
+      return { bank: [] as any[], matches: [] as any[], matchGroups: [] as any[] };
+    }
 
     // Coalesce refresh calls:
     // - If a refresh is already running, queue ONE follow-up refresh (latest opts wins)
@@ -765,6 +802,7 @@ export default function ReconcilePageClient() {
 
     let bankItems: any[] = [];
     let matchItems: any[] = [];
+    let matchGroupItems: any[] = [];
 
     const run = (async () => {
       // -------------------------
@@ -799,16 +837,19 @@ export default function ReconcilePageClient() {
 
       // -------------------------
       // Legacy matches (read-only, used for export/history fallback)
+      // Skip during bounded settle retries to avoid extra post-sync churn.
       // -------------------------
-      if (myEpoch === refreshEpochRef.current) setMatchesLoading(true);
-      try {
-        const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-        matchItems = m?.items ?? [];
-        if (myEpoch === refreshEpochRef.current) setMatches(matchItems);
-      } catch {
-        if (myEpoch === refreshEpochRef.current) setMatches([]);
-      } finally {
-        if (myEpoch === refreshEpochRef.current) setMatchesLoading(false);
+      if (!opts?.skipLegacyMatches) {
+        if (myEpoch === refreshEpochRef.current) setMatchesLoading(true);
+        try {
+          const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
+          matchItems = m?.items ?? [];
+          if (myEpoch === refreshEpochRef.current) setMatches(matchItems);
+        } catch {
+          if (myEpoch === refreshEpochRef.current) setMatches([]);
+        } finally {
+          if (myEpoch === refreshEpochRef.current) setMatchesLoading(false);
+        }
       }
 
       // -------------------------
@@ -821,14 +862,16 @@ export default function ReconcilePageClient() {
           accountId: selectedAccountId,
           status: "all", // needed for History (includes voided groups)
         });
-        if (myEpoch === refreshEpochRef.current) setMatchGroups(mg?.items ?? []);
+        matchGroupItems = mg?.items ?? [];
+        if (myEpoch === refreshEpochRef.current) setMatchGroups(matchGroupItems);
       } catch {
         if (myEpoch === refreshEpochRef.current) setMatchGroups([]);
+        matchGroupItems = [];
       } finally {
         if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(false);
       }
 
-      return { bank: bankItems, matches: matchItems };
+      return { bank: bankItems, matches: matchItems, matchGroups: matchGroupItems };
     })();
 
     refreshInFlightRef.current = run;
@@ -868,71 +911,126 @@ export default function ReconcilePageClient() {
 
     if (postConnectRefreshTimerRef.current) clearTimeout(postConnectRefreshTimerRef.current);
 
-    const baselineCount = bankTxLenRef.current;
-    const baselineNewest = newestPostedDate(bankTx);
+    const baselineBankSig = bankSignature(bankTx);
+    const baselineGroupSig = matchGroupSignature(matchGroups);
+    const baselineEntriesSig = entriesSignature(entriesQ.data ?? []);
 
-    const schedule = [0, 1500, 3000, 6000]; // bounded backoff (max 4 pulls)
+    const schedule = [0, 1200, 2500]; // bounded backoff (max 3 pulls including immediate)
     let stopped = false;
 
-    const tick = async (i: number) => {
-      if (stopped) return;
+    await new Promise<void>((resolve) => {
+      const tick = async (i: number) => {
+        if (stopped) {
+          resolve();
+          return;
+        }
 
-      const { bank } = await refreshBankAndMatches({ preserveOnEmpty: true, ...(opts ?? {}) } as any);
+        const { bank, matchGroups: nextGroups } = await refreshBankAndMatches({
+          preserveOnEmpty: true,
+          skipLegacyMatches: true,
+          ...(opts ?? {}),
+        } as any);
+
+        const entriesRes: any = await entriesQ.refetch?.();
+        const nextEntries = entriesRes?.data ?? entriesQ.data ?? [];
+
+        const nextBankSig = bankSignature(Array.isArray(bank) ? bank : []);
+        const nextGroupSig = matchGroupSignature(Array.isArray(nextGroups) ? nextGroups : []);
+        const nextEntriesSig = entriesSignature(Array.isArray(nextEntries) ? nextEntries : []);
+
+        // Stop early once any visible reconcile surface changed
+        if (
+          nextBankSig !== baselineBankSig ||
+          nextGroupSig !== baselineGroupSig ||
+          nextEntriesSig !== baselineEntriesSig
+        ) {
+          stopped = true;
+          resolve();
+          return;
+        }
+
+        if (i + 1 >= schedule.length) {
+          resolve();
+          return;
+        }
+
+        postConnectRefreshTimerRef.current = setTimeout(() => {
+          void tick(i + 1);
+        }, schedule[i + 1]);
+      };
+
+      void tick(0);
+    });
+  }
+
+  async function refreshTablesFully(opts?: { preserveOnEmpty?: boolean }) {
+    setRefreshBusy(true);
+    try {
+      await refreshBankAndMatches({ preserveOnEmpty: true, ...(opts ?? {}) });
       await entriesQ.refetch?.();
+      await runBoundedPostSyncRefresh({ preserveOnEmpty: true, ...(opts ?? {}) });
 
-      const nextCount = Array.isArray(bank) ? bank.length : 0;
-      const nextNewest = newestPostedDate(Array.isArray(bank) ? bank : []);
-
-      // Stop early once bank list changes (count OR newest posted_date)
-      if (nextCount !== baselineCount || (nextNewest && nextNewest !== baselineNewest)) {
-        stopped = true;
-        return;
+      // Critical: ensure Ledger page refetches without manual refresh.
+      // Ledger uses react-query cache keyed by ["entries", businessId, accountId, ...]
+      if (selectedBusinessId && selectedAccountId) {
+        void qc.invalidateQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) &&
+            q.queryKey[0] === "entries" &&
+            q.queryKey[1] === selectedBusinessId &&
+            q.queryKey[2] === selectedAccountId,
+        });
       }
-
-      if (i + 1 >= schedule.length) return;
-
-      postConnectRefreshTimerRef.current = setTimeout(() => {
-        void tick(i + 1);
-      }, schedule[i + 1]);
-    };
-
-    // immediate tick (0ms), then backoff sequence
-    void tick(0);
+    } finally {
+      setRefreshBusy(false);
+    }
   }
 
   function refreshAllDebounced() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    refreshTimerRef.current = setTimeout(async () => {
-      setRefreshBusy(true);
-      try {
-        await refreshBankAndMatches();
-        await entriesQ.refetch?.();
-
-        // Critical: ensure Ledger page refetches without manual refresh.
-        // Ledger uses react-query cache keyed by ["entries", businessId, accountId, ...]
-        if (selectedBusinessId && selectedAccountId) {
-          void qc.invalidateQueries({
-            predicate: (q) =>
-              Array.isArray(q.queryKey) &&
-              q.queryKey[0] === "entries" &&
-              q.queryKey[1] === selectedBusinessId &&
-              q.queryKey[2] === selectedAccountId,
-          });
-        }
-      } finally {
-        setRefreshBusy(false);
-      }
+    refreshTimerRef.current = setTimeout(() => {
+      void refreshTablesFully({ preserveOnEmpty: true });
     }, 150);
   }
+
+    useEffect(() => {
+    const onLedgerRefresh = () => {
+      void refreshTablesFully({ preserveOnEmpty: true });
+    };
+
+    window.addEventListener("bynk:ledger-refresh", onLedgerRefresh as any);
+    return () => window.removeEventListener("bynk:ledger-refresh", onLedgerRefresh as any);
+  }, [selectedBusinessId, selectedAccountId]);
 
   // Create-entry busy state per bank txn (instant UX)
   const [createEntryBusyByBankId, setCreateEntryBusyByBankId] = useState<Record<string, boolean>>({});
   const [createEntryErr, setCreateEntryErr] = useState<string | null>(null);
 
+  const createEntryBusy = useMemo(
+    () => Object.values(createEntryBusyByBankId).some(Boolean),
+    [createEntryBusyByBankId]
+  );
+
+  const bankUpdating =
+    plaidSyncing ||
+    refreshBusy ||
+    matchBusy ||
+    bulkCreateBusy ||
+    createEntryBusy ||
+    bankTxLoading;
+
+  const entriesUpdating =
+    plaidSyncing ||
+    refreshBusy ||
+    matchBusy ||
+    bulkCreateBusy ||
+    createEntryBusy ||
+    entriesQ.isFetching;
+
   // Create-entry confirmation dialog
   const [openCreateEntry, setOpenCreateEntry] = useState(false);
   const [createEntryBankTxnId, setCreateEntryBankTxnId] = useState<string | null>(null);
-  const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(false);
+  const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(true);
 
   // Overrides
   const [createEntryMemo, setCreateEntryMemo] = useState("");
@@ -2300,7 +2398,7 @@ export default function ReconcilePageClient() {
           onClose={() => {
             setOpenCreateEntry(false);
             setCreateEntryBankTxnId(null);
-            setCreateEntryAutoMatch(false);
+            setCreateEntryAutoMatch(true);
           }}
           title="Create entry"
           size="md"
@@ -2362,8 +2460,7 @@ export default function ReconcilePageClient() {
                             category_id: createEntryCategoryId.trim() || "",
                           });
 
-                          await refreshBankAndMatches({ preserveOnEmpty: true });
-                          await entriesQ.refetch?.();
+                          await refreshTablesFully({ preserveOnEmpty: true });
 
                           clearMutErr();
                           setOpenCreateEntry(false);
@@ -2469,7 +2566,7 @@ export default function ReconcilePageClient() {
                                     key={id || name}
                                     type="button"
                                     className={[
-                                      "h-6 px-2 rounded-full border text-[11px] inline-flex items-center gap-2",
+                                      "h-7 px-2.5 rounded-full border text-[11px] inline-flex items-center gap-2",
                                       selected
                                         ? "border-primary/20 bg-primary/10 text-primary"
                                         : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
@@ -2482,21 +2579,24 @@ export default function ReconcilePageClient() {
                                       setCategoryQuery("");
                                     }}
                                   >
-                                    <span className="font-medium truncate max-w-[160px]">{name}</span>
-                                    <span className={selected ? "text-primary" : "text-slate-500"}>{conf}%</span>
+                                    <span className="font-medium truncate max-w-[150px]">{name}</span>
+                                    <span
+                                      className={[
+                                        "inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-semibold",
+                                        selected ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600",
+                                      ].join(" ")}
+                                    >
+                                      {conf}%
+                                    </span>
                                   </button>
                                 );
                               })}
                             </div>
 
-                            <div className="text-[11px] text-slate-500">
-                              {String(createEntrySuggestions?.[0]?.reason ?? "").trim() ? (
-                                <span title={String(createEntrySuggestions?.[0]?.reason ?? "")}>
-                                  Why: {String(createEntrySuggestions?.[0]?.reason ?? "")}
-                                </span>
-                              ) : (
-                                <span>Why: Based on your history</span>
-                              )}
+                            <div className="text-[11px] text-slate-500 truncate" title={String(createEntrySuggestions?.[0]?.reason ?? "Based on your history")}>
+                              {String(createEntrySuggestions?.[0]?.reason ?? "").trim()
+                                ? `AI reason: ${String(createEntrySuggestions?.[0]?.reason ?? "")}`
+                                : "AI reason: Based on your history"}
                             </div>
                           </div>
                         ) : createEntrySugErr ? (
@@ -2713,9 +2813,7 @@ export default function ReconcilePageClient() {
                           return next;
                         });
 
-                        // One refresh only (no storms)
-                        await refreshBankAndMatches({ preserveOnEmpty: true });
-                        await entriesQ.refetch?.();
+                        await refreshTablesFully({ preserveOnEmpty: true });
 
                         // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
                         setSelectedBankTxnIds((prev) => {
@@ -2747,8 +2845,9 @@ export default function ReconcilePageClient() {
 
           <div className="h-px bg-slate-200" />
 
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+          <div className="relative flex-1 min-h-0 overflow-hidden">
+            {entriesUpdating ? <UpdatingOverlay label={plaidSyncing ? "Syncing…" : "Updating…"} /> : null}
+            <div className={`h-full min-h-0 overflow-y-auto overflow-x-hidden ${entriesUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
               {entriesQ.isLoading ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
@@ -2846,32 +2945,10 @@ export default function ReconcilePageClient() {
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                        }`}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "Match entry" : (reconcileWriteReason ?? noPermTitle)}
+                                      title={canWriteReconcileEffective ? "Match ledger entry (AI assisted)" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match entry"
-                                      onClick={() => {
-                                        if (!canWriteReconcileEffective) return;
-                                        setEntryMatchEntryId(e.id);
-                                        setEntryMatchSelectedBankTxnIds(new Set());
-                                        setEntryMatchSearch("");
-                                        setEntryMatchError(null);
-                                        setEntryAiSuggestions([]);
-                                        setEntrySuggestError(null);
-                                        setOpenEntryMatch(true);
-                                      }}
-                                    >
-                                      <GitMerge className="h-4 w-4 text-slate-700" />
-                                    </button>
-                                  </HintWrap>
-                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-                                    <button
-                                      type="button"
-                                      className={`h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
-                                      disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "AI suggestions" : (reconcileWriteReason ?? noPermTitle)}
-                                      aria-label="AI suggestions"
                                       onClick={() => {
                                         if (!canWriteReconcileEffective) return;
                                         setEntryMatchEntryId(e.id);
@@ -2884,9 +2961,10 @@ export default function ReconcilePageClient() {
                                         void runAiSuggestForEntry(e);
                                       }}
                                     >
-                                      <Sparkles className="h-3.5 w-3.5 text-slate-700" />
+                                      <GitMerge className="h-4 w-4 text-slate-700" />
                                     </button>
                                   </HintWrap>
+                                  
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
@@ -3000,21 +3078,7 @@ export default function ReconcilePageClient() {
                           const res = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(res);
 
-                          // Immediate pull (but do NOT clobber populated table to empty while Plaid sync is catching up)
-                          await refreshBankAndMatches({ preserveOnEmpty: true });
-                          await entriesQ.refetch?.();
-
-                          // Ensure Ledger page sees new entries without manual refresh
-                          void qc.invalidateQueries({
-                            predicate: (q) =>
-                              Array.isArray(q.queryKey) &&
-                              q.queryKey[0] === "entries" &&
-                              q.queryKey[1] === selectedBusinessId &&
-                              q.queryKey[2] === selectedAccountId,
-                          });
-
-                          // Bounded confirmation refresh (event-driven only; stop early on list change)
-                          await runBoundedPostSyncRefresh({ preserveOnEmpty: true });
+                          await refreshTablesFully({ preserveOnEmpty: true });
                         } finally {
                           setPlaidLoading(false);
                         }
@@ -3053,12 +3117,7 @@ export default function ReconcilePageClient() {
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
 
-                          // IMPORTANT: refresh the tables (not just balance/status)
-                          await refreshBankAndMatches({ preserveOnEmpty: true });
-                          await entriesQ.refetch?.();
-
-                          // Bounded confirmation refresh (event-driven only; stop early on list change)
-                          await runBoundedPostSyncRefresh({ preserveOnEmpty: true });
+                          await refreshTablesFully({ preserveOnEmpty: true });
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Sync failed");
                         } finally {
@@ -3097,8 +3156,9 @@ export default function ReconcilePageClient() {
 
           <div className="h-px bg-slate-200" />
 
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+          <div className="relative flex-1 min-h-0 overflow-hidden">
+            {bankUpdating ? <UpdatingOverlay label={plaidSyncing ? "Syncing…" : "Updating…"} /> : null}
+            <div className={`h-full min-h-0 overflow-y-auto overflow-x-hidden ${bankUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
               {bankTxLoading ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
@@ -3126,18 +3186,21 @@ export default function ReconcilePageClient() {
                     <tr className="h-[28px]">
                       <th className={thClass}>
                         {bankTab === "unmatched" ? (
-                          <PillToggle
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
                             checked={
                               bankUnmatchedList.length > 0 &&
                               selectedBankTxnIds.size === bankUnmatchedList.length
                             }
-                            onCheckedChange={(checked) => {
-                              if (checked) {
+                            onChange={(e) => {
+                              if (e.target.checked) {
                                 setSelectedBankTxnIds(new Set(bankUnmatchedList.map((x: any) => String(x.id))));
                               } else {
                                 setSelectedBankTxnIds(new Set());
                               }
                             }}
+                            aria-label="Select all unmatched bank transactions"
                           />
                         ) : null}
                       </th>
@@ -3282,33 +3345,10 @@ export default function ReconcilePageClient() {
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
-                                        }`}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "Match this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
+                                      title={canWriteReconcileEffective ? "Match bank transaction to entry (AI assisted)" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match bank transaction"
-                                      onClick={() => {
-                                        if (!canWriteReconcileEffective) return;
-                                        setMatchBankTxnId(t.id);
-                                        setMatchSearch("");
-                                        setMatchSelectedEntryIds(new Set());
-                                        setMatchError(null);
-                                        setMatchAiSuggestions([]);
-                                        setMatchSuggestError(null);
-                                        setOpenMatch(true);
-                                      }}
-                                    >
-                                      <GitMerge className="h-4 w-4 text-slate-700" />
-                                    </button>
-                                  </HintWrap>
-
-                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-                                    <button
-                                      type="button"
-                                      className={`h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
-                                      disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "AI suggestions" : (reconcileWriteReason ?? noPermTitle)}
-                                      aria-label="AI suggestions"
                                       onClick={() => {
                                         if (!canWriteReconcileEffective) return;
                                         setMatchBankTxnId(t.id);
@@ -3321,7 +3361,7 @@ export default function ReconcilePageClient() {
                                         void runAiSuggestForBank(t);
                                       }}
                                     >
-                                      <Sparkles className="h-3.5 w-3.5 text-slate-700" />
+                                      <GitMerge className="h-4 w-4 text-slate-700" />
                                     </button>
                                   </HintWrap>
                                 </>
@@ -3355,7 +3395,7 @@ export default function ReconcilePageClient() {
 
                                     setCreateEntryErr(null);
                                     setCreateEntryBankTxnId(bankId);
-                                    setCreateEntryAutoMatch(false);
+                                    setCreateEntryAutoMatch(true);
 
                                     // Prefill overrides
                                     const defaultDesc = (t?.name ?? "").toString().trim() || "—";
@@ -3861,6 +3901,8 @@ export default function ReconcilePageClient() {
                           });
                         }
 
+                        await refreshTablesFully({ preserveOnEmpty: true });
+
                         clearMutErr();
                         setOpenMatch(false);
                         setMatchBankTxnId(null);
@@ -3868,9 +3910,6 @@ export default function ReconcilePageClient() {
                         setMatchSelectedEntryIds(new Set());
                         setMatchAiSuggestions([]);
                         setMatchSuggestError(null);
-
-                        void refreshBankAndMatches({ preserveOnEmpty: true });
-                        void entriesQ.refetch?.();
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t match transactions");
                         if (!r.isClosed) setMatchError(r.msg);
@@ -3894,7 +3933,7 @@ export default function ReconcilePageClient() {
       >
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-slate-600 mb-2">Select entries to match (same sign; full-match only).</div>
+            <div className="text-xs text-slate-600 mb-2">Select ledger entries that sum exactly to the bank transaction amount.</div>
 
             <div className="mb-2">
               <input
@@ -3926,7 +3965,7 @@ export default function ReconcilePageClient() {
                     <div className="text-xs text-slate-500 tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
                   </div>
 
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Bank transaction</span>
                       <span className={`tabular-nums ${bankAmt < 0n ? "text-red-700" : "text-slate-900"}`}>{formatUsdFromCents(bankAmt)}</span>
@@ -3978,7 +4017,7 @@ export default function ReconcilePageClient() {
               if (matchSuggestLoading) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary mb-2">AI suggestions</div>
                     <div className="space-y-2">
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
@@ -4000,7 +4039,7 @@ export default function ReconcilePageClient() {
               if (rows.length === 0) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
                     <div className="mt-1 text-[11px] text-slate-500">
                       No eligible suggestions found for this bank transaction.
                     </div>
@@ -4011,7 +4050,7 @@ export default function ReconcilePageClient() {
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
                     <div className="text-[11px] text-slate-500">LLM rerank • full-match only</div>
                   </div>
 
@@ -4034,7 +4073,7 @@ export default function ReconcilePageClient() {
                         <button
                           key={e.id}
                           type="button"
-                          className={`w-full text-left min-h-[42px] px-2 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-2`}
+                          className={`w-full text-left min-h-[46px] px-2.5 py-1.5 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-3`}
                           onClick={() => {
                             setMatchSelectedEntryIds(() => {
                               const s = new Set<string>();
@@ -4045,11 +4084,19 @@ export default function ReconcilePageClient() {
                           title={fullReason}
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">{rankLabel} • {e.payee}</span>
-                            <span className="truncate max-w-[340px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
+                            <span className="truncate text-xs font-medium text-slate-800">
+                              <span className={idx === 0 ? "text-primary" : "text-slate-500"}>{rankLabel}</span>
+                              <span className="text-slate-400"> • </span>
+                              {e.payee}
+                            </span>
+                            <span className="truncate max-w-[420px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
                           </span>
                           <span className="shrink-0 flex items-center gap-2">
-                            {ai ? <span className="text-[11px] font-medium text-slate-500">{pctConfidence(ai.confidence)}</span> : null}
+                            {ai ? (
+                              <span className="inline-flex h-5 items-center rounded-full border border-primary/20 bg-primary/10 px-2 text-[11px] font-semibold text-primary">
+                                {pctConfidence(ai.confidence)}
+                              </span>
+                            ) : null}
                             <span className={`text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
                               {formatUsdFromCents(amt)}
                             </span>
@@ -4362,6 +4409,8 @@ export default function ReconcilePageClient() {
                           });
                         }
 
+                        await refreshTablesFully({ preserveOnEmpty: true });
+
                         clearMutErr();
                         setOpenEntryMatch(false);
                         setEntryMatchEntryId(null);
@@ -4369,9 +4418,6 @@ export default function ReconcilePageClient() {
                         setEntryMatchSelectedBankTxnIds(new Set());
                         setEntryAiSuggestions([]);
                         setEntrySuggestError(null);
-
-                        void refreshBankAndMatches({ preserveOnEmpty: true });
-                        void entriesQ.refetch?.();
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t create match");
                         if (!r.isClosed) setEntryMatchError(r.msg);
@@ -4394,7 +4440,7 @@ export default function ReconcilePageClient() {
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-slate-600 mb-2">
-              Select multiple eligible bank transactions (same sign). Full-match only: the selected bank amounts must sum exactly to the entry amount.
+              Select bank transactions that sum exactly to the ledger entry amount.
             </div>
 
             <div className="mb-2">
@@ -4438,7 +4484,7 @@ export default function ReconcilePageClient() {
               if (entrySuggestLoading) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-slate-600 mb-2">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary mb-2">AI suggestions</div>
                     <div className="space-y-2">
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
@@ -4460,7 +4506,7 @@ export default function ReconcilePageClient() {
               if (rows.length === 0) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
                     <div className="mt-1 text-[11px] text-slate-500">
                       No eligible suggestions found for this entry.
                     </div>
@@ -4471,7 +4517,7 @@ export default function ReconcilePageClient() {
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-slate-600">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
                     <div className="text-[11px] text-slate-500">LLM rerank • full-match only</div>
                   </div>
 
@@ -4494,7 +4540,7 @@ export default function ReconcilePageClient() {
                         <button
                           key={t.id}
                           type="button"
-                          className={`w-full text-left min-h-[42px] px-2 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-2`}
+                          className={`w-full text-left min-h-[46px] px-2.5 py-1.5 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-3`}
                           onClick={() => {
                             setEntryMatchSelectedBankTxnIds(() => {
                               const s = new Set<string>();
@@ -4505,11 +4551,19 @@ export default function ReconcilePageClient() {
                           title={fullReason}
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">{rankLabel} • {t.name}</span>
-                            <span className="truncate max-w-[340px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
+                            <span className="truncate text-xs font-medium text-slate-800">
+                              <span className={idx === 0 ? "text-primary" : "text-slate-500"}>{rankLabel}</span>
+                              <span className="text-slate-400"> • </span>
+                              {t.name}
+                            </span>
+                            <span className="truncate max-w-[420px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
                           </span>
                           <span className="shrink-0 flex items-center gap-2">
-                            {ai ? <span className="text-[11px] font-medium text-slate-500">{pctConfidence(ai.confidence)}</span> : null}
+                            {ai ? (
+                              <span className="inline-flex h-5 items-center rounded-full border border-primary/20 bg-primary/10 px-2 text-[11px] font-semibold text-primary">
+                                {pctConfidence(ai.confidence)}
+                              </span>
+                            ) : null}
                             <span className={`text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
                               {formatUsdFromCents(amt)}
                             </span>
@@ -4546,7 +4600,7 @@ export default function ReconcilePageClient() {
                     <div className="text-xs text-slate-500 tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
                   </div>
 
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Entry</span>
                       <span className={`tabular-nums ${entryAmt < 0n ? "text-red-700" : "text-slate-900"}`}>{formatUsdFromCents(entryAmt)}</span>
@@ -4917,8 +4971,7 @@ export default function ReconcilePageClient() {
                           reason: "User unmatch",
                         });
 
-                        await refreshBankAndMatches({ preserveOnEmpty: true });
-                        await entriesQ.refetch?.();
+                        await refreshTablesFully({ preserveOnEmpty: true });
 
                         clearMutErr();
                         setOpenReconAuditDetail(false);
@@ -5290,7 +5343,7 @@ export default function ReconcilePageClient() {
         open={openExportHub}
         onClose={() => setOpenExportHub(false)}
         title="Export"
-        size="sm"
+        size="md"
       >
         <div className="p-3">
           <div className="grid grid-cols-2 gap-3">

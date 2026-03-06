@@ -43,6 +43,17 @@ function formatUsdFromCents(cents: bigint) {
   return neg ? `($${core})` : `$${core}`;
 }
 
+function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function VendorsPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -280,7 +291,10 @@ export default function VendorsPageClient() {
           </div>
         </div>
       ) : (
-        <LedgerTableShell
+        <div className="relative">
+          {loading && vendors.length > 0 ? <UpdatingOverlay /> : null}
+          <div className={loading && vendors.length > 0 ? "pointer-events-none select-none blur-[1px]" : ""}>
+            <LedgerTableShell
           colgroup={
             <>
               <col />
@@ -300,7 +314,7 @@ export default function VendorsPageClient() {
           }
           addRow={null}
           body={
-            loading ? (
+            loading && vendors.length === 0 ? (
               <>
                 {Array.from({ length: 10 }).map((_, i) => (
                   <tr key={`sk-${i}`} className="h-9 border-b border-slate-100">
@@ -366,6 +380,8 @@ export default function VendorsPageClient() {
           }
           footer={null}
         />
+          </div>
+        </div>
       )}
 
       <UploadPanel

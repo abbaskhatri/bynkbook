@@ -9,6 +9,10 @@ import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { patchBusiness, deleteBusiness, getBusinessUsage, type Business } from "@/lib/api/businesses";
+import { listEntries } from "@/lib/api/entries";
+import { listMatchGroups } from "@/lib/api/match-groups";
+import { listVendors } from "@/lib/api/vendors";
+import { listClosedPeriods, previewClosedPeriods, type ClosedPeriodRow } from "@/lib/api/closedPeriods";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import {
   createAccount,
@@ -108,6 +112,30 @@ function roleLabel(role?: string | null) {
   }
 }
 
+function downloadJsonFile(filename: string, data: unknown) {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function monthBounds(month: string) {
+  const [yy, mm] = String(month).split("-").map(Number);
+  const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  return {
+    from: `${month}-01`,
+    to: `${month}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
 type PlaidCellState = {
   connected?: boolean;
   institutionName?: string;
@@ -196,6 +224,12 @@ export default function SettingsPageClient() {
   const canEditBusinessProfile = useMemo(() => ["OWNER", "ADMIN"].includes(selectedBusinessRole), [selectedBusinessRole]);
 
   const accountsQ = useAccounts(selectedBusinessId);
+  const [showArchivedAccounts, setShowArchivedAccounts] = useState(false);
+
+  const visibleAccounts = useMemo(() => {
+    const rows = accountsQ.data ?? [];
+    return showArchivedAccounts ? rows : rows.filter((a) => !a.archived_at);
+  }, [accountsQ.data, showArchivedAccounts]);
 
   const usageQ = useQuery({
 
@@ -343,15 +377,26 @@ export default function SettingsPageClient() {
   const [editErr, setEditErr] = useState<string | null>(null);
 
   // Business profile form
-  const [bpAddress, setBpAddress] = useState("");
-  const [bpPhone, setBpPhone] = useState("");
+  const [bpName, setBpName] = useState("");
   const [bpIndustry, setBpIndustry] = useState("");
   const [bpIndustryOther, setBpIndustryOther] = useState("");
+  const [bpAddress, setBpAddress] = useState("");
+  const [bpPhone, setBpPhone] = useState("");
   const [bpCurrency, setBpCurrency] = useState("USD");
-  const [bpTimezone, setBpTimezone] = useState("America/Chicago");
   const [bpFiscalMonth, setBpFiscalMonth] = useState("1");
+  const [bpTimezone, setBpTimezone] = useState("America/Chicago");
   const [bpSaving, setBpSaving] = useState(false);
   const [bpMsg, setBpMsg] = useState<string | null>(null);
+  const [deleteBusinessOpen, setDeleteBusinessOpen] = useState(false);
+  const [deleteBusinessBusy, setDeleteBusinessBusy] = useState(false);
+  const [deleteBusinessErr, setDeleteBusinessErr] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupErr, setBackupErr] = useState<string | null>(null);
+  const [exportClosedOpen, setExportClosedOpen] = useState(false);
+  const [exportClosedBusy, setExportClosedBusy] = useState(false);
+  const [exportClosedErr, setExportClosedErr] = useState<string | null>(null);
+  const [exportClosedPeriods, setExportClosedPeriods] = useState<ClosedPeriodRow[]>([]);
+  const [exportClosedMonth, setExportClosedMonth] = useState<string>("");
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const logoUploader = useUploadController({
@@ -494,6 +539,9 @@ export default function SettingsPageClient() {
   const [actError, setActError] = useState<string | null>(null);
   const [actItems, setActItems] = useState<ActivityLogItem[]>([]);
   const [actEventType, setActEventType] = useState<string>("ALL");
+  const [actUserId, setActUserId] = useState<string>("ALL");
+  const [actFromDate, setActFromDate] = useState<string>("");
+  const [actToDate, setActToDate] = useState<string>("");
   const [actDetailsId, setActDetailsId] = useState<string | null>(null);
 
   const noPermTitle = "Insufficient permissions";
@@ -519,6 +567,154 @@ export default function SettingsPageClient() {
   const [manualCurrency, setManualCurrency] = useState("USD");
   const [manualInstitution, setManualInstitution] = useState("");
   const [manualLast4, setManualLast4] = useState("");
+
+  async function onDownloadBackup() {
+    if (!selectedBusinessId) return;
+
+    setBackupBusy(true);
+    setBackupErr(null);
+
+    try {
+      const accounts = accountsQ.data ?? [];
+
+      const [vendorsRes, categoriesRes, closedRes, prefsRes, teamRes, rolePoliciesRes] = await Promise.all([
+        listVendors({ businessId: selectedBusinessId, sort: "name_asc" }),
+        listCategories(selectedBusinessId, { includeArchived: true } as any),
+        listClosedPeriods(selectedBusinessId),
+        getBookkeepingPreferences(selectedBusinessId),
+        getTeam(selectedBusinessId),
+        getRolePolicies(selectedBusinessId),
+      ]);
+
+      const perAccount = await Promise.all(
+        accounts.map(async (a) => {
+          const [entries, matchGroupsRes] = await Promise.all([
+            listEntries({
+              businessId: selectedBusinessId,
+              accountId: a.id,
+              limit: 200,
+              includeDeleted: true,
+            }),
+            listMatchGroups({
+              businessId: selectedBusinessId,
+              accountId: a.id,
+              status: "all",
+            }),
+          ]);
+
+          return {
+            account: a,
+            entries,
+            match_groups: matchGroupsRes?.items ?? [],
+          };
+        })
+      );
+
+      const payload = {
+        kind: "bynkbook_backup_snapshot",
+        generated_at: new Date().toISOString(),
+        business: selectedBusiness,
+        warnings: [
+          "Client-generated snapshot from current frontend APIs.",
+          "Entries are limited to the first 200 rows per account because the current entries API has no pagination in this frontend surface.",
+          "Use this as a launch snapshot/export, not a guaranteed full server backup.",
+        ],
+        accounts: perAccount.map((x) => x.account),
+        entries_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.entries])),
+        match_groups_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.match_groups])),
+        vendors: vendorsRes?.vendors ?? [],
+        categories: categoriesRes?.rows ?? [],
+        closed_periods: closedRes?.periods ?? [],
+        bookkeeping_preferences: prefsRes ?? null,
+        team_members: teamRes?.members ?? [],
+        team_invites: teamRes?.invites ?? [],
+        role_policies: rolePoliciesRes?.items ?? [],
+      };
+
+      downloadJsonFile(`bynkbook-backup-${selectedBusinessId}-${todayYmd()}.json`, payload);
+    } catch (e: any) {
+      setBackupErr(e?.message ?? "Backup export failed");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function onExportClosedPeriod() {
+    if (!selectedBusinessId || !exportClosedMonth) return;
+
+    setExportClosedBusy(true);
+    setExportClosedErr(null);
+
+    try {
+      const { from, to } = monthBounds(exportClosedMonth);
+      const periodRow = exportClosedPeriods.find((p) => p.month === exportClosedMonth) ?? null;
+      const accounts = accountsQ.data ?? [];
+
+      const perAccount = await Promise.all(
+        accounts.map(async (a) => {
+          const [preview, entries, matchGroupsRes] = await Promise.all([
+            previewClosedPeriods({
+              businessId: selectedBusinessId,
+              accountId: a.id,
+              from,
+              to,
+            }).catch(() => null),
+            listEntries({
+              businessId: selectedBusinessId,
+              accountId: a.id,
+              limit: 200,
+              includeDeleted: true,
+              date_from: from,
+              date_to: to,
+            }),
+            listMatchGroups({
+              businessId: selectedBusinessId,
+              accountId: a.id,
+              status: "all",
+            }),
+          ]);
+
+          const monthGroups = (matchGroupsRes?.items ?? []).filter((g: any) => {
+            const createdMonth = String(g?.created_at ?? "").slice(0, 7);
+            const voidedMonth = String(g?.voided_at ?? "").slice(0, 7);
+            return createdMonth === exportClosedMonth || voidedMonth === exportClosedMonth;
+          });
+
+          return {
+            account: a,
+            preview,
+            entries,
+            match_groups: monthGroups,
+          };
+        })
+      );
+
+      const payload = {
+        kind: "bynkbook_closed_period_export",
+        generated_at: new Date().toISOString(),
+        business: selectedBusiness,
+        month: exportClosedMonth,
+        range: { from, to },
+        closed_period: periodRow,
+        warnings: [
+          "Client-generated closed-period export from current frontend APIs.",
+          "Entries are limited to the first 200 rows per account for the selected date range because the current entries API has no pagination in this frontend surface.",
+          "Match groups are filtered by created_at/voided_at month because the current frontend match-group API has no date-range endpoint.",
+        ],
+        accounts: perAccount.map((x) => x.account),
+        previews_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.preview])),
+        entries_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.entries])),
+        match_groups_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.match_groups])),
+      };
+
+      downloadJsonFile(`bynkbook-closed-period-${exportClosedMonth}.json`, payload);
+      setExportClosedOpen(false);
+    } catch (e: any) {
+      setExportClosedErr(e?.message ?? "Closed period export failed");
+    } finally {
+      setExportClosedBusy(false);
+    }
+  }
 
   async function onSignOut() {
     await signOut();
@@ -608,7 +804,7 @@ export default function SettingsPageClient() {
           limit: 50,
           eventType: actEventType === "ALL" ? undefined : actEventType,
         });
-        if (!cancelled) {
+        if (!cancelled && myEpoch === tabEpochRef.current) {
           const items: ActivityLogItem[] = res?.items ?? [];
           setActItems(items);
         }
@@ -622,12 +818,49 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId, actEventType, reloadNonce]);
+  }, [spKey, authReady, selectedBusinessId, actEventType, reloadNonce]);
+
+  const actUserOptions = useMemo(() => {
+    const map = new Map<string, string>();
+
+    for (const m of teamMembers ?? []) {
+      const id = String((m as any).user_id ?? "").trim();
+      const email = String((m as any).email ?? "").trim();
+      if (id) map.set(id, email || id);
+    }
+
+    if (currentUserId) {
+      map.set(String(currentUserId), String(currentUserEmail || currentUserId));
+    }
+
+    for (const it of actItems ?? []) {
+      const id = String(it.actor_user_id ?? "").trim();
+      if (!id) continue;
+      if (!map.has(id)) map.set(id, id);
+    }
+
+    return Array.from(map.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [teamMembers, currentUserId, currentUserEmail, actItems]);
+
+  const actVisibleItems = useMemo(() => {
+    return (actItems ?? []).filter((it) => {
+      const actor = String(it.actor_user_id ?? "");
+      const ymd = String(it.created_at ?? "").slice(0, 10);
+
+      if (actUserId !== "ALL" && actor !== actUserId) return false;
+      if (actFromDate && ymd && ymd < actFromDate) return false;
+      if (actToDate && ymd && ymd > actToDate) return false;
+
+      return true;
+    });
+  }, [actItems, actUserId, actFromDate, actToDate]);
 
   // Load team data when Team tab is active
   useEffect(() => {
     const tab = sp.get("tab") || "business";
-    if (tab !== "team") return;
+    if (tab !== "team" && tab !== "activity") return;
     if (!authReady) return;
     if (!selectedBusinessId) return;
 
@@ -876,6 +1109,37 @@ export default function SettingsPageClient() {
     };
   }, [spKey, authReady, selectedBusinessId, accountsQ.isLoading, accountsQ.data]);
 
+  useEffect(() => {
+    if (!exportClosedOpen || !selectedBusinessId) return;
+
+    let cancelled = false;
+
+    (async () => {
+      setExportClosedBusy(true);
+      setExportClosedErr(null);
+
+      try {
+        const res = await listClosedPeriods(selectedBusinessId);
+        if (cancelled) return;
+
+        const rows = res?.periods ?? [];
+        setExportClosedPeriods(rows);
+        setExportClosedMonth((cur) => {
+          if (cur && rows.some((r) => r.month === cur)) return cur;
+          return rows[0]?.month ?? "";
+        });
+      } catch (e: any) {
+        if (!cancelled) setExportClosedErr(e?.message ?? "Failed to load closed periods");
+      } finally {
+        if (!cancelled) setExportClosedBusy(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [exportClosedOpen, selectedBusinessId]);
+
   // current tab (only allowed)
   const tab = (() => {
     const raw = sp.get("tab") || "business";
@@ -929,9 +1193,9 @@ export default function SettingsPageClient() {
           </CardHeader>
 
           <CardContent className="space-y-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-end gap-2">
               <div className="w-[260px]">
-                <Label className="text-[11px]">Event type (optional)</Label>
+                <Label className="text-[11px]">Event type</Label>
                 <Select value={actEventType} onValueChange={(v) => setActEventType(v)}>
                   <SelectTrigger className={selectTriggerClass}>
                     <SelectValue placeholder="All events" />
@@ -952,6 +1216,47 @@ export default function SettingsPageClient() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="w-[170px]">
+                <Label className="text-[11px]">From</Label>
+                <AppDatePicker value={actFromDate} onChange={setActFromDate} />
+              </div>
+
+              <div className="w-[170px]">
+                <Label className="text-[11px]">To</Label>
+                <AppDatePicker value={actToDate} onChange={setActToDate} />
+              </div>
+
+              <div className="w-[220px]">
+                <Label className="text-[11px]">User</Label>
+                <Select value={actUserId} onValueChange={setActUserId}>
+                  <SelectTrigger className={selectTriggerClass}>
+                    <SelectValue placeholder="All users" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All users</SelectItem>
+                    {actUserOptions.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <button
+                type="button"
+                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                onClick={() => {
+                  setActEventType("ALL");
+                  setActUserId("ALL");
+                  setActFromDate("");
+                  setActToDate("");
+                }}
+              >
+                Reset
+              </button>
+
               <div className="flex-1" />
               <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">Read-only</span>
             </div>
@@ -960,8 +1265,8 @@ export default function SettingsPageClient() {
               <Skeleton className="h-24 w-full" />
             ) : actError ? (
               <div className="text-xs text-red-600">{actError}</div>
-            ) : actItems.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No activity yet.</div>
+            ) : actVisibleItems.length === 0 ? (
+              <div className="text-xs text-muted-foreground">No activity found for the current filters.</div>
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
                 <Table>
@@ -975,7 +1280,7 @@ export default function SettingsPageClient() {
                   </THead>
 
                   <TableBody>
-                    {actItems.map((it) => {
+                    {actVisibleItems.map((it) => {
                       const when = (() => {
                         try { return new Date(it.created_at).toLocaleString(); } catch { return String(it.created_at); }
                       })();
@@ -1296,7 +1601,7 @@ export default function SettingsPageClient() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-medium text-slate-800">Roles & Permissions</div>
-                      <div className="text-[11px] text-muted-foreground">Policies are stored; enforcement depends on authz_mode/wave.</div>
+                      <div className="text-[11px] text-muted-foreground">Policies are saved and used by supported UI surfaces; allowlists still remain a fallback.</div>
                     </div>
                     <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
                       Store-only
@@ -1425,7 +1730,7 @@ export default function SettingsPageClient() {
                   </Table>
 
                   <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-slate-200">
-                    Enforcement not enabled yet — allowlists remain the source of truth.
+                    Policies are active on supported screens. Where a screen does not yet enforce policy directly, allowlists remain the fallback source of truth.
                   </div>
                 </div>
               </div>
@@ -1732,7 +2037,12 @@ export default function SettingsPageClient() {
                 <div className="mt-1 text-xs text-muted-foreground">Manage bank accounts, cash accounts, and credit cards.</div>
               </div>
 
-              <div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Label className="text-[11px] text-slate-600">Show archived</Label>
+                  <PillToggle checked={showArchivedAccounts} onCheckedChange={setShowArchivedAccounts} />
+                </div>
+
                 <Button size="sm" onClick={() => setOpen(true)}>Add account</Button>
 
                 <AppDialog
@@ -2199,6 +2509,12 @@ export default function SettingsPageClient() {
                       Deleting an account cannot be undone.
                     </div>
 
+                    {deleteSuggestArchive ? (
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        This account has related records, so hard delete is blocked. Archive hides the account while preserving accounting history.
+                      </div>
+                    ) : null}
+
                     {deleteErr ? (
                       <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                         {deleteErr}
@@ -2315,8 +2631,10 @@ export default function SettingsPageClient() {
           <CardContent>
             {accountsQ.isLoading ? (
               <Skeleton className="h-24 w-full" />
-            ) : (accountsQ.data?.length ?? 0) === 0 ? (
-              <div className="text-sm text-muted-foreground">No accounts yet.</div>
+            ) : visibleAccounts.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                {showArchivedAccounts ? "No accounts yet." : "No active accounts. Turn on Show archived to view archived accounts."}
+              </div>
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
                 <Table>
@@ -2334,7 +2652,7 @@ export default function SettingsPageClient() {
                   </THead>
 
                   <TableBody>
-                    {(accountsQ.data ?? []).map((a) => {
+                    {visibleAccounts.map((a) => {
                       const amount = currency.format(a.opening_balance_cents / 100);
                       const date = formatShortDate(a.opening_balance_date);
                       const isArchived = !!a.archived_at;
@@ -2720,6 +3038,11 @@ export default function SettingsPageClient() {
 
             <CardContent className="space-y-3">
               {bpMsg ? <div className="text-xs text-slate-700">{bpMsg}</div> : null}
+              {backupErr ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {backupErr}
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -2858,27 +3181,40 @@ export default function SettingsPageClient() {
               </div>
 
               <div className="flex items-center justify-between gap-2 pt-1">
-                <div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-7 px-3 text-xs"
+                    disabled={!selectedBusinessId || backupBusy}
+                    onClick={() => {
+                      void onDownloadBackup();
+                    }}
+                  >
+                    {backupBusy ? "Preparing backup…" : "Download backup"}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-7 px-3 text-xs"
+                    disabled={!selectedBusinessId}
+                    onClick={() => {
+                      setExportClosedErr(null);
+                      setExportClosedOpen(true);
+                    }}
+                  >
+                    Export closed period
+                  </Button>
+
                   {isOwnerRole ? (
                     <Button
                       type="button"
                       variant="outline"
                       className="h-7 px-3 text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
-                      onClick={async () => {
-                        if (!selectedBusinessId) return;
-                        const ok = window.confirm("Delete this business?\n\nThis permanently deletes the business and all related data. This cannot be undone.");
-                        if (!ok) return;
-
-                        try {
-                          await deleteBusiness(selectedBusinessId);
-                          await businessesQ.refetch();
-                          const list = businessesQ.data ?? [];
-                          const nextId = list.find((b) => b.id !== selectedBusinessId)?.id ?? null;
-                          if (nextId) router.replace(`/settings?businessId=${nextId}`);
-                          else router.replace("/create-business");
-                        } catch (e: any) {
-                          alert(e?.message ?? "Delete failed");
-                        }
+                      onClick={() => {
+                        setDeleteBusinessErr(null);
+                        setDeleteBusinessOpen(true);
                       }}
                     >
                       Delete business
@@ -2920,6 +3256,141 @@ export default function SettingsPageClient() {
           </Card>
         </div>
       )}
+
+      <AppDialog
+        open={exportClosedOpen}
+        onClose={() => {
+          if (exportClosedBusy) return;
+          setExportClosedOpen(false);
+        }}
+        title="Export closed period"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="text-xs text-slate-600">
+            Export a client-generated JSON snapshot for a closed month, including account previews, entries in the selected month, and month-filtered match groups.
+          </div>
+
+          {exportClosedErr ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {exportClosedErr}
+            </div>
+          ) : null}
+
+          <div className="space-y-1">
+            <Label>Closed month</Label>
+            <Select value={exportClosedMonth} onValueChange={setExportClosedMonth} disabled={exportClosedBusy || exportClosedPeriods.length === 0}>
+              <SelectTrigger className={selectTriggerClass}>
+                <SelectValue placeholder={exportClosedBusy ? "Loading…" : "Select month"} />
+              </SelectTrigger>
+              <SelectContent>
+                {exportClosedPeriods.map((p) => (
+                  <SelectItem key={p.month} value={p.month}>
+                    {p.month}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {exportClosedPeriods.length === 0 && !exportClosedBusy ? (
+              <div className="text-[11px] text-slate-500">No closed periods found.</div>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              className="h-7 px-3 text-xs"
+              disabled={exportClosedBusy}
+              onClick={() => {
+                setExportClosedOpen(false);
+                setExportClosedErr(null);
+              }}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              className="h-7 px-3 text-xs"
+              disabled={exportClosedBusy || !selectedBusinessId || !exportClosedMonth}
+              onClick={() => {
+                void onExportClosedPeriod();
+              }}
+            >
+              {exportClosedBusy ? "Preparing export…" : "Download export"}
+            </Button>
+          </div>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={deleteBusinessOpen}
+        onClose={() => {
+          if (deleteBusinessBusy) return;
+          setDeleteBusinessOpen(false);
+        }}
+        title="Delete business"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-slate-700">
+            <div className="font-medium text-slate-900">{selectedBusiness?.name || "This business"}</div>
+            <div className="mt-1 text-xs text-slate-600">
+              This permanently deletes the business and all related data. This cannot be undone.
+            </div>
+
+            {deleteBusinessErr ? (
+              <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {deleteBusinessErr}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              className="h-7 px-3 text-xs"
+              disabled={deleteBusinessBusy}
+              onClick={() => {
+                setDeleteBusinessOpen(false);
+                setDeleteBusinessErr(null);
+              }}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              className="h-7 px-3 text-xs bg-rose-600 hover:bg-rose-700"
+              disabled={deleteBusinessBusy || !selectedBusinessId}
+              onClick={async () => {
+                if (!selectedBusinessId) return;
+                setDeleteBusinessBusy(true);
+                setDeleteBusinessErr(null);
+
+                try {
+                  const deletingId = selectedBusinessId;
+                  await deleteBusiness(deletingId);
+
+                  const refreshed: any = await businessesQ.refetch();
+                  const list = refreshed?.data ?? businessesQ.data ?? [];
+                  const nextId = list.find((b: any) => b.id !== deletingId)?.id ?? null;
+
+                  setDeleteBusinessOpen(false);
+
+                  if (nextId) router.replace(`/settings?businessId=${nextId}`);
+                  else router.replace("/create-business");
+                } catch (e: any) {
+                  setDeleteBusinessErr(e?.message ?? "Delete failed");
+                } finally {
+                  setDeleteBusinessBusy(false);
+                }
+              }}
+            >
+              {deleteBusinessBusy ? "Deleting…" : "Delete business"}
+            </Button>
+          </div>
+        </div>
+      </AppDialog>
+
     </div>
   );
 }
