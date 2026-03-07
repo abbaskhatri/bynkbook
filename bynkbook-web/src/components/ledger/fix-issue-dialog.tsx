@@ -134,8 +134,9 @@ export function FixIssueDialog(props: {
     return `${date} • ${payeeShort} • ${amt}`;
   };
 
-  const dialogSize = useMemo<"md" | "lg">(() => {
-    if (kind !== "DUPLICATE") return "md";
+  const dialogSize = useMemo<"xs" | "sm" | "md">(() => {
+    if (kind === "STALE_CHECK") return "xs";
+    if (kind !== "DUPLICATE") return "sm";
 
     let maxPayeeLen = 0;
     let maxTokenLen = 0;
@@ -146,13 +147,9 @@ export function FixIssueDialog(props: {
       for (const tok of p.split(/\s+/)) maxTokenLen = Math.max(maxTokenLen, tok.length);
     }
 
-    // 3 scenarios:
-    // - small: md
-    // - medium/large: lg
-    // Use BOTH overall length and longest-token length so "ACH CREDIT BANKCARD..." widens too.
-    if (maxPayeeLen >= 18) return "lg";
-    if (maxTokenLen >= 14) return "lg";
-    return "md";
+    if (maxPayeeLen >= 26) return "md";
+    if (maxTokenLen >= 18) return "md";
+    return "sm";
   }, [kind, affectedRows]);
 
   const title =

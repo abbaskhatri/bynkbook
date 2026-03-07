@@ -396,7 +396,7 @@ export default function VendorsPageClient() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Add vendor"
-        size="md"
+        size="xs"
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setCreateOpen(false)} disabled={loading}>

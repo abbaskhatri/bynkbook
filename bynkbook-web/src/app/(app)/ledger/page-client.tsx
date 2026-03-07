@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession } from "aws-amplify/auth";
@@ -92,6 +93,8 @@ import {
   BookOpen,
   Lock,
   RefreshCw,
+  Download,
+  Printer,
 } from "lucide-react";
 
 // ================================
@@ -123,6 +126,180 @@ function todayYmd() {
 
 function allTimeStartYmd() {
   return "2000-01-01";
+}
+
+type LedgerRangePreset =
+  | "TODAY"
+  | "YESTERDAY"
+  | "LAST_7_DAYS"
+  | "LAST_30_DAYS"
+  | "THIS_WEEK"
+  | "LAST_WEEK"
+  | "THIS_MONTH"
+  | "LAST_MONTH"
+  | "THIS_QUARTER"
+  | "LAST_QUARTER"
+  | "THIS_YEAR"
+  | "LAST_YEAR"
+  | "CUSTOM";
+
+type LedgerRangeValue = {
+  preset: LedgerRangePreset;
+  from: string;
+  to: string;
+};
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function dateToYmdLocal(dt: Date) {
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+}
+
+function parseYmdLocal(ymd: string) {
+  const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function startOfWeek(dt: Date) {
+  const copy = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const day = copy.getDay();
+  const delta = day === 0 ? -6 : 1 - day;
+  copy.setDate(copy.getDate() + delta);
+  return copy;
+}
+
+function endOfWeek(dt: Date) {
+  const copy = startOfWeek(dt);
+  copy.setDate(copy.getDate() + 6);
+  return copy;
+}
+
+function startOfMonthLocal(dt: Date) {
+  return new Date(dt.getFullYear(), dt.getMonth(), 1);
+}
+
+function endOfMonthLocal(dt: Date) {
+  return new Date(dt.getFullYear(), dt.getMonth() + 1, 0);
+}
+
+function startOfQuarterLocal(dt: Date) {
+  const quarterMonth = Math.floor(dt.getMonth() / 3) * 3;
+  return new Date(dt.getFullYear(), quarterMonth, 1);
+}
+
+function endOfQuarterLocal(dt: Date) {
+  const start = startOfQuarterLocal(dt);
+  return new Date(start.getFullYear(), start.getMonth() + 3, 0);
+}
+
+function startOfYearLocal(dt: Date) {
+  return new Date(dt.getFullYear(), 0, 1);
+}
+
+function endOfYearLocal(dt: Date) {
+  return new Date(dt.getFullYear(), 11, 31);
+}
+
+function addDaysLocal(dt: Date, days: number) {
+  const copy = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function getLedgerRangeValue(preset: LedgerRangePreset): LedgerRangeValue {
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  switch (preset) {
+    case "TODAY":
+      return { preset, from: dateToYmdLocal(current), to: dateToYmdLocal(current) };
+    case "YESTERDAY": {
+      const d = addDaysLocal(current, -1);
+      return { preset, from: dateToYmdLocal(d), to: dateToYmdLocal(d) };
+    }
+    case "LAST_7_DAYS":
+      return { preset, from: dateToYmdLocal(addDaysLocal(current, -6)), to: dateToYmdLocal(current) };
+    case "LAST_30_DAYS":
+      return { preset, from: dateToYmdLocal(addDaysLocal(current, -29)), to: dateToYmdLocal(current) };
+    case "THIS_WEEK":
+      return { preset, from: dateToYmdLocal(startOfWeek(current)), to: dateToYmdLocal(endOfWeek(current)) };
+    case "LAST_WEEK": {
+      const anchor = addDaysLocal(startOfWeek(current), -1);
+      return { preset, from: dateToYmdLocal(startOfWeek(anchor)), to: dateToYmdLocal(endOfWeek(anchor)) };
+    }
+    case "THIS_MONTH":
+      return { preset, from: dateToYmdLocal(startOfMonthLocal(current)), to: dateToYmdLocal(endOfMonthLocal(current)) };
+    case "LAST_MONTH": {
+      const anchor = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+      return { preset, from: dateToYmdLocal(startOfMonthLocal(anchor)), to: dateToYmdLocal(endOfMonthLocal(anchor)) };
+    }
+    case "THIS_QUARTER":
+      return { preset, from: dateToYmdLocal(startOfQuarterLocal(current)), to: dateToYmdLocal(endOfQuarterLocal(current)) };
+    case "LAST_QUARTER": {
+      const currentQuarterStart = startOfQuarterLocal(current);
+      const anchor = new Date(currentQuarterStart.getFullYear(), currentQuarterStart.getMonth() - 1, 1);
+      return { preset, from: dateToYmdLocal(startOfQuarterLocal(anchor)), to: dateToYmdLocal(endOfQuarterLocal(anchor)) };
+    }
+    case "THIS_YEAR":
+      return { preset, from: dateToYmdLocal(startOfYearLocal(current)), to: dateToYmdLocal(endOfYearLocal(current)) };
+    case "LAST_YEAR": {
+      const anchor = new Date(current.getFullYear() - 1, 0, 1);
+      return { preset, from: dateToYmdLocal(startOfYearLocal(anchor)), to: dateToYmdLocal(endOfYearLocal(anchor)) };
+    }
+    case "CUSTOM":
+    default:
+      return { preset: "CUSTOM", from: "", to: "" };
+  }
+}
+
+function ledgerPresetLabel(preset: LedgerRangePreset) {
+  switch (preset) {
+    case "TODAY": return "Today";
+    case "YESTERDAY": return "Yesterday";
+    case "LAST_7_DAYS": return "Last 7 days";
+    case "LAST_30_DAYS": return "Last 30 days";
+    case "THIS_WEEK": return "This week";
+    case "LAST_WEEK": return "Last week";
+    case "THIS_MONTH": return "This month";
+    case "LAST_MONTH": return "Last month";
+    case "THIS_QUARTER": return "This quarter";
+    case "LAST_QUARTER": return "Last quarter";
+    case "THIS_YEAR": return "This year";
+    case "LAST_YEAR": return "Last year";
+    case "CUSTOM": return "Custom";
+    default: return "Custom";
+  }
+}
+
+function formatLedgerDateForDisplay(ymd: string) {
+  const dt = parseYmdLocal(ymd);
+  if (!dt) return ymd || "—";
+  try {
+    return dt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  } catch {
+    return ymd;
+  }
+}
+
+function formatLedgerDateTimeForPrint(ts: string) {
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return ts;
+  }
+}
+
+function escapeHtml(value: string) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function toBigIntSafe(v: unknown): bigint {
@@ -930,6 +1107,11 @@ export default function LedgerPageClient() {
     return list.find((a) => a.id === selectedAccountId) ?? null;
   }, [accountsQ.data, selectedAccountId]);
 
+  const selectedBusinessName = useMemo(() => {
+    const list = businessesQ.data ?? [];
+    return list.find((b: any) => b?.id === selectedBusinessId)?.name ?? "Business";
+  }, [businessesQ.data, selectedBusinessId]);
+
   const accountNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of accountsQ.data ?? []) m.set(a.id, a.name);
@@ -937,6 +1119,15 @@ export default function LedgerPageClient() {
   }, [accountsQ.data]);
 
   // Transfer display is derived from backend fields on each entry (stable across refetch).
+
+
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const [ledgerRangePreset, setLedgerRangePreset] = useState<LedgerRangePreset>("THIS_MONTH");
+  const initialLedgerRange = useMemo(() => getLedgerRangeValue("THIS_MONTH"), []);
+  const [ledgerRangeFrom, setLedgerRangeFrom] = useState(initialLedgerRange.from);
+  const [ledgerRangeTo, setLedgerRangeTo] = useState(initialLedgerRange.to);
+  const [ledgerActionBusy, setLedgerActionBusy] = useState<"export" | "print" | null>(null);
 
   // Filters + toggle
   const [searchPayee, setSearchPayee] = useState("");
@@ -4606,6 +4797,245 @@ export default function LedgerPageClient() {
     categoryOptions,
   ]);
 
+
+  const activeLedgerRange = useMemo<LedgerRangeValue>(() => ({
+    preset: ledgerRangePreset,
+    from: ledgerRangeFrom,
+    to: ledgerRangeTo,
+  }), [ledgerRangePreset, ledgerRangeFrom, ledgerRangeTo]);
+
+  const activeLedgerRangeLabel = useMemo(() => {
+    if (!activeLedgerRange.from || !activeLedgerRange.to) return "Select a date range";
+    return `${formatLedgerDateForDisplay(activeLedgerRange.from)} – ${formatLedgerDateForDisplay(activeLedgerRange.to)}`;
+  }, [activeLedgerRange]);
+
+  const applyLedgerPreset = (preset: LedgerRangePreset) => {
+    setLedgerRangePreset(preset);
+    if (preset === "CUSTOM") return;
+    const next = getLedgerRangeValue(preset);
+    setLedgerRangeFrom(next.from);
+    setLedgerRangeTo(next.to);
+  };
+
+  const onLedgerFromChange = (next: string) => {
+    setLedgerRangePreset("CUSTOM");
+    setLedgerRangeFrom(next);
+  };
+
+  const onLedgerToChange = (next: string) => {
+    setLedgerRangePreset("CUSTOM");
+    setLedgerRangeTo(next);
+  };
+
+  const fetchLedgerRowsForRange = async () => {
+    if (!selectedBusinessId || !selectedAccountId) {
+      throw new Error("Select a business and account first.");
+    }
+    if (!ledgerRangeFrom || !ledgerRangeTo) {
+      throw new Error("Select both From and To dates.");
+    }
+    if (ledgerRangeFrom > ledgerRangeTo) {
+      throw new Error("From date must be on or before To date.");
+    }
+
+    const rows = await listEntries({
+      businessId: selectedBusinessId,
+      accountId: selectedAccountId,
+      limit: 200,
+      includeDeleted: showDeleted,
+      date_from: ledgerRangeFrom,
+      date_to: ledgerRangeTo,
+    });
+
+    return rows.slice().sort(sortEntriesChronAsc);
+  };
+
+  const buildLedgerCsvRows = (rows: Entry[]) => {
+    return rows.map((row) => {
+      const amount = toBigIntSafe(row.amount_cents);
+      return [
+        row.date || "",
+        row.payee || "",
+        row.memo || "",
+        row.category_name || "",
+        row.type || "",
+        row.method || "",
+        row.status || "",
+        formatUsdFromCents(amount),
+      ];
+    });
+  };
+
+  const handleLedgerExport = async () => {
+    try {
+      setLedgerActionBusy("export");
+      const rows = await fetchLedgerRowsForRange();
+      const accountSlug = slugifyFilenamePart(selectedAccount?.name ?? "ledger");
+      const rangeSlug = `${ledgerRangeFrom || "from"}_to_${ledgerRangeTo || "to"}`;
+      downloadCsv(
+        `ledger-${accountSlug}-${rangeSlug}.csv`,
+        ["Date", "Payee", "Memo", "Category", "Type", "Method", "Status", "Amount"],
+        buildLedgerCsvRows(rows)
+      );
+      setExportDialogOpen(false);
+    } catch (e: any) {
+      setErr(appErrorMessageOrNull(e) ?? e?.message ?? "Export failed");
+    } finally {
+      setLedgerActionBusy(null);
+    }
+  };
+
+  const handleLedgerPrint = async () => {
+    try {
+      setLedgerActionBusy("print");
+      const rows = await fetchLedgerRowsForRange();
+      const printWindow = window.open("", "_blank", "width=1200,height=900");
+      if (!printWindow) throw new Error("Pop-up blocked. Allow pop-ups to print the ledger.");
+
+      const generatedAt = new Date().toISOString();
+      const totalCents = rows.reduce((sum, row) => sum + toBigIntSafe(row.amount_cents), ZERO);
+      const tableRows = rows.length
+        ? rows.map((row) => {
+            const amount = toBigIntSafe(row.amount_cents);
+            const amountClass = amount < ZERO ? "amount amount-neg" : "amount";
+            return `
+              <tr>
+                <td>${escapeHtml(row.date || "")}</td>
+                <td>${escapeHtml(row.payee || "—")}</td>
+                <td>${escapeHtml(row.memo || "—")}</td>
+                <td>${escapeHtml(row.category_name || "—")}</td>
+                <td>${escapeHtml(row.status || "—")}</td>
+                <td class="${amountClass}">${escapeHtml(formatUsdFromCents(amount))}</td>
+              </tr>
+            `;
+          }).join("")
+        : `<tr><td colspan="6" class="empty">No ledger entries found for this range.</td></tr>`;
+
+      printWindow.document.open();
+      printWindow.document.write(`
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Ledger Report</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #0f172a; background: #ffffff; }
+              .page { padding: 32px; }
+              .header { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; }
+              .logo { width: 156px; height: 36px; object-fit: contain; object-position: left center; }
+              .title { font-size: 24px; font-weight: 700; margin: 0; }
+              .meta { margin-top: 6px; font-size: 12px; color: #475569; line-height: 1.6; }
+              .range { margin: 18px 0 14px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; font-size: 12px; color: #334155; }
+              table { width: 100%; border-collapse: collapse; }
+              thead th { text-align: left; font-size: 12px; color: #475569; padding: 10px 12px; border-bottom: 1px solid #cbd5e1; }
+              tbody td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-size: 12px; vertical-align: top; }
+              .amount { text-align: right; white-space: nowrap; font-weight: 600; }
+              .amount-neg { color: #b91c1c; }
+              .summary { display: flex; justify-content: flex-end; margin-top: 14px; }
+              .summary-card { min-width: 240px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; background: #f8fafc; }
+              .summary-label { font-size: 12px; color: #475569; }
+              .summary-value { margin-top: 6px; font-size: 18px; font-weight: 700; }
+              .summary-value.neg { color: #b91c1c; }
+              .empty { text-align: center; color: #64748b; padding: 24px 12px; }
+              @media print {
+                body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .page { padding: 20px; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="page">
+              <div class="header">
+                <img src="/brand/bynkbook-logo-horizontal.png" alt="BynkBook" class="logo" />
+                <div>
+                  <h1 class="title">Ledger Report</h1>
+                  <div class="meta">
+                    <div><strong>Business:</strong> ${escapeHtml(selectedBusinessName)}</div>
+                    <div><strong>Account:</strong> ${escapeHtml(selectedAccount?.name ?? "All accounts")}</div>
+                    <div><strong>Date range:</strong> ${escapeHtml(activeLedgerRangeLabel)}</div>
+                    <div><strong>Generated:</strong> ${escapeHtml(formatLedgerDateTimeForPrint(generatedAt))}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="range">
+                ${escapeHtml(ledgerPresetLabel(activeLedgerRange.preset))} • ${escapeHtml(activeLedgerRangeLabel)}
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 100px;">Date</th>
+                    <th style="width: 180px;">Payee</th>
+                    <th>Memo</th>
+                    <th style="width: 140px;">Category</th>
+                    <th style="width: 110px;">Status</th>
+                    <th style="width: 120px; text-align: right;">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+              </table>
+
+              <div class="summary">
+                <div class="summary-card">
+                  <div class="summary-label">Net total</div>
+                  <div class="summary-value ${totalCents < ZERO ? "neg" : ""}">${escapeHtml(formatUsdFromCents(totalCents))}</div>
+                </div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+
+      await new Promise<void>((resolve) => {
+        let done = false;
+
+        const finish = () => {
+          if (done) return;
+          done = true;
+          resolve();
+        };
+
+        const attemptPrint = () => {
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } finally {
+            finish();
+          }
+        };
+
+        const logo = printWindow.document.querySelector("img.logo") as HTMLImageElement | null;
+
+        const onReady = () => {
+          if (logo && !logo.complete) {
+            logo.addEventListener("load", attemptPrint, { once: true });
+            logo.addEventListener("error", attemptPrint, { once: true });
+            window.setTimeout(attemptPrint, 1200);
+            return;
+          }
+
+          window.setTimeout(attemptPrint, 150);
+        };
+
+        if (printWindow.document.readyState === "complete") {
+          onReady();
+        } else {
+          printWindow.addEventListener("load", onReady, { once: true });
+          window.setTimeout(onReady, 400);
+        }
+      });
+
+      setPrintDialogOpen(false);
+    } catch (e: any) {
+      setErr(appErrorMessageOrNull(e) ?? e?.message ?? "Print failed");
+    } finally {
+      setLedgerActionBusy(null);
+    }
+  };
+
   // Auth handled by AppShell
 
   const accountCapsuleEl = (
@@ -4652,6 +5082,26 @@ export default function LedgerPageClient() {
                     Uncategorized: <span className="font-semibold">{uncategorizedCount}</span>
                   </button>
                 ) : null}
+
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  onClick={() => setExportDialogOpen(true)}
+                  disabled={!selectedBusinessId || !selectedAccountId}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                </button>
+
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  onClick={() => setPrintDialogOpen(true)}
+                  disabled={!selectedBusinessId || !selectedAccountId}
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print
+                </button>
 
                 <button
                   type="button"
@@ -4830,7 +5280,7 @@ export default function LedgerPageClient() {
         open={!!paymentDeleteDialog}
         onClose={() => setPaymentDeleteDialog(null)}
         title="Delete vendor payment"
-        size="md"
+        size="xs"
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" onClick={() => setPaymentDeleteDialog(null)}>
@@ -4904,7 +5354,7 @@ export default function LedgerPageClient() {
         open={!!deleteDialog}
         onClose={() => setDeleteDialog(null)}
         title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
-        size="md"
+        size="xs"
         disableOverlayClose={false}
         footer={
           <div className="flex items-center justify-end gap-2">
@@ -4982,7 +5432,7 @@ export default function LedgerPageClient() {
         open={ledgerApplyOpen}
         onClose={() => setLedgerApplyOpen(false)}
         title="Apply payment"
-        size="lg"
+        size="md"
         footer={
           <div className="flex items-center justify-between">
             <div className="text-xs text-slate-600">
@@ -5105,7 +5555,7 @@ export default function LedgerPageClient() {
         open={aiExplainOpen}
         onClose={() => setAiExplainOpen(false)}
         title="AI Explain"
-        size="md"
+        size="xs"
       >
         <div className="space-y-3">
           {aiExplainBusy && !aiExplainLast ? (
@@ -5127,6 +5577,181 @@ export default function LedgerPageClient() {
           {!aiExplainBusy && !aiExplainErr ? (
             <div className="text-[11px] text-slate-500">AI guidance only. Review before saving changes.</div>
           ) : null}
+        </div>
+      </AppDialog>
+
+
+      <AppDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        title="Export ledger"
+        size="sm"
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-slate-500">
+              Export filtered ledger rows for the selected date range.
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setExportDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleLedgerExport} disabled={ledgerActionBusy === "export"}>
+                {ledgerActionBusy === "export" ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Exporting…
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export CSV
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <div className="text-sm font-semibold text-slate-900">Choose timeframe</div>
+            <div className="mt-1 text-xs text-slate-600">
+              Current selection: {activeLedgerRangeLabel}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {([
+                "TODAY",
+                "YESTERDAY",
+                "LAST_7_DAYS",
+                "LAST_30_DAYS",
+                "THIS_WEEK",
+                "LAST_WEEK",
+                "THIS_MONTH",
+                "LAST_MONTH",
+                "THIS_QUARTER",
+                "LAST_QUARTER",
+                "THIS_YEAR",
+                "LAST_YEAR",
+                "CUSTOM",
+              ] as LedgerRangePreset[]).map((preset) => {
+                const active = ledgerRangePreset === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={[
+                      "h-9 rounded-lg border px-3 text-xs font-medium transition-colors duration-200",
+                      active
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                    ].join(" ")}
+                    onClick={() => applyLedgerPreset(preset)}
+                  >
+                    {ledgerPresetLabel(preset)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">From</div>
+              <AppDatePicker value={ledgerRangeFrom} onChange={onLedgerFromChange} placeholder="From date" />
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">To</div>
+              <AppDatePicker value={ledgerRangeTo} onChange={onLedgerToChange} placeholder="To date" />
+            </div>
+          </div>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={printDialogOpen}
+        onClose={() => setPrintDialogOpen(false)}
+        title="Print ledger"
+        size="sm"
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-slate-500">
+              Prints a branded ledger report for the selected date range.
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setPrintDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleLedgerPrint} disabled={ledgerActionBusy === "print"}>
+                {ledgerActionBusy === "print" ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Preparing…
+                  </>
+                ) : (
+                  <>
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print ledger
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <div className="text-sm font-semibold text-slate-900">Choose timeframe</div>
+            <div className="mt-1 text-xs text-slate-600">
+              Print header will include the BynkBook logo, business, account, selected date range, and generated timestamp.
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {([
+                "TODAY",
+                "YESTERDAY",
+                "LAST_7_DAYS",
+                "LAST_30_DAYS",
+                "THIS_WEEK",
+                "LAST_WEEK",
+                "THIS_MONTH",
+                "LAST_MONTH",
+                "THIS_QUARTER",
+                "LAST_QUARTER",
+                "THIS_YEAR",
+                "LAST_YEAR",
+                "CUSTOM",
+              ] as LedgerRangePreset[]).map((preset) => {
+                const active = ledgerRangePreset === preset;
+                return (
+                  <button
+                    key={`print-${preset}`}
+                    type="button"
+                    className={[
+                      "h-9 rounded-lg border px-3 text-xs font-medium transition-colors duration-200",
+                      active
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                    ].join(" ")}
+                    onClick={() => applyLedgerPreset(preset)}
+                  >
+                    {ledgerPresetLabel(preset)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">From</div>
+              <AppDatePicker value={ledgerRangeFrom} onChange={onLedgerFromChange} placeholder="From date" />
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">To</div>
+              <AppDatePicker value={ledgerRangeTo} onChange={onLedgerToChange} placeholder="To date" />
+            </div>
+          </div>
         </div>
       </AppDialog>
 

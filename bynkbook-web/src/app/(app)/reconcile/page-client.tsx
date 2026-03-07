@@ -3484,7 +3484,7 @@ export default function ReconcilePageClient() {
           setOpenSnapshots(false);
         }}
         title="Snapshots"
-        size="lg"
+        size="sm"
         footer={
           <DialogFooter
             left={
@@ -4191,7 +4191,7 @@ export default function ReconcilePageClient() {
           setAdjustEntryId(null);
         }}
         title="Mark adjustment"
-        size="md"
+        size="xs"
         footer={
           <DialogFooter
             left={
@@ -5343,14 +5343,14 @@ export default function ReconcilePageClient() {
         open={openExportHub}
         onClose={() => setOpenExportHub(false)}
         title="Export"
-        size="md"
+        size="sm"
       >
         <div className="p-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
               <button
                 type="button"
-                className={["h-24 w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
+                className={["h-20 w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2", ringFocus].join(" ")}
                 disabled={
                   !canWriteReconcileEffective ||
                   (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
@@ -5379,7 +5379,7 @@ export default function ReconcilePageClient() {
 
             <button
               type="button"
-              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-2 col-span-2", ringFocus].join(" ")}
+              className={["h-20 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2 sm:col-span-2", ringFocus].join(" ")}
               disabled={reconAuditVisible.length === 0}
               title={reconAuditVisible.length === 0 ? "No audit events to export" : "Export audit events (CSV) — respects current filters"}
               onClick={() => exportAuditEventsCsv()}

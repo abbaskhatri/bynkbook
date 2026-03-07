@@ -9,6 +9,8 @@ import {
   HelpCircle,
   UserCircle,
   Building2,
+  ChevronsLeft,
+  ChevronsRight,
   LayoutDashboard,
   BookOpen,
   GitMerge,
@@ -32,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
 import GlobalSearch from "@/components/app/global-search";
+import BrandLogo from "@/components/app/BrandLogo";
 
 function navVariant(active: boolean) {
   return active ? "default" : "outline";
@@ -550,13 +553,31 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   if (!showChrome) return <>{children}</>;
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex bg-slate-50">
       {/* Sidebar (sticky) */}
       <aside
-        className={(collapsed ? "w-16" : "w-56") + " border-r border-slate-200 bg-white flex flex-col sticky top-0 h-screen"}
+        className={[
+          collapsed ? "w-16" : "w-56",
+          "border-r border-slate-200 bg-white/95 backdrop-blur flex flex-col sticky top-0 h-screen",
+          "transition-[width] duration-200 ease-out",
+        ].join(" ")}
       >
-        <div className="h-14 px-3 border-b border-slate-200 flex items-center bg-white">
-          <div className="text-sm font-semibold leading-none">{collapsed ? "BB" : "BynkBook"}</div>
+        <div className="h-14 px-3 border-b border-slate-200 flex items-center bg-white/95">
+          <div
+            className={
+              collapsed
+                ? "w-full flex items-center justify-center"
+                : "w-full flex items-center justify-start"
+            }
+          >
+            <BrandLogo
+              collapsed={collapsed}
+              variant={collapsed ? "icon" : "full"}
+              size={collapsed ? "md" : "md"}
+              priority
+              className={collapsed ? "" : "translate-y-[1px]"}
+            />
+          </div>
         </div>
 
         <div className="p-3 space-y-3 flex-1 overflow-y-auto">
@@ -567,7 +588,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               <div key={group.group} className="space-y-2">
                 {/* Group label (hidden when collapsed to keep width stable) */}
                 {!collapsed ? (
-                  <div className="px-1 text-[10px] uppercase tracking-wide text-slate-500">
+                  <div className="px-1 text-[10px] uppercase tracking-[0.16em] text-slate-500 transition-opacity duration-200">
                     {group.group}
                   </div>
                 ) : null}
@@ -587,7 +608,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                           key={item.path}
                           asChild
                           variant={navVariant(active)}
-                          className="w-full justify-center"
+                          className="w-full justify-center transition-colors duration-200"
                           size="sm"
                           title={
                             item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
@@ -615,10 +636,10 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         key={item.path}
                         asChild
                         variant={navVariant(active)}
-                        className="w-full justify-start"
+                        className="w-full justify-start transition-colors duration-200"
                         size="sm"
                       >
-                        <Link href={link} prefetch className="flex w-full items-center gap-2">
+                        <Link href={link} prefetch className="flex w-full items-center gap-2 transition-all duration-200">
                           <span className="shrink-0 text-slate-600">{item.icon}</span>
                           <span className="truncate">{item.label}</span>
                           {item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0 ? (
@@ -641,16 +662,20 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           })}
         </div>
 
-        <div className="p-3 border-t border-slate-200 bg-white">
+        <div className="p-3 border-t border-slate-200 bg-white/95">
           <Button
             variant="outline"
             size="sm"
-            className={collapsed ? "w-full justify-center" : "w-full justify-between"}
+            className={collapsed ? "w-full justify-center h-9" : "w-full justify-between h-9"}
             onClick={toggleCollapsed}
-            title="Collapse sidebar"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {collapsed ? "»" : "Collapse"}
-            {!collapsed ? <span>«</span> : null}
+            {collapsed ? <ChevronsRight className="h-4 w-4" /> : (
+              <>
+                <span>Collapse</span>
+                <ChevronsLeft className="h-4 w-4" />
+              </>
+            )}
           </Button>
         </div>
       </aside>

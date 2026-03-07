@@ -21,3 +21,11 @@ export function downloadCsv(filename: string, headers: string[], rows: any[][]) 
 
   URL.revokeObjectURL(url);
 }
+
+export function slugifyFilenamePart(value: string) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "ledger";
+}

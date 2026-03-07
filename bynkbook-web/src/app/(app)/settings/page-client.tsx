@@ -2054,7 +2054,7 @@ export default function SettingsPageClient() {
                     setPlaidDraft(null);
                   }}
                   title="Create account"
-                  size="md"
+                  size={createMode === "choose" ? "xs" : "sm"}
                   footer={
                     <div className="flex items-center justify-between gap-2">
                       <div>

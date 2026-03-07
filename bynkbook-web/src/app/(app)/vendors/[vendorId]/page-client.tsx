@@ -1225,7 +1225,7 @@ export default function VendorDetailPageClient() {
           open={billDialogOpen}
           onClose={() => { setBillDialogOpen(false); setBillEditId(null); }}
           title={billEditId ? "Edit bill" : "New bill"}
-          size="md"
+          size="sm"
           footer={
             <div className="flex items-center justify-end gap-2">
               <Button
@@ -1405,7 +1405,7 @@ export default function VendorDetailPageClient() {
           open={vendorPayOpen}
           onClose={() => setVendorPayOpen(false)}
           title="Apply vendor payment"
-          size="md"
+          size="sm"
           footer={
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-slate-600">
@@ -1719,7 +1719,7 @@ export default function VendorDetailPageClient() {
           open={applyOpen}
           onClose={() => setApplyOpen(false)}
           title="Apply payment"
-          size="lg"
+          size="sm"
           footer={
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-slate-600">
@@ -2086,7 +2086,7 @@ export default function VendorDetailPageClient() {
           open={statementOpen}
           onClose={() => setStatementOpen(false)}
           title="Download vendor statement"
-          size="md"
+          size="sm"
           footer={
             <div className="flex items-center justify-end gap-2">
               <Button
@@ -2198,7 +2198,7 @@ export default function VendorDetailPageClient() {
           open={editOpen}
           onClose={() => setEditOpen(false)}
           title="Edit vendor"
-          size="md"
+          size="xs"
           footer={
             <div className="flex items-center justify-end gap-2">
               <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setEditOpen(false)} disabled={loading}>

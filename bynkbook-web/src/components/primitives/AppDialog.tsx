@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { X } from "lucide-react";
 import { surfaceCardSoft, ringFocus } from "./tokens";
 
-type AppDialogSize = "sm" | "md" | "lg" | "xl";
+type AppDialogSize = "xs" | "sm" | "md" | "lg" | "xl";
 
 type AppDialogProps = {
   open: boolean;
@@ -11,22 +12,16 @@ type AppDialogProps = {
   children: React.ReactNode;
   onClose?: () => void;
   footer?: React.ReactNode;
-
-  /** Sizing tokens (default: md) */
   size?: AppDialogSize;
-
-  /**
-   * Overlay click closes only when onClose exists.
-   * If true, overlay click will NOT close (useful for sensitive flows).
-   */
   disableOverlayClose?: boolean;
 };
 
 const dialogWidthBySize: Record<AppDialogSize, string> = {
-  sm: "max-w-sm",
-  md: "max-w-lg",
-  lg: "max-w-2xl",
-  xl: "max-w-4xl",
+  xs: "sm:min-w-[22rem] max-w-[24rem]",
+  sm: "sm:min-w-[24rem] max-w-[28rem]",
+  md: "sm:min-w-[28rem] max-w-[34rem]",
+  lg: "sm:min-w-[34rem] max-w-[42rem]",
+  xl: "sm:min-w-[42rem] max-w-[56rem]",
 };
 
 export function AppDialog({
@@ -40,20 +35,16 @@ export function AppDialog({
 }: AppDialogProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Safe initial focus (no focus trap requirement yet)
   React.useEffect(() => {
     if (!open) return;
-    // Defer to ensure element exists in DOM
     const t = window.setTimeout(() => {
       containerRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(t);
   }, [open]);
 
-  // ESC closes only if onClose exists
   React.useEffect(() => {
-    if (!open) return;
-    if (!onClose) return;
+    if (!open || !onClose) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -68,20 +59,19 @@ export function AppDialog({
   const widthClass = dialogWidthBySize[size] ?? dialogWidthBySize.md;
 
   const handleOverlayClick = () => {
-    if (!onClose) return;
-    if (disableOverlayClose) return;
+    if (!onClose || disableOverlayClose) return;
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 overflow-x-hidden">
       <div
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] transition-opacity duration-200"
         onClick={handleOverlayClick}
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-center justify-center p-4 overflow-x-hidden">
+      <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-4 overflow-x-hidden">
         <div
           ref={containerRef}
           tabIndex={-1}
@@ -89,14 +79,15 @@ export function AppDialog({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "w-full max-w-full",
+            "w-auto min-w-0 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-slate-200/90 bg-white shadow-2xl",
+            "max-h-[85vh] flex flex-col overflow-hidden",
+            "transition-all duration-200 ease-out",
+            "animate-in fade-in zoom-in-95",
             widthClass,
-            "max-h-[85vh] flex flex-col overflow-x-hidden",
           ].join(" ")}
         >
-          {/* Header (fixed) */}
-          <div className="shrink-0 px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-slate-900 truncate">
+          <div className="shrink-0 px-3.5 py-2.5 border-b border-slate-200/80 flex items-start justify-between gap-3 bg-white/95">
+            <div className="min-w-0 text-sm font-semibold text-slate-900 leading-6">
               {title}
             </div>
 
@@ -104,23 +95,22 @@ export function AppDialog({
               <button
                 type="button"
                 className={[
-                  "h-7 w-8 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white",
+                  "h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-200",
+                  "hover:bg-slate-50 hover:text-slate-800",
                   ringFocus,
                 ].join(" ")}
                 onClick={onClose}
                 aria-label="Close dialog"
               >
-                ✕
+                <X className="h-4 w-4" />
               </button>
             ) : null}
           </div>
 
-          {/* Body (scroll only here) */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">{children}</div>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-3.5 py-2.5">{children}</div>
 
-          {/* Footer (fixed) */}
           {footer ? (
-            <div className="shrink-0 px-4 py-3 border-t border-slate-200">
+            <div className="shrink-0 px-3.5 py-2.5 border-t border-slate-200/80 bg-slate-50/70">
               {footer}
             </div>
           ) : null}

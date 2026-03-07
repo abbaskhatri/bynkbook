@@ -151,7 +151,7 @@ export function ClosePeriodDialog(props: {
       open={open}
       onClose={() => onOpenChange(false)}
       title="Close period"
-      size="lg"
+      size="md"
       footer={
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs text-slate-600">

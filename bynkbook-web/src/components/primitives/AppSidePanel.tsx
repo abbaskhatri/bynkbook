@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { X } from "lucide-react";
 import { surfaceCardSoft, ringFocus } from "./tokens";
 
 type PanelSize = "sm" | "md" | "lg";
@@ -11,27 +12,15 @@ type AppSidePanelProps = {
   children: React.ReactNode;
   onClose?: () => void;
   footer?: React.ReactNode;
-
-  /** Width tokens (default: md) */
   size?: PanelSize;
-
-  /**
-   * Legacy escape hatch. Prefer `size`.
-   * If provided, it overrides `size`.
-   */
-  widthClassName?: string; // e.g., "w-[520px]"
-
-  /**
-   * Overlay click closes only when onClose exists.
-   * If true, overlay click will NOT close (useful for sensitive flows).
-   */
+  widthClassName?: string;
   disableOverlayClose?: boolean;
 };
 
 const panelWidthBySize: Record<PanelSize, string> = {
-  sm: "w-[420px]",
-  md: "w-[520px]",
-  lg: "w-[640px]",
+  sm: "w-[400px]",
+  md: "w-[500px]",
+  lg: "w-[600px]",
 };
 
 export function AppSidePanel({
@@ -46,7 +35,6 @@ export function AppSidePanel({
 }: AppSidePanelProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Safe initial focus (no focus trap requirement yet)
   React.useEffect(() => {
     if (!open) return;
     const t = window.setTimeout(() => {
@@ -55,10 +43,8 @@ export function AppSidePanel({
     return () => window.clearTimeout(t);
   }, [open]);
 
-  // ESC closes only if onClose exists
   React.useEffect(() => {
-    if (!open) return;
-    if (!onClose) return;
+    if (!open || !onClose) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -73,15 +59,14 @@ export function AppSidePanel({
   const widthClass = widthClassName ?? (panelWidthBySize[size] ?? panelWidthBySize.md);
 
   const handleOverlayClick = () => {
-    if (!onClose) return;
-    if (disableOverlayClose) return;
+    if (!onClose || disableOverlayClose) return;
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50">
       <div
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] transition-opacity duration-200"
         onClick={handleOverlayClick}
         aria-hidden="true"
       />
@@ -92,11 +77,16 @@ export function AppSidePanel({
           tabIndex={-1}
           role="dialog"
           aria-modal="true"
-          className={[surfaceCardSoft, "h-full", widthClass, "flex flex-col"].join(" ")}
+          className={[
+            surfaceCardSoft,
+            "h-full rounded-none border-l border-slate-200/90 bg-white shadow-2xl",
+            "transition-transform duration-200 ease-out animate-in slide-in-from-right",
+            widthClass,
+            "flex flex-col",
+          ].join(" ")}
         >
-          {/* Header (fixed) */}
-          <div className="shrink-0 px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-slate-900 truncate">
+          <div className="shrink-0 px-5 py-4 border-b border-slate-200/80 flex items-start justify-between gap-3 bg-white/95">
+            <div className="min-w-0 text-sm font-semibold text-slate-900 leading-6">
               {title}
             </div>
 
@@ -104,28 +94,23 @@ export function AppSidePanel({
               <button
                 type="button"
                 className={[
-                  "h-7 w-8 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white",
+                  "h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-200",
+                  "hover:bg-slate-50 hover:text-slate-800",
                   ringFocus,
                 ].join(" ")}
                 onClick={onClose}
                 aria-label="Close panel"
               >
-                ✕
+                <X className="h-4 w-4" />
               </button>
             ) : null}
           </div>
 
-          {/* Body (scroll only here) */}
-          <div className="flex-1 overflow-auto px-4 py-3">{children}</div>
+          <div className="flex-1 overflow-auto px-5 py-4">{children}</div>
 
-          {/* Footer (fixed) */}
-          {footer ? (
-            <div className="shrink-0 px-4 py-3 border-t border-slate-200">
-              {footer}
-            </div>
-          ) : (
-            <div className="shrink-0 px-4 py-3 border-t border-slate-200" />
-          )}
+          <div className="shrink-0 px-5 py-4 border-t border-slate-200/80 bg-slate-50/70">
+            {footer ?? null}
+          </div>
         </div>
       </div>
     </div>
