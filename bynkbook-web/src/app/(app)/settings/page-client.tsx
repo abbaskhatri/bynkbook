@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { patchBusiness, deleteBusiness, getBusinessUsage, type Business } from "@/lib/api/businesses";
+import { patchBusiness, deleteBusiness, resetBusiness, getBusinessUsage, type Business } from "@/lib/api/businesses";
 import { listEntries } from "@/lib/api/entries";
 import { listMatchGroups } from "@/lib/api/match-groups";
 import { listVendors } from "@/lib/api/vendors";
@@ -390,6 +390,11 @@ export default function SettingsPageClient() {
   const [deleteBusinessOpen, setDeleteBusinessOpen] = useState(false);
   const [deleteBusinessBusy, setDeleteBusinessBusy] = useState(false);
   const [deleteBusinessErr, setDeleteBusinessErr] = useState<string | null>(null);
+
+  const [resetBusinessOpen, setResetBusinessOpen] = useState(false);
+  const [resetBusinessBusy, setResetBusinessBusy] = useState(false);
+  const [resetBusinessErr, setResetBusinessErr] = useState<string | null>(null);
+  const [resetBusinessConfirm, setResetBusinessConfirm] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupErr, setBackupErr] = useState<string | null>(null);
   const [exportClosedOpen, setExportClosedOpen] = useState(false);
@@ -3208,17 +3213,32 @@ export default function SettingsPageClient() {
                   </Button>
 
                   {isOwnerRole ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-7 px-3 text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
-                      onClick={() => {
-                        setDeleteBusinessErr(null);
-                        setDeleteBusinessOpen(true);
-                      }}
-                    >
-                      Delete business
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-7 px-3 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
+                        onClick={() => {
+                          setResetBusinessErr(null);
+                          setResetBusinessConfirm("");
+                          setResetBusinessOpen(true);
+                        }}
+                      >
+                        Reset business
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-7 px-3 text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+                        onClick={() => {
+                          setDeleteBusinessErr(null);
+                          setDeleteBusinessOpen(true);
+                        }}
+                      >
+                        Delete business
+                      </Button>
+                    </>
                   ) : null}
                 </div>
 
@@ -3317,6 +3337,86 @@ export default function SettingsPageClient() {
               }}
             >
               {exportClosedBusy ? "Preparing export…" : "Download export"}
+            </Button>
+          </div>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={resetBusinessOpen}
+        onClose={() => {
+          if (resetBusinessBusy) return;
+          setResetBusinessOpen(false);
+        }}
+        title="Reset business"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            This will erase operational data for the current business but keep the workspace itself.
+          </div>
+
+          <div className="text-xs text-slate-600">
+            Preserved: business profile, members, accounts, categories, bookkeeping preferences, invites, and role policies.
+          </div>
+
+          <div className="text-xs text-slate-600">
+            Cleared: entries, uploads, bank transactions, matches, reconcile snapshots, closed periods, vendors, bills, payments, transfers, budgets, goals, and activity history.
+          </div>
+
+          {resetBusinessErr ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {resetBusinessErr}
+            </div>
+          ) : null}
+
+          <div className="space-y-1">
+            <Label htmlFor="reset-business-confirm">Type RESET to continue</Label>
+            <Input
+              id="reset-business-confirm"
+              value={resetBusinessConfirm}
+              onChange={(e) => setResetBusinessConfirm(e.target.value)}
+              placeholder="RESET"
+              className="h-9"
+              disabled={resetBusinessBusy}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              className="h-7 px-3 text-xs"
+              disabled={resetBusinessBusy}
+              onClick={() => setResetBusinessOpen(false)}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              className="h-7 px-3 text-xs bg-amber-600 hover:bg-amber-700"
+              disabled={resetBusinessBusy || !selectedBusinessId || resetBusinessConfirm.trim().toUpperCase() !== "RESET"}
+              onClick={async () => {
+                if (!selectedBusinessId) return;
+                setResetBusinessBusy(true);
+                setResetBusinessErr(null);
+                try {
+                  await resetBusiness(selectedBusinessId);
+                  setResetBusinessOpen(false);
+                  setResetBusinessConfirm("");
+                  await Promise.all([
+                    qc.invalidateQueries({ queryKey: ["business-usage", selectedBusinessId] }),
+                    qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] }),
+                    qc.invalidateQueries({ queryKey: ["businesses"] }),
+                  ]);
+                  router.refresh();
+                } catch (e: any) {
+                  setResetBusinessErr(e?.message ?? "Reset failed");
+                } finally {
+                  setResetBusinessBusy(false);
+                }
+              }}
+            >
+              {resetBusinessBusy ? "Resetting…" : "Reset business"}
             </Button>
           </div>
         </div>

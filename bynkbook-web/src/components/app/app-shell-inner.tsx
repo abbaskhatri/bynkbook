@@ -702,10 +702,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           {/* Right: Global search + bell + user menu */}
           <div className="flex items-center gap-2">
             {businessId ? (
-              <GlobalSearch
-                businessId={businessId}
-                accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
-              />
+              <div className="hidden md:block">
+                <GlobalSearch
+                  businessId={businessId}
+                  accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
+                />
+              </div>
             ) : null}
 
             <div className="relative" ref={activityRef}>

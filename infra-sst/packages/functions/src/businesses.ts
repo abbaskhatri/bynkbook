@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { logActivity } from "./lib/activityLog";
 import { randomUUID } from "node:crypto";
 
 function json(statusCode: number, body: any) {
@@ -12,6 +13,27 @@ function json(statusCode: number, body: any) {
 function getClaims(event: any) {
   const auth = event?.requestContext?.authorizer ?? {};
   return auth?.jwt?.claims ?? auth?.claims ?? {};
+}
+
+async function requireOwner(prisma: any, businessId: string, sub: string) {
+  const membership = await prisma.userBusinessRole.findFirst({
+    where: { user_id: sub, business_id: businessId },
+    select: { role: true },
+  });
+  const role = String(membership?.role ?? "").toUpperCase();
+  if (!role) return { ok: false as const, status: 403, error: "Forbidden (not a member of this business)" };
+  if (role !== "OWNER") return { ok: false as const, status: 403, error: "Forbidden (requires OWNER)" };
+
+  const biz = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { id: true, owner_user_id: true, name: true },
+  });
+  if (!biz) return { ok: false as const, status: 404, error: "Business not found" };
+  if (String(biz.owner_user_id) !== String(sub)) {
+    return { ok: false as const, status: 403, error: "Forbidden (only business owner can reset)" };
+  }
+
+  return { ok: true as const, business: biz };
 }
 
 export async function handler(event: any) {
@@ -43,6 +65,127 @@ export async function handler(event: any) {
     return json(200, {
       ok: true,
       usage: { entries_count, accounts_count, members_count },
+    });
+  }
+
+  // POST /v1/businesses/{businessId}/reset (OWNER only)
+  if (method === "POST" && businessId && path?.endsWith(`/v1/businesses/${businessId}/reset`)) {
+    const authz = await requireOwner(prisma, businessId, sub);
+    if (!authz.ok) return json(authz.status, { ok: false, error: authz.error });
+
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+
+    const confirm = String(body?.confirm ?? "").trim().toUpperCase();
+    if (confirm !== "RESET") {
+      return json(400, { ok: false, error: 'Confirmation text must be "RESET"' });
+    }
+
+    const summary = await prisma.$transaction(async (tx: any) => {
+      const [
+        billPaymentApplications,
+        bills,
+        vendors,
+        closedPeriods,
+        reconcileSnapshots,
+        matchGroupEntries,
+        matchGroupBanks,
+        matchGroups,
+        bankMatches,
+        bankTransactions,
+        uploads,
+        entryIssues,
+        entries,
+        transfers,
+        bankConnections,
+        budgets,
+        goals,
+        activityLogs,
+      ] = await Promise.all([
+        tx.billPaymentApplication.deleteMany({ where: { business_id: businessId } }),
+        tx.bill.deleteMany({ where: { business_id: businessId } }),
+        tx.vendor.deleteMany({ where: { business_id: businessId } }),
+        tx.closedPeriod.deleteMany({ where: { business_id: businessId } }),
+        tx.reconcileSnapshot.deleteMany({ where: { business_id: businessId } }),
+        tx.matchGroupEntry.deleteMany({ where: { business_id: businessId } }),
+        tx.matchGroupBank.deleteMany({ where: { business_id: businessId } }),
+        tx.matchGroup.deleteMany({ where: { business_id: businessId } }),
+        tx.bankMatch.deleteMany({ where: { business_id: businessId } }),
+        tx.bankTransaction.deleteMany({ where: { business_id: businessId } }),
+        tx.upload.deleteMany({ where: { business_id: businessId } }),
+        tx.entryIssue.deleteMany({ where: { business_id: businessId } }),
+        tx.entry.deleteMany({ where: { business_id: businessId } }),
+        tx.transfer.deleteMany({ where: { business_id: businessId } }),
+        tx.bankConnection.deleteMany({ where: { business_id: businessId } }),
+        tx.budget.deleteMany({ where: { business_id: businessId } }),
+        tx.goal.deleteMany({ where: { business_id: businessId } }),
+        tx.activityLog.deleteMany({ where: { business_id: businessId } }),
+      ]);
+
+      await logActivity(tx, {
+        businessId,
+        actorUserId: sub,
+        eventType: "BUSINESS_RESET",
+        payloadJson: {
+          business_name: authz.business.name,
+          cleared: {
+            bill_payment_applications: billPaymentApplications.count,
+            bills: bills.count,
+            vendors: vendors.count,
+            closed_periods: closedPeriods.count,
+            reconcile_snapshots: reconcileSnapshots.count,
+            match_group_entries: matchGroupEntries.count,
+            match_group_banks: matchGroupBanks.count,
+            match_groups: matchGroups.count,
+            bank_matches: bankMatches.count,
+            bank_transactions: bankTransactions.count,
+            uploads: uploads.count,
+            entry_issues: entryIssues.count,
+            entries: entries.count,
+            transfers: transfers.count,
+            bank_connections: bankConnections.count,
+            budgets: budgets.count,
+            goals: goals.count,
+            prior_activity_logs: activityLogs.count,
+          },
+          preserved: ["business", "members", "accounts", "categories", "preferences", "role_policies", "invites"],
+        },
+      });
+
+      return {
+        bill_payment_applications: billPaymentApplications.count,
+        bills: bills.count,
+        vendors: vendors.count,
+        closed_periods: closedPeriods.count,
+        reconcile_snapshots: reconcileSnapshots.count,
+        match_group_entries: matchGroupEntries.count,
+        match_group_banks: matchGroupBanks.count,
+        match_groups: matchGroups.count,
+        bank_matches: bankMatches.count,
+        bank_transactions: bankTransactions.count,
+        uploads: uploads.count,
+        entry_issues: entryIssues.count,
+        entries: entries.count,
+        transfers: transfers.count,
+        bank_connections: bankConnections.count,
+        budgets: budgets.count,
+        goals: goals.count,
+        prior_activity_logs: activityLogs.count,
+      };
+    });
+
+    return json(200, {
+      ok: true,
+      reset: {
+        business_id: businessId,
+        business_name: authz.business.name,
+        preserved: ["business", "members", "accounts", "categories", "preferences", "role_policies", "invites"],
+        cleared: summary,
+      },
     });
   }
 
@@ -211,23 +354,8 @@ export async function handler(event: any) {
 
   // DELETE /v1/businesses/{businessId} (OWNER only)
   if (method === "DELETE" && businessId && path.includes("/v1/businesses/")) {
-    const membership = await prisma.userBusinessRole.findFirst({
-      where: { user_id: sub, business_id: businessId },
-      select: { role: true },
-    });
-    const role = String(membership?.role ?? "").toUpperCase();
-    if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
-    if (role !== "OWNER") return json(403, { ok: false, error: "Forbidden (requires OWNER)" });
-
-    // Extra guard: must match owner_user_id
-    const biz = await prisma.business.findUnique({
-      where: { id: businessId },
-      select: { id: true, owner_user_id: true },
-    });
-    if (!biz) return json(404, { ok: false, error: "Business not found" });
-    if (String(biz.owner_user_id) !== String(sub)) {
-      return json(403, { ok: false, error: "Forbidden (only business owner can delete)" });
-    }
+    const authz = await requireOwner(prisma, businessId, sub);
+    if (!authz.ok) return json(authz.status, { ok: false, error: authz.error });
 
     await prisma.business.delete({ where: { id: businessId } });
     return json(200, { ok: true });

@@ -65,3 +65,16 @@ export async function getBusinessUsage(businessId: string): Promise<{
   const res: any = await apiFetch(`/v1/businesses/${businessId}/usage`);
   return res?.usage ?? { entries_count: 0, accounts_count: 0, members_count: 0 };
 }
+
+export async function resetBusiness(businessId: string): Promise<{
+  business_id: string;
+  business_name: string;
+  preserved: string[];
+  cleared: Record<string, number>;
+}> {
+  const res: any = await apiFetch(`/v1/businesses/${businessId}/reset`, {
+    method: "POST",
+    body: JSON.stringify({ confirm: "RESET" }),
+  });
+  return res?.reset;
+}

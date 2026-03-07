@@ -96,6 +96,7 @@ export default $config({
 
     // Settings usage stats (minimal, business-scoped)
     api.route("GET /v1/businesses/{businessId}/usage", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("POST /v1/businesses/{businessId}/reset", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Accounts ----------
 const acctHandler = {

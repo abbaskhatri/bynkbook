@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { queryGlobalSearch } from "@/lib/api/ai";
 import { Input } from "@/components/ui/input";
-import { Search } from "lucide-react";
+import { Command, Search } from "lucide-react";
 
 type SearchItem = {
   key: string;
@@ -18,6 +18,12 @@ function isEditableTarget(el: Element | null): boolean {
   if (tag === "input" || tag === "textarea" || tag === "select") return true;
   if ((el as HTMLElement).isContentEditable) return true;
   return false;
+}
+
+function shortcutLabel() {
+  if (typeof navigator === "undefined") return "Ctrl K";
+  const platform = navigator.platform?.toLowerCase() ?? "";
+  return /mac|iphone|ipad|ipod/.test(platform) ? "⌘K" : "Ctrl K";
 }
 
 export default function GlobalSearch(props: { businessId: string; accountId?: string }) {
@@ -38,6 +44,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
 
   const trimmed = q.trim();
   const canSearch = !!businessId && trimmed.length >= 3;
+  const keyHint = useMemo(() => shortcutLabel(), []);
 
   function extractStatus(e: any): number | null {
     const msg = String(e?.message ?? "");
@@ -54,18 +61,35 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
     router.push(link);
   }
 
-  // Global "/" shortcut to focus search (except when typing in editable controls)
+  function focusSearch() {
+    inputRef.current?.focus();
+    setOpen(true);
+  }
+
+  // Global shortcuts:
+  // - "/" focuses search when not typing
+  // - Cmd/Ctrl + K focuses search
   useEffect(() => {
     const onDocKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key !== "/") return;
-      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-
       const activeEl = document.activeElement;
-      if (isEditableTarget(activeEl)) return;
+      const editable = isEditableTarget(activeEl);
 
-      ev.preventDefault();
-      inputRef.current?.focus();
-      setOpen(true);
+      if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "k") {
+        if (editable && activeEl !== inputRef.current) {
+          ev.preventDefault();
+          focusSearch();
+          return;
+        }
+        ev.preventDefault();
+        focusSearch();
+        return;
+      }
+
+      if (ev.key === "/" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+        if (editable) return;
+        ev.preventDefault();
+        focusSearch();
+      }
     };
 
     document.addEventListener("keydown", onDocKeyDown);
@@ -120,16 +144,11 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
 
   const items: SearchItem[] = useMemo(() => {
     const out: SearchItem[] = [];
-    for (const e of entries.slice(0, 6)) {
-      out.push({ key: `e:${String(e.id)}`, link: String(e.link), kind: "entry" });
-    }
-    for (const t of bankTxns.slice(0, 6)) {
-      out.push({ key: `b:${String(t.id)}`, link: String(t.link), kind: "bank" });
-    }
+    for (const e of entries.slice(0, 6)) out.push({ key: `e:${String(e.id)}`, link: String(e.link), kind: "entry" });
+    for (const t of bankTxns.slice(0, 6)) out.push({ key: `b:${String(t.id)}`, link: String(t.link), kind: "bank" });
     return out;
   }, [entries, bankTxns]);
 
-  // Keep selection sane as results change
   useEffect(() => {
     if (!open || !canSearch) {
       setActiveIndex(-1);
@@ -139,14 +158,16 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [res, open, canSearch]);
 
+  const totalVisible = entries.slice(0, 6).length + bankTxns.slice(0, 6).length;
+
   return (
     <div className="relative">
       <div className="relative">
-        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input
           ref={inputRef}
-          className="h-7 w-[260px] pl-8 pr-2 text-xs"
-          placeholder="Search: “Expenses over $500 last month”…"
+          className="h-9 w-[320px] rounded-xl border-slate-200 bg-white pl-9 pr-16 text-sm shadow-sm"
+          placeholder="Search entries, bank txns, payees…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => setOpen(true)}
@@ -155,6 +176,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
               if (ev.key === "Escape") {
                 setOpen(false);
                 setActiveIndex(-1);
+                setQ("");
               }
               return;
             }
@@ -182,100 +204,140 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
               ev.preventDefault();
               setOpen(false);
               setActiveIndex(-1);
+              setQ("");
             }
           }}
           onBlur={() => {
-            // Delay close so clicks work
             setTimeout(() => setOpen(false), 120);
           }}
         />
+
+        <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+          <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+            {keyHint.includes("⌘") ? <Command className="h-3 w-3" /> : null}
+            <span>{keyHint}</span>
+          </div>
+        </div>
       </div>
 
-      {open && canSearch ? (
-        <div className="absolute z-50 mt-1 w-[420px] max-w-[70vw] rounded-md border border-slate-200 bg-white shadow-sm">
-          <div className="px-3 py-2 text-[11px] text-slate-500 flex items-center justify-between">
-            <span>Results (scoped)</span>
-            {busy ? <span>Searching…</span> : null}
-          </div>
-
-          {errMsg ? <div className="px-3 pb-2 text-xs text-rose-600">{errMsg}</div> : null}
-
-          <div className="h-px bg-slate-100" />
-
-          <div className="px-3 py-2">
-            <div className="text-[11px] font-semibold text-slate-700 mb-1">Entries</div>
-            {entries.length ? (
-              <div className="flex flex-col">
-                {entries.slice(0, 6).map((e: any, idx: number) => {
-                  const rowIndex = idx; // entries first
-                  const isActive = rowIndex === activeIndex;
-
-                  return (
-                    <button
-                      key={String(e.id)}
-                      type="button"
-                      aria-selected={isActive}
-                      className={[
-                        "py-2 text-left text-xs rounded-md px-2 border border-transparent",
-                        "hover:bg-slate-50",
-                        isActive ? "bg-accent text-accent-foreground ring-1 ring-ring/20" : "",
-                      ].join(" ")}
-                      onMouseEnter={() => setActiveIndex(rowIndex)}
-                      onClick={() => onSelect(String(e.link))}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="truncate">
-                          <span className="font-medium text-slate-900">{String(e.payee ?? "Entry")}</span>
-                          {e.memo ? <span className="text-slate-500"> · {String(e.memo).slice(0, 40)}</span> : null}
-                        </div>
-                        <div className="text-slate-500 tabular-nums">{String(e.date ?? "")}</div>
-                      </div>
-                    </button>
-                  );
-                })}
+      {open ? (
+        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_60px_rgba(15,23,42,0.14)]">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div>
+              <div className="text-xs font-semibold tracking-wide text-slate-700">Global search</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">
+                {canSearch ? "Scoped to the current business." : "Type at least 3 characters to search."}
               </div>
-            ) : (
-              <div className="text-xs text-slate-500">No entry matches</div>
-            )}
+            </div>
+            <div className="text-[11px] text-slate-400">{busy ? "Searching…" : totalVisible ? `${totalVisible} shown` : ""}</div>
           </div>
 
-          <div className="h-px bg-slate-100" />
+          {errMsg ? <div className="px-4 py-3 text-sm text-rose-600">{errMsg}</div> : null}
 
-          <div className="px-3 py-2">
-            <div className="text-[11px] font-semibold text-slate-700 mb-1">Bank transactions</div>
-            {bankTxns.length ? (
-              <div className="flex flex-col">
-                {bankTxns.slice(0, 6).map((t: any, idx: number) => {
-                  const rowIndex = entries.slice(0, 6).length + idx; // after entries
-                  const isActive = rowIndex === activeIndex;
-
-                  return (
-                    <button
-                      key={String(t.id)}
-                      type="button"
-                      aria-selected={isActive}
-                      className={[
-                        "py-2 text-left text-xs rounded-md px-2 border border-transparent",
-                        "hover:bg-slate-50",
-                        isActive ? "bg-accent text-accent-foreground ring-1 ring-ring/20" : "",
-                      ].join(" ")}
-                      onMouseEnter={() => setActiveIndex(rowIndex)}
-                      onClick={() => onSelect(String(t.link))}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="truncate">
-                          <span className="font-medium text-slate-900">{String(t.name ?? "Bank txn")}</span>
-                        </div>
-                        <div className="text-slate-500 tabular-nums">{String(t.posted_date ?? "").slice(0, 10)}</div>
-                      </div>
-                    </button>
-                  );
-                })}
+          {!canSearch ? (
+            <div className="px-4 py-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Search by payee, memo, amount phrasing, or transaction context. Try:
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Uber</span>
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Office supplies</span>
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Expenses over 500</span>
+                </div>
               </div>
-            ) : (
-              <div className="text-xs text-slate-500">No bank txn matches</div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <>
+              <div className="px-4 py-3">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Entries</div>
+                {entries.length ? (
+                  <div className="flex flex-col gap-1">
+                    {entries.slice(0, 6).map((e: any, idx: number) => {
+                      const rowIndex = idx;
+                      const isActive = rowIndex === activeIndex;
+
+                      return (
+                        <button
+                          key={String(e.id)}
+                          type="button"
+                          aria-selected={isActive}
+                          className={[
+                            "rounded-xl border px-3 py-2.5 text-left transition",
+                            isActive ? "border-slate-300 bg-slate-50" : "border-transparent hover:border-slate-200 hover:bg-slate-50",
+                          ].join(" ")}
+                          onMouseEnter={() => setActiveIndex(rowIndex)}
+                          onClick={() => onSelect(String(e.link))}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-slate-900">
+                                {String(e.payee ?? "Entry")}
+                              </div>
+                              <div className="mt-0.5 truncate text-xs text-slate-500">
+                                {e.memo ? String(e.memo).slice(0, 60) : "No memo"}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-xs tabular-nums text-slate-500">
+                              {String(e.date ?? "")}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                    No entry matches.
+                  </div>
+                )}
+              </div>
+
+              <div className="h-px bg-slate-100" />
+
+              <div className="px-4 py-3">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Bank transactions</div>
+                {bankTxns.length ? (
+                  <div className="flex flex-col gap-1">
+                    {bankTxns.slice(0, 6).map((t: any, idx: number) => {
+                      const rowIndex = entries.slice(0, 6).length + idx;
+                      const isActive = rowIndex === activeIndex;
+
+                      return (
+                        <button
+                          key={String(t.id)}
+                          type="button"
+                          aria-selected={isActive}
+                          className={[
+                            "rounded-xl border px-3 py-2.5 text-left transition",
+                            isActive ? "border-slate-300 bg-slate-50" : "border-transparent hover:border-slate-200 hover:bg-slate-50",
+                          ].join(" ")}
+                          onMouseEnter={() => setActiveIndex(rowIndex)}
+                          onClick={() => onSelect(String(t.link))}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-slate-900">
+                                {String(t.description ?? "Bank transaction")}
+                              </div>
+                              <div className="mt-0.5 truncate text-xs text-slate-500">
+                                {t.memo ? String(t.memo).slice(0, 60) : "Bank transaction result"}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-xs tabular-nums text-slate-500">
+                              {String(t.date ?? "")}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                    No bank transaction matches.
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       ) : null}
     </div>
