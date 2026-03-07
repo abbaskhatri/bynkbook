@@ -94,8 +94,9 @@ export default $config({
     api.route("GET /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("PATCH /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
-    // Settings usage stats (minimal, business-scoped)
+    // Settings usage stats + admin ops
     api.route("GET /v1/businesses/{businessId}/usage", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("GET /v1/businesses/{businessId}/backup", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("POST /v1/businesses/{businessId}/reset", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Accounts ----------

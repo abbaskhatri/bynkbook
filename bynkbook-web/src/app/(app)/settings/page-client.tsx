@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { patchBusiness, deleteBusiness, resetBusiness, getBusinessUsage, type Business } from "@/lib/api/businesses";
+import { patchBusiness, deleteBusiness, resetBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
 import { listEntries } from "@/lib/api/entries";
 import { listMatchGroups } from "@/lib/api/match-groups";
 import { listVendors } from "@/lib/api/vendors";
@@ -580,65 +580,10 @@ export default function SettingsPageClient() {
     setBackupErr(null);
 
     try {
-      const accounts = accountsQ.data ?? [];
-
-      const [vendorsRes, categoriesRes, closedRes, prefsRes, teamRes, rolePoliciesRes] = await Promise.all([
-        listVendors({ businessId: selectedBusinessId, sort: "name_asc" }),
-        listCategories(selectedBusinessId, { includeArchived: true } as any),
-        listClosedPeriods(selectedBusinessId),
-        getBookkeepingPreferences(selectedBusinessId),
-        getTeam(selectedBusinessId),
-        getRolePolicies(selectedBusinessId),
-      ]);
-
-      const perAccount = await Promise.all(
-        accounts.map(async (a) => {
-          const [entries, matchGroupsRes] = await Promise.all([
-            listEntries({
-              businessId: selectedBusinessId,
-              accountId: a.id,
-              limit: 200,
-              includeDeleted: true,
-            }),
-            listMatchGroups({
-              businessId: selectedBusinessId,
-              accountId: a.id,
-              status: "all",
-            }),
-          ]);
-
-          return {
-            account: a,
-            entries,
-            match_groups: matchGroupsRes?.items ?? [],
-          };
-        })
-      );
-
-      const payload = {
-        kind: "bynkbook_backup_snapshot",
-        generated_at: new Date().toISOString(),
-        business: selectedBusiness,
-        warnings: [
-          "Client-generated snapshot from current frontend APIs.",
-          "Entries are limited to the first 200 rows per account because the current entries API has no pagination in this frontend surface.",
-          "Use this as a launch snapshot/export, not a guaranteed full server backup.",
-        ],
-        accounts: perAccount.map((x) => x.account),
-        entries_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.entries])),
-        match_groups_by_account: Object.fromEntries(perAccount.map((x) => [x.account.id, x.match_groups])),
-        vendors: vendorsRes?.vendors ?? [],
-        categories: categoriesRes?.rows ?? [],
-        closed_periods: closedRes?.periods ?? [],
-        bookkeeping_preferences: prefsRes ?? null,
-        team_members: teamRes?.members ?? [],
-        team_invites: teamRes?.invites ?? [],
-        role_policies: rolePoliciesRes?.items ?? [],
-      };
-
-      downloadJsonFile(`bynkbook-backup-${selectedBusinessId}-${todayYmd()}.json`, payload);
+      const payload = await getBusinessBackup(selectedBusinessId);
+      downloadJsonFile(`bynkbook-full-backup-${selectedBusinessId}-${todayYmd()}.json`, payload);
     } catch (e: any) {
-      setBackupErr(e?.message ?? "Backup export failed");
+      setBackupErr(e?.message ?? "Full backup export failed");
     } finally {
       setBackupBusy(false);
     }
@@ -3196,7 +3141,7 @@ export default function SettingsPageClient() {
                       void onDownloadBackup();
                     }}
                   >
-                    {backupBusy ? "Preparing backup…" : "Download backup"}
+                    {backupBusy ? "Preparing full backup…" : "Download full backup"}
                   </Button>
 
                   <Button

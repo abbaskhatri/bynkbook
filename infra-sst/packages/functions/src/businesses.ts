@@ -6,7 +6,21 @@ function json(statusCode: number, body: any) {
   return {
     statusCode,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body, (_key, value) => {
+      if (typeof value === "bigint") return value.toString();
+
+      if (
+        value &&
+        typeof value === "object" &&
+        typeof (value as any).toJSON !== "function" &&
+        value.constructor &&
+        value.constructor.name === "Decimal"
+      ) {
+        return value.toString();
+      }
+
+      return value;
+    }),
   };
 }
 
@@ -30,10 +44,19 @@ async function requireOwner(prisma: any, businessId: string, sub: string) {
   });
   if (!biz) return { ok: false as const, status: 404, error: "Business not found" };
   if (String(biz.owner_user_id) !== String(sub)) {
-    return { ok: false as const, status: 403, error: "Forbidden (only business owner can reset)" };
+    return { ok: false as const, status: 403, error: "Forbidden (only business owner can access this operation)" };
   }
 
   return { ok: true as const, business: biz };
+}
+
+async function safeQuery<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    console.error(`[businesses.backup] ${label} failed`, err?.message ?? err);
+    return fallback;
+  }
 }
 
 export async function handler(event: any) {
@@ -65,6 +88,292 @@ export async function handler(event: any) {
     return json(200, {
       ok: true,
       usage: { entries_count, accounts_count, members_count },
+    });
+  }
+
+  // GET /v1/businesses/{businessId}/backup (OWNER only)
+  if (method === "GET" && businessId && path?.endsWith(`/v1/businesses/${businessId}/backup`)) {
+    const authz = await requireOwner(prisma, businessId, sub);
+    if (!authz.ok) return json(authz.status, { ok: false, error: authz.error });
+
+    const p: any = prisma;
+
+    const [
+      business,
+      members,
+      rolePolicies,
+      preferences,
+      accounts,
+      categories,
+      entries,
+      entryIssues,
+      uploads,
+      bankConnections,
+      bankTransactions,
+      bankMatches,
+      matchGroups,
+      matchGroupEntries,
+      matchGroupBanks,
+      closedPeriods,
+      reconcileSnapshots,
+      vendors,
+      bills,
+      billPaymentApplications,
+      transfers,
+      budgets,
+      goals,
+      activityLogs,
+    ] = await Promise.all([
+      safeQuery("business", () => p.business.findUnique({ where: { id: businessId } }), null),
+      safeQuery(
+        "members",
+        () =>
+          p.userBusinessRole.findMany({
+            where: { business_id: businessId },
+            orderBy: { created_at: "asc" },
+          }),
+        []
+      ),
+      safeQuery(
+        "rolePolicies",
+        () =>
+          typeof p.rolePolicy?.findMany === "function"
+            ? p.rolePolicy.findMany({
+                where: { business_id: businessId },
+                orderBy: { role: "asc" },
+              })
+            : Promise.resolve([]),
+        []
+      ),
+      safeQuery(
+        "preferences",
+        () =>
+          typeof p.bookkeepingPreference?.findUnique === "function"
+            ? p.bookkeepingPreference.findUnique({
+                where: { business_id: businessId },
+              })
+            : Promise.resolve(null),
+        null
+      ),
+      safeQuery(
+        "accounts",
+        () =>
+          p.account.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ archived_at: "asc" }, { name: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "categories",
+        () =>
+          p.category.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ archived_at: "asc" }, { name: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "entries",
+        () =>
+          p.entry.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ date: "asc" }, { created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "entryIssues",
+        () =>
+          p.entryIssue.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "uploads",
+        () =>
+          p.upload.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "bankConnections",
+        () =>
+          p.bankConnection.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "bankTransactions",
+        () =>
+          p.bankTransaction.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ date: "asc" }, { created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "bankMatches",
+        () =>
+          p.bankMatch.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "matchGroups",
+        () =>
+          p.matchGroup.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "matchGroupEntries",
+        () =>
+          p.matchGroupEntry.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "matchGroupBanks",
+        () =>
+          p.matchGroupBank.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "closedPeriods",
+        () =>
+          p.closedPeriod.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ month: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "reconcileSnapshots",
+        () =>
+          p.reconcileSnapshot.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "vendors",
+        () =>
+          p.vendor.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ archived_at: "asc" }, { name: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "bills",
+        () =>
+          p.bill.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ invoice_date: "asc" }, { created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "billPaymentApplications",
+        () =>
+          p.billPaymentApplication.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "transfers",
+        () =>
+          p.transfer.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+      safeQuery(
+        "budgets",
+        () =>
+          typeof p.budget?.findMany === "function"
+            ? p.budget.findMany({ where: { business_id: businessId } })
+            : Promise.resolve([]),
+        []
+      ),
+      safeQuery(
+        "goals",
+        () =>
+          typeof p.goal?.findMany === "function"
+            ? p.goal.findMany({
+                where: { business_id: businessId },
+                orderBy: [{ created_at: "asc" }],
+              })
+            : Promise.resolve([]),
+        []
+      ),
+      safeQuery(
+        "activityLogs",
+        () =>
+          p.activityLog.findMany({
+            where: { business_id: businessId },
+            orderBy: [{ created_at: "asc" }],
+          }),
+        []
+      ),
+    ]);
+
+    return json(200, {
+      ok: true,
+      backup: {
+        kind: "bynkbook_full_backup",
+        version: 1,
+        generated_at: new Date().toISOString(),
+        business_id: businessId,
+        business_name: authz.business.name,
+        exported_by_user_id: sub,
+        data: {
+          business,
+          members,
+          role_policies: rolePolicies,
+          bookkeeping_preferences: preferences,
+          accounts,
+          categories,
+          entries,
+          entry_issues: entryIssues,
+          uploads,
+          bank_connections: bankConnections,
+          bank_transactions: bankTransactions,
+          bank_matches: bankMatches,
+          match_groups: matchGroups,
+          match_group_entries: matchGroupEntries,
+          match_group_banks: matchGroupBanks,
+          closed_periods: closedPeriods,
+          reconcile_snapshots: reconcileSnapshots,
+          vendors,
+          bills,
+          bill_payment_applications: billPaymentApplications,
+          transfers,
+          budgets,
+          goals,
+          activity_logs: activityLogs,
+        },
+      },
     });
   }
 

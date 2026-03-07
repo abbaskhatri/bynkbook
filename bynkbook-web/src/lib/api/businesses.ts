@@ -78,3 +78,8 @@ export async function resetBusiness(businessId: string): Promise<{
   });
   return res?.reset;
 }
+
+export async function getBusinessBackup(businessId: string): Promise<any> {
+  const res: any = await apiFetch(`/v1/businesses/${businessId}/backup`);
+  return res?.backup;
+}
