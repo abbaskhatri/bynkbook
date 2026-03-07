@@ -278,6 +278,8 @@ export default function VendorDetailPageClient() {
   const [billMemo, setBillMemo] = useState("");
   const [billTerms, setBillTerms] = useState("");
   const [billVoidReason, setBillVoidReason] = useState("");
+  const [voidBillOpen, setVoidBillOpen] = useState(false);
+  const [voidBillId, setVoidBillId] = useState<string | null>(null);
 
   // Vendor-first unified payment+apply dialog
   const [vendorPayOpen, setVendorPayOpen] = useState(false);
@@ -961,39 +963,12 @@ export default function VendorDetailPageClient() {
                                     type="button"
                                     className="text-xs text-red-700 hover:underline disabled:opacity-50"
                                     disabled={!canWrite || isVoid || pendingBillById[String(b.id)]}
-                                    onClick={async () => {
-                                      if (!businessId) return;
-
+                                    onClick={() => {
                                       setErr(null);
                                       setErrIsClosed(false);
-
-                                      const billId = String(b.id);
-                                      const prevBill = b;
-
-                                      markBillPending(billId);
-
-                                      // optimistic: mark VOID immediately (safe UI feedback)
-                                      setBills((prev) =>
-                                        prev.map((x: any) => (String(x.id) === billId ? { ...x, status: "VOID" } : x))
-                                      );
-
-                                      try {
-                                        await voidBill({ businessId, vendorId, billId });
-
-                                        const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
-                                        setApSummary(sumRes?.summary ?? null);
-                                      } catch (e: any) {
-                                        // rollback ONLY this row (snapshot)
-                                        setBills((prev) =>
-                                          prev.map((x: any) => (String(x.id) === billId ? { ...x, ...prevBill } : x))
-                                        );
-
-                                        const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Void failed";
-                                        setErr(msg);
-                                        setErrIsClosed(isClosedPeriodError(e, msg));
-                                      } finally {
-                                        clearBillPending(billId);
-                                      }
+                                      setBillVoidReason("");
+                                      setVoidBillId(String(b.id));
+                                      setVoidBillOpen(true);
                                     }}
                                     title="Cannot void if applied—must unapply first"
                                   >
@@ -2222,6 +2197,96 @@ export default function VendorDetailPageClient() {
             </div>
           </div>
         </AppDialog>
+
+              <AppDialog
+        open={voidBillOpen}
+        onClose={() => {
+          if (applyActionLoading) return;
+          setVoidBillOpen(false);
+          setVoidBillId(null);
+          setBillVoidReason("");
+        }}
+        title="Void bill"
+        size="xs"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setVoidBillOpen(false);
+                setVoidBillId(null);
+                setBillVoidReason("");
+              }}
+              disabled={applyActionLoading}
+            >
+              Cancel
+            </Button>
+
+            <BusyButton
+              variant="danger"
+              size="md"
+              busy={!!(voidBillId && pendingBillById[String(voidBillId)])}
+              busyLabel="Voiding…"
+              disabled={!voidBillId}
+              onClick={async () => {
+                if (!businessId || !voidBillId) return;
+
+                setErr(null);
+                setErrIsClosed(false);
+
+                const billId = String(voidBillId);
+                const prevBill = bills.find((x: any) => String(x.id) === billId);
+
+                markBillPending(billId);
+
+                setBills((prev) =>
+                  prev.map((x: any) => (String(x.id) === billId ? { ...x, status: "VOID" } : x))
+                );
+
+                try {
+                  await voidBill({ businessId, vendorId, billId, reason: billVoidReason.trim() || undefined } as any);
+
+                  const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
+                  setApSummary(sumRes?.summary ?? null);
+
+                  setVoidBillOpen(false);
+                  setVoidBillId(null);
+                  setBillVoidReason("");
+                } catch (e: any) {
+                  if (prevBill) {
+                    setBills((prev) =>
+                      prev.map((x: any) => (String(x.id) === billId ? { ...x, ...prevBill } : x))
+                    );
+                  }
+
+                  const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Void failed";
+                  setErr(msg);
+                  setErrIsClosed(isClosedPeriodError(e, msg));
+                } finally {
+                  clearBillPending(billId);
+                }
+              }}
+            >
+              Void bill
+            </BusyButton>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-slate-700">
+            This will void the bill and preserve its audit history.
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-slate-700">Reason (optional)</label>
+            <Input
+              value={billVoidReason}
+              onChange={(e) => setBillVoidReason(e.target.value)}
+              placeholder="Why are you voiding this bill?"
+            />
+          </div>
+        </div>
+      </AppDialog>
 
       </div>
     </div>

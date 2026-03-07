@@ -26,6 +26,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { BusyButton } from "@/components/primitives/BusyButton";
 import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { PillToggle } from "@/components/primitives/PillToggle";
+import { Button } from "@/components/ui/button";
 import { ringFocus } from "@/components/primitives/tokens";
 
 import { InlineBanner } from "@/components/app/inline-banner";
@@ -662,6 +663,7 @@ export default function ReconcilePageClient() {
   // Phase 5B-1: Revert (void) from audit detail (voids ALL active matches for selected bank txn)
   const [revertBusy, setRevertBusy] = useState(false);
   const [revertError, setRevertError] = useState<string | null>(null);
+  const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
 
   // Phase 6B: Reconcile snapshots
   const [openSnapshots, setOpenSnapshots] = useState(false);
@@ -4945,46 +4947,10 @@ export default function ReconcilePageClient() {
                     disabled={!canRevert}
                     title={!canWrite ? noPermTitle : "Revert bank match (void all active matches for this bank transaction)"}
                     aria-label="Revert bank match"
-                    onClick={async () => {
+                    onClick={() => {
                       if (!selectedBusinessId || !selectedAccountId) return;
                       if (!bankTxnId) return;
-
-                      const ok = window.confirm(
-                        "Revert bank match?\n\nThis will VOID (unmatch) ALL active matches for this bank transaction.\nThis action is recorded in history and can be re-matched later."
-                      );
-                      if (!ok) return;
-
-                      setRevertBusy(true);
-                      setRevertError(null);
-                      clearMutErr();
-
-                      if (bankTxnId) markPending(String(bankTxnId));
-                      if (groupId) markPending(String(groupId));
-
-                      try {
-                        if (!groupId) throw new Error("Match group id unavailable");
-
-                        await voidMatchGroup({
-                          businessId: selectedBusinessId,
-                          accountId: selectedAccountId,
-                          matchGroupId: groupId,
-                          reason: "User unmatch",
-                        });
-
-                        await refreshTablesFully({ preserveOnEmpty: true });
-
-                        clearMutErr();
-                        setOpenReconAuditDetail(false);
-                        setSelectedReconAudit(null);
-                      } catch (e: any) {
-                        const r = applyMutationError(e, "Can’t revert match");
-                        if (!r.isClosed) setRevertError(r.msg);
-                        else setRevertError(null);
-                      } finally {
-                        if (bankTxnId) clearPending(String(bankTxnId));
-                        if (groupId) clearPending(String(groupId));
-                        setRevertBusy(false);
-                      }
+                      setRevertConfirmOpen(true);
                     }}
                   >
                     Revert bank match
@@ -5131,6 +5097,87 @@ export default function ReconcilePageClient() {
               );
             })()}
           </div>
+        </div>
+      </AppDialog>
+
+            <AppDialog
+        open={revertConfirmOpen}
+        onClose={() => {
+          if (revertBusy) return;
+          setRevertConfirmOpen(false);
+        }}
+        title="Revert bank match"
+        size="xs"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setRevertConfirmOpen(false)}
+              disabled={revertBusy}
+            >
+              Cancel
+            </Button>
+
+            <BusyButton
+              variant="danger"
+              size="md"
+              busy={revertBusy}
+              busyLabel="Reverting…"
+              onClick={async () => {
+                const ev = selectedReconAudit as any | null;
+                const groupId = ev?.groupId ? String(ev.groupId) : null;
+                const bankTxnId = ev?.bankTxnIds?.[0] ? String(ev.bankTxnIds[0]) : null;
+
+                if (!selectedBusinessId || !selectedAccountId || !groupId || !bankTxnId) return;
+
+                setRevertBusy(true);
+                setRevertError(null);
+                clearMutErr();
+
+                markPending(String(bankTxnId));
+                markPending(String(groupId));
+
+                try {
+                  await voidMatchGroup({
+                    businessId: selectedBusinessId,
+                    accountId: selectedAccountId,
+                    matchGroupId: groupId,
+                    reason: "User unmatch",
+                  });
+
+                  await refreshTablesFully({ preserveOnEmpty: true });
+
+                  clearMutErr();
+                  setRevertConfirmOpen(false);
+                  setOpenReconAuditDetail(false);
+                  setSelectedReconAudit(null);
+                } catch (e: any) {
+                  const r = applyMutationError(e, "Can’t revert match");
+                  if (!r.isClosed) setRevertError(r.msg);
+                  else setRevertError(null);
+                } finally {
+                  clearPending(String(bankTxnId));
+                  clearPending(String(groupId));
+                  setRevertBusy(false);
+                }
+              }}
+            >
+              Revert match
+            </BusyButton>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm text-slate-700">
+          <div className="font-medium text-slate-900">Revert bank match?</div>
+          <div className="text-xs text-slate-600">
+            This will void all active matches for the selected bank transaction. The action is recorded in history and can be re-matched later.
+          </div>
+
+          {revertError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {revertError}
+            </div>
+          ) : null}
         </div>
       </AppDialog>
 

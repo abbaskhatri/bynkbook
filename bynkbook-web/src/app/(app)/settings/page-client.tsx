@@ -374,6 +374,21 @@ export default function SettingsPageClient() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
   const [deleteSuggestArchive, setDeleteSuggestArchive] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [archiveConfirmText, setArchiveConfirmText] = useState("");
+  const [archiveTarget, setArchiveTarget] = useState<{ id: string; name: string; action: "archive" | "unarchive" } | null>(null);
+
+  const [categoryDeleteOpen, setCategoryDeleteOpen] = useState(false);
+  const [categoryDeleteTarget, setCategoryDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const [revokeInviteOpen, setRevokeInviteOpen] = useState(false);
+  const [revokeInviteTarget, setRevokeInviteTarget] = useState<{ id: string; email: string } | null>(null);
+
+  const [removeMemberOpen, setRemoveMemberOpen] = useState(false);
+  const [removeMemberTarget, setRemoveMemberTarget] = useState<{ userId: string; email: string } | null>(null);
+  const [removeMemberConfirm, setRemoveMemberConfirm] = useState("");
+
   const [editErr, setEditErr] = useState<string | null>(null);
 
   // Business profile form
@@ -390,6 +405,7 @@ export default function SettingsPageClient() {
   const [deleteBusinessOpen, setDeleteBusinessOpen] = useState(false);
   const [deleteBusinessBusy, setDeleteBusinessBusy] = useState(false);
   const [deleteBusinessErr, setDeleteBusinessErr] = useState<string | null>(null);
+  const [deleteBusinessConfirm, setDeleteBusinessConfirm] = useState("");
 
   const [resetBusinessOpen, setResetBusinessOpen] = useState(false);
   const [resetBusinessBusy, setResetBusinessBusy] = useState(false);
@@ -1430,12 +1446,9 @@ export default function SettingsPageClient() {
                                 <Button
                                   className="h-7 px-2 text-xs"
                                   variant="outline"
-                                  onClick={async () => {
-                                    if (!selectedBusinessId) return;
-                                    await revokeInvite(selectedBusinessId, i.id);
-                                    const res = await getTeam(selectedBusinessId);
-                                    setTeamMembers(res.members ?? []);
-                                    setTeamInvites(res.invites ?? []);
+                                  onClick={() => {
+                                    setRevokeInviteTarget({ id: i.id, email: i.email });
+                                    setRevokeInviteOpen(true);
                                   }}
                                 >
                                   Revoke
@@ -1520,12 +1533,11 @@ export default function SettingsPageClient() {
                                 <Button
                                   className="h-7 px-2 text-xs"
                                   variant="outline"
-                                  onClick={async () => {
-                                    if (!selectedBusinessId) return;
-                                    await removeMember(selectedBusinessId, m.user_id);
-                                    const res = await getTeam(selectedBusinessId);
-                                    setTeamMembers(res.members ?? []);
-                                    setTeamInvites(res.invites ?? []);
+                                  onClick={() => {
+                                    const shownEmail = String((m as any).email || "").trim() || "Member";
+                                    setRemoveMemberTarget({ userId: m.user_id, email: shownEmail });
+                                    setRemoveMemberConfirm("");
+                                    setRemoveMemberOpen(true);
                                   }}
                                   disabled={!["OWNER", "ADMIN"].includes(selectedBusinessRole) || disableOwnerActions}
                                 >
@@ -1951,19 +1963,9 @@ export default function SettingsPageClient() {
                               type="button"
                               className="text-rose-600 hover:text-rose-700"
                               title="Delete category"
-                              onClick={async () => {
-                                if (!selectedBusinessId) return;
-                                const ok = window.confirm("Delete this category? This cannot be undone.");
-                                if (!ok) return;
-
-                                setCatError(null);
-                                try {
-                                  await deleteCategory(selectedBusinessId, c.id);
-                                  const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                                  setCategories(res?.rows ?? res?.items ?? []);
-                                } catch (e: any) {
-                                  setCatError(e?.message ?? "Cannot delete category");
-                                }
+                              onClick={() => {
+                                setCategoryDeleteTarget({ id: c.id, name: c.name });
+                                setCategoryDeleteOpen(true);
                               }}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -2372,6 +2374,7 @@ export default function SettingsPageClient() {
                     setDeleteErr(null);
                     setDeleteSuggestArchive(false);
                     setDeleteBusy(false);
+                    setDeleteConfirmText("");
                   }}
                   title="Delete account"
                   size="sm"
@@ -2386,6 +2389,7 @@ export default function SettingsPageClient() {
                           setDeleteErr(null);
                           setDeleteSuggestArchive(false);
                           setDeleteBusy(false);
+                          setDeleteConfirmText("");
                         }}
                         disabled={deleteBusy}
                       >
@@ -2407,6 +2411,7 @@ export default function SettingsPageClient() {
                               setDeleteAccountId(null);
                               setDeleteAccountName("");
                               setDeleteSuggestArchive(false);
+                              setDeleteConfirmText("");
                             } catch (e: any) {
                               setDeleteErr(e?.message ?? "Archive failed");
                             } finally {
@@ -2419,7 +2424,12 @@ export default function SettingsPageClient() {
                       ) : (
                         <Button
                           variant="destructive"
-                          disabled={deleteBusy || !deleteAccountId || !selectedBusinessId}
+                          disabled={
+                            deleteBusy ||
+                            !deleteAccountId ||
+                            !selectedBusinessId ||
+                            deleteConfirmText.trim().toUpperCase() !== "DELETE"
+                          }
                           onClick={async () => {
                             if (!selectedBusinessId || !deleteAccountId) return;
 
@@ -2433,6 +2443,7 @@ export default function SettingsPageClient() {
                               setDeleteOpen(false);
                               setDeleteAccountId(null);
                               setDeleteAccountName("");
+                              setDeleteConfirmText("");
                             } catch (e: any) {
                               const msg = String(e?.message ?? "");
                               // Backend: 409 { ok:false, error:"Account has related rows; archive instead", related_total: ... }
@@ -2464,6 +2475,17 @@ export default function SettingsPageClient() {
                         This account has related records, so hard delete is blocked. Archive hides the account while preserving accounting history.
                       </div>
                     ) : null}
+
+                    <div className="mt-3 space-y-1">
+                      <Label htmlFor="delete-account-confirm">Type DELETE to continue</Label>
+                      <Input
+                        id="delete-account-confirm"
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        placeholder="DELETE"
+                        disabled={deleteBusy}
+                      />
+                    </div>
 
                     {deleteErr ? (
                       <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -2850,11 +2872,14 @@ export default function SettingsPageClient() {
                                 type="button"
                                 className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
                                 title={isArchived ? "Unarchive" : "Archive"}
-                                onClick={async () => {
-                                  if (!selectedBusinessId) return;
-                                  if (isArchived) await unarchiveAccount(selectedBusinessId, a.id);
-                                  else await archiveAccount(selectedBusinessId, a.id);
-                                  qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                                onClick={() => {
+                                  setArchiveTarget({
+                                    id: a.id,
+                                    name: a.name,
+                                    action: isArchived ? "unarchive" : "archive",
+                                  });
+                                  setArchiveConfirmText("");
+                                  setArchiveConfirmOpen(true);
                                 }}
                               >
                                 <Archive className="h-3.5 w-3.5" />
@@ -3178,6 +3203,7 @@ export default function SettingsPageClient() {
                         className="h-7 px-3 text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
                         onClick={() => {
                           setDeleteBusinessErr(null);
+                          setDeleteBusinessConfirm("");
                           setDeleteBusinessOpen(true);
                         }}
                       >
@@ -3288,6 +3314,184 @@ export default function SettingsPageClient() {
       </AppDialog>
 
       <AppDialog
+        open={categoryDeleteOpen}
+        onClose={() => setCategoryDeleteOpen(false)}
+        title="Delete category"
+        size="xs"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setCategoryDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!selectedBusinessId || !categoryDeleteTarget) return;
+                setCatError(null);
+                try {
+                  await deleteCategory(selectedBusinessId, categoryDeleteTarget.id);
+                  const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
+                  setCategories(res?.rows ?? res?.items ?? []);
+                  setCategoryDeleteOpen(false);
+                  setCategoryDeleteTarget(null);
+                } catch (e: any) {
+                  setCatError(e?.message ?? "Cannot delete category");
+                }
+              }}
+            >
+              Delete category
+            </Button>
+          </div>
+        }
+      >
+        <div className="text-sm text-slate-700">
+          Delete <span className="font-medium text-slate-900">{categoryDeleteTarget?.name || "this category"}</span>? This cannot be undone.
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={revokeInviteOpen}
+        onClose={() => setRevokeInviteOpen(false)}
+        title="Revoke invite"
+        size="xs"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setRevokeInviteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!selectedBusinessId || !revokeInviteTarget) return;
+                await revokeInvite(selectedBusinessId, revokeInviteTarget.id);
+                const res = await getTeam(selectedBusinessId);
+                setTeamMembers(res.members ?? []);
+                setTeamInvites(res.invites ?? []);
+                setRevokeInviteOpen(false);
+                setRevokeInviteTarget(null);
+              }}
+            >
+              Revoke invite
+            </Button>
+          </div>
+        }
+      >
+        <div className="text-sm text-slate-700">
+          Revoke the pending invite for <span className="font-medium text-slate-900">{revokeInviteTarget?.email || "this user"}</span>?
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={removeMemberOpen}
+        onClose={() => setRemoveMemberOpen(false)}
+        title="Remove member"
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setRemoveMemberOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={removeMemberConfirm.trim().toUpperCase() !== "REMOVE"}
+              onClick={async () => {
+                if (!selectedBusinessId || !removeMemberTarget) return;
+                await removeMember(selectedBusinessId, removeMemberTarget.userId);
+                const res = await getTeam(selectedBusinessId);
+                setTeamMembers(res.members ?? []);
+                setTeamInvites(res.invites ?? []);
+                setRemoveMemberOpen(false);
+                setRemoveMemberTarget(null);
+                setRemoveMemberConfirm("");
+              }}
+            >
+              Remove member
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-slate-700">
+            Remove <span className="font-medium text-slate-900">{removeMemberTarget?.email || "this member"}</span> from the business?
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="remove-member-confirm">Type REMOVE to continue</Label>
+            <Input
+              id="remove-member-confirm"
+              value={removeMemberConfirm}
+              onChange={(e) => setRemoveMemberConfirm(e.target.value)}
+              placeholder="REMOVE"
+            />
+          </div>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={archiveConfirmOpen}
+        onClose={() => setArchiveConfirmOpen(false)}
+        title={archiveTarget?.action === "archive" ? "Archive account" : "Unarchive account"}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={archiveTarget?.action === "archive" ? "destructive" : "default"}
+              disabled={
+                !selectedBusinessId ||
+                !archiveTarget ||
+                (archiveTarget.action === "archive" && archiveConfirmText.trim().toUpperCase() !== "ARCHIVE")
+              }
+              onClick={async () => {
+                if (!selectedBusinessId || !archiveTarget) return;
+
+                if (archiveTarget.action === "archive") {
+                  await archiveAccount(selectedBusinessId, archiveTarget.id);
+                } else {
+                  await unarchiveAccount(selectedBusinessId, archiveTarget.id);
+                }
+
+                qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                setArchiveConfirmOpen(false);
+                setArchiveTarget(null);
+                setArchiveConfirmText("");
+              }}
+            >
+              {archiveTarget?.action === "archive" ? "Archive account" : "Unarchive account"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-slate-700">
+            {archiveTarget?.action === "archive" ? (
+              <>
+                Archive <span className="font-medium text-slate-900">{archiveTarget?.name || "this account"}</span>? It will be hidden from active views but preserved for accounting history.
+              </>
+            ) : (
+              <>
+                Unarchive <span className="font-medium text-slate-900">{archiveTarget?.name || "this account"}</span>?
+              </>
+            )}
+          </div>
+
+          {archiveTarget?.action === "archive" ? (
+            <div className="space-y-1">
+              <Label htmlFor="archive-account-confirm">Type ARCHIVE to continue</Label>
+              <Input
+                id="archive-account-confirm"
+                value={archiveConfirmText}
+                onChange={(e) => setArchiveConfirmText(e.target.value)}
+                placeholder="ARCHIVE"
+              />
+            </div>
+          ) : null}
+        </div>
+      </AppDialog>
+
+      <AppDialog
         open={resetBusinessOpen}
         onClose={() => {
           if (resetBusinessBusy) return;
@@ -3372,24 +3576,12 @@ export default function SettingsPageClient() {
         onClose={() => {
           if (deleteBusinessBusy) return;
           setDeleteBusinessOpen(false);
+          setDeleteBusinessErr(null);
+          setDeleteBusinessConfirm("");
         }}
         title="Delete business"
         size="sm"
-      >
-        <div className="space-y-4">
-          <div className="text-sm text-slate-700">
-            <div className="font-medium text-slate-900">{selectedBusiness?.name || "This business"}</div>
-            <div className="mt-1 text-xs text-slate-600">
-              This permanently deletes the business and all related data. This cannot be undone.
-            </div>
-
-            {deleteBusinessErr ? (
-              <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {deleteBusinessErr}
-              </div>
-            ) : null}
-          </div>
-
+        footer={
           <div className="flex items-center justify-end gap-2">
             <Button
               variant="outline"
@@ -3398,6 +3590,7 @@ export default function SettingsPageClient() {
               onClick={() => {
                 setDeleteBusinessOpen(false);
                 setDeleteBusinessErr(null);
+                setDeleteBusinessConfirm("");
               }}
             >
               Cancel
@@ -3405,7 +3598,11 @@ export default function SettingsPageClient() {
 
             <Button
               className="h-7 px-3 text-xs bg-rose-600 hover:bg-rose-700"
-              disabled={deleteBusinessBusy || !selectedBusinessId}
+              disabled={
+                deleteBusinessBusy ||
+                !selectedBusinessId ||
+                deleteBusinessConfirm.trim().toUpperCase() !== "DELETE"
+              }
               onClick={async () => {
                 if (!selectedBusinessId) return;
                 setDeleteBusinessBusy(true);
@@ -3420,6 +3617,7 @@ export default function SettingsPageClient() {
                   const nextId = list.find((b: any) => b.id !== deletingId)?.id ?? null;
 
                   setDeleteBusinessOpen(false);
+                  setDeleteBusinessConfirm("");
 
                   if (nextId) router.replace(`/settings?businessId=${nextId}`);
                   else router.replace("/create-business");
@@ -3433,9 +3631,34 @@ export default function SettingsPageClient() {
               {deleteBusinessBusy ? "Deleting…" : "Delete business"}
             </Button>
           </div>
+        }
+      >
+        <div className="text-sm text-slate-700">
+          <div className="font-medium text-slate-900">{selectedBusiness?.name || "This business"}</div>
+          <div className="mt-1 text-xs text-slate-600">
+            This permanently deletes the business and all related data. This cannot be undone.
+          </div>
+
+          <div className="mt-3 space-y-1">
+            <Label htmlFor="delete-business-confirm">Type DELETE to continue</Label>
+            <Input
+              id="delete-business-confirm"
+              value={deleteBusinessConfirm}
+              onChange={(e) => setDeleteBusinessConfirm(e.target.value)}
+              placeholder="DELETE"
+              className="h-9"
+              disabled={deleteBusinessBusy}
+            />
+          </div>
+
+          {deleteBusinessErr ? (
+            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {deleteBusinessErr}
+            </div>
+          ) : null}
         </div>
       </AppDialog>
 
-    </div>
+    </div >
   );
 }
