@@ -315,7 +315,6 @@ export async function handler(event: any) {
 
 const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
 
-    console.log("mark-uploaded", { uploadId: row.id, hasMeta: !!row.meta, etag });
     const updated = await prisma.upload.update({
       where: { id: row.id },
       data: {

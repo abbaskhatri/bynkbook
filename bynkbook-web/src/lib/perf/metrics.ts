@@ -19,7 +19,9 @@ function dlog(...args: any[]) {
   if (!debugPerfOn()) return;
   if (process.env.NODE_ENV === "production") return;
   // eslint-disable-next-line no-console
+  if (process.env.NODE_ENV === "development") {
   console.log(...args);
+  }
 }
 
 function pushSample(store: Record<string, number[]>, name: string, ms: number) {

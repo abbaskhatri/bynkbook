@@ -1116,34 +1116,8 @@ export default function ReportsPageClient() {
                       )}
                     </div>
 
-                    <div className="rounded-md border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 px-3 h-9 flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <div className="flex items-center gap-2">
-                          <Landmark className="h-4 w-4 text-slate-500" />
-                          <span>Account Balances (as of {to})</span>
-                        </div>
-                        <div className="w-[180px] text-right">Balance</div>
-                      </div>
-
-                      <div className="divide-y divide-slate-100">
-                        {(accountsSummary?.rows ?? []).slice(0, 8).map((r: any, idx: number) => (
-                          <div key={`${r.account_id}-${idx}`} className="h-9 px-3 flex items-center text-sm">
-                            <div className="flex-1 min-w-0 truncate">{r.name}</div>
-                            <div
-                              className={`w-[180px] text-right tabular-nums font-semibold ${formatUsdAccountingFromCents(r.balance_cents).isNeg
-                                ? "text-red-600"
-                                : "text-slate-900"
-                                }`}
-                            >
-                              {formatUsdAccountingFromCents(r.balance_cents).text}
-                            </div>
-                          </div>
-                        ))}
-
-                        {(accountsSummary?.rows ?? []).length === 0 ? (
-                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No accounts found.</div>
-                        ) : null}
-                      </div>
+                    <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-600">
+                      Opening-balance driven account balances are intentionally excluded from Reports.
                     </div>
                   </div>
                 </>
@@ -1151,7 +1125,7 @@ export default function ReportsPageClient() {
 
               <ReportFootnote
                 lines={[
-                  "Overview aggregates P&L, Cash Flow, Categories, and Account Balances for the selected range.",
+                  "Overview aggregates P&L, Cash Flow, and Categories for the selected range.",
                   "Basis: Ledger effective date (entry date). Closed periods are read-only.",
                 ]}
               />
@@ -1447,7 +1421,7 @@ export default function ReportsPageClient() {
                 <div className="text-sm text-slate-600">Run the report to view results.</div>
               ) : (
                 <>
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-slate-200 p-3">
                       <div className="text-xs text-slate-600">Cash In</div>
                       <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
@@ -1467,18 +1441,6 @@ export default function ReportsPageClient() {
                       <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.net_cents).isNeg ? "text-red-600" : ""}`}>
                         {formatUsdAccountingFromCents(cashflow.totals.net_cents).text}
                       </div>
-                    </div>
-
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Ending Cash (as of {to})</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(String(cashEndingCents ?? "0")).isNeg ? "text-red-600" : ""}`}>
-                        {formatUsdAccountingFromCents(String(cashEndingCents ?? "0")).text}
-                      </div>
-                      {cashEndingPrevCents ? (
-                        <div className="mt-1 text-[11px] text-slate-500">
-                          vs prior end: {formatUsdAccountingFromCents(String(BigInt(String(cashEndingCents ?? "0")) - BigInt(String(cashEndingPrevCents)))).text}
-                        </div>
-                      ) : null}
                     </div>
                   </div>
 

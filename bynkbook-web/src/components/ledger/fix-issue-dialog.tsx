@@ -185,7 +185,11 @@ export function FixIssueDialog(props: {
       onOpenChange(false);
       setPickedCategoryId("");
     } catch (e: any) {
-      setErr(e?.message || "Failed");
+      const msg =
+        String(e?.message ?? "").toLowerCase().includes("closed_period")
+          ? "This item is in a closed period and can’t be changed."
+          : "Couldn’t resolve this issue. Please try again.";
+      setErr(msg);
     } finally {
       setBusy(false);
     }

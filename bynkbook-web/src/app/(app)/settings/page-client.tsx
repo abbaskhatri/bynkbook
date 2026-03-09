@@ -7,8 +7,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
+import { userFacingErrorMessage } from "@/lib/errors";
+
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { patchBusiness, deleteBusiness, resetBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
+import { patchBusiness, resetBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
+import { apiFetch } from "@/lib/api/client";
 import { listEntries } from "@/lib/api/entries";
 import { listMatchGroups } from "@/lib/api/match-groups";
 import { listVendors } from "@/lib/api/vendors";
@@ -134,6 +137,10 @@ function monthBounds(month: string) {
     from: `${month}-01`,
     to: `${month}-${String(lastDay).padStart(2, "0")}`,
   };
+}
+
+function uiErrorMessage(error: any, fallback = "Something went wrong. Try again.") {
+  return userFacingErrorMessage(error, fallback);
 }
 
 type PlaidCellState = {
@@ -331,7 +338,7 @@ export default function SettingsPageClient() {
           setBkInitial(snap);
         }
       } catch (e: any) {
-        if (!cancelled && myEpoch === tabEpochRef.current) setBkError(e?.message ?? "Failed to load bookkeeping preferences");
+        if (!cancelled && myEpoch === tabEpochRef.current) setBkError(uiErrorMessage(e, "Failed to load bookkeeping preferences."));
       } finally {
         if (!cancelled && myEpoch === tabEpochRef.current) setBkLoading(false);
       }
@@ -599,7 +606,7 @@ export default function SettingsPageClient() {
       const payload = await getBusinessBackup(selectedBusinessId);
       downloadJsonFile(`bynkbook-full-backup-${selectedBusinessId}-${todayYmd()}.json`, payload);
     } catch (e: any) {
-      setBackupErr(e?.message ?? "Full backup export failed");
+      setBackupErr(uiErrorMessage(e, "Full backup export failed."));
     } finally {
       setBackupBusy(false);
     }
@@ -676,7 +683,7 @@ export default function SettingsPageClient() {
       downloadJsonFile(`bynkbook-closed-period-${exportClosedMonth}.json`, payload);
       setExportClosedOpen(false);
     } catch (e: any) {
-      setExportClosedErr(e?.message ?? "Closed period export failed");
+      setExportClosedErr(uiErrorMessage(e, "Closed period export failed."));
     } finally {
       setExportClosedBusy(false);
     }
@@ -746,7 +753,7 @@ export default function SettingsPageClient() {
       }, 250);
     } catch (e: any) {
       qc.invalidateQueries({ queryKey: key });
-      setErr(e?.message || "Failed to create account");
+      setErr(uiErrorMessage(e, "Failed to create account."));
       setOpen(true);
     } finally {
       setSaving(false);
@@ -775,7 +782,7 @@ export default function SettingsPageClient() {
           setActItems(items);
         }
       } catch (e: any) {
-        if (!cancelled && myEpoch === tabEpochRef.current) setActError(e?.message ?? "Failed to load activity");
+        if (!cancelled && myEpoch === tabEpochRef.current) setActError(uiErrorMessage(e, "Failed to load activity."));
       } finally {
         if (!cancelled && myEpoch === tabEpochRef.current) setActLoading(false);
       }
@@ -842,7 +849,7 @@ export default function SettingsPageClient() {
           setTeamInvites(res.invites ?? []);
         }
       } catch (e: any) {
-        if (!cancelled && myEpoch === tabEpochRef.current) setTeamError(e?.message ?? "Failed to load team");
+        if (!cancelled && myEpoch === tabEpochRef.current) setTeamError(uiErrorMessage(e, "Failed to load team."));
       } finally {
         if (!cancelled && myEpoch === tabEpochRef.current) setTeamLoading(false);
       }
@@ -851,7 +858,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId, reloadNonce]);
+  }, [spKey, authReady, selectedBusinessId, reloadNonce]);
 
   // Load role policies when Team tab is active
   useEffect(() => {
@@ -871,7 +878,7 @@ export default function SettingsPageClient() {
         const items: RolePolicyRow[] = res?.items ?? [];
         if (!cancelled) setPolRows(items);
       } catch (e: any) {
-        if (!cancelled) setPolError(e?.message ?? "Failed to load role policies");
+        if (!cancelled) setPolError(uiErrorMessage(e, "Failed to load role policies."));
       } finally {
         if (!cancelled) setPolLoading(false);
       }
@@ -992,7 +999,7 @@ export default function SettingsPageClient() {
         const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
         if (!cancelled && myEpoch === tabEpochRef.current) setCategories(res?.rows ?? res?.items ?? []);
       } catch (e: any) {
-        if (!cancelled && myEpoch === tabEpochRef.current) setCatError(e?.message ?? "Failed to load categories");
+        if (!cancelled && myEpoch === tabEpochRef.current) setCatError(uiErrorMessage(e, "Failed to load categories."));
       } finally {
         if (!cancelled && myEpoch === tabEpochRef.current) setCatLoading(false);
       }
@@ -1095,7 +1102,7 @@ export default function SettingsPageClient() {
           return rows[0]?.month ?? "";
         });
       } catch (e: any) {
-        if (!cancelled) setExportClosedErr(e?.message ?? "Failed to load closed periods");
+        if (!cancelled) setExportClosedErr(uiErrorMessage(e, "Failed to load closed periods."));
       } finally {
         if (!cancelled) setExportClosedBusy(false);
       }
@@ -1385,7 +1392,7 @@ export default function SettingsPageClient() {
                           setTeamMembers(res.members ?? []);
                           setTeamInvites(res.invites ?? []);
                         } catch (e: any) {
-                          setInviteMsg(e?.message ?? "Failed to create invite");
+                          setInviteMsg(uiErrorMessage(e, "Failed to create invite."));
                         } finally {
                           setInviteBusy(false);
                         }
@@ -1507,10 +1514,14 @@ export default function SettingsPageClient() {
                                   onValueChange={async (v) => {
                                     if (!selectedBusinessId) return;
                                     if (!["OWNER", "ADMIN"].includes(selectedBusinessRole)) return;
-                                    await updateMemberRole(selectedBusinessId, m.user_id, v);
-                                    const res = await getTeam(selectedBusinessId);
-                                    setTeamMembers(res.members ?? []);
-                                    setTeamInvites(res.invites ?? []);
+                                    try {
+                                      await updateMemberRole(selectedBusinessId, m.user_id, v);
+                                      const res = await getTeam(selectedBusinessId);
+                                      setTeamMembers(res.members ?? []);
+                                      setTeamInvites(res.invites ?? []);
+                                    } catch (e: any) {
+                                      setTeamError(uiErrorMessage(e, "Failed to update member role."));
+                                    }
                                   }}
                                   disabled={!["OWNER", "ADMIN"].includes(selectedBusinessRole) || disableOwnerActions}
                                 >
@@ -1665,7 +1676,7 @@ export default function SettingsPageClient() {
                                         setPolMsg("Saved.");
                                       } catch (e: any) {
                                         setPolRows(prevRows);
-                                        setPolMsg(e?.message ?? "Save failed");
+                                        setPolMsg(uiErrorMessage(e, "Save failed."));
                                       }
                                     }}
                                   >
@@ -1807,7 +1818,7 @@ export default function SettingsPageClient() {
                           setBkInitial(nextSnap);
                           setBkMsg("Saved.");
                         } catch (e: any) {
-                          setBkError(e?.message ?? "Save failed");
+                          setBkError(uiErrorMessage(e, "Save failed."));
                         } finally {
                           setBkSaving(false);
                         }
@@ -1872,7 +1883,7 @@ export default function SettingsPageClient() {
                         const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                         setCategories(res?.rows ?? res?.items ?? []);
                       } catch (err: any) {
-                        setCatError(err?.message ?? "Failed to create category");
+                        setCatError(uiErrorMessage(err, "Failed to create category."));
                       }
                     }}
                     placeholder="e.g. Office Supplies"
@@ -1892,7 +1903,7 @@ export default function SettingsPageClient() {
                       const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                       setCategories(res?.rows ?? res?.items ?? []);
                     } catch (e: any) {
-                      setCatError(e?.message ?? "Failed to create category");
+                      setCatError(uiErrorMessage(e, "Failed to create category."));
                     }
                   }}
                   disabled={!selectedBusinessId || !catNewName.trim()}
@@ -1932,7 +1943,7 @@ export default function SettingsPageClient() {
                                 const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                                 setCategories(res?.rows ?? res?.items ?? []);
                               } catch (e: any) {
-                                setCatError(e?.message ?? "Cannot archive category");
+                                setCatError(uiErrorMessage(e, "Cannot archive category."));
                               }
                             }}
                           >
@@ -1952,7 +1963,7 @@ export default function SettingsPageClient() {
                                   const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                                   setCategories(res?.rows ?? res?.items ?? []);
                                 } catch (e: any) {
-                                  setCatError(e?.message ?? "Cannot unarchive category");
+                                  setCatError(uiErrorMessage(e, "Cannot unarchive category."));
                                 }
                               }}
                             >
@@ -2193,7 +2204,7 @@ export default function SettingsPageClient() {
 
                               // Load Plaid script (same approach as PlaidConnectButton)
                               const scriptSrc = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
-                              const existing = document.querySelector(`script[src="${scriptSrc}"]`);
+                              const existing = document.querySelector(`script[src="${scriptSrc}"]`) as HTMLScriptElement | null;
                               if (!existing) {
                                 const s = document.createElement("script");
                                 s.src = scriptSrc;
@@ -2238,7 +2249,7 @@ export default function SettingsPageClient() {
 
                               handler.open();
                             } catch (e: any) {
-                              setErr(e?.message ?? "Plaid failed");
+                              setErr(uiErrorMessage(e, "Plaid failed."));
                             }
                           }}
                           disabled={!selectedBusinessId}
@@ -2295,7 +2306,7 @@ export default function SettingsPageClient() {
                             setCreateMode("choose");
                             setPlaidDraft(null);
                           } catch (e: any) {
-                            setErr(e?.message ?? "Failed to create account");
+                            setErr(uiErrorMessage(e, "Failed to create account."));
                           } finally {
                             setSaving(false);
                           }
@@ -2413,7 +2424,7 @@ export default function SettingsPageClient() {
                               setDeleteSuggestArchive(false);
                               setDeleteConfirmText("");
                             } catch (e: any) {
-                              setDeleteErr(e?.message ?? "Archive failed");
+                              setDeleteErr(uiErrorMessage(e, "Something went wrong. Try again."));
                             } finally {
                               setDeleteBusy(false);
                             }
@@ -2451,7 +2462,7 @@ export default function SettingsPageClient() {
                                 setDeleteErr("This account has related records. You can’t delete it. Archive it instead.");
                                 setDeleteSuggestArchive(true);
                               } else {
-                                setDeleteErr(msg || "Delete failed");
+                                setDeleteErr(uiErrorMessage(e, "Something went wrong. Try again."));
                               }
                             } finally {
                               setDeleteBusy(false);
@@ -2529,7 +2540,7 @@ export default function SettingsPageClient() {
                             qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
                             setEditOpen(false);
                           } catch (e: any) {
-                            setEditErr(e?.message ?? "Save failed");
+                            setEditErr(uiErrorMessage(e, "Save failed."));
                           } finally {
                             setEditBusy(false);
                           }
@@ -3233,7 +3244,7 @@ export default function SettingsPageClient() {
                         qc.invalidateQueries({ queryKey: ["businesses"] });
                         setBpMsg("Saved.");
                       } catch (e: any) {
-                        setBpMsg(e?.message ?? "Save failed");
+                        setBpMsg(uiErrorMessage(e, "Save failed."));
                       } finally {
                         setBpSaving(false);
                       }
@@ -3335,7 +3346,7 @@ export default function SettingsPageClient() {
                   setCategoryDeleteOpen(false);
                   setCategoryDeleteTarget(null);
                 } catch (e: any) {
-                  setCatError(e?.message ?? "Cannot delete category");
+                  setCatError(uiErrorMessage(e, "Cannot delete category."));
                 }
               }}
             >
@@ -3363,12 +3374,16 @@ export default function SettingsPageClient() {
               variant="destructive"
               onClick={async () => {
                 if (!selectedBusinessId || !revokeInviteTarget) return;
-                await revokeInvite(selectedBusinessId, revokeInviteTarget.id);
-                const res = await getTeam(selectedBusinessId);
-                setTeamMembers(res.members ?? []);
-                setTeamInvites(res.invites ?? []);
-                setRevokeInviteOpen(false);
-                setRevokeInviteTarget(null);
+                try {
+                  await revokeInvite(selectedBusinessId, revokeInviteTarget.id);
+                  const res = await getTeam(selectedBusinessId);
+                  setTeamMembers(res.members ?? []);
+                  setTeamInvites(res.invites ?? []);
+                  setRevokeInviteOpen(false);
+                  setRevokeInviteTarget(null);
+                } catch (e: any) {
+                  setTeamError(uiErrorMessage(e, "Failed to revoke invite."));
+                }
               }}
             >
               Revoke invite
@@ -3396,13 +3411,17 @@ export default function SettingsPageClient() {
               disabled={removeMemberConfirm.trim().toUpperCase() !== "REMOVE"}
               onClick={async () => {
                 if (!selectedBusinessId || !removeMemberTarget) return;
-                await removeMember(selectedBusinessId, removeMemberTarget.userId);
-                const res = await getTeam(selectedBusinessId);
-                setTeamMembers(res.members ?? []);
-                setTeamInvites(res.invites ?? []);
-                setRemoveMemberOpen(false);
-                setRemoveMemberTarget(null);
-                setRemoveMemberConfirm("");
+                try {
+                  await removeMember(selectedBusinessId, removeMemberTarget.userId);
+                  const res = await getTeam(selectedBusinessId);
+                  setTeamMembers(res.members ?? []);
+                  setTeamInvites(res.invites ?? []);
+                  setRemoveMemberOpen(false);
+                  setRemoveMemberTarget(null);
+                  setRemoveMemberConfirm("");
+                } catch (e: any) {
+                  setTeamError(uiErrorMessage(e, "Failed to remove member."));
+                }
               }}
             >
               Remove member
@@ -3447,16 +3466,25 @@ export default function SettingsPageClient() {
               onClick={async () => {
                 if (!selectedBusinessId || !archiveTarget) return;
 
-                if (archiveTarget.action === "archive") {
-                  await archiveAccount(selectedBusinessId, archiveTarget.id);
-                } else {
-                  await unarchiveAccount(selectedBusinessId, archiveTarget.id);
-                }
+                try {
+                  if (archiveTarget.action === "archive") {
+                    await archiveAccount(selectedBusinessId, archiveTarget.id);
+                  } else {
+                    await unarchiveAccount(selectedBusinessId, archiveTarget.id);
+                  }
 
-                qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
-                setArchiveConfirmOpen(false);
-                setArchiveTarget(null);
-                setArchiveConfirmText("");
+                  qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                  setArchiveConfirmOpen(false);
+                  setArchiveTarget(null);
+                  setArchiveConfirmText("");
+                } catch (e: any) {
+                  setDeleteErr(
+                    uiErrorMessage(
+                      e,
+                      archiveTarget.action === "archive" ? "Failed to archive account." : "Failed to unarchive account."
+                    )
+                  );
+                }
               }}
             >
               {archiveTarget?.action === "archive" ? "Archive account" : "Unarchive account"}
@@ -3559,7 +3587,7 @@ export default function SettingsPageClient() {
                   ]);
                   router.refresh();
                 } catch (e: any) {
-                  setResetBusinessErr(e?.message ?? "Reset failed");
+                  setResetBusinessErr(uiErrorMessage(e, "Something went wrong. Try again."));
                 } finally {
                   setResetBusinessBusy(false);
                 }
@@ -3610,7 +3638,12 @@ export default function SettingsPageClient() {
 
                 try {
                   const deletingId = selectedBusinessId;
-                  await deleteBusiness(deletingId);
+
+                  await apiFetch(`/v1/businesses/${deletingId}`, {
+                    method: "DELETE",
+                  });
+
+                  await qc.invalidateQueries({ queryKey: ["businesses"] });
 
                   const refreshed: any = await businessesQ.refetch();
                   const list = refreshed?.data ?? businessesQ.data ?? [];
@@ -3622,7 +3655,7 @@ export default function SettingsPageClient() {
                   if (nextId) router.replace(`/settings?businessId=${nextId}`);
                   else router.replace("/create-business");
                 } catch (e: any) {
-                  setDeleteBusinessErr(e?.message ?? "Delete failed");
+                  setDeleteBusinessErr(uiErrorMessage(e, "Something went wrong. Try again."));
                 } finally {
                   setDeleteBusinessBusy(false);
                 }

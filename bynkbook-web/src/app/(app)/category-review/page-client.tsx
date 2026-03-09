@@ -181,7 +181,7 @@ export default function CategoryReviewPageClient() {
   }
 
   // Entries (single fetch via hook; filters only apply after Run)
-  const entriesLimit = 500;
+  const entriesLimit = 2000;
   const entriesKey = useMemo(
     () => ["entries", selectedBusinessId, selectedAccountId, entriesLimit, false] as const,
     [selectedBusinessId, selectedAccountId, entriesLimit]
@@ -587,8 +587,14 @@ export default function CategoryReviewPageClient() {
         updates: { category_id: categoryId },
       });
 
-      // One targeted refresh: entries for this business+account only.
-      void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+      // Refresh all ledger/account entry surfaces immediately.
+      await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+      await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
+      }
 
     } catch (e: any) {
       // Revert this entry only
@@ -693,8 +699,13 @@ export default function CategoryReviewPageClient() {
         updates: { payee: merchant },
       });
 
-      // Keep last-good; one targeted refresh (no storm)
-      void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+      await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+      await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
+      }
     } catch (e: any) {
       const r = applyMutationError(e, "Can’t apply merchant");
       if (!r.isClosed) setFailedById((m) => ({ ...m, [entryId]: r.msg }));
@@ -749,7 +760,7 @@ export default function CategoryReviewPageClient() {
     return out.slice(0, 200);
   }, [selectedSuggestionByEntryId]);
   return (
-    <div className="space-y-4 max-w-6xl h-[calc(100vh-96px)] overflow-hidden">
+    <div className="flex h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
@@ -873,20 +884,20 @@ export default function CategoryReviewPageClient() {
       </div>
 
       {/* Table card */}
-      <Card>
-        <CHeader className="pb-2">
+      <Card className="flex min-h-0 flex-1 flex-col">
+        <CHeader className="shrink-0 pb-2">
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="inline-flex items-center gap-2">
               Uncategorized
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
-                {visibleRows.filter((e: any) => !e.category_id).length}
+                {visibleRows.length}
               </span>
               {sugUpdating ? <span className="text-[11px] text-slate-500">Updating…</span> : null}
             </CardTitle>
           </div>
         </CHeader>
 
-        <CardContent className="space-y-3">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
           {err ? (
             <div className="text-sm text-red-600" role="alert">
               {err}
@@ -898,21 +909,22 @@ export default function CategoryReviewPageClient() {
           ) : visibleRows.length === 0 ? (
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
-            <div className="relative rounded-lg border border-slate-200 overflow-hidden">
+            <div className="relative h-full min-h-0 flex-1 rounded-lg border border-slate-200 overflow-hidden">
               {tableUpdating ? <UpdatingOverlay /> : null}
-              <div className={tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}>
-                <LedgerTableShell scrollMode="visible"
-                colgroup={
-                  <>
-                    <col style={{ width: 36 }} />
-                    <col style={{ width: 98 }} />
-                    <col />
-                    <col style={{ width: 120 }} />
-                    <col style={{ width: 360 }} />
-                  </>
-                }
-                header={
-                  <tr className="h-7">
+              <div className={`h-full min-h-0 ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
+                <div className="h-full min-h-0">
+                  <LedgerTableShell scrollMode="auto"
+                  colgroup={
+                    <>
+                      <col style={{ width: 36 }} />
+                      <col style={{ width: 98 }} />
+                      <col />
+                      <col style={{ width: 120 }} />
+                      <col style={{ width: 360 }} />
+                    </>
+                  }
+                  header={
+                    <tr className="h-7">
                     <th className="px-0 text-center align-middle">
                       <div className="flex h-7 items-center justify-center">
                         <input
@@ -1320,8 +1332,9 @@ export default function CategoryReviewPageClient() {
                     })}
                   </>
                 }
-                footer={null}
-              />
+                  footer={null}
+                />
+                </div>
               </div>
             </div>
           )}
@@ -1435,6 +1448,14 @@ export default function CategoryReviewPageClient() {
                       });
 
                       await entriesQ.refetch?.();
+                      await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
+                      await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+                      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+
+                      if (typeof window !== "undefined") {
+                        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
+                      }
+
                       setApplyOpen(false);
                     } catch (e: any) {
                       applyMutationError(e, "Can’t apply suggestions");

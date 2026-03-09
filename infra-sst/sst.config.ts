@@ -93,8 +93,9 @@ export default $config({
     // Single business (profile)
     api.route("GET /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("PATCH /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+    api.route("DELETE /v1/businesses/{businessId}", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
-    // Settings usage stats + admin ops
+    // Settings usage stats (minimal, business-scoped)
     api.route("GET /v1/businesses/{businessId}/usage", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("GET /v1/businesses/{businessId}/backup", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });
     api.route("POST /v1/businesses/{businessId}/reset", bizHandler, { auth: { jwt: { authorizer: authorizer.id } } });

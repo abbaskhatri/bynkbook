@@ -99,15 +99,6 @@ export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
 
-  // Force CloudWatch log group creation + give us traceability
-  console.log("transfers invoked", {
-    method,
-    path,
-    requestId: event?.requestContext?.requestId,
-    businessId: event?.pathParameters?.businessId,
-    accountId: event?.pathParameters?.accountId,
-  });
-
   try {
     const claims = getClaims(event);
     const sub = (claims.sub as string | undefined) ?? "";

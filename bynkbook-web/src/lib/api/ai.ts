@@ -92,9 +92,21 @@ export async function aiSuggestCategory(args: {
   limitPerItem?: number;
 }) {
   const { businessId, accountId, items, limitPerItem } = args;
-  return apiFetch(`/v1/ai/suggest-category`, {
+
+  return apiFetch(`/v1/businesses/${encodeURIComponent(businessId)}/ai/category-suggestions`, {
     method: "POST",
-    body: JSON.stringify({ businessId, accountId, items, limitPerItem: limitPerItem ?? 3 }),
+    body: JSON.stringify({
+      accountId,
+      items: items.map((x) => ({
+        kind: "ENTRY",
+        id: x.id,
+        date: x.date,
+        amount_cents: x.amount_cents,
+        payee_or_name: x.payee_or_name,
+        memo: x.memo,
+      })),
+      limitPerItem: limitPerItem ?? 3,
+    }),
   });
 }
 

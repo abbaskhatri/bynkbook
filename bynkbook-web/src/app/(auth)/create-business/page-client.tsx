@@ -299,14 +299,45 @@ export default function CreateBusinessClient() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="logoUrl">Logo URL</Label>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="logoUrl">Logo</Label>
+                    <label
+                      htmlFor="logoFile"
+                      className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                    >
+                      Upload logo
+                    </label>
+                  </div>
+
                   <Input
                     id="logoUrl"
                     value={logoUrl}
                     onChange={(e) => setLogoUrl(e.target.value)}
-                    placeholder="https://…"
+                    placeholder="Paste logo URL or use Upload logo"
                     className="h-11 rounded-xl"
                   />
+
+                  <input
+                    id="logoFile"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const result = String(reader.result ?? "");
+                        if (result) setLogoUrl(result);
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+
+                  <div className="text-xs text-slate-500">
+                    Upload a logo image or paste a public logo URL.
+                  </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -328,13 +359,25 @@ export default function CreateBusinessClient() {
                     <Label htmlFor="fiscalStartMonth">Fiscal year start month</Label>
                     <div className="relative">
                       <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input
+                      <select
                         id="fiscalStartMonth"
                         value={fiscalStartMonth}
                         onChange={(e) => setFiscalStartMonth(e.target.value)}
-                        placeholder="1"
-                        className="h-11 rounded-xl pl-10"
-                      />
+                        className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 shadow-sm outline-none ring-0 focus:border-emerald-500"
+                      >
+                        <option value="1">January</option>
+                        <option value="2">February</option>
+                        <option value="3">March</option>
+                        <option value="4">April</option>
+                        <option value="5">May</option>
+                        <option value="6">June</option>
+                        <option value="7">July</option>
+                        <option value="8">August</option>
+                        <option value="9">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                      </select>
                     </div>
                   </div>
                 </div>

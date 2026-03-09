@@ -126,13 +126,11 @@ export async function handler(event: any) {
   if (!okAcct) return json(404, { ok: false, error: "Account not found" });
 
   // Fetch entries (deleted entries must never create issues)
-    const entries = await prisma.entry.findMany({
+  const entries = await prisma.entry.findMany({
     where: {
       business_id: biz,
       account_id: acct,
       deleted_at: null,
-      // NOTE: Do NOT filter "opening_balance" here.
-      // That row is UI-only (synthetic) and does not exist in the DB as a UUID.
     },
     select: {
       id: true,
@@ -141,6 +139,13 @@ export async function handler(event: any) {
       memo: true,
       amount_cents: true,
       method: true,
+      type: true,
+      category_id: true,
+      account: {
+        select: {
+          type: true,
+        },
+      },
     },
   });
 
@@ -159,10 +164,31 @@ export async function handler(event: any) {
   const detected: Detected[] = [];
 
   // Missing category (optional)
+  // Business rules:
+  // - OPENING: never requires category
+  // - ADJUSTMENT: never requires category
+  // - TRANSFER: never requires category
+  // - CASH account entries: never require category
   if (includeMissingCategory) {
     for (const e of entries) {
-      const cat = (e.memo || "").trim();
-      if (!cat || cat.toLowerCase() === "uncategorized") {
+      const typeUpper = String((e as any).type ?? "").toUpperCase();
+      const accountTypeUpper = String((e as any)?.account?.type ?? "").toUpperCase();
+      const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
+
+      const isOpening =
+        typeUpper === "OPENING" ||
+        payeeLower.startsWith("opening balance");
+
+      const isAdjustment = typeUpper === "ADJUSTMENT";
+      const isTransfer = typeUpper === "TRANSFER";
+      const isCashAccount = accountTypeUpper === "CASH";
+
+      if (isOpening || isAdjustment || isTransfer || isCashAccount) {
+        continue;
+      }
+
+      const categoryId = (e as any).category_id ? String((e as any).category_id).trim() : "";
+      if (!categoryId) {
         detected.push({
           entry_id: e.id,
           issue_type: "MISSING_CATEGORY",
@@ -177,10 +203,23 @@ export async function handler(event: any) {
 
   // Stale checks
   for (const e of entries) {
+    const typeUpper = String((e as any).type ?? "").toUpperCase();
+    const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
+
+    if (
+      typeUpper === "OPENING" ||
+      typeUpper === "ADJUSTMENT" ||
+      payeeLower.startsWith("opening balance")
+    ) {
+      continue;
+    }
+
     const methodUpper = (e.method || "").toString().toUpperCase();
     if (methodUpper !== "CHECK") continue;
+
     const day = Math.floor(Date.UTC(e.date.getUTCFullYear(), e.date.getUTCMonth(), e.date.getUTCDate()) / 86400000);
     if (!Number.isFinite(todayDay) || !Number.isFinite(day)) continue;
+
     const age = todayDay - day;
     if (age > 45) {
       detected.push({
@@ -198,6 +237,17 @@ export async function handler(event: any) {
   const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean }>>();
 
   for (const e of entries) {
+    const typeUpper = String((e as any).type ?? "").toUpperCase();
+    const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
+
+    if (
+      typeUpper === "OPENING" ||
+      typeUpper === "ADJUSTMENT" ||
+      payeeLower.startsWith("opening balance")
+    ) {
+      continue;
+    }
+
     const methodUpper = (e.method || "").toString().toUpperCase();
     const isCheck = methodUpper === "CHECK";
 

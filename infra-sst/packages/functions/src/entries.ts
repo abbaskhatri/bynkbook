@@ -51,8 +51,6 @@ function canWrite(role: string | null) {
 }
 
 export async function handler(event: any) {
-  console.log("ENTRIES_HANDLER_VERSION", "v-transfer-fields-1");
-  console.log("ENTRIES_HANDLER_VERSION", "v3-transfer-display");
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
 

@@ -443,10 +443,21 @@ export default function ReconcilePageClient() {
 
   const selectedAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
-    if (accountIdFromUrl && !String(accountIdFromUrl).startsWith("temp_")) return accountIdFromUrl;
 
-    // Never select temp_ accounts (optimistic UI ids) in reconcile.
-    const real = list.find((a: any) => !a.archived_at && !String(a.id ?? "").startsWith("temp_"));
+    if (accountIdFromUrl && !String(accountIdFromUrl).startsWith("temp_")) {
+      const picked = list.find((a: any) => String(a.id) === String(accountIdFromUrl));
+      if (picked && !picked.archived_at && String(picked.type ?? "").toUpperCase() !== "CASH") {
+        return accountIdFromUrl;
+      }
+    }
+
+    // Reconcile excludes temp_ and CASH accounts.
+    const real = list.find(
+      (a: any) =>
+        !a.archived_at &&
+        !String(a.id ?? "").startsWith("temp_") &&
+        String(a.type ?? "").toUpperCase() !== "CASH"
+    );
     return real?.id ?? "";
   }, [accountsQ.data, accountIdFromUrl]);
 
@@ -1219,6 +1230,27 @@ export default function ReconcilePageClient() {
   // -------------------------
   const isAdjustedEntry = (e: any) => Boolean(e?.is_adjustment) || locallyAdjusted.has(e?.id);
 
+  const isOpeningLikeEntry = (e: any) => {
+    const t = String(e?.type ?? "").toUpperCase();
+    const payee = String(e?.payee ?? "").trim().toLowerCase();
+    return t === "OPENING" || payee.startsWith("opening balance");
+  };
+
+const isReconcileExemptEntry = (e: any) => {
+  const t = String(e?.type ?? "").toUpperCase();
+
+  if (isOpeningLikeEntry(e)) return true;
+  if (t === "ADJUSTMENT") return true;
+
+  const account = (accountsQ.data ?? []).find(
+    (a: any) => String(a.id) === String(selectedAccountId)
+  );
+
+  if (String(account?.type ?? "").toUpperCase() === "CASH") return true;
+
+  return false;
+};
+
   // Keep raw entries; tab-level filtering decides visibility (Expected hides Adjusted-unmatched)
   const allEntries = entriesQ.data ?? [];
 
@@ -1989,6 +2021,7 @@ export default function ReconcilePageClient() {
     for (const e of allEntriesSorted) {
       if (matchedEntryIdSet.has(e.id)) continue;
       if (isAdjustedEntry(e)) continue;
+      if (isReconcileExemptEntry(e)) continue;
 
       const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
       if (!matchesRowSearch(hay)) continue;
@@ -1997,12 +2030,13 @@ export default function ReconcilePageClient() {
       if (out.length >= expectedVisibleN) break;
     }
     return out;
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN]);
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN, accountsQ.data, selectedAccountId]);
 
   const entriesMatchedList = useMemo(() => {
     const out: any[] = [];
     for (const e of allEntriesSorted) {
       if (!matchedEntryIdSet.has(e.id)) continue;
+      if (isReconcileExemptEntry(e)) continue;
 
       const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
       if (!matchesRowSearch(hay)) continue;
@@ -2011,13 +2045,15 @@ export default function ReconcilePageClient() {
       if (out.length >= matchedVisibleN) break;
     }
     return out;
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ, matchedVisibleN]);
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ, matchedVisibleN, accountsQ.data, selectedAccountId]);
 
   // Counts (uncapped) for tab labels — computed cheaply in one pass
   const { expectedCount, matchedCount } = useMemo(() => {
     let exp = 0;
     let mat = 0;
     for (const e of allEntriesSorted) {
+      if (isReconcileExemptEntry(e)) continue;
+
       const isMat = matchedEntryIdSet.has(e.id);
       if (!isMat && isAdjustedEntry(e)) continue;
 
@@ -2028,7 +2064,7 @@ export default function ReconcilePageClient() {
       else exp++;
     }
     return { expectedCount: exp, matchedCount: mat };
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ]);
+  }, [allEntriesSorted, matchedEntryIdSet, searchQ, accountsQ.data, selectedAccountId]);
 
   // Tabs: Bank Transactions (Phase 2: cap rendered rows for instant tab switches)
   const bankUnmatchedList = useMemo(() => {
@@ -2118,7 +2154,7 @@ export default function ReconcilePageClient() {
   const revertsInScope = voidedGroups.length;
 
   const opts = (accountsQ.data ?? [])
-    .filter((a) => !a.archived_at)
+    .filter((a) => !a.archived_at && String(a.type ?? "").toUpperCase() !== "CASH")
     .map((a) => ({ value: a.id, label: a.name }));
 
   const accountCapsule = (

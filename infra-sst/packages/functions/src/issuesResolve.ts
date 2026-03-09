@@ -91,6 +91,13 @@ export async function handler(event: any) {
     // Validate issue belongs to business+account (lock)
     const row = await prisma.entryIssue.findFirst({
       where: { id: issue, business_id: biz, account_id: acct },
+      select: {
+        id: true,
+        entry_id: true,
+        issue_type: true,
+        status: true,
+        resolved_at: true,
+      },
     });
     if (!row) return json(404, { ok: false, error: "Issue not found" });
 
@@ -143,9 +150,11 @@ export async function handler(event: any) {
     }
 
     // LEGITIMIZE or ACK_STALE: resolve issue only (no entry mutation)
-    await prisma.entryIssue.updateMany({
-      where: { id: issue, business_id: biz, account_id: acct },
-      data: { status: "RESOLVED", resolved_at: new Date(), updated_at: new Date() },
+    await prisma.$transaction(async (tx: any) => {
+      await tx.entryIssue.updateMany({
+        where: { id: issue, business_id: biz, account_id: acct },
+        data: { status: "RESOLVED", resolved_at: new Date(), updated_at: new Date() },
+      });
     });
 
     return json(200, { ok: true, issue_id: issue, resolved: true, action });

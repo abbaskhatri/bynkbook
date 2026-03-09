@@ -905,7 +905,9 @@ export default function LedgerPageClient() {
     if (!perfOn) return;
     if (process.env.NODE_ENV === "production") return;
     // eslint-disable-next-line no-console
+    if (process.env.NODE_ENV === "development") {
     console.log(...args);
+    }
   };
 
   // Coalesced background refresh for entries (no storms)
@@ -982,14 +984,25 @@ export default function LedgerPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshScopeKey]);
 
-  // Uploads "create entries" triggers a lightweight ledger refresh (no storms)
+  // Immediate cross-surface ledger refresh for reconcile/category mutations
   useEffect(() => {
-    const fn = () =>
-      scheduleEntriesRefresh(selectedBusinessIdRef.current, selectedAccountIdRef.current, "uploadsCreateEntries");
+    const fn = () => {
+      const biz = selectedBusinessIdRef.current;
+      const acc = selectedAccountIdRef.current;
+      if (!biz || !acc) return;
 
-    window.addEventListener("bynk:ledger-refresh", fn as any);
-    return () => window.removeEventListener("bynk:ledger-refresh", fn as any);
-  }, [scheduleEntriesRefresh]);
+      cancelEntriesRefresh();
+
+      void qc.invalidateQueries({ queryKey: ["entries", biz, acc], exact: false });
+      void qc.invalidateQueries({ queryKey: ["entryIssues", biz, acc], exact: false });
+      void qc.invalidateQueries({ queryKey: ["ledgerSummary", biz, acc], exact: false });
+
+      perfLog("[PERF][entriesRefresh] fired (custom-now)");
+    };
+
+    window.addEventListener("bynk:ledger-refresh-now", fn as any);
+    return () => window.removeEventListener("bynk:ledger-refresh-now", fn as any);
+  }, [qc]);
 
   // Open Apply Payment dialog from vendor suggestion pill (no redirect)
   useEffect(() => {
@@ -1548,6 +1561,11 @@ export default function LedgerPageClient() {
         category: (() => {
           const t = (e.type ?? "").toString().toUpperCase();
 
+          // OPENING: never categorized
+          if (t === "OPENING" || isOpeningLikePayee(e.payee)) {
+            return "";
+          }
+
           // TRANSFER: use durable backend fields (stable across refetch/reload)
           if (t === "TRANSFER" && tid) {
             if (tDir && tOtherName) {
@@ -1591,9 +1609,14 @@ export default function LedgerPageClient() {
           if (isDeleted) return "Deleted";
 
           const t = String(e.type ?? "").toUpperCase();
+          const payeeLower = String(e.payee ?? "").trim().toLowerCase();
 
-          // Adjustments are considered resolved for period close and ledger UX
+          // Opening balances and adjustments are always considered legitimate/resolved in ledger UX
           if (t === "ADJUSTMENT") return "Matched";
+          if (t === "OPENING" || payeeLower.startsWith("opening balance")) return "Matched";
+
+          // Cash-account entries do not require reconciliation
+          if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") return "Matched";
 
           const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
           const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
@@ -1607,7 +1630,11 @@ export default function LedgerPageClient() {
           if (isDeleted) return "DELETED";
 
           const t = String(e.type ?? "").toUpperCase();
+          const payeeLower = String(e.payee ?? "").trim().toLowerCase();
+
           if (t === "ADJUSTMENT") return "MATCHED";
+          if (t === "OPENING" || payeeLower.startsWith("opening balance")) return "MATCHED";
+          if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") return "MATCHED";
 
           const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
           const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
