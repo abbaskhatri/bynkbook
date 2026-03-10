@@ -461,7 +461,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                 <div className="text-sm font-semibold text-slate-900">Upload summary</div>
                 <div className="text-xs text-slate-600">
                   {type === "INVOICE"
-                    ? "Invoices extracted from uploaded files."
+                    ? "Invoices are extracted automatically. Bills are created automatically when parsing succeeds."
                     : type === "RECEIPT"
                       ? "Receipts extracted from uploaded files."
                       : "Uploaded files."}
@@ -586,6 +586,16 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         ? (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD" })
                         : parsed?.amount_text || "—";
 
+                    const duplicateCode =
+                      (it.completedMeta as any)?.error_code ??
+                      (it.completedMeta as any)?.meta?.error_code ??
+                      "";
+
+                    const duplicateMeta =
+                      (it.completedMeta as any)?.duplicate ??
+                      (it.completedMeta as any)?.meta?.duplicate ??
+                      null;
+
                     const statusLabel =
                       status === "PARSING"
                         ? "Parsing…"
@@ -594,7 +604,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                           : status === "NEEDS_REVIEW"
                             ? "Needs review"
                             : status === "FAILED"
-                              ? "Failed"
+                              ? (duplicateCode === "DUPLICATE_UPLOAD" ? "Duplicate upload" : "Failed")
                               : "Uploaded";
 
                     return (
@@ -659,7 +669,14 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                             </td>
 
                             <td className="px-3 py-2 text-slate-700">{dueDate || "—"}</td>
-                            <td className="px-3 py-2 text-right text-slate-900">{total || "—"}</td>
+                            <td className="px-3 py-2 text-right text-slate-900">
+                              <div>{total || "—"}</div>
+                              {duplicateCode === "DUPLICATE_UPLOAD" && duplicateMeta ? (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  Duplicate of {String(duplicateMeta.original_filename || "existing upload")}
+                                </div>
+                              ) : null}
+                            </td>
                             <td className="px-3 py-2">
                               <span
                                 className={
@@ -670,13 +687,38 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                       : status === "NEEDS_REVIEW"
                                         ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
                                         : status === "FAILED"
-                                          ? "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
+                                          ? (
+                                              ((it.completedMeta as any)?.error_code ??
+                                                (it.completedMeta as any)?.meta?.error_code ??
+                                                "") === "DUPLICATE_UPLOAD"
+                                                ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                                : "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
+                                            )
                                           : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                 }
                               >
                                 {statusLabel}
-                                {it.uploadId ? (
-                                  entryCreateStatus[it.uploadId]?.state === "creating" ? (
+                                {(() => {
+                                  const autoBillId =
+                                    (it.completedMeta as any)?.bill_id ??
+                                    (it.completedMeta as any)?.meta?.bill_id ??
+                                    null;
+
+                                  if (autoBillId) {
+                                    return <span className="ml-2 text-[11px] text-primary">Bill created</span>;
+                                  }
+
+                                  if (duplicateCode === "DUPLICATE_UPLOAD") {
+                                    return (
+                                      <span className="ml-2 text-[11px] text-slate-600">
+                                        Existing upload reused
+                                      </span>
+                                    );
+                                  }
+
+                                  if (!it.uploadId) return null;
+
+                                  return entryCreateStatus[it.uploadId]?.state === "creating" ? (
                                     <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
                                     <span className="ml-2 text-[11px] text-primary">Created</span>
@@ -684,8 +726,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                     <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
                                     <span className="ml-2 text-[11px] text-red-700">Failed</span>
-                                  ) : null
-                                ) : null}
+                                  ) : null;
+                                })()}
                               </span>
                             </td>
                           </>
@@ -803,7 +845,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
             </div>
 
             {/* Actions (selected rows) */}
-            {(type === "INVOICE" || type === "RECEIPT") && ctx?.businessId ? (
+            {type === "RECEIPT" && ctx?.businessId ? (
               <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between">
                 <div className="text-xs text-slate-600">
                   {controller.items.filter((it) => it.uploadId && selectedForEntry[it.uploadId]).length} selected
@@ -838,43 +880,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         const ids = selectedEligibleIds;
                         if (!ids.length) return;
 
-                        // Mark as creating (non-blocking)
                         setEntryCreateStatus((m) => {
                           const next = { ...m };
                           for (const id of ids) next[id] = { state: "creating" };
                           return next;
                         });
 
-                        if (type === "INVOICE") {
-                          const res: any = await apiFetch(`/v1/businesses/${ctx.businessId}/uploads/create-bills`, {
-                            method: "POST",
-                            body: JSON.stringify({ upload_ids: ids }),
-                          });
-
-                          const results = Array.isArray(res?.results) ? res.results : [];
-                          setEntryCreateStatus((m) => {
-                            const next = { ...m };
-                            for (const r of results) {
-                              const uid = String(r.upload_id || "");
-                              if (!uid) continue;
-                              if (r.bill_id && r.already) next[uid] = { state: "already", entryId: r.bill_id };
-                              else if (r.bill_id) next[uid] = { state: "created", entryId: r.bill_id };
-                              else next[uid] = { state: "failed", error: r.error || "Failed" };
-                            }
-                            return next;
-                          });
-
-                          // Refresh vendors + vendor detail instantly
-                          window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
-                          const forcedVendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
-                          if (forcedVendorId) {
-                            window.dispatchEvent(new CustomEvent("bynk:vendor-detail-refresh", { detail: { vendorId: forcedVendorId } }));
-                          }
-
-                          return;
-                        }
-
-                        // RECEIPT -> ledger entries path
                         const entry_dates: Record<string, string> = {};
                         for (const id of ids) {
                           const v = (entryDateByUploadId[id] || "").trim();
@@ -902,7 +913,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh"));
                       }}
                     >
-                      {type === "INVOICE" ? "Create bills" : "Create entries"}
+                      Create entries
                     </Button>
                   );
                 })()}
@@ -944,7 +955,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                       <div className="flex items-center gap-2">
                         {it.status === "UPLOADED" || it.status === "COMPLETED" ? (
                           <div className="inline-flex items-center gap-1 text-xs text-primary">
-                            <CheckCircle2 className="h-4 w-4" /> Uploaded
+                            <CheckCircle2 className="h-4 w-4" />
+                            {it.completedMeta ? "Uploaded" : "Ready"}
                           </div>
                         ) : it.status === "FAILED" ? (
                           <div className="inline-flex items-center gap-1 text-xs text-red-700">

@@ -19,5 +19,8 @@ export function useEntries(params: {
         includeDeleted: !!includeDeleted,
       }),
     enabled: !!businessId && !!accountId,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }

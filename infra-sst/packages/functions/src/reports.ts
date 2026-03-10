@@ -98,6 +98,11 @@ export async function handler(event: any) {
     deleted_at: null,
     type: { in: ["INCOME", "EXPENSE"] },
     date: { gte: fromDate, lt: toDateExclusive },
+    NOT: [
+      { payee: { equals: "Opening Balance", mode: "insensitive" } },
+      { payee: { equals: "Opening Balance (estimated)", mode: "insensitive" } },
+      { payee: { startsWith: "Opening balance", mode: "insensitive" } },
+    ],
     ...(accountId === "all" ? {} : { account_id: accountId }),
   };
 
@@ -381,6 +386,11 @@ export async function handler(event: any) {
         deleted_at: null,
         type: { in: ["INCOME", "EXPENSE"] },
         date: { gte: ytdFromDate, lt: ytdToExclusive },
+        NOT: [
+          { payee: { equals: "Opening Balance", mode: "insensitive" } },
+          { payee: { equals: "Opening Balance (estimated)", mode: "insensitive" } },
+          { payee: { startsWith: "Opening balance", mode: "insensitive" } },
+        ],
         ...(accountId === "all" ? {} : { account_id: accountId }),
       };
 
@@ -422,6 +432,11 @@ export async function handler(event: any) {
             AND e.type IN ('INCOME','EXPENSE')
             AND e.date >= ${ytdFromDate}::date
             AND e.date < ${ytdToExclusive}::date
+            AND NOT (
+              lower(coalesce(e.payee, '')) = 'opening balance'
+              OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+              OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+            )
           GROUP BY 1
           ORDER BY 1 ASC
         `;
@@ -439,6 +454,11 @@ export async function handler(event: any) {
             AND e.date >= ${ytdFromDate}::date
             AND e.date < ${ytdToExclusive}::date
             AND e.account_id = ${accountId}::uuid
+            AND NOT (
+              lower(coalesce(e.payee, '')) = 'opening balance'
+              OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+              OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+            )
           GROUP BY 1
           ORDER BY 1 ASC
         `;
@@ -511,6 +531,11 @@ export async function handler(event: any) {
       deleted_at: null,
       type: { in: ["INCOME", "EXPENSE"] },
       date: { gte: seriesFromDate, lt: seriesToExclusive },
+      NOT: [
+        { payee: { equals: "Opening Balance", mode: "insensitive" } },
+        { payee: { equals: "Opening Balance (estimated)", mode: "insensitive" } },
+        { payee: { startsWith: "Opening balance", mode: "insensitive" } },
+      ],
       ...(accountId === "all" ? {} : { account_id: accountId }),
     };
 
@@ -546,6 +571,11 @@ export async function handler(event: any) {
           AND e.type IN ('INCOME','EXPENSE')
           AND e.date >= ${seriesFromDate}::date
           AND e.date < ${seriesToExclusive}::date
+          AND NOT (
+            lower(coalesce(e.payee, '')) = 'opening balance'
+            OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+            OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+          )
         GROUP BY 1
         ORDER BY 1 ASC
       `;
@@ -563,6 +593,11 @@ export async function handler(event: any) {
           AND e.date >= ${seriesFromDate}::date
           AND e.date < ${seriesToExclusive}::date
           AND e.account_id = ${accountId}::uuid
+          AND NOT (
+            lower(coalesce(e.payee, '')) = 'opening balance'
+            OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+            OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+          )
         GROUP BY 1
         ORDER BY 1 ASC
       `;
@@ -631,20 +666,23 @@ export async function handler(event: any) {
         AND e.type IN ('INCOME','EXPENSE')
         AND e.date <= ${asOfDate}::date
         AND e.account_id = ANY(${ids}::uuid[])
+        AND NOT (
+          lower(coalesce(e.payee, '')) = 'opening balance'
+          OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+          OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+        )
       GROUP BY e.account_id
     `;
 
     const sumByAccount = new Map<string, bigint>(sums.map((r: any) => [String(r.account_id), (r.sum_cents ?? 0n) as bigint]));
 
     const rows = accounts.map((a: any) => {
-      const open = (a.opening_balance_cents ?? 0n) as bigint;
       const mov = sumByAccount.get(String(a.id)) ?? 0n;
-      const bal = open + mov;
       return {
         account_id: String(a.id),
         name: String(a.name),
         type: String(a.type),
-        balance_cents: bal.toString(),
+        balance_cents: mov.toString(),
       };
     });
 

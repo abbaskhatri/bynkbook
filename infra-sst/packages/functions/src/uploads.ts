@@ -223,14 +223,32 @@ export async function handler(event: any) {
         ...(accountId ? { account_id: accountId } : {}),
         original_filename: { equals: filename, mode: "insensitive" },
         completed_at: { gte: since },
+
+        // Only treat as duplicate if parsing succeeded
+        meta: {
+          path: ["parsed_status"],
+          equals: "PARSED",
+        },
       },
       select: { id: true },
     });
 
     if (existingDup) {
+      const dupRow = await prisma.upload.findFirst({
+        where: { id: existingDup.id, business_id: biz },
+        select: {
+          id: true,
+          original_filename: true,
+          created_at: true,
+          status: true,
+          meta: true,
+        },
+      });
+
       return json(409, {
         ok: false,
         code: "DUPLICATE_UPLOAD",
+        error_code: "DUPLICATE_UPLOAD",
         upload_id: existingDup.id,
         error: "A matching upload already exists.",
       });
@@ -311,9 +329,9 @@ export async function handler(event: any) {
     }
 
     const baseMeta =
-  row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as Record<string, any>) : {};
+      row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as Record<string, any>) : {};
 
-const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
+    const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
 
     const updated = await prisma.upload.update({
       where: { id: row.id },
@@ -450,10 +468,13 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
 
         if (!vendorLinked) {
           const parsedName = parsed?.vendor_name ? String(parsed.vendor_name).trim() : "";
-          const fallbackName = filenameStem(row.original_filename);
-          const vnRaw = parsedName || fallbackName;
-          const vn = normalizeVendorName(vnRaw);
+          const vn = normalizeVendorName(parsedName);
 
+          // IMPORTANT:
+          // For invoices, do NOT create a vendor from filename stem.
+          // If parsing does not produce a real vendor name, keep vendor unlinked
+          // and let the upload remain review-only instead of creating junk vendors
+          // like "INV-024251".
           if (vn) {
             const existing = await prisma.vendor.findFirst({
               where: { business_id: biz, name: { equals: vn, mode: "insensitive" } },
@@ -463,7 +484,6 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
             if (existing) {
               vendorLinked = existing;
             } else {
-              // Create vendor (safe, deterministic)
               const created = await prisma.vendor.create({
                 data: { business_id: biz, name: vn, notes: null },
                 select: { id: true, name: true },
@@ -577,7 +597,7 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
     }
   }
 
-    // -------------------------
+  // -------------------------
   // CREATE ENTRY FROM UPLOAD (POST /uploads/{uploadId}/create-entry)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/create-entry`) {
@@ -641,7 +661,7 @@ const mergedMeta = etag ? { ...baseMeta, etag } : baseMeta;
     // memo = "Receipt <receiptNo>" optional
     const payee = storeName;
     const memo = row.upload_type === "RECEIPT" ? (docNo ? `Receipt ${docNo}` : "Receipt") : docNo ? `Invoice ${docNo}` : "Invoice";
-const entry = await prisma.entry.create({
+    const entry = await prisma.entry.create({
       data: {
         id: randomUUID(),
         business_id: biz,
@@ -686,107 +706,107 @@ const entry = await prisma.entry.create({
         return json(400, { ok: false, error: "Invalid JSON body" });
       }
 
-    const ids = Array.isArray(body?.upload_ids) ? body.upload_ids.map((x: any) => String(x)) : [];
-    const entryDates = body?.entry_dates && typeof body.entry_dates === "object" ? body.entry_dates : {};
-    if (ids.length === 0) return json(400, { ok: false, error: "upload_ids required" });
+      const ids = Array.isArray(body?.upload_ids) ? body.upload_ids.map((x: any) => String(x)) : [];
+      const entryDates = body?.entry_dates && typeof body.entry_dates === "object" ? body.entry_dates : {};
+      if (ids.length === 0) return json(400, { ok: false, error: "upload_ids required" });
 
-    const rows = await prisma.upload.findMany({
-      where: { business_id: biz, id: { in: ids } },
-      select: { id: true, account_id: true, upload_type: true, original_filename: true, status: true, meta: true },
-    });
-
-    const out: any[] = [];
-
-    for (const r of rows) {
-      if (!r.account_id) {
-        out.push({ upload_id: r.id, error: "Upload missing account_id" });
-        continue;
-      }
-
-      const okAcct = await requireAccountInBusiness(prisma, biz, r.account_id);
-      if (!okAcct) {
-        out.push({ upload_id: r.id, error: "Account not found" });
-        continue;
-      }
-
-      const metaObj = r.meta && typeof r.meta === "object" && !Array.isArray(r.meta) ? (r.meta as any) : {};
-      if (metaObj.entry_id) {
-        out.push({ upload_id: r.id, entry_id: metaObj.entry_id, already: true });
-        continue;
-      }
-
-      if (r.status !== "COMPLETED") {
-        out.push({ upload_id: r.id, error: "Still retrieving…", code: "RETRIEVING" });
-        continue;
-      }
-
-      const existingBySource = await prisma.entry.findFirst({
-        where: { business_id: biz, sourceUploadId: r.id },
-        select: { id: true },
-      });
-      if (existingBySource) {
-        out.push({ upload_id: r.id, entry_id: existingBySource.id, already: true });
-        continue;
-      }
-
-      const parsed = getParsedMeta(metaObj);
-      if (!parsed) {
-        out.push({ upload_id: r.id, error: "No parsed data" });
-        continue;
-      }
-
-      const amountCents = parsed.amount_cents;
-      if (typeof amountCents !== "number" || !Number.isFinite(amountCents) || amountCents === 0) {
-        out.push({ upload_id: r.id, error: "Parsed amount missing" });
-        continue;
-      }
-
-      const override = toIsoDateStr(entryDates?.[r.id] ? String(entryDates[r.id]).trim() : "");
-      const docDate = toIsoDateStr(String(parsed.doc_date || "").trim());
-      const date = override || docDate || new Date().toISOString().slice(0, 10);
-
-      // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
-      const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: date });
-      if (!cp.ok) {
-        out.push({ upload_id: r.id, error: "This period is closed.", code: "CLOSED_PERIOD" });
-        continue;
-      }
-
-      const vendorName = String(parsed.vendor_name || metaObj.vendor_name || "").trim();
-      const docNo = String(parsed.doc_number || "").trim();
-
-      const fallbackPayee = filenameStem(r.original_filename) || "Vendor";
-      const storeName = vendorName || fallbackPayee;
-
-      const payee = storeName;
-      const memo = r.upload_type === "RECEIPT" ? (docNo ? `Receipt ${docNo}` : "Receipt") : docNo ? `Invoice ${docNo}` : "Invoice";
-      const entry = await prisma.entry.create({
-        data: {
-          id: randomUUID(),
-          business_id: biz,
-          account_id: r.account_id,
-          date: new Date(date + "T00:00:00Z"),
-          payee,
-          memo,
-          amount_cents: BigInt(-Math.abs(amountCents)),
-          type: "EXPENSE",
-          method: "OTHER",
-          status: "EXPECTED",
-          category_id: null,
-          vendor_id: r.upload_type === "INVOICE" ? (metaObj.vendor_id ?? null) : null,
-          sourceUploadId: r.id,
-          deleted_at: null,
-          created_at: new Date(),
-          updated_at: new Date(),
-        },
-        select: { id: true },
+      const rows = await prisma.upload.findMany({
+        where: { business_id: biz, id: { in: ids } },
+        select: { id: true, account_id: true, upload_type: true, original_filename: true, status: true, meta: true },
       });
 
-      const nextMeta = { ...metaObj, entry_id: entry.id, entry_created_at: new Date().toISOString() };
-      await prisma.upload.update({ where: { id: r.id }, data: { meta: nextMeta } });
+      const out: any[] = [];
 
-      out.push({ upload_id: r.id, entry_id: entry.id, already: false });
-    }
+      for (const r of rows) {
+        if (!r.account_id) {
+          out.push({ upload_id: r.id, error: "Upload missing account_id" });
+          continue;
+        }
+
+        const okAcct = await requireAccountInBusiness(prisma, biz, r.account_id);
+        if (!okAcct) {
+          out.push({ upload_id: r.id, error: "Account not found" });
+          continue;
+        }
+
+        const metaObj = r.meta && typeof r.meta === "object" && !Array.isArray(r.meta) ? (r.meta as any) : {};
+        if (metaObj.entry_id) {
+          out.push({ upload_id: r.id, entry_id: metaObj.entry_id, already: true });
+          continue;
+        }
+
+        if (r.status !== "COMPLETED") {
+          out.push({ upload_id: r.id, error: "Still retrieving…", code: "RETRIEVING" });
+          continue;
+        }
+
+        const existingBySource = await prisma.entry.findFirst({
+          where: { business_id: biz, sourceUploadId: r.id },
+          select: { id: true },
+        });
+        if (existingBySource) {
+          out.push({ upload_id: r.id, entry_id: existingBySource.id, already: true });
+          continue;
+        }
+
+        const parsed = getParsedMeta(metaObj);
+        if (!parsed) {
+          out.push({ upload_id: r.id, error: "No parsed data" });
+          continue;
+        }
+
+        const amountCents = parsed.amount_cents;
+        if (typeof amountCents !== "number" || !Number.isFinite(amountCents) || amountCents === 0) {
+          out.push({ upload_id: r.id, error: "Parsed amount missing" });
+          continue;
+        }
+
+        const override = toIsoDateStr(entryDates?.[r.id] ? String(entryDates[r.id]).trim() : "");
+        const docDate = toIsoDateStr(String(parsed.doc_date || "").trim());
+        const date = override || docDate || new Date().toISOString().slice(0, 10);
+
+        // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
+        const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: date });
+        if (!cp.ok) {
+          out.push({ upload_id: r.id, error: "This period is closed.", code: "CLOSED_PERIOD" });
+          continue;
+        }
+
+        const vendorName = String(parsed.vendor_name || metaObj.vendor_name || "").trim();
+        const docNo = String(parsed.doc_number || "").trim();
+
+        const fallbackPayee = filenameStem(r.original_filename) || "Vendor";
+        const storeName = vendorName || fallbackPayee;
+
+        const payee = storeName;
+        const memo = r.upload_type === "RECEIPT" ? (docNo ? `Receipt ${docNo}` : "Receipt") : docNo ? `Invoice ${docNo}` : "Invoice";
+        const entry = await prisma.entry.create({
+          data: {
+            id: randomUUID(),
+            business_id: biz,
+            account_id: r.account_id,
+            date: new Date(date + "T00:00:00Z"),
+            payee,
+            memo,
+            amount_cents: BigInt(-Math.abs(amountCents)),
+            type: "EXPENSE",
+            method: "OTHER",
+            status: "EXPECTED",
+            category_id: null,
+            vendor_id: r.upload_type === "INVOICE" ? (metaObj.vendor_id ?? null) : null,
+            sourceUploadId: r.id,
+            deleted_at: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+          select: { id: true },
+        });
+
+        const nextMeta = { ...metaObj, entry_id: entry.id, entry_created_at: new Date().toISOString() };
+        await prisma.upload.update({ where: { id: r.id }, data: { meta: nextMeta } });
+
+        out.push({ upload_id: r.id, entry_id: entry.id, already: false });
+      }
 
       return json(200, { ok: true, results: out });
     } catch (e: any) {

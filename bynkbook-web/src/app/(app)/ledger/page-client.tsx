@@ -906,7 +906,7 @@ export default function LedgerPageClient() {
     if (process.env.NODE_ENV === "production") return;
     // eslint-disable-next-line no-console
     if (process.env.NODE_ENV === "development") {
-    console.log(...args);
+      console.log(...args);
     }
   };
 
@@ -1446,7 +1446,7 @@ export default function LedgerPageClient() {
     return list;
   }, [entriesSorted, openingEntry]);
 
-    const entryById = useMemo(() => {
+  const entryById = useMemo(() => {
     const m = new Map<string, Entry>();
     for (const e of entriesWithOpening) m.set(String(e.id), e);
     return m;
@@ -1547,6 +1547,8 @@ export default function LedgerPageClient() {
       const tid = ((e as any).transfer_id ?? (e as any).transferId ?? null) as string | null;
       const tOtherName = ((e as any).transfer_other_account_name ?? null) as string | null;
       const tDir = ((e as any).transfer_direction ?? null) as ("IN" | "OUT" | null);
+      const isOpeningBalanceEntry =
+        String(e.type ?? "").toUpperCase() === "OPENING" || isOpeningLikePayee(e.payee);
 
       return {
         id: e.id,
@@ -1562,7 +1564,7 @@ export default function LedgerPageClient() {
           const t = (e.type ?? "").toString().toUpperCase();
 
           // OPENING: never categorized
-          if (t === "OPENING" || isOpeningLikePayee(e.payee)) {
+          if (isOpeningBalanceEntry) {
             return "";
           }
 
@@ -1609,11 +1611,10 @@ export default function LedgerPageClient() {
           if (isDeleted) return "Deleted";
 
           const t = String(e.type ?? "").toUpperCase();
-          const payeeLower = String(e.payee ?? "").trim().toLowerCase();
 
           // Opening balances and adjustments are always considered legitimate/resolved in ledger UX
           if (t === "ADJUSTMENT") return "Matched";
-          if (t === "OPENING" || payeeLower.startsWith("opening balance")) return "Matched";
+          if (isOpeningBalanceEntry) return "Matched";
 
           // Cash-account entries do not require reconciliation
           if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") return "Matched";
@@ -1630,10 +1631,9 @@ export default function LedgerPageClient() {
           if (isDeleted) return "DELETED";
 
           const t = String(e.type ?? "").toUpperCase();
-          const payeeLower = String(e.payee ?? "").trim().toLowerCase();
 
           if (t === "ADJUSTMENT") return "MATCHED";
-          if (t === "OPENING" || payeeLower.startsWith("opening balance")) return "MATCHED";
+          if (isOpeningBalanceEntry) return "MATCHED";
           if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") return "MATCHED";
 
           const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
@@ -1652,7 +1652,8 @@ export default function LedgerPageClient() {
           !isDeleted &&
           String(e.date ?? "").slice(0, 10) !== "" &&
           String(e.date ?? "").slice(0, 10) <= closedThroughDate,
-        canDelete: e.id !== "opening_balance",
+        canDelete: !isOpeningBalanceEntry && e.id !== "opening_balance",
+        isOpeningBalanceEntry,
       };
     });
   }, [entriesWithOpening, openingBalanceCents, closedThroughDate]);
@@ -1664,9 +1665,10 @@ export default function LedgerPageClient() {
     for (const r of rowModels) {
       if (r.isDeleted) continue;
 
-      // Ignore types that don't require categories
+      // Ignore rows that never require categories
       const t = (r.rawType || "").toString().toUpperCase();
       if (r.id === "opening_balance") continue;
+      if (r.isOpeningBalanceEntry) continue;
       if (t === "OPENING" || t === "TRANSFER" || t === "ADJUSTMENT") continue;
 
       const cat = (r.category || "").trim();
@@ -1983,6 +1985,7 @@ export default function LedgerPageClient() {
     for (const r of pageRows) {
       if (r.isDeleted) continue;
       if (r.id === "opening_balance") continue;
+      if (r.isOpeningBalanceEntry) continue;
 
       const t = (r.rawType || "").toString().toUpperCase();
       if (t === "TRANSFER") continue;
@@ -1995,7 +1998,16 @@ export default function LedgerPageClient() {
     const net = income + expense;
 
     // Balance: first visible non-deleted row's running balance
-    const top = pageRows.find((r) => !r.isDeleted && r.id !== "opening_balance" && r.balanceStr && r.balanceStr !== "—") ?? null;
+    const top =
+      pageRows.find(
+        (r) =>
+          !r.isDeleted &&
+          r.id !== "opening_balance" &&
+          !r.isOpeningBalanceEntry &&
+          r.balanceStr &&
+          r.balanceStr !== "—"
+      ) ?? null;
+
     const balCents = top ? BigInt(parseMoneyToCents(top.balanceStr)) : ZERO;
     const balStr = top ? top.balanceStr : "—";
 
@@ -2123,6 +2135,13 @@ export default function LedgerPageClient() {
   const [draftPayee, setDraftPayee] = useState("");
   const [draftType, setDraftType] = useState<UiType>("EXPENSE");
   const [draftMethod, setDraftMethod] = useState<UiMethod>("CASH");
+
+  useEffect(() => {
+    if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") {
+      setDraftMethod("CASH");
+    }
+  }, [selectedAccount?.type]);
+
   const [draftCategory, setDraftCategory] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
 
@@ -3242,7 +3261,7 @@ export default function LedgerPageClient() {
       ref: draftRef,
       payee,
       type: draftType,
-      method: draftMethod,
+      method: String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? "CASH" : draftMethod,
       categoryName,
       categoryId,
       note: draftNote,
@@ -3377,27 +3396,31 @@ export default function LedgerPageClient() {
 
       {/* Method */}
       <td className={td}>
-        <Select
-          open={methodOpen}
-          onOpenChange={setMethodOpen}
-          value={draftMethod}
-          onValueChange={(v) => setDraftMethod(v as UiMethod)}
-        >
-          <SelectTrigger className={selectTriggerClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent side="bottom" align="start">
-            <SelectItem value="CASH">Cash</SelectItem>
-            <SelectItem value="CARD">Card</SelectItem>
-            <SelectItem value="ACH">ACH</SelectItem>
-            <SelectItem value="WIRE">Wire</SelectItem>
-            <SelectItem value="CHECK">Check</SelectItem>
-            <SelectItem value="DIRECT_DEPOSIT">DD (Direct Deposit)</SelectItem>
-            <SelectItem value="ZELLE">Zelle</SelectItem>
-            <SelectItem value="TRANSFER">Transfer</SelectItem>
-            <SelectItem value="OTHER">Other</SelectItem>
-          </SelectContent>
-        </Select>
+        {String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? (
+          <div className={inputH7 + " flex items-center px-2 text-slate-700"}>Cash</div>
+        ) : (
+          <Select
+            open={methodOpen}
+            onOpenChange={setMethodOpen}
+            value={draftMethod}
+            onValueChange={(v) => setDraftMethod(v as UiMethod)}
+          >
+            <SelectTrigger className={selectTriggerClass}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent side="bottom" align="start">
+              <SelectItem value="CASH">Cash</SelectItem>
+              <SelectItem value="CARD">Card</SelectItem>
+              <SelectItem value="ACH">ACH</SelectItem>
+              <SelectItem value="WIRE">Wire</SelectItem>
+              <SelectItem value="CHECK">Check</SelectItem>
+              <SelectItem value="DIRECT_DEPOSIT">DD (Direct Deposit)</SelectItem>
+              <SelectItem value="ZELLE">Zelle</SelectItem>
+              <SelectItem value="TRANSFER">Transfer</SelectItem>
+              <SelectItem value="OTHER">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </td>
 
       {/* Category / Note / To Account */}
@@ -3933,7 +3956,7 @@ export default function LedgerPageClient() {
       return (
         <tr key={r.id} className={rowClass}>
           <td className={td + " " + center}>
-            {r.id !== "opening_balance" && !deletedRow ? (
+            {r.id !== "opening_balance" && !r.isOpeningBalanceEntry && !deletedRow ? (
               <input
                 type="checkbox"
                 className={checkboxClass}
@@ -4217,27 +4240,31 @@ export default function LedgerPageClient() {
           {/* Method */}
           <td className={td + " " + trunc + " " + deletedText}>
             {isEditing && editDraft ? (
-              <Select
-                open={editMethodOpen}
-                onOpenChange={setEditMethodOpen}
-                value={editDraft.method}
-                onValueChange={(v) => setEditDraft({ ...editDraft, method: v as UiMethod })}
-              >
-                <SelectTrigger className={selectTriggerClass}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent side="bottom" align="start">
-                  <SelectItem value="CASH">Cash</SelectItem>
-                  <SelectItem value="CARD">Card</SelectItem>
-                  <SelectItem value="ACH">ACH</SelectItem>
-                  <SelectItem value="WIRE">Wire</SelectItem>
-                  <SelectItem value="CHECK">Check</SelectItem>
-                  <SelectItem value="DIRECT_DEPOSIT">DD (Direct Deposit)</SelectItem>
-                  <SelectItem value="ZELLE">Zelle</SelectItem>
-                  <SelectItem value="TRANSFER">Transfer</SelectItem>
-                  <SelectItem value="OTHER">Other</SelectItem>
-                </SelectContent>
-              </Select>
+              String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? (
+                <div className={inputH7 + " flex items-center px-2 text-slate-700"}>Cash</div>
+              ) : (
+                <Select
+                  open={editMethodOpen}
+                  onOpenChange={setEditMethodOpen}
+                  value={editDraft.method}
+                  onValueChange={(v) => setEditDraft({ ...editDraft, method: v as UiMethod })}
+                >
+                  <SelectTrigger className={selectTriggerClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="bottom" align="start">
+                    <SelectItem value="CASH">Cash</SelectItem>
+                    <SelectItem value="CARD">Card</SelectItem>
+                    <SelectItem value="ACH">ACH</SelectItem>
+                    <SelectItem value="WIRE">Wire</SelectItem>
+                    <SelectItem value="CHECK">Check</SelectItem>
+                    <SelectItem value="DIRECT_DEPOSIT">DD (Direct Deposit)</SelectItem>
+                    <SelectItem value="ZELLE">Zelle</SelectItem>
+                    <SelectItem value="TRANSFER">Transfer</SelectItem>
+                    <SelectItem value="OTHER">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              )
             ) : (
               r.methodDisplay
             )}
@@ -4373,7 +4400,10 @@ export default function LedgerPageClient() {
                 ) : null}
 
                 {/* Phase F2+: Ledger top-1 suggestion pill (uncategorized only) */}
-                {!deletedRow && !r.categoryId ? (
+                {!deletedRow &&
+                  !r.isOpeningBalanceEntry &&
+                  !r.categoryId &&
+                  !["OPENING", "TRANSFER", "ADJUSTMENT"].includes(String(r.rawType ?? "").toUpperCase()) ? (
                   (() => {
                     const s = ledgerSugTopByEntryId[r.id] ?? null;
                     if (!s) {
@@ -4537,6 +4567,7 @@ export default function LedgerPageClient() {
           {/* CAT column (tight padding) */}
           <td className={td + " " + center + " px-0.5"}>
             {!deletedRow &&
+              !r.isOpeningBalanceEntry &&
               r.hasMissing &&
               (() => {
                 const t = (r.rawType || "").toString().toUpperCase();
@@ -4606,7 +4637,7 @@ export default function LedgerPageClient() {
                 </>
               ) : (
                 <>
-                  {r.id !== "opening_balance" ? (
+                  {r.id !== "opening_balance" && !r.isOpeningBalanceEntry ? (
                     <>
                       <Button
                         variant="outline"
@@ -4923,9 +4954,9 @@ export default function LedgerPageClient() {
       const totalCents = rows.reduce((sum, row) => sum + toBigIntSafe(row.amount_cents), ZERO);
       const tableRows = rows.length
         ? rows.map((row) => {
-            const amount = toBigIntSafe(row.amount_cents);
-            const amountClass = amount < ZERO ? "amount amount-neg" : "amount";
-            return `
+          const amount = toBigIntSafe(row.amount_cents);
+          const amountClass = amount < ZERO ? "amount amount-neg" : "amount";
+          return `
               <tr>
                 <td>${escapeHtml(row.date || "")}</td>
                 <td>${escapeHtml(row.payee || "—")}</td>
@@ -4935,7 +4966,7 @@ export default function LedgerPageClient() {
                 <td class="${amountClass}">${escapeHtml(formatUsdFromCents(amount))}</td>
               </tr>
             `;
-          }).join("")
+        }).join("")
         : `<tr><td colspan="6" class="empty">No ledger entries found for this range.</td></tr>`;
 
       printWindow.document.open();

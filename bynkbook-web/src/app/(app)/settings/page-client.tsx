@@ -2006,7 +2006,17 @@ export default function SettingsPageClient() {
                   <PillToggle checked={showArchivedAccounts} onCheckedChange={setShowArchivedAccounts} />
                 </div>
 
-                <Button size="sm" onClick={() => setOpen(true)}>Add account</Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setErr(null);
+                    setPlaidDraft(null);
+                    setCreateMode("choose");
+                    setOpen(true);
+                  }}
+                >
+                  Add account
+                </Button>
 
                 <AppDialog
                   open={open}
@@ -2056,13 +2066,19 @@ export default function SettingsPageClient() {
                         <Button
                           className="h-7 px-3 text-xs"
                           onClick={() => {
-                            if (createMode === "manual") onCreateAccount();
-                            else if (createMode === "choose") setErr("Select a creation method.");
-                            else setErr("Continue to Plaid to review details.");
+                            if (createMode === "manual") {
+                              onCreateAccount();
+                              return;
+                            }
+                            if (createMode === "choose") {
+                              setErr("Select a creation method.");
+                              return;
+                            }
                           }}
                           disabled={
                             saving ||
                             !selectedBusinessId ||
+                            createMode === "plaid" ||
                             (createMode === "manual" ? !name.trim() : false)
                           }
                         >
@@ -2341,7 +2357,6 @@ export default function SettingsPageClient() {
                           <SelectItem value="CHECKING">Checking</SelectItem>
                           <SelectItem value="SAVINGS">Savings</SelectItem>
                           <SelectItem value="CREDIT_CARD">Credit card</SelectItem>
-                          <SelectItem value="CASH">Cash</SelectItem>
                           <SelectItem value="OTHER">Other</SelectItem>
                         </SelectContent>
                       </Select>
@@ -2722,6 +2737,9 @@ export default function SettingsPageClient() {
 
                                 // Archived accounts: no Plaid actions, no edit/archive; delete handled separately
                                 if (isArchived) return null;
+
+                                // Cash accounts never connect to Plaid
+                                if (String(a.type ?? "").toUpperCase() === "CASH") return null;
 
                                 // While status is still loading/unknown, don't render connect/switch controls (prevents wrong flashes).
                                 if (!checked || loading) return null;
