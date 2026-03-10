@@ -165,12 +165,13 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
       try {
         const init = await initOne(file);
 
-        // Duplicate upload guard: reuse the existing upload record instead of failing
+        // Duplicate upload guard: reuse visible active upload if present.
+        // If backend points at a hidden/deleted row, surface a clear duplicate error
+        // instead of showing fake "Parsing..." forever.
         if ((init as any).method === "DUPLICATE") {
           const businessId = requireBusinessId();
           const accountId = ctx?.accountId?.trim() || null;
 
-          // Fetch recent uploads for this type and pick the matching id
           const qs = new URLSearchParams();
           qs.set("type", type);
           if (accountId) qs.set("accountId", accountId);
@@ -179,6 +180,29 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
           const listRes: any = await apiFetch(`/v1/businesses/${businessId}/uploads?${qs.toString()}`, { method: "GET" });
           const items = Array.isArray(listRes?.items) ? listRes.items : [];
           const hit = items.find((u: any) => String(u?.id) === String(init.id)) ?? null;
+
+          if (!hit) {
+            setItems((prev) =>
+              prev.map((i) =>
+                i.id === localId
+                  ? {
+                      ...i,
+                      status: "FAILED",
+                      progress: 100,
+                      error: "This file matched an older deleted upload record. Re-upload was blocked by stale duplicate detection.",
+                      completedMeta: {
+                        error_code: "DUPLICATE_UPLOAD_STALE",
+                        error_message: "Matched hidden/deleted upload row",
+                      },
+                      parsedStatus: "FAILED",
+                      parsed: null,
+                    }
+                  : i
+              )
+            );
+            delete xhrs.current[localId];
+            return;
+          }
 
           setItems((prev) =>
             prev.map((i) =>

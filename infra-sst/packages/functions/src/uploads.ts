@@ -210,12 +210,23 @@ export async function handler(event: any) {
           : 25 * 1024 * 1024;
     if (sizeBytes > maxBytes) return json(400, { ok: false, error: `File too large (max ${maxBytes} bytes)` });
 
-    // Duplicate upload guard (best-effort): if a recent COMPLETED upload matches filename+size+type+account+upload_type, block
+    // Duplicate upload guard:
+    // only active, non-deleted completed uploads may block a new upload.
+    // For invoice uploads from a vendor page, also scope duplicate matching to that vendor_id
+    // so unrelated invoices with similar names do not collide.
     const recentWindowMs = 7 * 24 * 60 * 60 * 1000;
     const since = new Date(Date.now() - recentWindowMs);
+
+    const rawMeta =
+      body?.meta && typeof body.meta === "object" && !Array.isArray(body.meta)
+        ? body.meta
+        : {};
+    const initVendorId = rawMeta?.vendor_id ? String(rawMeta.vendor_id).trim() : null;
+
     const existingDup = await prisma.upload.findFirst({
       where: {
         business_id: biz,
+        deleted_at: null,
         upload_type: uploadType,
         status: "COMPLETED",
         content_type: contentType,
@@ -223,19 +234,31 @@ export async function handler(event: any) {
         ...(accountId ? { account_id: accountId } : {}),
         original_filename: { equals: filename, mode: "insensitive" },
         completed_at: { gte: since },
+        ...(initVendorId
+          ? {
+              meta: {
+                path: ["vendor_id"],
+                equals: initVendorId,
+              },
+            }
+          : {}),
 
-        // Only treat as duplicate if parsing succeeded
-        meta: {
-          path: ["parsed_status"],
-          equals: "PARSED",
-        },
+        // Only treat as duplicate if parsing actually succeeded
+        ...(initVendorId
+          ? {}
+          : {
+              meta: {
+                path: ["parsed_status"],
+                equals: "PARSED",
+              },
+            }),
       },
       select: { id: true },
     });
 
     if (existingDup) {
       const dupRow = await prisma.upload.findFirst({
-        where: { id: existingDup.id, business_id: biz },
+        where: { id: existingDup.id, business_id: biz, deleted_at: null },
         select: {
           id: true,
           original_filename: true,
@@ -250,6 +273,18 @@ export async function handler(event: any) {
         code: "DUPLICATE_UPLOAD",
         error_code: "DUPLICATE_UPLOAD",
         upload_id: existingDup.id,
+        duplicate: dupRow
+          ? {
+              id: dupRow.id,
+              original_filename: dupRow.original_filename,
+              created_at: dupRow.created_at,
+              status: dupRow.status,
+              bill_id:
+                dupRow.meta && typeof dupRow.meta === "object" && !Array.isArray(dupRow.meta)
+                  ? (dupRow.meta as any).bill_id ?? null
+                  : null,
+            }
+          : null,
         error: "A matching upload already exists.",
       });
     }
@@ -439,20 +474,49 @@ export async function handler(event: any) {
 
           // Confidence gating (deterministic)
           const hasVendor = !!parsed.vendor_name && (parsed.vendor_conf ?? 0) >= 50;
-          const hasAmount = parsed.amount_cents !== null && (parsed.amount_conf ?? 0) >= 70;
+          const hasAmount =
+            typeof parsed.amount_cents === "number" &&
+            Number.isFinite(parsed.amount_cents) &&
+            parsed.amount_cents !== 0 &&
+            (parsed.amount_conf ?? 0) >= 70;
           const hasDate = !!parsed.doc_date && (parsed.doc_date_conf ?? 0) >= 50;
 
-          parseStatus = hasVendor && hasAmount && hasDate ? "PARSED" : "NEEDS_REVIEW";
+          const review_reasons: string[] = [];
+          if (!hasVendor) review_reasons.push("vendor");
+          if (!hasAmount) review_reasons.push("amount");
+          if (!hasDate) review_reasons.push("invoice_date");
+
+          if (review_reasons.length === 0) {
+            parseStatus = "PARSED";
+          } else {
+            parseStatus = "NEEDS_REVIEW";
+            parsed.review_reasons = review_reasons;
+            parsed.review_message =
+              review_reasons.includes("amount")
+                ? "Invoice amount is missing, zero, or low confidence."
+                : "Invoice needs review before vendor or bill creation.";
+          }
         } catch (e: any) {
-          console.error("textract.analyzeExpense failed", { uploadId: row.id, err: e?.message });
+          const rawErr = String(e?.message || "Parse failed");
+          const unsupported = /unsupported document format/i.test(rawErr);
+
+          const userErr = unsupported
+            ? "This PDF format is not supported by invoice extraction. Try Print to PDF, flatten the PDF, or upload an image."
+            : rawErr;
+
+          console.error("textract.analyzeExpense failed", { uploadId: row.id, err: rawErr });
+
           parseStatus = "FAILED";
-          parsed = { error: e?.message || "Parse failed" };
+          parsed = {
+            error: userErr,
+            raw_error: rawErr,
+          };
         }
       }
 
       // If INVOICE: derive/link vendor deterministically (no user pick required)
       let vendorLinked: any = null;
-      if (row.upload_type === "INVOICE") {
+      if (row.upload_type === "INVOICE" && parseStatus === "PARSED") {
         // Prefer explicit vendor_id passed by the client (vendor detail upload),
         // else fall back to parsed vendor_name/filename stem.
         const explicitVendorId =
@@ -558,6 +622,22 @@ export async function handler(event: any) {
         etag: etag ?? baseMeta.etag,
         parsed_status: parseStatus,
         parsed,
+        ...(parseStatus === "FAILED"
+          ? {
+              error_code: /unsupported document format/i.test(String(parsed?.raw_error || parsed?.error || ""))
+                ? "UNSUPPORTED_DOCUMENT_FORMAT"
+                : "PARSE_FAILED",
+              error_message: String(parsed?.error || "Parse failed"),
+            }
+          : {}),
+        ...(parseStatus === "NEEDS_REVIEW"
+          ? {
+              error_code: "NEEDS_REVIEW",
+              error_message: String(
+                parsed?.review_message || "Invoice needs review before vendor or bill creation."
+              ),
+            }
+          : {}),
         ...(vendorLinked ? { vendor_id: vendorLinked.id, vendor_name: vendorLinked.name } : {}),
         ...(billLinked ? { bill_id: billLinked.id, bill_created_at: new Date().toISOString() } : {}),
       };

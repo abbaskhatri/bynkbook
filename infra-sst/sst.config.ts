@@ -590,6 +590,7 @@ api.route("GET /v1/businesses/{businessId}/vendors", vendorsHandler, { auth: { j
 api.route("POST /v1/businesses/{businessId}/vendors", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PATCH /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("DELETE /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Accounts Payable (Bills) ----------
 const apHandler = {

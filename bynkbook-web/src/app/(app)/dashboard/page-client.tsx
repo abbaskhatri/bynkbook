@@ -85,16 +85,26 @@ function monthAbbr(raw: string) {
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const s = String(raw ?? "").trim();
 
-  // Preferred: YYYY-MM
   if (/^\d{4}-\d{2}$/.test(s)) {
     const m = Number(s.slice(5, 7));
     return `${names[m - 1] ?? s} ${s.slice(2, 4)}`;
   }
 
-  // Do NOT parse arbitrary date strings (it creates "Fri Aug" style labels).
-  // If it's not YYYY-MM, return the raw value.
-
   return s || "—";
+}
+
+function normalizeMonthKey(raw: any) {
+  const s = String(raw ?? "").trim();
+
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);
+
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  return "";
 }
 
 function absBig(n: bigint) {
@@ -1009,21 +1019,30 @@ export default function DashboardPageClient() {
   }, [topExpenseCats]);
 
   const monthlySummary = useMemo(() => {
-    // Prefer pnl monthly for revenue/expenses/net; use cashMonthly for ending cash.
     const pnlMonthly = (pnlQ.data?.monthly ?? []) as any[];
-    const pnlSorted = [...pnlMonthly].map((r) => ({ ...r, month: String(r.month) })).sort((a, b) => (a.month > b.month ? 1 : -1));
+
+    const pnlSorted = [...pnlMonthly]
+      .map((r) => ({
+        ...r,
+        month: normalizeMonthKey(r.month),
+      }))
+      .filter((r) => !!r.month)
+      .sort((a, b) => (a.month > b.month ? 1 : -1));
 
     const cashByYm: Record<string, string> = {};
-    for (const r of cashMonthly) cashByYm[r.ym] = r.endingCashCents;
+    for (const r of cashMonthly) {
+      const ym = normalizeMonthKey(r.ym);
+      if (ym) cashByYm[ym] = String(r.endingCashCents ?? "0");
+    }
 
     const rows = pnlSorted.map((r, idx) => {
-      const ym = String(r.month);
-      const ending = cashByYm[ym] ?? null;
+      const ym = normalizeMonthKey(r.month);
+      const ending = ym ? cashByYm[ym] ?? null : null;
 
       let deltaCash: string | null = null;
       if (ending && idx > 0) {
-        const prevYm = String(pnlSorted[idx - 1].month);
-        const prevEnd = cashByYm[prevYm] ?? null;
+        const prevYm = normalizeMonthKey(pnlSorted[idx - 1].month);
+        const prevEnd = prevYm ? cashByYm[prevYm] ?? null : null;
         if (prevEnd) {
           try {
             deltaCash = String(BigInt(ending) - BigInt(prevEnd));
@@ -1039,13 +1058,84 @@ export default function DashboardPageClient() {
         revenue_cents: String(r.income_cents ?? "0"),
         expenses_cents: String(r.expense_cents ?? "0"),
         net_cents: String(r.net_cents ?? "0"),
-        delta_cash_cents: deltaCash, // null => show —
-        ending_cash_cents: ending, // null => show —
+        delta_cash_cents: deltaCash,
+        ending_cash_cents: ending,
       };
     });
 
     return rows;
   }, [pnlQ.data, cashMonthly]);
+
+  const monthlySummaryLabel = useMemo(() => {
+    const count = monthlySummary.length;
+    if (count <= 1) return "1 month";
+    return `Last ${count} months`;
+  }, [monthlySummary]);
+
+  const aiSummaryFallback = useMemo(() => {
+    const lines: string[] = [];
+
+    lines.push(`This report covers the period from ${range.from} to ${range.to}.`);
+
+    if (revenueCents != null && expensesCents != null && netCents != null) {
+      lines.push(
+        `Revenue is ${fmtUsdAccountingFromCents(String(revenueCents)).text}, expenses are ${fmtUsdAccountingFromCents(String(expensesCents)).text}, and net is ${fmtUsdAccountingFromCents(String(netCents)).text}.`
+      );
+    }
+
+    lines.push(`Ending cash as of ${range.to} is ${fmtUsdAccountingFromCents(String(cashBalanceCents)).text}.`);
+
+    const firstCat = topExpenseCats.rows[0];
+    if (firstCat && topExpenseCats.totalAbs > 0n) {
+      const pct = Math.round((Number(firstCat.absCents) / Number(topExpenseCats.totalAbs)) * 100);
+      lines.push(`Largest expense category is ${firstCat.label} at ${pct}% of tracked expense composition.`);
+    }
+
+    if (monthlySummary.length >= 2) {
+      const last = monthlySummary[monthlySummary.length - 1];
+      const prev = monthlySummary[monthlySummary.length - 2];
+      try {
+        const lastNet = BigInt(String(last.net_cents ?? "0"));
+        const prevNet = BigInt(String(prev.net_cents ?? "0"));
+        const delta = lastNet - prevNet;
+        lines.push(
+          `Net changed by ${fmtUsdAccountingFromCents(String(delta)).text} versus the prior month bucket.`
+        );
+      } catch {
+        // ignore
+      }
+    }
+
+    lines.push("Used fields: Revenue, Expenses, Net, Ending Cash, Largest Expense Category.");
+
+    return lines.join(" ");
+  }, [range.from, range.to, revenueCents, expensesCents, netCents, cashBalanceCents, topExpenseCats, monthlySummary]);
+
+  const aiSummaryText = useMemo(() => {
+    const raw = String(aiNarrativeQ.data?.answer ?? "").trim();
+    const hasRealData =
+      revenueCents != null ||
+      expensesCents != null ||
+      netCents != null ||
+      (accountsSummaryQ.data?.rows?.length ?? 0) > 0 ||
+      (categoriesQ.data?.rows?.length ?? 0) > 0;
+
+    const looksWrong =
+      /does not contain any financial data/i.test(raw) ||
+      /no information available about profit and loss/i.test(raw) ||
+      /no financial insights can be drawn/i.test(raw);
+
+    if (raw && !(hasRealData && looksWrong)) return raw;
+    return aiSummaryFallback;
+  }, [
+    aiNarrativeQ.data,
+    aiSummaryFallback,
+    revenueCents,
+    expensesCents,
+    netCents,
+    accountsSummaryQ.data,
+    categoriesQ.data,
+  ]);
 
   // Deterministic insights (max 3)
   const insights = useMemo(() => {
@@ -1234,9 +1324,27 @@ export default function DashboardPageClient() {
           <PageHeader
             icon={<LayoutDashboard className="h-4 w-4" />}
             title="Dashboard"
+            afterTitle={
+              <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
+                <CapsuleSelect
+                  variant="flat"
+                  value={accountScopeId}
+                  onValueChange={(v) => setAccountScopeId(String(v))}
+                  options={[
+                    { value: "all", label: "All accounts" },
+                    ...((accountsAllQ.data?.rows ?? []) as any[])
+                      .filter((r: any) => r && r.account_id)
+                      .map((r: any) => ({
+                        value: String(r.account_id),
+                        label: String(r.name ?? "Account"),
+                      })),
+                  ]}
+                  placeholder="All accounts"
+                />
+              </div>
+            }
             right={
               <div className="flex items-center gap-2">
-
                 {periodCapsule}
 
                 {periodMode === "CUSTOM" ? (
@@ -1259,35 +1367,12 @@ export default function DashboardPageClient() {
                       />
                     </div>
                   </div>
-
                 ) : null}
               </div>
             }
           />
         </div>
         <div className="mt-2 h-px bg-slate-200" />
-      </div>
-
-      <div className="px-3 pb-2">
-        <div className="flex items-center gap-2">
-          <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
-            <CapsuleSelect
-              variant="flat"
-              value={accountScopeId}
-              onValueChange={(v) => setAccountScopeId(String(v))}
-              options={[
-                { value: "all", label: "All Accounts" },
-                ...((accountsAllQ.data?.rows ?? []) as any[])
-                  .filter((r: any) => r && r.id && !r.archived_at)
-                  .map((r: any) => ({
-                    value: String(r.id),
-                    label: String(r.name ?? "Account"),
-                  })),
-              ]}
-              placeholder="All Accounts"
-            />
-          </div>
-        </div>
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
@@ -1664,7 +1749,7 @@ export default function DashboardPageClient() {
                 <div className="-mt-1 divide-y divide-slate-100">
                   {(accountsSummaryQ.data?.rows ?? []).slice(0, 6).map((r: any, idx: number) => (
                     <div
-                      key={`${String(r.id ?? "")}-${String(r.name ?? "")}-${idx}`}
+                      key={`${String(r.account_id ?? "")}-${String(r.name ?? "")}-${idx}`}
                       className="flex items-center justify-between px-4 py-1.5"
                     >
                       <div className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -1808,7 +1893,7 @@ export default function DashboardPageClient() {
               <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
             </div>
           ) : aiNarrativeQ.data?.ok ? (
-            <div className="text-sm text-slate-700 whitespace-pre-wrap">{String(aiNarrativeQ.data.answer ?? "")}</div>
+            <div className="text-sm text-slate-700 whitespace-pre-wrap">{aiSummaryText}</div>
           ) : (
             <div className="text-sm text-slate-600">{dashboardAiMessage(aiNarrativeQ.error, "AI summary is unavailable right now.")}</div>
           )}
@@ -1924,7 +2009,7 @@ export default function DashboardPageClient() {
                   <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Monthly Summary</CardTitle>
                 </div>
 
-                <div className="text-xs text-slate-500 leading-none">Last 4 months</div>
+                <div className="text-xs text-slate-500 leading-none">{monthlySummaryLabel}</div>
               </div>
             </CHeader>
 

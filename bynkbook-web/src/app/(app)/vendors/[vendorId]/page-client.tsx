@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -20,7 +20,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { getVendor, updateVendor } from "@/lib/api/vendors";
+import { deleteVendor, getVendor, updateVendor } from "@/lib/api/vendors";
 import {
   listBillsByVendor,
   createBill,
@@ -121,6 +121,91 @@ async function apiFetchWithRetry(path: string, init: any, retries: number = 1) {
   }
 }
 
+function parseApiPayloadFromError(e: any) {
+  const raw = String(e?.message ?? "");
+  const m = raw.match(/^API\s+\d{3}:\s*(.*)$/s);
+  if (m?.[1]) {
+    try {
+      return JSON.parse(m[1]);
+    } catch { }
+  }
+  return e?.payload ?? null;
+}
+
+function vendorDeleteMessage(e: any) {
+  const payload = parseApiPayloadFromError(e);
+  if (payload?.code === "VENDOR_DELETE_BLOCKED") {
+    const billCount = Number(payload?.details?.bill_count ?? 0);
+    const entryCount = Number(payload?.details?.entry_count ?? 0);
+    const uploadCount = Number(payload?.details?.upload_count ?? 0);
+
+    const parts: string[] = [];
+    if (billCount > 0) parts.push(`${billCount} bill${billCount === 1 ? "" : "s"}`);
+    if (entryCount > 0) parts.push(`${entryCount} ledger entr${entryCount === 1 ? "y" : "ies"}`);
+    if (uploadCount > 0) parts.push(`${uploadCount} invoice upload${uploadCount === 1 ? "" : "s"}`);
+
+    if (parts.length > 0) {
+      return `This vendor can’t be deleted yet. Remove linked records first: ${parts.join(", ")}.`;
+    }
+    return "This vendor can’t be deleted yet because linked records still exist.";
+  }
+
+  return appErrorMessageOrNull(e) ?? "Failed to delete vendor.";
+}
+
+function getUploadMeta(upload: any) {
+  return upload?.meta && typeof upload.meta === "object" && !Array.isArray(upload.meta) ? upload.meta : {};
+}
+
+function getInvoiceUploadStatus(upload: any) {
+  const meta = getUploadMeta(upload);
+  const parsedStatus = String(meta?.parsed_status ?? "").toUpperCase();
+  const duplicateCode = String(meta?.error_code ?? "").toUpperCase();
+
+  if (meta?.bill_id) return { label: "Bill created", tone: "success" as const };
+  if (duplicateCode === "DUPLICATE_UPLOAD") return { label: "Duplicate upload", tone: "neutral" as const };
+  if (parsedStatus === "PARSED") return { label: "Parsed", tone: "success" as const };
+  if (parsedStatus === "NEEDS_REVIEW") return { label: "Needs review", tone: "warn" as const };
+  if (parsedStatus === "FAILED") return { label: "Failed", tone: "danger" as const };
+  if (String(upload?.status ?? "").toUpperCase() === "COMPLETED") return { label: "Completed", tone: "neutral" as const };
+  return { label: String(upload?.status ?? "Uploaded"), tone: "neutral" as const };
+}
+
+function getInvoiceUploadDetail(upload: any) {
+  const meta = getUploadMeta(upload);
+  const parsed = meta?.parsed && typeof meta.parsed === "object" && !Array.isArray(meta.parsed) ? meta.parsed : {};
+  const parsedStatus = String(meta?.parsed_status ?? "").toUpperCase();
+  const duplicateCode = String(meta?.error_code ?? "").toUpperCase();
+
+  if (meta?.bill_id) return "Bill created automatically from this invoice.";
+  if (duplicateCode === "DUPLICATE_UPLOAD") return "A matching completed upload already exists, so the existing upload was reused.";
+  if (parsedStatus === "FAILED") return String(parsed?.error ?? "Parsing failed. Retry parse or upload a clearer invoice file.");
+
+  if (parsedStatus === "NEEDS_REVIEW") {
+    const missing: string[] = [];
+    if (!parsed?.vendor_name || Number(parsed?.vendor_conf ?? 0) < 50) missing.push("vendor");
+    if (!(typeof parsed?.amount_cents === "number" && Number.isFinite(parsed.amount_cents) && parsed.amount_cents !== 0) || Number(parsed?.amount_conf ?? 0) < 70) {
+      missing.push("amount");
+    }
+    if (!parsed?.doc_date || Number(parsed?.doc_date_conf ?? 0) < 50) missing.push("invoice date");
+
+    if (missing.length > 0) {
+      return `Needs review: confirm ${missing.join(", ")} before a bill can be created.`;
+    }
+    return "Needs review before a bill can be created.";
+  }
+
+  if (parsedStatus === "PARSED") return "Parsed successfully.";
+  return "";
+}
+
+function invoiceStatusClass(tone: "success" | "warn" | "danger" | "neutral") {
+  if (tone === "success") return "inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-primary";
+  if (tone === "warn") return "inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-amber-700";
+  if (tone === "danger") return "inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-red-700";
+  return "inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-slate-700";
+}
+
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
     <div className="absolute inset-0 z-20 flex items-start justify-center rounded-xl bg-white/55 backdrop-blur-[1px]">
@@ -161,6 +246,7 @@ function presetRange(preset: string) {
 
 export default function VendorDetailPageClient() {
   const params = useParams<{ vendorId: string }>();
+  const router = useRouter();
   const sp = useSearchParams();
   const businessesQ = useBusinesses();
 
@@ -301,6 +387,10 @@ export default function VendorDetailPageClient() {
   const [applyAmounts, setApplyAmounts] = useState<Record<string, string>>({});
 
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -651,6 +741,20 @@ export default function VendorDetailPageClient() {
                   title="Create bills from older invoice uploads (idempotent)"
                 >
                   Backfill bills
+                </button>
+
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                  disabled={!canWrite || loading}
+                  title={!canWrite ? "Insufficient permissions" : "Delete vendor"}
+                  onClick={() => {
+                    setDeleteErr(null);
+                    setDeleteConfirm("");
+                    setDeleteOpen(true);
+                  }}
+                >
+                  Delete
                 </button>
 
                 <button
@@ -1127,58 +1231,110 @@ export default function VendorDetailPageClient() {
                     <tr className="h-9">
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">File</th>
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Status</th>
                       <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {invoiceUploads.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>
+                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={4}>
                           No uploads yet.
                         </td>
                       </tr>
                     ) : (
-                      invoiceUploads.map((u: any) => (
-                        <tr key={u.id} className="h-9 border-b border-slate-100 hover:bg-slate-50">
-                          <td className="px-3 text-sm">{u.original_filename}</td>
-                          <td className="px-3 text-sm text-slate-600">{String(u.created_at ?? "").slice(0, 10)}</td>
-                          <td className="px-3 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                type="button"
-                                className="text-xs text-slate-700 hover:underline"
-                                onClick={async () => {
-                                  if (!businessId) return;
-                                  const res: any = await apiFetch(`/v1/businesses/${businessId}/uploads/${u.id}/download`, { method: "GET" });
-                                  const url = res?.download?.url;
-                                  if (url) window.open(url, "_blank", "noopener,noreferrer");
-                                }}
-                              >
-                                View / Download
-                              </button>
+                      invoiceUploads.map((u: any) => {
+                        const meta = getUploadMeta(u);
+                        const parsed = meta?.parsed && typeof meta.parsed === "object" && !Array.isArray(meta.parsed) ? meta.parsed : {};
+                        const status = getInvoiceUploadStatus(u);
+                        const detail = getInvoiceUploadDetail(u);
+                        const canRetryParse =
+                          String(meta?.parsed_status ?? "").toUpperCase() === "FAILED" ||
+                          String(meta?.parsed_status ?? "").toUpperCase() === "NEEDS_REVIEW";
 
-                              <button
-                                type="button"
-                                className="text-xs text-red-700 hover:underline"
-                                onClick={async () => {
-                                  if (!businessId) return;
-                                  try {
-                                    await apiFetch(`/v1/businesses/${businessId}/uploads/${u.id}/delete`, { method: "POST" });
-                                    // instant removal in UI
-                                    setInvoiceUploads((prev) => prev.filter((x: any) => x.id !== u.id));
-                                    window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
-                                  } catch (e: any) {
-                                    setErr(e?.message ?? "Delete failed");
-                                  }
-                                }}
-                                title="Soft delete (blocked if referenced by bill/entry)"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
+                        return (
+                          <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50 align-top">
+                            <td className="px-3 py-2 text-sm">
+                              <div className="font-medium text-slate-900">{u.original_filename}</div>
+                              <div className="mt-0.5 text-[11px] text-slate-500">
+                                {String(meta?.vendor_name ?? parsed?.vendor_name ?? vendor?.name ?? "Vendor")}
+                              </div>
+                            </td>
+
+                            <td className="px-3 py-2 text-sm text-slate-600">
+                              {String(u.created_at ?? "").slice(0, 10)}
+                            </td>
+
+                            <td className="px-3 py-2 text-sm">
+                              <div>
+                                <span className={invoiceStatusClass(status.tone)}>{status.label}</span>
+                              </div>
+                              {detail ? (
+                                <div className="mt-1 max-w-[420px] text-[11px] text-slate-500">{detail}</div>
+                              ) : null}
+                            </td>
+
+                            <td className="px-3 py-2 text-right">
+                              <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="text-xs text-slate-700 hover:underline"
+                                  onClick={async () => {
+                                    if (!businessId) return;
+                                    const res: any = await apiFetch(`/v1/businesses/${businessId}/uploads/${u.id}/download`, { method: "GET" });
+                                    const url = res?.download?.url;
+                                    if (url) window.open(url, "_blank", "noopener,noreferrer");
+                                  }}
+                                >
+                                  View / Download
+                                </button>
+
+                                {canRetryParse ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs text-slate-700 hover:underline"
+                                    onClick={async () => {
+                                      if (!businessId) return;
+                                      try {
+                                        setErr(null);
+                                        await apiFetch(`/v1/businesses/${businessId}/uploads/complete`, {
+                                          method: "POST",
+                                          body: JSON.stringify({ uploadId: u.id }),
+                                        });
+                                        await refresh();
+                                        window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+                                      } catch (e: any) {
+                                        setErr(appErrorMessageOrNull(e) ?? "Retry parse failed.");
+                                      }
+                                    }}
+                                    title="Retry invoice parse and bill creation"
+                                  >
+                                    Retry parse
+                                  </button>
+                                ) : null}
+
+                                <button
+                                  type="button"
+                                  className="text-xs text-red-700 hover:underline"
+                                  onClick={async () => {
+                                    if (!businessId) return;
+                                    try {
+                                      await apiFetch(`/v1/businesses/${businessId}/uploads/${u.id}/delete`, { method: "POST" });
+                                      setInvoiceUploads((prev) => prev.filter((x: any) => x.id !== u.id));
+                                      window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+                                    } catch (e: any) {
+                                      setErr(appErrorMessageOrNull(e) ?? "Delete failed.");
+                                    }
+                                  }}
+                                  title="Soft delete (blocked if referenced by bill or entry)"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -2166,6 +2322,78 @@ export default function VendorDetailPageClient() {
             <div className="text-xs text-slate-500">
               CSV includes bills and applied totals for the selected range.
             </div>
+          </div>
+        </AppDialog>
+
+        <AppDialog
+          open={deleteOpen}
+          onClose={() => {
+            if (deleteBusy) return;
+            setDeleteOpen(false);
+            setDeleteErr(null);
+            setDeleteConfirm("");
+          }}
+          title="Delete vendor"
+          size="sm"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                className="h-7 px-3 text-xs"
+                disabled={deleteBusy}
+                onClick={() => {
+                  setDeleteOpen(false);
+                  setDeleteErr(null);
+                  setDeleteConfirm("");
+                }}
+              >
+                Cancel
+              </Button>
+
+              <Button
+                className="h-7 px-3 text-xs bg-rose-600 hover:bg-rose-700"
+                disabled={deleteBusy || deleteConfirm.trim().toUpperCase() !== "DELETE" || !businessId || !vendorId}
+                onClick={async () => {
+                  if (!businessId || !vendorId) return;
+                  setDeleteBusy(true);
+                  setDeleteErr(null);
+
+                  try {
+                    await deleteVendor({ businessId, vendorId });
+                    window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+                    setDeleteOpen(false);
+                    setDeleteConfirm("");
+                    router.push(`/vendors?businessId=${encodeURIComponent(businessId)}`);
+                  } catch (e: any) {
+                    setDeleteErr(vendorDeleteMessage(e));
+                  } finally {
+                    setDeleteBusy(false);
+                  }
+                }}
+              >
+                {deleteBusy ? "Deleting…" : "Delete vendor"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <div className="font-medium text-slate-900">{vendor?.name || "This vendor"}</div>
+            <div className="text-xs text-slate-600">
+              Delete only works when this vendor has no linked bills, ledger entries, or invoice uploads.
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[11px] text-slate-600">Type DELETE to continue</div>
+              <Input
+                className="h-8 text-xs"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder="DELETE"
+                autoFocus
+              />
+            </div>
+
+            {deleteErr ? <div className="text-xs text-red-600">{deleteErr}</div> : null}
           </div>
         </AppDialog>
 

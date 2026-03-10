@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AppSidePanel } from "@/components/primitives/AppSidePanel";
+import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { UploadCloud, X, CheckCircle2, AlertTriangle, Trash2, Download } from "lucide-react";
 import { useUploadController } from "./useUploadController";
@@ -54,6 +54,32 @@ function toIsoDate(v: string): string {
     return `${yyyy}-${mm}-${dd}`;
   }
 
+  return "";
+}
+
+function uploadReason(it: any) {
+  const meta = it?.completedMeta && typeof it.completedMeta === "object" ? it.completedMeta : {};
+  const parsed = it?.parsed && typeof it.parsed === "object" ? it.parsed : {};
+  const errorCode = String(meta?.error_code || "");
+  const errorMessage = String(meta?.error_message || parsed?.error || it?.error || "").trim();
+  const reviewReasons = Array.isArray(parsed?.review_reasons) ? parsed.review_reasons : [];
+
+  if (errorCode === "UNSUPPORTED_DOCUMENT_FORMAT") {
+    return "Unsupported PDF format for invoice extraction. Try Print to PDF, flatten the PDF, or upload an image.";
+  }
+
+  if (errorCode === "NEEDS_REVIEW") {
+    const labels: string[] = [];
+    if (reviewReasons.includes("vendor")) labels.push("vendor");
+    if (reviewReasons.includes("amount")) labels.push("amount");
+    if (reviewReasons.includes("invoice_date")) labels.push("invoice date");
+
+    if (labels.length > 0) {
+      return `Needs review: confirm ${labels.join(", ")} before a vendor or bill can be created.`;
+    }
+  }
+
+  if (errorMessage) return errorMessage;
   return "";
 }
 
@@ -328,12 +354,11 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
   }
 
   return (
-    <AppSidePanel
+    <AppDialog
       open={open}
       onClose={onClose}
       title={title}
-      size="lg"
-      disableOverlayClose={overlayCloseDisabled}
+      size="xl"
       footer={
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs text-slate-600">
@@ -678,57 +703,65 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                               ) : null}
                             </td>
                             <td className="px-3 py-2">
-                              <span
-                                className={
-                                  status === "PARSING"
-                                    ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
-                                    : status === "PARSED"
-                                      ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
-                                      : status === "NEEDS_REVIEW"
-                                        ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
-                                        : status === "FAILED"
-                                          ? (
-                                              ((it.completedMeta as any)?.error_code ??
-                                                (it.completedMeta as any)?.meta?.error_code ??
-                                                "") === "DUPLICATE_UPLOAD"
-                                                ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
-                                                : "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
-                                            )
-                                          : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
-                                }
-                              >
-                                {statusLabel}
-                                {(() => {
-                                  const autoBillId =
-                                    (it.completedMeta as any)?.bill_id ??
-                                    (it.completedMeta as any)?.meta?.bill_id ??
-                                    null;
-
-                                  if (autoBillId) {
-                                    return <span className="ml-2 text-[11px] text-primary">Bill created</span>;
+                              <div>
+                                <span
+                                  className={
+                                    status === "PARSING"
+                                      ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                      : status === "PARSED"
+                                        ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
+                                        : status === "NEEDS_REVIEW"
+                                          ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
+                                          : status === "FAILED"
+                                            ? (
+                                                ((it.completedMeta as any)?.error_code ??
+                                                  (it.completedMeta as any)?.meta?.error_code ??
+                                                  "") === "DUPLICATE_UPLOAD"
+                                                  ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                                  : "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
+                                              )
+                                            : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
                                   }
+                                >
+                                  {statusLabel}
+                                  {(() => {
+                                    const autoBillId =
+                                      (it.completedMeta as any)?.bill_id ??
+                                      (it.completedMeta as any)?.meta?.bill_id ??
+                                      null;
 
-                                  if (duplicateCode === "DUPLICATE_UPLOAD") {
-                                    return (
-                                      <span className="ml-2 text-[11px] text-slate-600">
-                                        Existing upload reused
-                                      </span>
-                                    );
-                                  }
+                                    if (autoBillId) {
+                                      return <span className="ml-2 text-[11px] text-primary">Bill created</span>;
+                                    }
 
-                                  if (!it.uploadId) return null;
+                                    if (duplicateCode === "DUPLICATE_UPLOAD") {
+                                      return (
+                                        <span className="ml-2 text-[11px] text-slate-600">
+                                          Existing upload reused
+                                        </span>
+                                      );
+                                    }
 
-                                  return entryCreateStatus[it.uploadId]?.state === "creating" ? (
-                                    <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
-                                  ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
-                                    <span className="ml-2 text-[11px] text-primary">Created</span>
-                                  ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
-                                    <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
-                                  ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
-                                    <span className="ml-2 text-[11px] text-red-700">Failed</span>
-                                  ) : null;
-                                })()}
-                              </span>
+                                    if (!it.uploadId) return null;
+
+                                    return entryCreateStatus[it.uploadId]?.state === "creating" ? (
+                                      <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
+                                    ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
+                                      <span className="ml-2 text-[11px] text-primary">Created</span>
+                                    ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
+                                      <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
+                                    ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
+                                      <span className="ml-2 text-[11px] text-red-700">Failed</span>
+                                    ) : null;
+                                  })()}
+                                </span>
+
+                                {uploadReason(it) ? (
+                                  <div className="mt-1 max-w-[360px] text-[11px] leading-4 text-slate-500">
+                                    {uploadReason(it)}
+                                  </div>
+                                ) : null}
+                              </div>
                             </td>
                           </>
                         ) : type === "RECEIPT" ? (
@@ -1001,6 +1034,6 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
           </div>
         ) : null}
       </div>
-    </AppSidePanel>
+    </AppDialog>
   );
 }

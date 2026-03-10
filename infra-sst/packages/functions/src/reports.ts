@@ -323,6 +323,18 @@ export async function handler(event: any) {
     return `${y}-${m}`;
   }
 
+  function normalizeMonthValue(input: any) {
+    const s = String(input ?? "").trim();
+
+    if (/^\d{4}-\d{2}$/.test(s)) return s;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);
+
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return monthKey(d);
+
+    return "";
+  }
+
   function ymdToDate(ymd: string) {
     return new Date(`${ymd}T00:00:00Z`);
   }
@@ -464,22 +476,89 @@ export async function handler(event: any) {
         `;
       }
 
-      monthly = rows.map((r: any) => ({
-        month: String(r.month).slice(0, 7), // YYYY-MM
-        income_cents: (r.income_cents ?? 0n).toString(),
-        expense_cents: (r.expense_cents ?? 0n).toString(),
-        net_cents: (r.net_cents ?? 0n).toString(),
-      }));
+      monthly = rows
+        .map((r: any) => ({
+          month: normalizeMonthValue(r.month),
+          income_cents: (r.income_cents ?? 0n).toString(),
+          expense_cents: (r.expense_cents ?? 0n).toString(),
+          net_cents: (r.net_cents ?? 0n).toString(),
+        }))
+        .filter((r: any) => !!r.month)
+        .sort((a: any, b: any) => (a.month > b.month ? 1 : -1));
     } else {
-      // When YTD is off: return a single-month row for consistency
-      monthly = [
-        {
-          month: monthKey(fromDate),
-          income_cents: periodIncome.toString(),
-          expense_cents: periodExpense.toString(),
-          net_cents: (periodIncome + periodExpense).toString(),
-        },
-      ];
+      // When YTD is off:
+      // - if the selected period spans multiple months, return grouped monthly buckets
+      // - if it is a single month, keep the existing single-row behavior
+      const fromMonth = monthKey(fromDate);
+      const toMonth = monthKey(toUtcStart(toYmd));
+
+      if (fromMonth !== toMonth) {
+        let rows: Array<{ month: Date; income_cents: bigint; expense_cents: bigint; net_cents: bigint }> = [];
+
+        if (accountId === "all") {
+          rows = await prisma.$queryRaw`
+            SELECT
+              date_trunc('month', e.date)::date AS month,
+              COALESCE(SUM(CASE WHEN e.type='INCOME' THEN e.amount_cents ELSE 0 END), 0)::bigint AS income_cents,
+              COALESCE(SUM(CASE WHEN e.type='EXPENSE' THEN e.amount_cents ELSE 0 END), 0)::bigint AS expense_cents,
+              COALESCE(SUM(e.amount_cents), 0)::bigint AS net_cents
+            FROM entry e
+            WHERE e.business_id = ${biz}::uuid
+              AND e.deleted_at IS NULL
+              AND e.type IN ('INCOME','EXPENSE')
+              AND e.date >= ${fromDate}::date
+              AND e.date < ${toDateExclusive}::date
+              AND NOT (
+                lower(coalesce(e.payee, '')) = 'opening balance'
+                OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+                OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+              )
+            GROUP BY 1
+            ORDER BY 1 ASC
+          `;
+        } else {
+          rows = await prisma.$queryRaw`
+            SELECT
+              date_trunc('month', e.date)::date AS month,
+              COALESCE(SUM(CASE WHEN e.type='INCOME' THEN e.amount_cents ELSE 0 END), 0)::bigint AS income_cents,
+              COALESCE(SUM(CASE WHEN e.type='EXPENSE' THEN e.amount_cents ELSE 0 END), 0)::bigint AS expense_cents,
+              COALESCE(SUM(e.amount_cents), 0)::bigint AS net_cents
+            FROM entry e
+            WHERE e.business_id = ${biz}::uuid
+              AND e.deleted_at IS NULL
+              AND e.type IN ('INCOME','EXPENSE')
+              AND e.date >= ${fromDate}::date
+              AND e.date < ${toDateExclusive}::date
+              AND e.account_id = ${accountId}::uuid
+              AND NOT (
+                lower(coalesce(e.payee, '')) = 'opening balance'
+                OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+                OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+              )
+            GROUP BY 1
+            ORDER BY 1 ASC
+          `;
+        }
+
+        monthly = rows
+          .map((r: any) => ({
+            month: normalizeMonthValue(r.month),
+            income_cents: (r.income_cents ?? 0n).toString(),
+            expense_cents: (r.expense_cents ?? 0n).toString(),
+            net_cents: (r.net_cents ?? 0n).toString(),
+          }))
+          .filter((r: any) => !!r.month)
+          .sort((a: any, b: any) => (a.month > b.month ? 1 : -1));
+      } else {
+        monthly = [
+          {
+            month: monthKey(fromDate),
+            income_cents: periodIncome.toString(),
+            expense_cents: periodExpense.toString(),
+            net_cents: (periodIncome + periodExpense).toString(),
+          },
+        ];
+      }
     }
 
     return json(200, {
@@ -614,12 +693,15 @@ export async function handler(event: any) {
         cash_out_cents: cashOut.toString(),
         net_cents: net.toString(),
       },
-      monthly: rows.map((r: any) => ({
-        month: String(r.month).slice(0, 7),
-        cash_in_cents: (r.cash_in_cents ?? 0n).toString(),
-        cash_out_cents: (r.cash_out_cents ?? 0n).toString(),
-        net_cents: (r.net_cents ?? 0n).toString(),
-      })),
+      monthly: rows
+        .map((r: any) => ({
+          month: normalizeMonthValue(r.month),
+          cash_in_cents: (r.cash_in_cents ?? 0n).toString(),
+          cash_out_cents: (r.cash_out_cents ?? 0n).toString(),
+          net_cents: (r.net_cents ?? 0n).toString(),
+        }))
+        .filter((r: any) => !!r.month)
+        .sort((a: any, b: any) => (a.month > b.month ? 1 : -1)),
     });
   }
 
@@ -641,6 +723,7 @@ export async function handler(event: any) {
         name: true,
         type: true,
         opening_balance_cents: true,
+        opening_balance_date: true,
       },
       orderBy: [{ name: "asc" }],
     });
@@ -663,26 +746,36 @@ export async function handler(event: any) {
       FROM entry e
       WHERE e.business_id = ${biz}::uuid
         AND e.deleted_at IS NULL
-        AND e.type IN ('INCOME','EXPENSE')
         AND e.date <= ${asOfDate}::date
         AND e.account_id = ANY(${ids}::uuid[])
         AND NOT (
-          lower(coalesce(e.payee, '')) = 'opening balance'
+          UPPER(coalesce(e.type, '')) = 'OPENING'
+          OR lower(coalesce(e.payee, '')) = 'opening balance'
           OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
           OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
         )
       GROUP BY e.account_id
     `;
 
-    const sumByAccount = new Map<string, bigint>(sums.map((r: any) => [String(r.account_id), (r.sum_cents ?? 0n) as bigint]));
+    const sumByAccount = new Map<string, bigint>(
+      sums.map((r: any) => [String(r.account_id), (r.sum_cents ?? 0n) as bigint])
+    );
 
     const rows = accounts.map((a: any) => {
-      const mov = sumByAccount.get(String(a.id)) ?? 0n;
+      const movement = sumByAccount.get(String(a.id)) ?? 0n;
+      const openingDate = a.opening_balance_date ? new Date(a.opening_balance_date) : null;
+      const opening =
+        openingDate && openingDate.getTime() <= asOfDate.getTime()
+          ? ((a.opening_balance_cents ?? 0n) as bigint)
+          : 0n;
+
+      const balance = opening + movement;
+
       return {
         account_id: String(a.id),
         name: String(a.name),
         type: String(a.type),
-        balance_cents: mov.toString(),
+        balance_cents: balance.toString(),
       };
     });
 

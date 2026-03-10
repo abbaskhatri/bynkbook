@@ -49,3 +49,12 @@ export async function updateVendor(args: {
     body: JSON.stringify({ name: args.name, notes: args.notes }),
   });
 }
+
+export async function deleteVendor(args: {
+  businessId: string;
+  vendorId: string;
+}): Promise<{ ok: true; deleted: true; vendor_id: string }> {
+  return apiFetch(`/v1/businesses/${args.businessId}/vendors/${args.vendorId}`, {
+    method: "DELETE",
+  });
+}

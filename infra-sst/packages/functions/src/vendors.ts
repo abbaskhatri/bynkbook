@@ -160,5 +160,53 @@ export async function handler(event: any) {
     return json(200, { ok: true, vendor });
   }
 
+  // DELETE
+  if (method === "DELETE" && vendorId && path === `/v1/businesses/${biz}/vendors/${vendorId}`) {
+    if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const vid = String(vendorId).trim();
+
+    const existing = await prisma.vendor.findFirst({
+      where: { id: vid, business_id: biz },
+      select: { id: true, name: true },
+    });
+    if (!existing) return json(404, { ok: false, error: "Vendor not found" });
+
+    const [billCount, entryCount, uploadCount] = await Promise.all([
+      prisma.bill.count({
+        where: { business_id: biz, vendor_id: vid },
+      }),
+      prisma.entry.count({
+        where: { business_id: biz, vendor_id: vid, deleted_at: null },
+      }),
+      prisma.upload.count({
+        where: {
+          business_id: biz,
+          deleted_at: null,
+          meta: { path: ["vendor_id"], equals: vid },
+        },
+      }),
+    ]);
+
+    if (billCount > 0 || entryCount > 0 || uploadCount > 0) {
+      return json(409, {
+        ok: false,
+        code: "VENDOR_DELETE_BLOCKED",
+        error: "Vendor cannot be deleted while linked records still exist.",
+        details: {
+          bill_count: billCount,
+          entry_count: entryCount,
+          upload_count: uploadCount,
+        },
+      });
+    }
+
+    await prisma.vendor.deleteMany({
+      where: { id: vid, business_id: biz },
+    });
+
+    return json(200, { ok: true, deleted: true, vendor_id: vid });
+  }
+
   return json(404, { ok: false, error: "Not found" });
 }
