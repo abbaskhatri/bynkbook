@@ -206,6 +206,14 @@ function invoiceStatusClass(tone: "success" | "warn" | "danger" | "neutral") {
   return "inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-slate-700";
 }
 
+function uploadParsedAmountString(upload: any) {
+  const meta = getUploadMeta(upload);
+  const parsed = meta?.parsed && typeof meta.parsed === "object" && !Array.isArray(meta.parsed) ? meta.parsed : {};
+  const cents = Number(parsed?.amount_cents ?? NaN);
+  if (!Number.isFinite(cents) || cents <= 0) return "";
+  return (cents / 100).toFixed(2);
+}
+
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
     <div className="absolute inset-0 z-20 flex items-start justify-center rounded-xl bg-white/55 backdrop-blur-[1px]">
@@ -358,6 +366,7 @@ export default function VendorDetailPageClient() {
 
   const [billDialogOpen, setBillDialogOpen] = useState(false);
   const [billEditId, setBillEditId] = useState<string | null>(null);
+  const [billSourceUpload, setBillSourceUpload] = useState<any | null>(null);
   const [billInvoiceDate, setBillInvoiceDate] = useState(todayYmd());
   const [billDueDate, setBillDueDate] = useState(todayYmd());
   const [billAmount, setBillAmount] = useState("");
@@ -544,16 +553,35 @@ export default function VendorDetailPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId, vendorId]);
 
-  // Prefill bill dialog when editing
+  // Prefill bill dialog when editing or when opened from an invoice upload
   useEffect(() => {
     if (!billDialogOpen) return;
 
     if (!billEditId) {
-      // New bill defaults
-      setBillInvoiceDate(todayYmd());
-      setBillDueDate(todayYmd());
-      setBillAmount("");
-      setBillMemo("");
+      const up = billSourceUpload;
+      const meta = up ? getUploadMeta(up) : {};
+      const parsed = meta?.parsed && typeof meta.parsed === "object" && !Array.isArray(meta.parsed) ? meta.parsed : {};
+
+      const invoiceDate =
+        String(parsed?.doc_date ?? "").trim() ||
+        String(up?.created_at ?? "").slice(0, 10) ||
+        todayYmd();
+
+      const dueDate =
+        String(parsed?.due_date ?? "").trim() ||
+        invoiceDate ||
+        todayYmd();
+
+      const amountStr = up ? uploadParsedAmountString(up) : "";
+      const docNumber = String(parsed?.doc_number ?? "").trim();
+      const fallbackMemo = docNumber
+        ? `Invoice ${docNumber}`
+        : String(up?.original_filename ?? "").trim();
+
+      setBillInvoiceDate(invoiceDate);
+      setBillDueDate(dueDate);
+      setBillAmount(amountStr);
+      setBillMemo(fallbackMemo);
       setBillTerms("");
       return;
     }
@@ -566,7 +594,7 @@ export default function VendorDetailPageClient() {
     setBillAmount((Number(String(b.amount_cents ?? 0)) / 100).toFixed(2));
     setBillMemo(String(b.memo ?? ""));
     setBillTerms(String(b.terms ?? ""));
-  }, [billDialogOpen, billEditId, bills]);
+  }, [billDialogOpen, billEditId, billSourceUpload, bills]);
 
   // Ledger deep-link: open apply dialog and preselect account + entry
   useEffect(() => {
@@ -884,6 +912,7 @@ export default function VendorDetailPageClient() {
                 onClick={() => {
                   // deterministic reset (guardrail)
                   setBillEditId(null);
+                  setBillSourceUpload(null);
                   setBillInvoiceDate(todayYmd());
                   setBillDueDate(todayYmd());
                   setBillAmount("");
@@ -1313,6 +1342,23 @@ export default function VendorDetailPageClient() {
                                   </button>
                                 ) : null}
 
+                                {!meta?.bill_id ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs text-slate-700 hover:underline"
+                                    onClick={() => {
+                                      setErr(null);
+                                      setErrIsClosed(false);
+                                      setBillEditId(null);
+                                      setBillSourceUpload(u);
+                                      setBillDialogOpen(true);
+                                    }}
+                                    title="Create bill from this uploaded invoice"
+                                  >
+                                    Create bill
+                                  </button>
+                                ) : null}
+
                                 <button
                                   type="button"
                                   className="text-xs text-red-700 hover:underline"
@@ -1354,15 +1400,23 @@ export default function VendorDetailPageClient() {
 
         <AppDialog
           open={billDialogOpen}
-          onClose={() => { setBillDialogOpen(false); setBillEditId(null); }}
-          title={billEditId ? "Edit bill" : "New bill"}
+          onClose={() => {
+            setBillDialogOpen(false);
+            setBillEditId(null);
+            setBillSourceUpload(null);
+          }}
+          title={billEditId ? "Edit bill" : billSourceUpload ? "Create bill from upload" : "New bill"}
           size="sm"
           footer={
             <div className="flex items-center justify-end gap-2">
               <Button
                 variant="outline"
                 className="h-7 px-3 text-xs"
-                onClick={() => { setBillDialogOpen(false); setBillEditId(null); }}
+                onClick={() => {
+                  setBillDialogOpen(false);
+                  setBillEditId(null);
+                  setBillSourceUpload(null);
+                }}
                 disabled={loading}
               >
                 Cancel
@@ -1445,6 +1499,7 @@ export default function VendorDetailPageClient() {
                         amount_cents,
                         memo: billMemo,
                         terms: billTerms,
+                        upload_id: billSourceUpload?.id ? String(billSourceUpload.id) : undefined,
                       });
 
                       const created = res?.bill ?? null;
@@ -1456,8 +1511,12 @@ export default function VendorDetailPageClient() {
                     const sumRes: any = await getVendorApSummary({ businessId, vendorId, asOf: todayYmd() });
                     setApSummary(sumRes?.summary ?? null);
 
+                    await refresh();
+                    window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+
                     setBillDialogOpen(false);
                     setBillEditId(null);
+                    setBillSourceUpload(null);
                   } catch (e: any) {
                     // rollback only the edited row
                     if (editingId && prevBill) {

@@ -10,11 +10,10 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
-import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry, aiMerchantNormalize, getCategorySuggestions } from "@/lib/api/ai";
+import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry, aiMerchantNormalize } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
-import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -387,40 +386,12 @@ export default function CategoryReviewPageClient() {
       if (!selectedBusinessId || !selectedAccountId) return {} as Record<string, any[]>;
       if (!suggestionTargets.length) return {} as Record<string, any[]>;
 
-      let res: any = null;
-
-      // Prefer LLM endpoint (Bundle E). Fallback to heuristic endpoint if unavailable.
-      try {
-        res = await aiSuggestCategory({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          items: suggestionTargets,
-          limitPerItem: 3,
-        });
-      } catch {
-        res = null;
-      }
-
-      const aiLooksEmpty = (() => {
-        if (!res?.ok) return true;
-        const byId = res?.suggestionsById;
-        if (!byId || typeof byId !== "object") return true;
-
-        for (const it of suggestionTargets) {
-          const arr = byId?.[it.id];
-          if (Array.isArray(arr) && arr.length > 0) return false;
-        }
-        return true;
-      })();
-
-      if (aiLooksEmpty) {
-        res = await getCategorySuggestions({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          items: suggestionTargets,
-          limitPerItem: 3,
-        });
-      }
+      const res: any = await aiSuggestCategory({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        items: suggestionTargets,
+        limitPerItem: 3,
+      });
 
       const next: Record<string, any[]> = {};
 
@@ -497,11 +468,20 @@ export default function CategoryReviewPageClient() {
     setSelectedIds(new Set());
     setBulkCategoryId("__NONE__");
     setFailedById({});
+    setSelectedSuggestionByEntryId({});
   }
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setBulkCategoryId("__NONE__");
+    setFailedById({});
+    setSelectedSuggestionByEntryId({});
+    setApplyOpen(false);
+    setExpandedAutoFixGroups({});
+  }, [selectedBusinessId, selectedAccountId]);
 
   // Bulk apply state + confirm
   const [bulkCategoryId, setBulkCategoryId] = useState<string>("__NONE__");
-  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Per-row status
   const [pendingIds, setPendingIds] = useState<Record<string, boolean>>({});
@@ -718,7 +698,7 @@ export default function CategoryReviewPageClient() {
     }
   }
 
-  async function applySelectedConfirmed() {
+  async function runApplySelectedConfirmed() {
     if (bulkCategoryId === "__NONE__") return;
 
     clearMutErr();
@@ -738,9 +718,7 @@ export default function CategoryReviewPageClient() {
       });
     }
 
-    setConfirmOpen(false);
-
-    const remaining = ids.filter((id) => !successes.has(id)); // failures stay selected
+    const remaining = ids.filter((id) => !successes.has(id));
     if (remaining.length === 0) {
       clearMutErr();
       clearSelection();
@@ -753,14 +731,139 @@ export default function CategoryReviewPageClient() {
   // Auth handled by AppShell
   const selectedApplyItems = useMemo(() => {
     const out: Array<{ entryId: string; category_id: string }> = [];
-    for (const [entryId, category_id] of Object.entries(selectedSuggestionByEntryId)) {
+
+    for (const entryId of Array.from(selectedIds)) {
+      const category_id = String(selectedSuggestionByEntryId[entryId] ?? "").trim();
       if (!category_id) continue;
       out.push({ entryId, category_id });
     }
+
     return out.slice(0, 200);
-  }, [selectedSuggestionByEntryId]);
+  }, [selectedIds, selectedSuggestionByEntryId]);
+
+  const autoFixRows = useMemo(() => {
+    return visibleRows
+      .filter((e: any) => selectedIds.has(String(e.id)))
+      .map((e: any) => {
+        const id = String(e.id);
+        const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+        const top = suggestions[0] ?? null;
+        const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+
+        return {
+          entry: e,
+          suggestions,
+          topCategoryId,
+          selectedCategoryId: String(selectedSuggestionByEntryId[id] ?? topCategoryId ?? "").trim(),
+        };
+      });
+  }, [visibleRows, selectedIds, sugByEntryId, selectedSuggestionByEntryId]);
+
+  const [expandedAutoFixGroups, setExpandedAutoFixGroups] = useState<Record<string, boolean>>({});
+
+  const autoFixTotalAmountCents = useMemo(() => {
+    return autoFixRows.reduce((sum, row) => sum + Number(row.entry?.amount_cents ?? 0), 0);
+  }, [autoFixRows]);
+
+  const autoFixGroups = useMemo(() => {
+    const categoryNameById = new Map<string, string>(
+      categories.map((c) => [String(c.id), String(c.name)])
+    );
+
+    const groupsMap = new Map<
+      string,
+      {
+        groupKey: string;
+        categoryId: string;
+        categoryName: string;
+        count: number;
+        totalAmountCents: number;
+        rows: typeof autoFixRows;
+      }
+    >();
+
+    for (const row of autoFixRows) {
+      const categoryId = String(row.selectedCategoryId ?? "").trim();
+      const groupKey = categoryId || "__UNASSIGNED__";
+      const categoryName = categoryId
+        ? categoryNameById.get(categoryId) ?? "Unknown category"
+        : "Unassigned";
+
+      const existing = groupsMap.get(groupKey);
+      if (existing) {
+        existing.count += 1;
+        existing.totalAmountCents += Number(row.entry?.amount_cents ?? 0);
+        existing.rows.push(row);
+      } else {
+        groupsMap.set(groupKey, {
+          groupKey,
+          categoryId,
+          categoryName,
+          count: 1,
+          totalAmountCents: Number(row.entry?.amount_cents ?? 0),
+          rows: [row],
+        });
+      }
+    }
+
+    return Array.from(groupsMap.values()).sort((a, b) => {
+      const aAbs = Math.abs(a.totalAmountCents);
+      const bAbs = Math.abs(b.totalAmountCents);
+      if (bAbs !== aAbs) return bAbs - aAbs;
+      return a.categoryName.localeCompare(b.categoryName);
+    });
+  }, [autoFixRows, categories]);
+
+  function toggleAutoFixGroup(groupKey: string) {
+    setExpandedAutoFixGroups((prev) => ({
+      ...prev,
+      [groupKey]: !prev[groupKey],
+    }));
+  }
+
+  function openAutoFixCategories() {
+    const next: Record<string, string> = { ...selectedSuggestionByEntryId };
+
+    for (const e of visibleRows) {
+      const id = String(e.id);
+      if (!selectedIds.has(id)) continue;
+      if (next[id]) continue;
+
+      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      const top = suggestions[0] ?? null;
+      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+
+      if (topCategoryId) next[id] = topCategoryId;
+    }
+
+    const categoryNameById = new Map<string, string>(
+      categories.map((c) => [String(c.id), String(c.name)])
+    );
+
+    const groupCounts = new Map<string, number>();
+    for (const e of visibleRows) {
+      const id = String(e.id);
+      if (!selectedIds.has(id)) continue;
+      const groupKey = String(next[id] ?? "").trim() || "__UNASSIGNED__";
+      groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
+    }
+
+    const firstGroups = Array.from(groupCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([groupKey]) => groupKey);
+
+    const nextExpanded: Record<string, boolean> = {};
+    for (const groupKey of firstGroups) nextExpanded[groupKey] = true;
+
+    setExpandedAutoFixGroups(nextExpanded);
+    setSelectedSuggestionByEntryId(next);
+    setApplySummary(null);
+    clearMutErr();
+    setApplyOpen(true);
+  }
   return (
-    <div className="flex h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
+    <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
@@ -884,9 +987,9 @@ export default function CategoryReviewPageClient() {
       </div>
 
       {/* Table card */}
-      <Card className="flex min-h-0 flex-1 flex-col">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <CHeader className="shrink-0 pb-2">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-3">
             <CardTitle className="inline-flex items-center gap-2">
               Uncategorized
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
@@ -894,10 +997,102 @@ export default function CategoryReviewPageClient() {
               </span>
               {sugUpdating ? <span className="text-[11px] text-slate-500">Updating…</span> : null}
             </CardTitle>
+
+            <div className="flex items-center gap-2">
+              <Button
+                className="h-7 px-3 text-xs"
+                disabled={applyBusy || visibleRows.length === 0}
+                onClick={() => {
+                  if (selectedCount === 0) {
+                    const allVisibleIds = new Set(visibleRows.map((e: any) => String(e.id)));
+                    setSelectedIds(allVisibleIds);
+
+                    const next: Record<string, string> = { ...selectedSuggestionByEntryId };
+
+                    for (const e of visibleRows) {
+                      const id = String(e.id);
+                      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+                      const top = suggestions[0] ?? null;
+                      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+                      if (!next[id] && topCategoryId) next[id] = topCategoryId;
+                    }
+
+                    const groupCounts = new Map<string, number>();
+                    for (const e of visibleRows) {
+                      const id = String(e.id);
+                      const groupKey = String(next[id] ?? "").trim() || "__UNASSIGNED__";
+                      groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
+                    }
+
+                    const firstGroups = Array.from(groupCounts.entries())
+                      .sort((a, b) => b[1] - a[1])
+                      .slice(0, 3)
+                      .map(([groupKey]) => groupKey);
+
+                    const nextExpanded: Record<string, boolean> = {};
+                    for (const groupKey of firstGroups) nextExpanded[groupKey] = true;
+
+                    setExpandedAutoFixGroups(nextExpanded);
+                    setSelectedSuggestionByEntryId(next);
+                    setApplySummary(null);
+                    clearMutErr();
+                    setApplyOpen(true);
+                    return;
+                  }
+
+                  openAutoFixCategories();
+                }}
+              >
+                Auto Fix Categories
+              </Button>
+
+              {selectedCount > 0 ? (
+                <>
+                  <select
+                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs"
+                    value={bulkCategoryId}
+                    onChange={(e) => setBulkCategoryId(e.target.value)}
+                  >
+                    <option value="__NONE__">Choose category…</option>
+                    <option value="__UNCATEGORIZED__">Uncategorized</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <Button
+                    className="h-7 px-3 text-xs"
+                    disabled={bulkCategoryId === "__NONE__" || selectedCount === 0}
+                    onClick={async () => {
+                      clearMutErr();
+                      setApplyBusy(true);
+                      try {
+                        await runApplySelectedConfirmed();
+                      } finally {
+                        setApplyBusy(false);
+                      }
+                    }}
+                  >
+                    Apply chosen category
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="h-7 px-3 text-xs"
+                    onClick={clearSelection}
+                    disabled={selectedCount === 0}
+                  >
+                    Clear
+                  </Button>
+                </>
+              ) : null}
+            </div>
           </div>
         </CHeader>
 
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pb-2">
           {err ? (
             <div className="text-sm text-red-600" role="alert">
               {err}
@@ -909,272 +1104,176 @@ export default function CategoryReviewPageClient() {
           ) : visibleRows.length === 0 ? (
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
-            <div className="relative h-full min-h-0 flex-1 rounded-lg border border-slate-200 overflow-hidden">
+            <div className="relative min-h-0 flex-1 rounded-lg border border-slate-200 overflow-hidden bg-white">
               {tableUpdating ? <UpdatingOverlay /> : null}
-              <div className={`h-full min-h-0 ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
-                <div className="h-full min-h-0">
-                  <LedgerTableShell scrollMode="auto"
-                  colgroup={
-                    <>
+              <div className={`min-h-0 h-full ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
+                <div className="h-full overflow-y-auto">
+                  <table className="w-full border-separate border-spacing-0">
+                    <colgroup>
                       <col style={{ width: 36 }} />
                       <col style={{ width: 98 }} />
                       <col />
                       <col style={{ width: 120 }} />
                       <col style={{ width: 360 }} />
-                    </>
-                  }
-                  header={
-                    <tr className="h-7">
-                    <th className="px-0 text-center align-middle">
-                      <div className="flex h-7 items-center justify-center">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          checked={allVisibleSelected}
-                          onChange={toggleSelectAllVisible}
-                        />
-                      </div>
-                    </th>
-                    <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Date</th>
-                    <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Payee</th>
-                    <th className="px-2 text-right text-[10px] font-semibold text-slate-600">Amount</th>
-                    <th className="px-2 text-left text-[10px] font-semibold text-slate-600">Category</th>
-                  </tr>
-                }
-                addRow={null}
-                body={
-                  <>
-                    {visibleRows.map((e: any) => {
-                      const id = String(e.id);
-                      const payee = String(e.payee ?? "");
-                      const dateYmd = String(e.date ?? "").slice(0, 10);
-                      const failMsg = failedById[id];
-                      const isSelected = selectedIds.has(id);
-                      const typeUpper = String(e.type ?? "").toUpperCase();
-                      const payeeLower = String(e.payee ?? "").trim().toLowerCase();
-                      const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
-                      const categoryLabel = e.category_id
-                        ? (categoryNameById[String(e.category_id)] ?? "Unknown category")
-                        : "Uncategorized";
+                    </colgroup>
 
-                      return (
-                        <tr key={id} className={`h-7 border-b border-slate-100 ${isSelected ? "bg-accent" : ""}`}>
-                          <td className="px-0 text-center align-middle">
-                            <div className="flex h-7 items-center justify-center">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4"
-                                checked={isSelected}
-                                onChange={() => toggleRow(id)}
-                              />
-                            </div>
-                          </td>
+                    <thead className="sticky top-0 z-10 bg-white">
+                      <tr className="h-7 border-b border-slate-200 bg-slate-50">
+                        <th className="px-0 text-center align-middle border-b border-slate-200">
+                          <div className="flex h-7 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              checked={allVisibleSelected}
+                              onChange={toggleSelectAllVisible}
+                            />
+                          </div>
+                        </th>
+                        <th className="px-2 text-left text-[10px] font-semibold text-slate-600 border-b border-slate-200">Date</th>
+                        <th className="px-2 text-left text-[10px] font-semibold text-slate-600 border-b border-slate-200">Payee</th>
+                        <th className="px-2 text-right text-[10px] font-semibold text-slate-600 border-b border-slate-200">Amount</th>
+                        <th className="px-2 text-left text-[10px] font-semibold text-slate-600 border-b border-slate-200">Category</th>
+                      </tr>
+                    </thead>
 
-                          <td className="px-2 text-xs text-slate-700 whitespace-nowrap">{dateYmd}</td>
+                    <tbody>
+                      {visibleRows.map((e: any) => {
+                        const id = String(e.id);
+                        const payee = String(e.payee ?? "");
+                        const dateYmd = String(e.date ?? "").slice(0, 10);
+                        const failMsg = failedById[id];
+                        const isSelected = selectedIds.has(id);
+                        const typeUpper = String(e.type ?? "").toUpperCase();
+                        const payeeLower = String(e.payee ?? "").trim().toLowerCase();
+                        const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
 
-                          <td className="px-2">
-                            <div className="flex flex-col min-w-0">
-                              <div className="text-xs text-slate-900 truncate font-medium">{payee}</div>
+                        return (
+                          <tr key={id} className={`border-b border-slate-100 align-top ${isSelected ? "bg-accent" : ""}`}>
+                            <td className="px-0 pt-2 text-center align-top border-b border-slate-100">
+                              <div className="flex items-start justify-center">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4"
+                                  checked={isSelected}
+                                  onChange={() => toggleRow(id)}
+                                />
+                              </div>
+                            </td>
 
-                              {(() => {
-                                const memo = String(e.memo ?? "");
-                                const looksNoisy = /[#\d]{2,}|(POS|WEB|ACH|DEBIT|CREDIT)/i.test(payee) && payee.length >= 8;
-                                if (!looksNoisy) return null;
+                            <td className="px-2 py-2 text-xs text-slate-700 whitespace-nowrap border-b border-slate-100">
+                              {dateYmd}
+                            </td>
 
-                                const cached = merchantCacheRef.current[id] ?? null;
-                                const merchantErr = merchantErrByEntryId[id] ?? null;
+                            <td className="px-2 py-2 border-b border-slate-100">
+                              <div className="flex flex-col min-w-0">
+                                <div className="text-xs text-slate-900 truncate font-medium">{payee}</div>
 
-                                if (merchantErr === "429") {
-                                  return <div className="mt-0.5 text-[11px] text-amber-700">AI limit reached. Merchant suggestion unavailable.</div>;
-                                }
+                                {(() => {
+                                  const memo = String(e.memo ?? "");
+                                  const looksNoisy = /[#\d]{2,}|(POS|WEB|ACH|DEBIT|CREDIT)/i.test(payee) && payee.length >= 8;
+                                  if (!looksNoisy) return null;
 
-                                if (merchantErr === "ERR") {
-                                  return <div className="mt-0.5 text-[11px] text-slate-500">AI merchant suggestion unavailable right now.</div>;
-                                }
+                                  const cached = merchantCacheRef.current[id] ?? null;
+                                  const merchantErr = merchantErrByEntryId[id] ?? null;
 
-                                return (
-                                  <div className="mt-0.5 flex items-center gap-2">
-                                    {cached ? (
-                                      <>
-                                        <div className="text-[11px] text-slate-600">
-                                          Merchant detected: <span className="font-semibold text-slate-900">{cached.merchant}</span>
-                                          <span className="text-slate-400"> • {Math.round((cached.confidence || 0) * 100)}%</span>
-                                        </div>
+                                  if (merchantErr === "429") {
+                                    return <div className="mt-0.5 text-[11px] text-amber-700">AI limit reached. Merchant suggestion unavailable.</div>;
+                                  }
 
+                                  if (merchantErr === "ERR") {
+                                    return <div className="mt-0.5 text-[11px] text-slate-500">AI merchant suggestion unavailable right now.</div>;
+                                  }
+
+                                  return (
+                                    <div className="mt-0.5 flex items-center gap-2">
+                                      {cached ? (
+                                        <>
+                                          <div className="text-[11px] text-slate-600">
+                                            Merchant detected: <span className="font-semibold text-slate-900">{cached.merchant}</span>
+                                            <span className="text-slate-400"> • {Math.round((cached.confidence || 0) * 100)}%</span>
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                                            disabled={!!pendingIds[id]}
+                                            onClick={() => void applyMerchant(id, cached.merchant)}
+                                          >
+                                            Apply
+                                          </button>
+                                        </>
+                                      ) : merchantBusyId === id ? (
+                                        <div className="h-3 w-44 rounded bg-slate-200 animate-pulse" />
+                                      ) : (
                                         <button
                                           type="button"
-                                          className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                                          disabled={!!pendingIds[id]}
-                                          onClick={() => void applyMerchant(id, cached.merchant)}
+                                          className="text-[11px] text-slate-600 hover:text-slate-900 underline"
+                                          onClick={() => void getMerchant(id, payee, memo)}
                                         >
-                                          Apply
+                                          Detect merchant
                                         </button>
-                                      </>
-                                    ) : merchantBusyId === id ? (
-                                      <div className="h-3 w-44 rounded bg-slate-200 animate-pulse" />
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        className="text-[11px] text-slate-600 hover:text-slate-900 underline"
-                                        onClick={() => void getMerchant(id, payee, memo)}
-                                      >
-                                        Detect merchant
-                                      </button>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          </td>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </td>
 
-                          <td
-                            className={`px-2 text-xs text-right tabular-nums ${Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
+                            <td
+                              className={`px-2 py-2 text-xs text-right tabular-nums border-b border-slate-100 ${
+                                Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
                               }`}
-                          >
-                            {formatUsdAccountingFromCents(e.amount_cents)}
-                          </td>
+                            >
+                              {formatUsdAccountingFromCents(e.amount_cents)}
+                            </td>
 
-                          <td className="px-2">
-                            <div className="flex items-center justify-start gap-1.5">
-                              {null}
+                            <td className="px-2 py-2 border-b border-slate-100">
+                              <div className="flex items-start justify-start gap-1.5 flex-wrap">
+                                <select
+                                  className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+                                  value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
+                                  disabled={isOpening || !!pendingIds[id]}
+                                  onChange={async (ev) => {
+                                    if (isOpening) return;
+                                    if (!selectedBusinessId || !selectedAccountId) return;
 
-                              {/* Per-row category dropdown (applies immediately on change) */}
-                              <select
-                                className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
-                                value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
-                                disabled={isOpening || !!pendingIds[id]}
-                                onChange={async (ev) => {
-                                  if (isOpening) return;
-                                  if (!selectedBusinessId || !selectedAccountId) return;
-
-                                  const v = ev.target.value;
-                                  const nextCategoryId = v ? v : null;
-
-                                  // Prevent double-submit while row is applying
-                                  if (pendingIds[id]) return;
-
-                                  // Guardrail: never send an archived/invalid category id (prevents 400 Invalid category)
-                                  if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
-                                    setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
-                                    return;
-                                  }
-
-                                  clearMutErr();
-
-                                  // Manual override should NOT be attributed to AI.
-                                  // If it fails, restore prior session-local AI/undo state.
-                                  const hadAi = !!aiAppliedById[id];
-                                  const undoSnap = undoByEntryId[id] ?? null;
-
-                                  if (hadAi) {
-                                    setAiAppliedById((m) => {
-                                      const next = { ...m };
-                                      delete next[id];
-                                      return next;
-                                    });
-                                  }
-                                  if (undoSnap) {
-                                    setUndoByEntryId((m) => {
-                                      const next = { ...m };
-                                      delete next[id];
-                                      return next;
-                                    });
-                                    clearUndoTimer(id);
-                                  }
-
-                                  try {
-                                    await applyCategoryToEntry(id, nextCategoryId);
-                                  } catch {
-                                    // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
-                                    // Restore session-local state if the manual change failed.
-                                    if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                    if (undoSnap) {
-                                      setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
-                                      // restore timer with remaining time (best-effort)
-                                      const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
-                                      if (remaining > 0) {
-                                        clearUndoTimer(id);
-                                        undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
-                                          setUndoByEntryId((m) => {
-                                            if (!m[id]) return m;
-                                            const next = { ...m };
-                                            delete next[id];
-                                            return next;
-                                          });
-                                          clearUndoTimer(id);
-                                        }, remaining);
-                                      }
-                                    }
-                                  }
-                                }}
-                              >
-                                <option value="">Uncategorized</option>
-                                {categories.map((c) => (
-                                  <option key={String(c.id)} value={String(c.id)}>
-                                    {c.name}
-                                  </option>
-                                ))}
-                              </select>
-
-                              {/* Row-level pending spinner */}
-                              {pendingIds[id] ? (
-                                <span className="inline-flex items-center" title="Applying…">
-                                  <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
-                                </span>
-                              ) : null}
-
-                              {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
-
-                              {/* F7a: session-local AI attribution + Undo (only for suggestion-pill applies) */}
-                              {aiAppliedById[id] ? (
-                                <span
-                                  className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center"
-                                  title="Applied via AI suggestion"
-                                >
-                                  AI
-                                </span>
-                              ) : null}
-
-                              {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
-                                <button
-                                  type="button"
-                                  className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
-                                  title="Undo"
-                                  disabled={!!pendingIds[id]}
-                                  onClick={async () => {
+                                    const v = ev.target.value;
+                                    const nextCategoryId = v ? v : null;
                                     if (pendingIds[id]) return;
 
-                                    const snapAi = !!aiAppliedById[id];
-                                    const snapUndo = undoByEntryId[id] ?? null;
-                                    if (!snapUndo) return;
+                                    if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
+                                      setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
+                                      return;
+                                    }
 
                                     clearMutErr();
 
-                                    try {
-                                      await applyCategoryToEntry(id, snapUndo.prevCategoryId);
+                                    const hadAi = !!aiAppliedById[id];
+                                    const undoSnap = undoByEntryId[id] ?? null;
 
-                                      // Guardrail: clear undo state only on SUCCESS
+                                    if (hadAi) {
+                                      setAiAppliedById((m) => {
+                                        const next = { ...m };
+                                        delete next[id];
+                                        return next;
+                                      });
+                                    }
+                                    if (undoSnap) {
                                       setUndoByEntryId((m) => {
                                         const next = { ...m };
                                         delete next[id];
                                         return next;
                                       });
                                       clearUndoTimer(id);
+                                    }
 
-                                      // Since undo is a manual action, remove AI attribution on success
-                                      if (snapAi) {
-                                        setAiAppliedById((m) => {
-                                          const next = { ...m };
-                                          delete next[id];
-                                          return next;
-                                        });
-                                      }
+                                    try {
+                                      await applyCategoryToEntry(id, nextCategoryId);
                                     } catch {
-                                      // Guardrail: restore undo state if undo fails
-                                      if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                      if (snapUndo) {
-                                        setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
-                                        const remaining = Math.max(0, (snapUndo.expiresAt ?? 0) - Date.now());
+                                      if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                      if (undoSnap) {
+                                        setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
+                                        const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
                                         if (remaining > 0) {
                                           clearUndoTimer(id);
                                           undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
@@ -1191,220 +1290,202 @@ export default function CategoryReviewPageClient() {
                                     }
                                   }}
                                 >
-                                  Undo
-                                </button>
-                              ) : null}
+                                  <option value="">Uncategorized</option>
+                                  {categories.map((c) => (
+                                    <option key={String(c.id)} value={String(c.id)}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                                </select>
 
-                              {/* Compact suggestions (top 2 + +more); click applies immediately */}
-                              {!e.category_id ? (
-                                <div className="flex items-center gap-1 overflow-hidden">
-                                  {(() => {
-                                    const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
-                                    const top = list.slice(0, 2);
-                                    const more = Math.max(0, list.length - top.length);
+                                {pendingIds[id] ? (
+                                  <span className="inline-flex items-center" title="Applying…">
+                                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                  </span>
+                                ) : null}
 
-                                    return (
-                                      <>
-                                        {top.map((s: any, idx: number) => {
-                                          const catId = String(s?.category_id ?? s?.categoryId ?? "");
-                                          const name = String(
-                                            s?.category_name ??
-                                            s?.categoryName ??
-                                            categoryNameById[String(s?.category_id ?? s?.categoryId ?? "")] ??
-                                            "—"
-                                          );
-                                          const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+                                {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
 
-                                          return (
-                                            <div key={`${id}:${catId || name}:${idx}`} className="flex items-center gap-1">
+                                {aiAppliedById[id] ? (
+                                  <span className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center">
+                                    AI
+                                  </span>
+                                ) : null}
+
+                                {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
+                                  <button
+                                    type="button"
+                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
+                                    disabled={!!pendingIds[id]}
+                                    onClick={async () => {
+                                      if (pendingIds[id]) return;
+                                      const snapAi = !!aiAppliedById[id];
+                                      const snapUndo = undoByEntryId[id] ?? null;
+                                      if (!snapUndo) return;
+
+                                      clearMutErr();
+
+                                      try {
+                                        await applyCategoryToEntry(id, snapUndo.prevCategoryId);
+
+                                        setUndoByEntryId((m) => {
+                                          const next = { ...m };
+                                          delete next[id];
+                                          return next;
+                                        });
+                                        clearUndoTimer(id);
+
+                                        if (snapAi) {
+                                          setAiAppliedById((m) => {
+                                            const next = { ...m };
+                                            delete next[id];
+                                            return next;
+                                          });
+                                        }
+                                      } catch {
+                                        if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                        if (snapUndo) {
+                                          setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
+                                        }
+                                      }
+                                    }}
+                                  >
+                                    Undo
+                                  </button>
+                                ) : null}
+
+                                {!e.category_id ? (
+                                  <div className="flex items-center gap-1 overflow-hidden flex-wrap">
+                                    {(() => {
+                                      const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
+                                      const top = list.slice(0, 2);
+                                      const more = Math.max(0, list.length - top.length);
+
+                                      return (
+                                        <>
+                                          {top.map((s: any, idx: number) => {
+                                            const catId = String(s?.category_id ?? s?.categoryId ?? "");
+                                            const name = String(
+                                              s?.category_name ??
+                                              s?.categoryName ??
+                                              categoryNameById[String(s?.category_id ?? s?.categoryId ?? "")] ??
+                                              "—"
+                                            );
+                                            const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+
+                                            return (
+                                              <div key={`${id}:${catId || name}:${idx}`} className="flex items-center gap-1">
+                                                <button
+                                                  type="button"
+                                                  className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
+                                                  title={String(s?.reason ?? "")}
+                                                  disabled={!!pendingIds[id]}
+                                                  onClick={async () => {
+                                                    if (!catId) return;
+                                                    if (!selectedBusinessId || !selectedAccountId) return;
+                                                    if (pendingIds[id]) return;
+
+                                                    clearMutErr();
+                                                    const prevCategoryId = e.category_id ? String(e.category_id) : null;
+
+                                                    try {
+                                                      await applyCategoryToEntry(id, catId);
+                                                      setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                                      setUndoWindow(id, prevCategoryId, catId);
+                                                    } catch {}
+                                                  }}
+                                                >
+                                                  <span className="font-semibold truncate max-w-[88px]">{name}</span>
+                                                  <span className="text-primary">{conf}%</span>
+                                                </button>
+
+                                                <button
+                                                  type="button"
+                                                  className="h-5 px-1.5 rounded-full border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
+                                                  disabled={!!pendingIds[id] || whyBusy}
+                                                  onClick={() => void runWhy(id)}
+                                                >
+                                                  Why?
+                                                </button>
+                                              </div>
+                                            );
+                                          })}
+
+                                          {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
+                                          {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" /> : null}
+                                          {!sugLoading && suggestionsQ.error && !list.length ? (
+                                            <div className="inline-flex items-center gap-2 min-w-0">
+                                              <span className="text-[10px] text-slate-500">AI suggestions unavailable</span>
                                               <button
                                                 type="button"
-                                                className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
-                                                title={String(s?.reason ?? "")}
-                                                disabled={!!pendingIds[id]}
-                                                onClick={async () => {
-                                                  if (!catId) return;
-
-                                                  // Auto-apply immediately (explicit click on suggestion)
-                                                  if (!selectedBusinessId || !selectedAccountId) return;
-
-                                                  // Prevent double-submit
-                                                  if (pendingIds[id]) return;
-
-                                                  clearMutErr();
-
-                                                  // Snapshot previous category for undo (session-local)
-                                                  const prevCategoryId = e.category_id ? String(e.category_id) : null;
-
-                                                  try {
-                                                    await applyCategoryToEntry(id, catId);
-
-                                                    // SUCCESS: mark AI attribution + start undo window (10s)
-                                                    setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                                    setUndoWindow(id, prevCategoryId, catId);
-                                                  } catch {
-                                                    // applyCategoryToEntry handles rollback + CLOSED_PERIOD banner + row failure state
-                                                  }
-                                                }}
+                                                className="text-[10px] text-primary hover:underline"
+                                                onClick={() => void suggestionsQ.refetch()}
                                               >
-                                                <span className="font-semibold truncate max-w-[88px]">{name}</span>
-                                                <span className="text-primary">{conf}%</span>
-                                              </button>
-
-                                              <button
-                                                type="button"
-                                                className="h-5 px-1.5 rounded-full border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
-                                                disabled={!!pendingIds[id] || whyBusy}
-                                                onClick={() => void runWhy(id)}
-                                              >
-                                                Why?
+                                                Retry
                                               </button>
                                             </div>
-                                          );
-                                        })}
-
-                                        {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
-                                        {sugLoading && !list.length ? (
-                                          <span className="inline-flex items-center gap-1">
-                                            <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
-                                          </span>
-                                        ) : null}
-
-                                        {!sugLoading && suggestionsQ.error && !list.length ? (
-                                          <div className="inline-flex items-center gap-2 min-w-0">
-                                            <span className="text-[10px] text-slate-500">AI suggestions unavailable</span>
-                                            <button
-                                              type="button"
-                                              className="text-[10px] text-primary hover:underline"
-                                              onClick={() => void suggestionsQ.refetch()}
-                                            >
-                                              Retry
-                                            </button>
-                                          </div>
-                                        ) : null}
-
-                                        {!sugLoading && !suggestionsQ.error && !list.length ? (
-                                          <span className="text-[10px] text-slate-400">No AI suggestions</span>
-                                        ) : null}
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-                              ) : null}
-                              {whyEntryId === id ? (
-                                <div className="mt-1 w-full rounded-md border border-slate-200 bg-white p-2">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="text-[11px] font-semibold text-slate-700">AI explanation</div>
-                                    <button
-                                      type="button"
-                                      className="text-[11px] text-slate-500 hover:text-slate-900"
-                                      onClick={() => {
-                                        setWhyEntryId(null);
-                                        setWhyText(null);
-                                        setWhyErr(null);
-                                      }}
-                                    >
-                                      Close
-                                    </button>
+                                          ) : null}
+                                          {!sugLoading && !suggestionsQ.error && !list.length ? (
+                                            <span className="text-[10px] text-slate-400">No AI suggestions</span>
+                                          ) : null}
+                                        </>
+                                      );
+                                    })()}
                                   </div>
+                                ) : null}
 
-                                  {whyBusy && !whyText ? (
-                                    <div className="mt-2 space-y-2">
-                                      <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
-                                      <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
-                                      <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+                                {whyEntryId === id ? (
+                                  <div className="mt-1 w-full rounded-md border border-slate-200 bg-white p-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-[11px] font-semibold text-slate-700">AI explanation</div>
+                                      <button
+                                        type="button"
+                                        className="text-[11px] text-slate-500 hover:text-slate-900"
+                                        onClick={() => {
+                                          setWhyEntryId(null);
+                                          setWhyText(null);
+                                          setWhyErr(null);
+                                        }}
+                                      >
+                                        Close
+                                      </button>
                                     </div>
-                                  ) : whyErr ? (
-                                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
-                                      {whyErr}
-                                    </div>
-                                  ) : (
-                                    <div className="mt-2 text-[11px] text-slate-700 whitespace-pre-wrap">{whyText ?? ""}</div>
-                                  )}
 
-                                  {whyBusy && whyText ? <div className="mt-1 text-[11px] text-slate-500">Updating…</div> : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </>
-                }
-                  footer={null}
-                />
+                                    {whyBusy && !whyText ? (
+                                      <div className="mt-2 space-y-2">
+                                        <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
+                                        <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
+                                        <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+                                      </div>
+                                    ) : whyErr ? (
+                                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+                                        {whyErr}
+                                      </div>
+                                    ) : (
+                                      <div className="mt-2 text-[11px] text-slate-700 whitespace-pre-wrap">{whyText ?? ""}</div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Reserve space so sticky bar doesn't cover last row */}
-          {selectedCount > 0 ? <div className="h-12" /> : null}
-
-          {/* Sticky bulk action bar */}
-          {selectedCount > 0 ? (
-            <div className="sticky bottom-0 z-10 rounded-lg border border-slate-200 bg-white shadow-sm px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs text-slate-700">
-                  <span className="font-medium">{selectedCount}</span> selected
-                  {Object.keys(failedById).length ? (
-                    <span className="ml-2 text-red-600">• {Object.keys(failedById).length} failed</span>
-                  ) : null}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <BusyButton
-                    variant="primary"
-                    size="sm"
-                    busy={applyBusy}
-                    busyLabel="Applying…"
-                    disabled={
-                      applyBusy ||
-                      !Object.keys(selectedSuggestionByEntryId).some((k) => !!selectedSuggestionByEntryId[k])
-                    }
-                    onClick={() => {
-                      setApplySummary(null);
-                      setApplyOpen(true);
-                    }}
-                  >
-                    Apply selected suggestions
-                  </BusyButton>
-                  <select
-                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs"
-                    value={bulkCategoryId}
-                    onChange={(e) => setBulkCategoryId(e.target.value)}
-                  >
-                    <option value="__NONE__">Choose category…</option>
-                    <option value="__UNCATEGORIZED__">Uncategorized</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-
-                  <Button className="h-7 px-3 text-xs" disabled={bulkCategoryId === "__NONE__"} onClick={() => setConfirmOpen(true)}>
-                    Apply to selected
-                  </Button>
-
-                  <Button variant="outline" className="h-7 px-3 text-xs" onClick={clearSelection}>
-                    Clear
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Phase F2: Apply selected suggestions (explicit confirm) */}
           <AppDialog
             open={applyOpen}
             onClose={() => {
               if (applyBusy) return;
               setApplyOpen(false);
             }}
-            title="Apply suggestions"
-            size="md"
+            title="Auto Fix Categories"
+            size="lg"
             footer={
               <div className="flex items-center justify-end gap-2">
                 <Button variant="outline" onClick={() => setApplyOpen(false)} disabled={applyBusy}>
@@ -1435,14 +1516,27 @@ export default function CategoryReviewPageClient() {
 
                       setApplySummary({ applied, blocked });
 
-                      // Remove successful selections; keep blocked ones so user can retry later
                       const results = Array.isArray(res?.results) ? res.results : [];
+                      const successIds = new Set<string>();
+
+                      for (const r of results) {
+                        const id = String(r?.entryId ?? "");
+                        if (!id) continue;
+                        if (r?.ok === true) successIds.add(id);
+                      }
+
                       setSelectedSuggestionByEntryId((prev) => {
                         const next = { ...prev };
-                        for (const r of results) {
-                          const id = String(r?.entryId ?? "");
-                          if (!id) continue;
-                          if (r?.ok === true) delete next[id];
+                        for (const id of Array.from(successIds)) {
+                          delete next[id];
+                        }
+                        return next;
+                      });
+
+                      setSelectedIds((prev) => {
+                        const next = new Set(Array.from(prev));
+                        for (const id of Array.from(successIds)) {
+                          next.delete(id);
                         }
                         return next;
                       });
@@ -1464,16 +1558,133 @@ export default function CategoryReviewPageClient() {
                     }
                   }}
                 >
-                  Apply
+                  {`Apply ${selectedApplyItems.length} categor${selectedApplyItems.length === 1 ? "y" : "ies"}`}
                 </BusyButton>
               </div>
             }
           >
-            <div className="text-sm text-slate-700">
-              Apply category changes to <span className="font-medium">{selectedApplyItems.length}</span> entries?
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500">
-              Entries in closed periods will be blocked and counted separately.
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Selected</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixRows.length}</div>
+                </div>
+
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Groups</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixGroups.length}</div>
+                </div>
+
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Total amount</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">
+                    {formatUsdAccountingFromCents(autoFixTotalAmountCents)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-slate-600">
+                AI grouped the selected entries by suggested category. Expand any group to verify or edit.
+              </div>
+
+              <div className="h-[320px] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
+                {autoFixGroups.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    No selected rows available for auto-fix.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-200">
+                    {autoFixGroups.map((group) => {
+                      const isExpanded = !!expandedAutoFixGroups[group.groupKey];
+
+                      return (
+                        <div key={group.groupKey} className="bg-white">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-slate-50"
+                            onClick={() => toggleAutoFixGroup(group.groupKey)}
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              <div className="text-sm leading-none text-slate-400">
+                                {isExpanded ? "⌄" : "›"}
+                              </div>
+
+                              <div className="truncate text-sm font-semibold text-slate-900">
+                                {group.categoryName}
+                              </div>
+
+                              <span className="inline-flex min-w-[24px] items-center justify-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                                {group.count}
+                              </span>
+                            </div>
+
+                            <div className="shrink-0 text-right text-sm font-semibold text-slate-900">
+                              {formatUsdAccountingFromCents(group.totalAmountCents)}
+                            </div>
+                          </button>
+
+                          {isExpanded ? (
+                            <div className="border-t border-slate-200 bg-slate-50/40">
+                              {group.rows.map((row) => {
+                                const e = row.entry;
+                                const id = String(e.id);
+                                const top = row.suggestions[0] ?? null;
+                                const topReason = String(top?.reason ?? "").trim();
+
+                                return (
+                                  <div
+                                    key={id}
+                                    className="grid grid-cols-[minmax(0,1.5fr)_100px_170px] items-start gap-3 border-b border-slate-200 px-3 py-2.5 last:border-b-0"
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="truncate text-xs font-medium text-slate-900">
+                                        {String(e.payee ?? "—")}
+                                      </div>
+                                      <div className="mt-0.5 text-[10px] text-slate-500">
+                                        {String(e.date ?? "").slice(0, 10)}
+                                      </div>
+                                      {topReason ? (
+                                        <div className="mt-1 text-[10px] text-slate-500">
+                                          {topReason}
+                                        </div>
+                                      ) : null}
+                                    </div>
+
+                                    <div className="pt-0.5 text-right text-xs font-semibold text-slate-900">
+                                      {formatUsdAccountingFromCents(e.amount_cents)}
+                                    </div>
+
+                                    <div>
+                                      <select
+                                        className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+                                        value={row.selectedCategoryId}
+                                        onChange={(ev) => {
+                                          const nextValue = String(ev.target.value ?? "");
+                                          setSelectedSuggestionByEntryId((prev) => ({
+                                            ...prev,
+                                            [id]: nextValue,
+                                          }));
+                                        }}
+                                      >
+                                        <option value="">Choose category…</option>
+                                        {categories.map((c) => (
+                                          <option key={c.id} value={c.id}>
+                                            {c.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </AppDialog>
         </CardContent>

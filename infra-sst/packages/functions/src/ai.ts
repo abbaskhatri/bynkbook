@@ -188,6 +188,97 @@ function normalizeReconcileSuggestions(args: {
   return out;
 }
 
+function norm(s: any) {
+  return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function findCategoryId(categories: Array<{ id: string; name: string }>, names: string[]) {
+  const wanted = names.map((x) => norm(x));
+
+  for (const c of categories) {
+    const n = norm(c.name);
+    if (wanted.includes(n)) return String(c.id);
+  }
+
+  for (const c of categories) {
+    const n = norm(c.name);
+    if (wanted.some((w) => n.includes(w) || w.includes(n))) return String(c.id);
+  }
+
+  return "";
+}
+
+function deterministicCategorySuggestion(
+  item: { id: string; payee_or_name: string; memo: string; amount_cents: number },
+  categories: Array<{ id: string; name: string }>
+) {
+  const text = `${item.payee_or_name} ${item.memo}`.toLowerCase();
+  const isNegative = Number(item.amount_cents) < 0;
+  const isPositive = Number(item.amount_cents) > 0;
+
+  const taxId = findCategoryId(categories, ["Tax", "Taxes", "Taxes & Licenses"]);
+  const payrollId = findCategoryId(categories, ["Payroll", "Payroll Expense", "Wages"]);
+  const bankChargesId = findCategoryId(categories, ["Bank Charges", "Service Charges", "Bank Fees"]);
+  const utilitiesId = findCategoryId(categories, ["Utilities", "Internet", "Phone", "Communications", "Telecommunications"]);
+  const loanId = findCategoryId(categories, ["Loan Payment", "Loans", "Credit Card Payment", "Owner Draw", "Transfers", "Transfer"]);
+  const purchaseId = findCategoryId(categories, ["Purchase", "Purchases", "Supplies", "Office Expense", "Office Supplies"]);
+  const saleId = findCategoryId(categories, ["Sale", "Sales", "Revenue", "Income", "Sales Income"]);
+  const otherId = findCategoryId(categories, ["Other", "Misc", "Miscellaneous"]);
+
+  if (/(irs|franchise tax|sales tax|comptroller|tax payment|tax pymt|usataxpymt|webfile tax)/i.test(text) && taxId) {
+    return { category_id: taxId, confidence: 0.99, reason: "Matched tax authority / tax payment keywords." };
+  }
+
+  if (/(payroll|salary|wages|gusto|adp|employee pay|employee|paycheck|zelle payment to .*emp|payroll;)/i.test(text) && payrollId) {
+    return { category_id: payrollId, confidence: 0.97, reason: "Matched payroll / employee payment keywords." };
+  }
+
+  if (/(spectrum|internet|phone|verizon|at&t|comcast|wireless|telecom|utility|utilities|electric|water|gas)/i.test(text) && utilitiesId) {
+    return { category_id: utilitiesId, confidence: 0.95, reason: "Matched utility / communications keywords." };
+  }
+
+  if (/(bank fee|service charge|monthly fee|overdraft|fee charge|fee)/i.test(text) && bankChargesId) {
+    return { category_id: bankChargesId, confidence: 0.97, reason: "Matched fee / service charge keywords." };
+  }
+
+  if (/(american express|amex|visa|mastercard|discover|credit card payment|loan payment|online banking transfer|transfer|payment to chk|card payment)/i.test(text)) {
+    if (loanId) {
+      return { category_id: loanId, confidence: 0.9, reason: "Matched transfer / card / liability payment keywords." };
+    }
+    if (otherId) {
+      return { category_id: otherId, confidence: 0.55, reason: "Ambiguous transfer / card payment; sent to review bucket." };
+    }
+    return null;
+  }
+
+  if (/(bankcard|btot dep|dep id:)/i.test(text) && isPositive && saleId) {
+    return { category_id: saleId, confidence: 0.95, reason: "Matched bankcard deposit / sales receipt pattern." };
+  }
+
+  if (/(bankcard)/i.test(text) && isNegative) {
+    if (bankChargesId) {
+      return { category_id: bankChargesId, confidence: 0.84, reason: "Matched negative bankcard / processing-fee pattern." };
+    }
+    if (otherId) {
+      return { category_id: otherId, confidence: 0.55, reason: "Negative bankcard item is ambiguous; sent to review bucket." };
+    }
+    return null;
+  }
+
+  if (/\bcheck\b|\bchk\b/i.test(text) && isNegative) {
+    if (otherId) {
+      return { category_id: otherId, confidence: 0.5, reason: "Outgoing check can map to multiple categories; sent to review bucket." };
+    }
+    return null;
+  }
+
+  if (/(purchase|supplies|office depot|staples|amazon|home depot|lowe'?s)/i.test(text) && purchaseId) {
+    return { category_id: purchaseId, confidence: 0.9, reason: "Matched purchasing / supplies keywords." };
+  }
+
+  return null;
+}
+
 // -------------------- handler --------------------
 export async function handler(event: any) {
   const method = (event?.requestContext?.http?.method ?? "").toString().toUpperCase();
@@ -435,7 +526,13 @@ export async function handler(event: any) {
         orderBy: { name: "asc" },
       });
 
-      const shapedItems = items.slice(0, 200).map((it: any) => ({
+      const shapedItems: Array<{
+        id: string;
+        date: string;
+        amount_cents: number;
+        payee_or_name: string;
+        memo: string;
+      }> = items.slice(0, 200).map((it: any) => ({
         id: String(it.id ?? ""),
         date: String(it.date ?? "").slice(0, 10),
         amount_cents: Number(it.amount_cents ?? 0),
@@ -443,21 +540,159 @@ export async function handler(event: any) {
         memo: String(it.memo ?? ""),
       }));
 
+            const categorizedHistory = await prisma.entry.findMany({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          deleted_at: null,
+          category_id: { not: null },
+        },
+        select: {
+          payee: true,
+          memo: true,
+          category_id: true,
+          date: true,
+        },
+        orderBy: { date: "desc" },
+        take: 500,
+      });
+
+      const categoryNameMap = new Map<string, string>();
+      for (const c of categories) {
+        categoryNameMap.set(String(c.id), String(c.name));
+      }
+
+      function findHistoryCategoryIdForPayee(payee: string) {
+        const target = norm(payee);
+        if (!target) return "";
+
+        const matches = categorizedHistory.filter((r: any) => {
+          const rp = norm(r.payee);
+          return rp && (rp === target || rp.includes(target) || target.includes(rp));
+        });
+
+        if (!matches.length) return "";
+
+        const counts = new Map<string, number>();
+        for (const r of matches) {
+          const cid = String(r.category_id ?? "").trim();
+          if (!cid) continue;
+          counts.set(cid, (counts.get(cid) ?? 0) + 1);
+        }
+
+        const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+        const top = ranked[0];
+        if (!top) return "";
+        if (top[1] < 2) return ""; // require repeat usage before trusting memory
+
+        return top[0];
+      }
+
+      const deterministicById: Record<string, any[]> = {};
+
+      for (const it of shapedItems) {
+        const historyCategoryId = findHistoryCategoryIdForPayee(it.payee_or_name);
+
+        if (historyCategoryId) {
+          deterministicById[it.id] = [{
+            category_id: historyCategoryId,
+            confidence: 0.93,
+            reason: `Matched prior accepted categorization history for this payee.`,
+          }];
+          continue;
+        }
+
+        const hit = deterministicCategorySuggestion(it, categories as any);
+        if (hit) {
+          deterministicById[it.id] = [hit];
+        }
+      }
+
+      const llmItems = shapedItems.filter((it: (typeof shapedItems)[number]) => !deterministicById[it.id]);
+
+      const historyRows = await prisma.entry.findMany({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          deleted_at: null,
+          category_id: { not: null },
+        },
+        select: {
+          payee: true,
+          memo: true,
+          category_id: true,
+          date: true,
+        },
+        orderBy: { date: "desc" },
+        take: 300,
+      });
+
+      const historyByCategoryId = new Map<string, string>();
+      for (const c of categories) {
+        historyByCategoryId.set(String(c.id), String(c.name));
+      }
+
+      const historyHintsById: Record<string, any[]> = {};
+      for (const it of llmItems) {
+        const payeeNorm = norm(it.payee_or_name);
+        const hits = historyRows
+          .filter((r: any) => {
+            const rp = norm(r.payee);
+            return rp && payeeNorm && (rp.includes(payeeNorm) || payeeNorm.includes(rp));
+          })
+          .slice(0, 5)
+          .map((r: any) => ({
+            payee: String(r.payee ?? ""),
+            memo: String(r.memo ?? ""),
+            category_id: String(r.category_id ?? ""),
+            category_name: historyByCategoryId.get(String(r.category_id ?? "")) ?? "Unknown",
+          }));
+
+        historyHintsById[it.id] = hits;
+      }
+
       const system =
-        "You are a CPA-safe bookkeeping assistant. Suggest categories from the allowed list ONLY. " +
-        "Return JSON only. Do not invent categories. If unsure, return an empty list for that id.\n\n" +
+        "You are a CPA-safe bookkeeping assistant classifying ledger entries into the user's allowed categories only. " +
+        "Return JSON only. Never invent categories. If unsure, return an empty list for that id. " +
+        "Use bookkeeping logic, not generic consumer-label logic.\n\n" +
+
+        "Important classification rules:\n" +
+        "- IRS, franchise tax, sales tax, comptroller, tax payment, tax deposit => prefer Tax.\n" +
+        "- Payroll, paycheck, salary, wages, employee pay, ADP, Gusto, payroll service, Zelle to staff => prefer Payroll.\n" +
+        "- Bank fee, monthly fee, overdraft, service charge => prefer Bank Charges or Service Charges if available.\n" +
+        "- Internet, phone, cable, Spectrum, AT&T, Verizon business service => prefer Utilities, Communications, or the closest operating-expense category; never Payroll.\n" +
+        "- American Express payment, credit card payment, loan payment, transfer, online banking transfer, owner transfer, card payoff => do not confidently guess a normal expense category unless the allowed list clearly includes a liability/payment category. If ambiguous, lower confidence or return empty.\n" +
+        "- Transfers, checks, card payments, balance-sheet style movements, and unclear merchant strings should not be forced into Payroll or Sale.\n" +
+        "- If more than one category is plausible and the evidence is weak, prefer Other/Misc if present; otherwise return empty.\n" +
+        "- Never force Payroll unless the text clearly indicates payroll, employee pay, wages, salary, paycheck, ADP, Gusto, or employee/Zelle payroll wording.\n" +
+        "- Never force Tax unless the text clearly indicates IRS, tax, comptroller, franchise tax, sales tax, or tax payment wording.\n" +
+        "- Never force Sale for a negative amount.\n" +
+        "- Use payee, memo, amount sign, and bookkeeping context together.\n" +
+
         "Output JSON schema:\n" +
         "{ \"suggestionsById\": { \"<id>\": [ {\"category_id\":\"...\",\"confidence\":0.0,\"reason\":\"...\"} ] } }\n" +
-        `Return at most ${limitPerItem} suggestions per id.`;
+        `Return at most ${limitPerItem} suggestions per id. ` +
+        "Reasons must be short, concrete, and mention the matched clue.";
 
       const user =
         `Allowed categories:\n${JSON.stringify(categories, null, 2)}\n\n` +
-        `Items:\n${JSON.stringify(shapedItems, null, 2)}`;
+        `Recent accepted history for similar merchants/payees:\n${JSON.stringify(historyHintsById, null, 2)}\n\n` +
+        `Items:\n${JSON.stringify(llmItems, null, 2)}`;
 
-      const raw = await openAiText({ model, apiKey, system, user, maxTokens: 900 });
+      const raw = llmItems.length
+        ? await openAiText({ model, apiKey, system, user, maxTokens: 900 })
+        : "{}";
 
       const parsed = safeJsonParse(raw) ?? {};
-      const suggestionsById = parsed?.suggestionsById && typeof parsed.suggestionsById === "object" ? parsed.suggestionsById : {};
+      const llmSuggestionsById =
+        parsed?.suggestionsById && typeof parsed.suggestionsById === "object"
+          ? parsed.suggestionsById
+          : {};
+
+      const suggestionsById = {
+        ...llmSuggestionsById,
+        ...deterministicById,
+      };
 
       await logActivity(prisma, {
         businessId,

@@ -358,11 +358,37 @@ export async function handler(event: any) {
       },
     });
 
+    if (upload_id) {
+      const up = await prisma.upload.findFirst({
+        where: { id: upload_id, business_id: biz, deleted_at: null },
+        select: { id: true, meta: true },
+      });
+
+      if (up) {
+        const baseMeta =
+          up.meta && typeof up.meta === "object" && !Array.isArray(up.meta)
+            ? (up.meta as Record<string, any>)
+            : {};
+
+        await prisma.upload.update({
+          where: { id: up.id },
+          data: {
+            meta: {
+              ...baseMeta,
+              bill_id: created.id,
+              bill_created_at: new Date().toISOString(),
+              vendor_id: vid,
+            } as any,
+          },
+        });
+      }
+    }
+
     await logActivity(prisma, {
       businessId: biz,
       actorUserId: sub,
       eventType: "AP_BILL_CREATED" as any,
-      payloadJson: { bill_id: created.id, vendor_id: vid, amount_cents: String(amount), due_date },
+      payloadJson: { bill_id: created.id, vendor_id: vid, amount_cents: String(amount), due_date, upload_id },
       scopeAccountId: null,
     });
 
