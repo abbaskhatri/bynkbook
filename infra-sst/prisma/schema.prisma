@@ -46,6 +46,7 @@ model Business {
   activityLogs            ActivityLog[]
   closedPeriods           ClosedPeriod[]
   vendors                 Vendor[]
+  categoryMemories        CategoryMemory[]
 
   // Accounts Payable
   bills                   Bill[]
@@ -131,6 +132,28 @@ model EntryMerge {
   @@map("entry_merge")
 }
 
+model CategoryMemory {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id         String   @db.Uuid
+  merchant_normalized String
+  direction           String
+  category_id         String   @db.Uuid
+  accept_count        Int      @default(0)
+  override_count      Int      @default(0)
+  last_used_at        DateTime @default(now()) @db.Timestamptz(6)
+  confidence_score    Int      @default(0)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  category Category @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, merchant_normalized, direction, category_id], map: "u_category_memory_scope_merchant_direction_category")
+  @@index([business_id, merchant_normalized, direction], map: "i_category_memory_scope_merchant_direction")
+  @@index([business_id, category_id], map: "i_category_memory_scope_category")
+  @@map("category_memory")
+}
+
 model Entry {
   id           String   @id @db.Uuid
   business_id  String   @db.Uuid
@@ -201,8 +224,10 @@ model Category {
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
-  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  entries  Entry[]
+  business              Business         @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entries               Entry[]
+  vendorDefaultVendors  Vendor[]         @relation("VendorDefaultCategory")
+  categoryMemories      CategoryMemory[]
 
   budgets Budget[]
   goals   Goal[]
@@ -614,14 +639,16 @@ model ClosedPeriod {
 }
 
 model Vendor {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  business_id String   @db.Uuid
-  name        String
-  notes       String?
-  created_at  DateTime @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id         String    @db.Uuid
+  name                String
+  notes               String?
+  default_category_id String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
 
-  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  business        Business  @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  defaultCategory Category? @relation("VendorDefaultCategory", fields: [default_category_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   // Opposite side of Entry.vendor relation
   entries Entry[]
@@ -631,6 +658,7 @@ model Vendor {
 
   @@unique([business_id, name], map: "u_vendor_scope_name")
   @@index([business_id, updated_at(sort: Desc)], map: "i_vendor_scope_updated_desc")
+  @@index([business_id, default_category_id], map: "i_vendor_scope_default_category")
   @@map("vendor")
 }
 
