@@ -5,6 +5,7 @@ export type Vendor = {
   business_id: string;
   name: string;
   notes?: string | null;
+  default_category_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -24,10 +25,15 @@ export async function createVendor(args: {
   businessId: string;
   name: string;
   notes?: string;
+  default_category_id?: string | null;
 }): Promise<{ ok: true; vendor: Vendor }> {
   return apiFetch(`/v1/businesses/${args.businessId}/vendors`, {
     method: "POST",
-    body: JSON.stringify({ name: args.name, notes: args.notes }),
+    body: JSON.stringify({
+      name: args.name,
+      notes: args.notes,
+      default_category_id: args.default_category_id ?? null,
+    }),
   });
 }
 
@@ -43,10 +49,15 @@ export async function updateVendor(args: {
   vendorId: string;
   name?: string;
   notes?: string;
+  default_category_id?: string | null;
 }): Promise<{ ok: true; vendor: Vendor }> {
   return apiFetch(`/v1/businesses/${args.businessId}/vendors/${args.vendorId}`, {
     method: "PATCH",
-    body: JSON.stringify({ name: args.name, notes: args.notes }),
+    body: JSON.stringify({
+      name: args.name,
+      notes: args.notes,
+      default_category_id: args.default_category_id ?? null,
+    }),
   });
 }
 

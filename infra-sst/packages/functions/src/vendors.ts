@@ -86,6 +86,7 @@ export async function handler(event: any) {
         business_id: true,
         name: true,
         notes: true,
+        default_category_id: true,
         created_at: true,
         updated_at: true,
       },
@@ -102,15 +103,35 @@ export async function handler(event: any) {
     const name = String(body?.name ?? "").trim();
     const notes = body?.notes === undefined ? null : String(body.notes ?? "").trim();
 
+    const defaultCategoryRaw = body?.default_category_id ?? body?.defaultCategoryId ?? null;
+    const default_category_id = defaultCategoryRaw ? String(defaultCategoryRaw).trim() : null;
+
     if (!name) return json(400, { ok: false, error: "name is required" });
+
+    if (default_category_id) {
+      const hit = await prisma.category.findFirst({
+        where: { id: default_category_id, business_id: biz, archived_at: null },
+        select: { id: true },
+      });
+      if (!hit) return json(400, { ok: false, error: "Invalid default category" });
+    }
 
     const created = await prisma.vendor.create({
       data: {
         business_id: biz,
         name,
         notes: notes && notes.length ? notes : null,
+        default_category_id,
       },
-      select: { id: true, business_id: true, name: true, notes: true, created_at: true, updated_at: true },
+      select: {
+        id: true,
+        business_id: true,
+        name: true,
+        notes: true,
+        default_category_id: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
 
     return json(200, { ok: true, vendor: created });
@@ -121,7 +142,15 @@ export async function handler(event: any) {
     const vid = String(vendorId).trim();
     const vendor = await prisma.vendor.findFirst({
       where: { id: vid, business_id: biz },
-      select: { id: true, business_id: true, name: true, notes: true, created_at: true, updated_at: true },
+      select: {
+        id: true,
+        business_id: true,
+        name: true,
+        notes: true,
+        default_category_id: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
     if (!vendor) return json(404, { ok: false, error: "Vendor not found" });
     return json(200, { ok: true, vendor });
@@ -144,6 +173,25 @@ export async function handler(event: any) {
       const nt = String(body.notes ?? "").trim();
       data.notes = nt ? nt : null;
     }
+    if (body.default_category_id !== undefined || body.defaultCategoryId !== undefined) {
+      const raw = body.default_category_id ?? body.defaultCategoryId;
+
+      if (raw === null || raw === "") {
+        data.default_category_id = null;
+      } else {
+        const catId = String(raw).trim();
+        if (!catId) {
+          data.default_category_id = null;
+        } else {
+          const hit = await prisma.category.findFirst({
+            where: { id: catId, business_id: biz, archived_at: null },
+            select: { id: true },
+          });
+          if (!hit) return json(400, { ok: false, error: "Invalid default category" });
+          data.default_category_id = catId;
+        }
+      }
+    }
 
     const updated = await prisma.vendor.updateMany({
       where: { id: vid, business_id: biz },
@@ -154,7 +202,15 @@ export async function handler(event: any) {
 
     const vendor = await prisma.vendor.findFirst({
       where: { id: vid, business_id: biz },
-      select: { id: true, business_id: true, name: true, notes: true, created_at: true, updated_at: true },
+      select: {
+        id: true,
+        business_id: true,
+        name: true,
+        notes: true,
+        default_category_id: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
 
     return json(200, { ok: true, vendor });

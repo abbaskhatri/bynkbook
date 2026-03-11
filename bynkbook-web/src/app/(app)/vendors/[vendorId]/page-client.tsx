@@ -21,6 +21,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { deleteVendor, getVendor, updateVendor } from "@/lib/api/vendors";
+import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import {
   listBillsByVendor,
   createBill,
@@ -299,6 +300,13 @@ export default function VendorDetailPageClient() {
   const [err, setErr] = useState<string | null>(null);
   const [errIsClosed, setErrIsClosed] = useState(false);
   const [vendor, setVendor] = useState<any>(null);
+  const [categoryRows, setCategoryRows] = useState<CategoryRow[]>([]);
+
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of categoryRows) m.set(String(c.id), String(c.name));
+    return m;
+  }, [categoryRows]);
 
   const [bills, setBills] = useState<any[]>([]);
   const [apSummary, setApSummary] = useState<any>(null);
@@ -402,6 +410,7 @@ export default function VendorDetailPageClient() {
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [defaultCategoryId, setDefaultCategoryId] = useState("");
 
   const [openUpload, setOpenUpload] = useState(false);
 
@@ -434,7 +443,7 @@ export default function VendorDetailPageClient() {
       setErr(null);
 
       try {
-        const [vRes, billsRes, sumRes, uploadsRes, payRes] = await Promise.all([
+        const [vRes, billsRes, sumRes, uploadsRes, payRes, catsRes] = await Promise.all([
           getVendor({ businessId, vendorId }),
           listBillsByVendor({ businessId, vendorId, status: "all", limit: 200 }),
           getVendorApSummary({ businessId, vendorId, asOf: todayYmd() }),
@@ -452,6 +461,7 @@ export default function VendorDetailPageClient() {
             // Do not break vendor page if payments endpoint is transient
             return { ok: false, error: e?.message ?? "Payments unavailable", payments: [] };
           }),
+          listCategories(businessId, { includeArchived: false }),
         ]);
 
         // Epoch guard: do not commit stale refresh results
@@ -460,6 +470,8 @@ export default function VendorDetailPageClient() {
         setVendor(vRes.vendor);
         setName(String(vRes.vendor?.name ?? ""));
         setNotes(String(vRes.vendor?.notes ?? ""));
+        setDefaultCategoryId(String(vRes.vendor?.default_category_id ?? ""));
+        setCategoryRows(Array.isArray(catsRes.rows) ? catsRes.rows : []);
 
         setBills(Array.isArray(billsRes.bills) ? billsRes.bills : []);
         setApSummary(sumRes.summary ?? null);
@@ -538,6 +550,7 @@ export default function VendorDetailPageClient() {
         vendorId,
         name: name.trim(),
         notes: notes.trim(),
+        default_category_id: defaultCategoryId || null,
       });
       setVendor(res.vendor);
       setEditOpen(false);
@@ -844,6 +857,12 @@ export default function VendorDetailPageClient() {
           {vendor ? (
             <>
               <div><span className="text-slate-600">Name:</span> <span className="font-medium">{vendor.name}</span></div>
+              <div>
+                <span className="text-slate-600">Default category:</span>{" "}
+                <span className="font-medium">
+                  {vendor.default_category_id ? (categoryNameById.get(String(vendor.default_category_id)) ?? "—") : "—"}
+                </span>
+              </div>
               <div><span className="text-slate-600">Notes:</span> <span className="font-medium">{vendor.notes ?? "—"}</span></div>
               <div className="text-slate-600 text-xs">
                 Created: {String(vendor.created_at ?? "").slice(0, 10)} • Updated: {String(vendor.updated_at ?? "").slice(0, 10)}
@@ -2481,6 +2500,22 @@ export default function VendorDetailPageClient() {
             <div className="space-y-1">
               <div className="text-[11px] text-slate-600">Notes</div>
               <Input className="h-7 text-xs" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[11px] text-slate-600">Default category</div>
+              <select
+                className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                value={defaultCategoryId}
+                onChange={(e) => setDefaultCategoryId(e.target.value)}
+              >
+                <option value="">None</option>
+                {categoryRows.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </AppDialog>

@@ -17,6 +17,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { listVendors, createVendor } from "@/lib/api/vendors";
+import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { getVendorsApSummary } from "@/lib/api/ap";
 
 // Upload invoice stays as-is (pipeline already exists)
@@ -103,6 +104,8 @@ export default function VendorsPageClient() {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [defaultCategoryId, setDefaultCategoryId] = useState("");
+  const [categoryRows, setCategoryRows] = useState<CategoryRow[]>([]);
 
   async function refresh() {
     if (!businessId) return;
@@ -119,11 +122,15 @@ export default function VendorsPageClient() {
 
     const run = (async () => {
       try {
-        const res = await listVendors({ businessId, q: q.trim() || undefined, sort });
+        const [res, catsRes] = await Promise.all([
+          listVendors({ businessId, q: q.trim() || undefined, sort }),
+          listCategories(businessId, { includeArchived: false }),
+        ]);
         if (myEpoch !== refreshEpochRef.current) return;
 
         const list = res.vendors ?? [];
         setVendors(list);
+        setCategoryRows(Array.isArray(catsRes.rows) ? catsRes.rows : []);
 
         const ids = list.map((v: any) => String(v.id)).slice(0, 200);
         const sumRes = await getVendorsApSummary({ businessId, vendorIds: ids, limit: 200 });
@@ -161,10 +168,16 @@ export default function VendorsPageClient() {
     const loadingToken = beginLoading();
     setErr(null);
     try {
-      const res = await createVendor({ businessId, name: name.trim(), notes: notes.trim() || undefined });
+      const res = await createVendor({
+        businessId,
+        name: name.trim(),
+        notes: notes.trim() || undefined,
+        default_category_id: defaultCategoryId || null,
+      });
       setCreateOpen(false);
       setName("");
       setNotes("");
+      setDefaultCategoryId("");
       await refresh();
       router.push(`/vendors/${res.vendor.id}?businessId=${encodeURIComponent(businessId)}`);
     } catch (e: any) {
@@ -394,7 +407,10 @@ export default function VendorsPageClient() {
 
       <AppDialog
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          setCreateOpen(false);
+          setDefaultCategoryId("");
+        }}
         title="Add vendor"
         size="xs"
         footer={
@@ -417,6 +433,22 @@ export default function VendorsPageClient() {
           <div className="space-y-1">
             <div className="text-[11px] text-slate-600">Notes (optional)</div>
             <Input className="h-7 text-xs" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-[11px] text-slate-600">Default category (optional)</div>
+            <select
+              className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+              value={defaultCategoryId}
+              onChange={(e) => setDefaultCategoryId(e.target.value)}
+            >
+              <option value="">None</option>
+              {categoryRows.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </AppDialog>
