@@ -4273,11 +4273,15 @@ export default function LedgerPageClient() {
           {/* Category */}
           <td className={td + " min-w-0 " + deletedText}>
             {isEditing && editDraft ? (
-              <input
-                className={inputH7}
+              <AutoInput
                 value={editDraft.category}
-                onChange={(e) => setEditDraft({ ...editDraft, category: e.target.value })}
-                onKeyDown={onEditKeyDown}
+                onValueChange={(v) => setEditDraft({ ...editDraft, category: v })}
+                options={categoryOptions}
+                placeholder="Category"
+                inputClassName={inputH7}
+                allowCreate
+                onCreate={(name) => setEditDraft({ ...editDraft, category: name })}
+                onSubmit={() => triggerSaveEdit(r.id)}
               />
             ) : quickCatEntryId === r.id ? (
               <div className="flex flex-col gap-1">
@@ -4456,7 +4460,7 @@ export default function LedgerPageClient() {
 
                     const catId = String(s?.category_id ?? "");
                     const name = String(s?.category_name ?? "—");
-                    const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+                    const conf = Math.max(0, Math.min(100, Math.round(Number(s?.confidence ?? 0) || 0)));
 
                     return (
                       <button
@@ -4662,6 +4666,9 @@ export default function LedgerPageClient() {
                                 return;
                               }
 
+                              const topSug = ledgerSugTopByEntryId[r.id] ?? null;
+                              const suggestedCategoryName = String(topSug?.category_name ?? "").trim();
+
                               setEditingId(r.id);
                               setEditDraft({
                                 date: r.date,
@@ -4669,7 +4676,7 @@ export default function LedgerPageClient() {
                                 payee: r.payee,
                                 type: uiTypeFromRaw(r.rawType),
                                 method: uiMethodFromRaw(r.rawMethod),
-                                category: r.category || "",
+                                category: r.category || suggestedCategoryName || "",
                                 amountStr: stripMoneyDisplay(r.amountStr),
                               });
                               requestAnimationFrame(() => editPayeeRef.current?.focus());

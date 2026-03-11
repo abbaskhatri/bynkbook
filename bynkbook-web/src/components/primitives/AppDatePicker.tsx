@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { inputH7, ringFocus } from "./tokens";
 
@@ -208,135 +209,144 @@ export function AppDatePicker({
                 </button>
             ) : null}
 
-            {open
-                ? typeof document !== "undefined"
-                    ? (() => {
-                        // compute position each render while open
-                        const el = anchorRef.current;
-                        if (el) {
-                            const r = el.getBoundingClientRect();
-                            const left = Math.max(8, Math.min(r.left, window.innerWidth - 320 - 8));
-                            const top = r.bottom + 8;
-                            // avoid setState loop if unchanged
-                            if (popoverPos.left !== left || popoverPos.top !== top) {
-                                // eslint-disable-next-line react-hooks/rules-of-hooks
-                                setTimeout(() => setPopoverPos({ left, top }), 0);
-                            }
+            {open && typeof document !== "undefined"
+                ? (() => {
+                    const el = anchorRef.current;
+                    if (el) {
+                        const r = el.getBoundingClientRect();
+                        const popoverWidth = 320;
+                        const popoverHeight = 340;
+
+                        const left = Math.max(8, Math.min(r.left, window.innerWidth - popoverWidth - 8));
+
+                        const spaceBelow = window.innerHeight - r.bottom;
+                        const spaceAbove = r.top;
+
+                        const top =
+                            spaceBelow >= popoverHeight + 8
+                                ? r.bottom + 8
+                                : spaceAbove >= popoverHeight + 8
+                                    ? r.top - popoverHeight - 8
+                                    : Math.max(8, Math.min(r.bottom + 8, window.innerHeight - popoverHeight - 8));
+
+                        if (popoverPos.left !== left || popoverPos.top !== top) {
+                            setTimeout(() => setPopoverPos({ left, top }), 0);
                         }
+                    }
 
-                        return (
-                            <div
-                                style={{ position: "fixed", left: popoverPos.left, top: popoverPos.top, width: 320, zIndex: 60 }}
-                                className="rounded-2xl border border-slate-200 bg-white shadow-xl p-3"
-                            >
-                                {/* Header */}
-                                <div className="grid grid-cols-[40px_1fr_40px] items-center mb-2">
-                                    <button
-                                        type="button"
-                                        className={[
-                                            "h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50",
-                                            "inline-flex items-center justify-center",
-                                            ringFocus,
-                                        ].join(" ")}
-                                        onClick={() => setViewMonth((m) => addMonths(m, -1))}
-                                        aria-label="Previous month"
-                                        title="Previous month"
-                                    >
-                                        <ChevronLeft className="h-5 w-5 text-slate-700" />
-                                    </button>
+                    return createPortal(
+                        <div
+                            style={{ position: "fixed", left: popoverPos.left, top: popoverPos.top, width: 320, zIndex: 60 }}
+                            className="rounded-2xl border border-slate-200 bg-white shadow-xl p-3"
+                        >
+                            {/* Header */}
+                            <div className="grid grid-cols-[40px_1fr_40px] items-center mb-2">
+                                <button
+                                    type="button"
+                                    className={[
+                                        "h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50",
+                                        "inline-flex items-center justify-center",
+                                        ringFocus,
+                                    ].join(" ")}
+                                    onClick={() => setViewMonth((m) => addMonths(m, -1))}
+                                    aria-label="Previous month"
+                                    title="Previous month"
+                                >
+                                    <ChevronLeft className="h-5 w-5 text-slate-700" />
+                                </button>
 
-                                    <div className="text-base font-semibold text-slate-900 text-center">{monthLabel}</div>
+                                <div className="text-base font-semibold text-slate-900 text-center">{monthLabel}</div>
 
-                                    <button
-                                        type="button"
-                                        className={[
-                                            "h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50",
-                                            "inline-flex items-center justify-center",
-                                            ringFocus,
-                                        ].join(" ")}
-                                        onClick={() => setViewMonth((m) => addMonths(m, 1))}
-                                        aria-label="Next month"
-                                        title="Next month"
-                                    >
-                                        <ChevronRight className="h-5 w-5 text-slate-700" />
-                                    </button>
-                                </div>
-
-                                {/* Weekdays */}
-                                <div className="grid grid-cols-7 text-[11px] font-medium text-slate-500 mb-1">
-                                    <div className="text-center">Su</div>
-                                    <div className="text-center">Mo</div>
-                                    <div className="text-center">Tu</div>
-                                    <div className="text-center">We</div>
-                                    <div className="text-center">Th</div>
-                                    <div className="text-center">Fr</div>
-                                    <div className="text-center">Sa</div>
-                                </div>
-
-                                {/* Grid */}
-                                <div className="grid grid-cols-7 gap-1">
-                                    {grid.flat().map(({ date, inMonth }) => {
-                                        const isToday = sameDay(date, today);
-                                        const isSelected = selected ? sameDay(date, selected) : false;
-
-                                        return (
-                                            <button
-                                                key={dateToYmdLocal(date)}
-                                                type="button"
-                                                className={[
-                                                    "h-10 w-10 rounded-xl text-sm flex items-center justify-center",
-                                                    inMonth ? "text-slate-900" : "text-slate-300",
-                                                    !disabled ? "hover:bg-primary/10" : "",
-                                                    isToday ? "bg-primary/10 ring-1 ring-primary/20" : "",
-                                                    isSelected ? "bg-primary text-primary-foreground hover:bg-primary" : "",
-                                                    ringFocus,
-                                                ].join(" ")}
-                                                disabled={disabled}
-                                                onClick={() => {
-                                                    if (disabled) return;
-                                                    onChange(dateToYmdLocal(date));
-                                                    setOpen(false);
-                                                }}
-                                                aria-label={date.toDateString()}
-                                                title={date.toDateString()}
-                                            >
-                                                {date.getDate()}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-
-                                {/* Footer */}
-                                <div className="mt-2 flex items-center justify-between">
-                                    <button
-                                        type="button"
-                                        className={["h-8 px-2 text-xs rounded-md hover:bg-slate-50", ringFocus].join(" ")}
-                                        onClick={() => {
-                                            onChange("");
-                                            setOpen(false);
-                                        }}
-                                        disabled={disabled}
-                                    >
-                                        Clear
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        className={["h-8 px-2 text-xs rounded-md hover:bg-slate-50", ringFocus].join(" ")}
-                                        onClick={() => {
-                                            onChange(dateToYmdLocal(today));
-                                            setViewMonth(startOfMonth(today));
-                                            setOpen(false);
-                                        }}
-                                        disabled={disabled}
-                                    >
-                                        Today
-                                    </button>
-                                </div>
+                                <button
+                                    type="button"
+                                    className={[
+                                        "h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50",
+                                        "inline-flex items-center justify-center",
+                                        ringFocus,
+                                    ].join(" ")}
+                                    onClick={() => setViewMonth((m) => addMonths(m, 1))}
+                                    aria-label="Next month"
+                                    title="Next month"
+                                >
+                                    <ChevronRight className="h-5 w-5 text-slate-700" />
+                                </button>
                             </div>
-                        );
-                    })()
-                    : null
+
+                            {/* Weekdays */}
+                            <div className="grid grid-cols-7 text-[11px] font-medium text-slate-500 mb-1">
+                                <div className="text-center">Su</div>
+                                <div className="text-center">Mo</div>
+                                <div className="text-center">Tu</div>
+                                <div className="text-center">We</div>
+                                <div className="text-center">Th</div>
+                                <div className="text-center">Fr</div>
+                                <div className="text-center">Sa</div>
+                            </div>
+
+                            {/* Grid */}
+                            <div className="grid grid-cols-7 gap-1">
+                                {grid.flat().map(({ date, inMonth }) => {
+                                    const isToday = sameDay(date, today);
+                                    const isSelected = selected ? sameDay(date, selected) : false;
+
+                                    return (
+                                        <button
+                                            key={dateToYmdLocal(date)}
+                                            type="button"
+                                            className={[
+                                                "h-10 w-10 rounded-xl text-sm flex items-center justify-center",
+                                                inMonth ? "text-slate-900" : "text-slate-300",
+                                                !disabled ? "hover:bg-violet-50" : "",
+                                                isToday ? "bg-violet-50 ring-1 ring-violet-200" : "",
+                                                isSelected ? "bg-violet-600 text-white hover:bg-violet-600" : "",
+                                                ringFocus,
+                                            ].join(" ")}
+                                            disabled={disabled}
+                                            onClick={() => {
+                                                if (disabled) return;
+                                                onChange(dateToYmdLocal(date));
+                                                setOpen(false);
+                                            }}
+                                            aria-label={date.toDateString()}
+                                            title={date.toDateString()}
+                                        >
+                                            {date.getDate()}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Footer */}
+                            <div className="mt-2 flex items-center justify-between">
+                                <button
+                                    type="button"
+                                    className={["h-8 px-2 text-xs rounded-md hover:bg-slate-50", ringFocus].join(" ")}
+                                    onClick={() => {
+                                        onChange("");
+                                        setOpen(false);
+                                    }}
+                                    disabled={disabled}
+                                >
+                                    Clear
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className={["h-8 px-2 text-xs rounded-md hover:bg-slate-50", ringFocus].join(" ")}
+                                    onClick={() => {
+                                        onChange(dateToYmdLocal(today));
+                                        setViewMonth(startOfMonth(today));
+                                        setOpen(false);
+                                    }}
+                                    disabled={disabled}
+                                >
+                                    Today
+                                </button>
+                            </div>
+                        </div>,
+                        document.body
+                    );
+                })()
                 : null}
         </div>
     );
