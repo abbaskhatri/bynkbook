@@ -101,13 +101,24 @@ export function AppDatePicker({
 
     // Close on outside click / escape
     const rootRef = React.useRef<HTMLDivElement | null>(null);
+    const popoverRef = React.useRef<HTMLDivElement | null>(null);
+
     React.useEffect(() => {
         if (!open) return;
 
         const onDocMouseDown = (e: MouseEvent) => {
-            const el = rootRef.current;
-            if (!el) return;
-            if (e.target instanceof Node && !el.contains(e.target)) setOpen(false);
+            const anchorEl = rootRef.current;
+            const popoverEl = popoverRef.current;
+            const target = e.target;
+
+            if (!(target instanceof Node)) return;
+
+            const clickedInsideAnchor = !!anchorEl && anchorEl.contains(target);
+            const clickedInsidePopover = !!popoverEl && popoverEl.contains(target);
+
+            if (!clickedInsideAnchor && !clickedInsidePopover) {
+                setOpen(false);
+            }
         };
 
         const onKeyDown = (e: KeyboardEvent) => {
@@ -236,6 +247,7 @@ export function AppDatePicker({
 
                     return createPortal(
                         <div
+                            ref={popoverRef}
                             style={{ position: "fixed", left: popoverPos.left, top: popoverPos.top, width: 320, zIndex: 60 }}
                             className="rounded-2xl border border-slate-200 bg-white shadow-xl p-3"
                         >
