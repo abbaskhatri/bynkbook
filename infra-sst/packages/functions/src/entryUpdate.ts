@@ -1,5 +1,6 @@
   import { getPrisma } from "./lib/db";
   import { assertNotClosedPeriod } from "./lib/closedPeriods";
+  import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
 
   const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
   const ENTRY_STATUS = ["EXPECTED", "CLEARED"] as const;
@@ -110,6 +111,9 @@
       } catch {
         return json(400, { ok: false, error: "Invalid JSON body" });
       }
+
+      const suggestedCategoryRaw = body?.suggested_category_id ?? body?.suggestedCategoryId ?? null;
+      const suggested_category_id = suggestedCategoryRaw ? String(suggestedCategoryRaw).trim() : null;
 
       const prisma = await getPrisma();
 
@@ -282,7 +286,14 @@ if (body.category_id !== undefined) {
         // Load the latest version for normalization decisions
         const current = await prisma.entry.findFirst({
           where: { id: ent, business_id: biz, account_id: acct },
-          select: { type: true, amount_cents: true, is_adjustment: true },
+          select: {
+            type: true,
+            amount_cents: true,
+            is_adjustment: true,
+            payee: true,
+            memo: true,
+            category_id: true,
+          },
         });
         if (!current) return json(404, { ok: false, error: "Entry not found" });
 
@@ -345,6 +356,22 @@ if (body.category_id !== undefined) {
 
       if (!updated) {
         return json(404, { ok: false, error: "Entry not found after update" });
+      }
+
+      if (body.category_id !== undefined && updated.category_id) {
+        await writeCategoryMemoryFeedback({
+          prisma,
+          business_id: biz,
+          entry: {
+            id: updated.id,
+            payee: updated.payee,
+            memo: updated.memo,
+            amount_cents: updated.amount_cents,
+            type: updated.type,
+          },
+          selected_category_id: updated.category_id,
+          suggested_category_id,
+        });
       }
 
       return json(200, { ok: true, entry: serializeEntry(updated) });

@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
+import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
 import { randomUUID } from "node:crypto";
 
 const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
@@ -82,7 +83,11 @@ export async function handler(event: any) {
       body = {};
     }
 
-    type ApplyItem = { entryId: string; category_id: string };
+    type ApplyItem = {
+      entryId: string;
+      category_id: string;
+      suggested_category_id?: string;
+    };
 
     const itemsIn: unknown[] = Array.isArray(body?.items) ? body.items : [];
     const items: ApplyItem[] = itemsIn
@@ -90,6 +95,7 @@ export async function handler(event: any) {
       .map((x: any): ApplyItem => ({
         entryId: String(x?.entryId ?? "").trim(),
         category_id: String(x?.category_id ?? "").trim(),
+        suggested_category_id: x?.suggested_category_id ? String(x.suggested_category_id).trim() : undefined,
       }))
       .filter((x: ApplyItem) => !!x.entryId);
 
@@ -138,14 +144,24 @@ export async function handler(event: any) {
         id: { in: entryIds },
         deleted_at: null,
       },
-      select: { id: true, date: true },
+      select: {
+        id: true,
+        date: true,
+        payee: true,
+        memo: true,
+        amount_cents: true,
+        type: true,
+        category_id: true,
+      },
     });
 
+    const entryById = new Map<string, any>();
     const dateById = new Map<string, any>();
     const months = new Set<string>();
     for (const r of rows) {
       const id = String(r?.id ?? "").trim();
       if (!id) continue;
+      entryById.set(id, r);
       dateById.set(id, r?.date);
 
       // Use closedPeriods helpers without per-row DB calls:
@@ -230,6 +246,23 @@ export async function handler(event: any) {
           where: { id: entryId },
           data: { category_id: categoryId },
         });
+
+        const existingEntry = entryById.get(entryId);
+        if (existingEntry) {
+          await writeCategoryMemoryFeedback({
+            prisma,
+            business_id: biz,
+            entry: {
+              id: existingEntry.id,
+              payee: existingEntry.payee,
+              memo: existingEntry.memo,
+              amount_cents: existingEntry.amount_cents,
+              type: existingEntry.type,
+            },
+            selected_category_id: categoryId,
+            suggested_category_id: it.suggested_category_id ?? null,
+          });
+        }
 
         applied++;
         results.push({ entryId, ok: true });
@@ -701,6 +734,10 @@ export async function handler(event: any) {
     const vendorIdRaw = body?.vendor_id ?? body?.vendorId ?? null;
     const vendor_id = vendorIdRaw ? vendorIdRaw.toString().trim() : null;
 
+    // Optional writeback metadata from suggestion surfaces
+    const suggestedCategoryRaw = body?.suggested_category_id ?? body?.suggestedCategoryId ?? null;
+    const suggested_category_id = suggestedCategoryRaw ? suggestedCategoryRaw.toString().trim() : null;
+
     const type = (body?.type ?? "").toString().trim();
     const methodField = body?.method ?? null;
     const status = (body?.status ?? "EXPECTED").toString().trim();
@@ -771,6 +808,22 @@ export async function handler(event: any) {
         updated_at: new Date(),
       },
     });
+
+    if (category_id) {
+      await writeCategoryMemoryFeedback({
+        prisma,
+        business_id: biz,
+        entry: {
+          id: created.id,
+          payee: created.payee,
+          memo: created.memo,
+          amount_cents: created.amount_cents,
+          type: created.type,
+        },
+        selected_category_id: category_id,
+        suggested_category_id,
+      });
+    }
 
     return json(201, {
       ok: true,
