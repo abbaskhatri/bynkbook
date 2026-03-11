@@ -70,6 +70,46 @@ function firstOfThisMonth() {
   return `${y}-${m}-01`;
 }
 
+function categorySuggestionConfidence(raw: unknown) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function categorySuggestionTierLabel(raw: unknown) {
+  const tier = String(raw ?? "").trim().toUpperCase();
+  if (tier === "SAFE_DETERMINISTIC") return "Strong suggestion";
+  if (tier === "STRONG_SUGGESTION") return "Strong suggestion";
+  if (tier === "ALTERNATE") return "Alternate";
+  if (tier === "REVIEW_BUCKET") return "Review needed";
+  return "Suggestion";
+}
+
+function categorySuggestionSourceLabel(raw: unknown) {
+  const source = String(raw ?? "").trim().toUpperCase();
+  if (source === "VENDOR_DEFAULT") return "Vendor default";
+  if (source === "MEMORY") return "Learned from your history";
+  if (source === "HEURISTIC") return "Pattern match";
+  if (source === "AI") return "AI suggestion";
+  return "Suggestion";
+}
+
+function categorySuggestionButtonClass(rawTier: unknown, isPrimary: boolean) {
+  const tier = String(rawTier ?? "").trim().toUpperCase();
+
+  if (tier === "SAFE_DETERMINISTIC" || tier === "STRONG_SUGGESTION") {
+    return isPrimary
+      ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
+      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50";
+  }
+
+  if (tier === "REVIEW_BUCKET") {
+    return "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100";
+  }
+
+  return "border-slate-200 bg-white text-slate-700 hover:bg-slate-50";
+}
+
 export default function CategoryReviewPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -542,7 +582,11 @@ export default function CategoryReviewPageClient() {
 
   // Per-row category changes apply immediately (dropdown onChange + suggestion pill click)
 
-  async function applyCategoryToEntry(entryId: string, categoryId: string | null) {
+  async function applyCategoryToEntry(
+    entryId: string,
+    categoryId: string | null,
+    suggestedCategoryId?: string | null
+  ) {
     if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
 
     setPendingIds((m) => ({ ...m, [entryId]: true }));
@@ -564,7 +608,10 @@ export default function CategoryReviewPageClient() {
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
         entryId,
-        updates: { category_id: categoryId },
+        updates: {
+          category_id: categoryId,
+          suggested_category_id: suggestedCategoryId ?? null,
+        },
       });
 
       // Refresh all ledger/account entry surfaces immediately.
@@ -730,16 +777,25 @@ export default function CategoryReviewPageClient() {
 
   // Auth handled by AppShell
   const selectedApplyItems = useMemo(() => {
-    const out: Array<{ entryId: string; category_id: string }> = [];
+    const out: Array<{ entryId: string; category_id: string; suggested_category_id?: string }> = [];
 
     for (const entryId of Array.from(selectedIds)) {
       const category_id = String(selectedSuggestionByEntryId[entryId] ?? "").trim();
       if (!category_id) continue;
-      out.push({ entryId, category_id });
+
+      const list = Array.isArray(sugByEntryId[entryId]) ? sugByEntryId[entryId] : [];
+      const top = list[0] ?? null;
+      const suggested_category_id = String(top?.category_id ?? top?.categoryId ?? "").trim();
+
+      out.push({
+        entryId,
+        category_id,
+        suggested_category_id: suggested_category_id || undefined,
+      });
     }
 
     return out.slice(0, 200);
-  }, [selectedIds, selectedSuggestionByEntryId]);
+  }, [selectedIds, selectedSuggestionByEntryId, sugByEntryId]);
 
   const autoFixRows = useMemo(() => {
     return visibleRows
@@ -1268,7 +1324,16 @@ export default function CategoryReviewPageClient() {
                                     }
 
                                     try {
-                                      await applyCategoryToEntry(id, nextCategoryId);
+                                      const topSuggestion = (Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [])[0] ?? null;
+                                      const suggestedCategoryId = String(
+                                        topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
+                                      ).trim();
+
+                                      await applyCategoryToEntry(
+                                        id,
+                                        nextCategoryId,
+                                        suggestedCategoryId || null
+                                      );
                                     } catch {
                                       if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
                                       if (undoSnap) {
@@ -1371,14 +1436,18 @@ export default function CategoryReviewPageClient() {
                                               categoryNameById[String(s?.category_id ?? s?.categoryId ?? "")] ??
                                               "—"
                                             );
-                                            const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+                                            const conf = categorySuggestionConfidence(s?.confidence);
+                                            const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
+                                            const sourceLabel = categorySuggestionSourceLabel(s?.source);
+                                            const reasonText = String(s?.reason ?? "").trim();
+                                            const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, idx === 0);
 
                                             return (
                                               <div key={`${id}:${catId || name}:${idx}`} className="flex items-center gap-1">
                                                 <button
                                                   type="button"
-                                                  className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15 disabled:opacity-60"
-                                                  title={String(s?.reason ?? "")}
+                                                  className={`h-5 px-1.5 rounded-full border text-[10px] inline-flex items-center gap-1 disabled:opacity-60 ${buttonTone}`}
+                                                  title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
                                                   disabled={!!pendingIds[id]}
                                                   onClick={async () => {
                                                     if (!catId) return;
@@ -1389,14 +1458,14 @@ export default function CategoryReviewPageClient() {
                                                     const prevCategoryId = e.category_id ? String(e.category_id) : null;
 
                                                     try {
-                                                      await applyCategoryToEntry(id, catId);
+                                                      await applyCategoryToEntry(id, catId, catId);
                                                       setAiAppliedById((m) => ({ ...m, [id]: true }));
                                                       setUndoWindow(id, prevCategoryId, catId);
                                                     } catch {}
                                                   }}
                                                 >
                                                   <span className="font-semibold truncate max-w-[88px]">{name}</span>
-                                                  <span className="text-primary">{conf}%</span>
+                                                  <span>{conf}%</span>
                                                 </button>
 
                                                 <button
@@ -1410,6 +1479,17 @@ export default function CategoryReviewPageClient() {
                                               </div>
                                             );
                                           })}
+
+                                          {top[0] ? (
+                                            <div className="text-[10px] text-slate-500">
+                                              {categorySuggestionTierLabel(top[0]?.confidence_tier)}
+                                              {" • "}
+                                              {categorySuggestionSourceLabel(top[0]?.source)}
+                                              {String(top[0]?.reason ?? "").trim()
+                                                ? ` • ${String(top[0]?.reason ?? "").trim()}`
+                                                : ""}
+                                            </div>
+                                          ) : null}
 
                                           {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
                                           {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" /> : null}
@@ -1630,6 +1710,9 @@ export default function CategoryReviewPageClient() {
                                 const id = String(e.id);
                                 const top = row.suggestions[0] ?? null;
                                 const topReason = String(top?.reason ?? "").trim();
+                                const topTierLabel = categorySuggestionTierLabel(top?.confidence_tier);
+                                const topSourceLabel = categorySuggestionSourceLabel(top?.source);
+                                const topConfidence = categorySuggestionConfidence(top?.confidence);
 
                                 return (
                                   <div
@@ -1643,6 +1726,11 @@ export default function CategoryReviewPageClient() {
                                       <div className="mt-0.5 text-[10px] text-slate-500">
                                         {String(e.date ?? "").slice(0, 10)}
                                       </div>
+                                      {top ? (
+                                        <div className="mt-1 text-[10px] text-slate-500">
+                                          {topTierLabel} • {topSourceLabel} • {topConfidence}%
+                                        </div>
+                                      ) : null}
                                       {topReason ? (
                                         <div className="mt-1 text-[10px] text-slate-500">
                                           {topReason}

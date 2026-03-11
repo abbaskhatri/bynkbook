@@ -26,8 +26,18 @@ export async function createEntryFromBankTransaction(args: {
   memo?: string;
   method?: string;
   category_id?: string;
+  suggested_category_id?: string;
 }) {
-  const { businessId, accountId, bankTransactionId, autoMatch, memo, method, category_id } = args;
+  const {
+    businessId,
+    accountId,
+    bankTransactionId,
+    autoMatch,
+    memo,
+    method,
+    category_id,
+    suggested_category_id,
+  } = args;
 
   return apiFetch(
     `/v1/businesses/${businessId}/accounts/${accountId}/bank-transactions/${bankTransactionId}/create-entry`,
@@ -38,6 +48,7 @@ export async function createEntryFromBankTransaction(args: {
         memo: memo ?? "",
         method: method ?? "",
         category_id: category_id ?? "",
+        suggested_category_id: suggested_category_id ?? "",
       }),
     }
   );

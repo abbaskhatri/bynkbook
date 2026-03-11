@@ -37,7 +37,11 @@ export async function getCategorySuggestions(args: {
 export async function applyCategoryBatch(args: {
   businessId: string;
   accountId: string;
-  items: Array<{ entryId: string; category_id: string }>;
+  items: Array<{
+    entryId: string;
+    category_id: string;
+    suggested_category_id?: string;
+  }>;
 }) {
   const { businessId, accountId, items } = args;
 

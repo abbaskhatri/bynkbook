@@ -245,6 +245,30 @@ function pctConfidence(v: number) {
   return `${n}%`;
 }
 
+function categorySuggestionConfidence(raw: unknown) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function categorySuggestionTierLabel(raw: unknown) {
+  const tier = String(raw ?? "").trim().toUpperCase();
+  if (tier === "SAFE_DETERMINISTIC") return "Strong suggestion";
+  if (tier === "STRONG_SUGGESTION") return "Strong suggestion";
+  if (tier === "ALTERNATE") return "Alternate";
+  if (tier === "REVIEW_BUCKET") return "Review needed";
+  return "Suggestion";
+}
+
+function categorySuggestionSourceLabel(raw: unknown) {
+  const source = String(raw ?? "").trim().toUpperCase();
+  if (source === "VENDOR_DEFAULT") return "Vendor default";
+  if (source === "MEMORY") return "Learned from your history";
+  if (source === "HEURISTIC") return "Pattern match";
+  if (source === "AI") return "AI suggestion";
+  return "Suggestion";
+}
+
 function aiUiMessage(err: any, fallback = "AI suggestions are unavailable right now.") {
   const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
   const raw = String(
@@ -1051,7 +1075,7 @@ export default function ReconcilePageClient() {
   const [createEntryCategoryId, setCreateEntryCategoryId] = useState<string>("");
   const [createEntryCategoryName, setCreateEntryCategoryName] = useState<string>("");
 
-  // Phase F1: heuristic category suggestions (suggestion-only; user must click)
+  // Bundle B: canonical category suggestions (suggestion-only; user must click)
   const [createEntrySugLoading, setCreateEntrySugLoading] = useState(false);
   const [createEntrySugErr, setCreateEntrySugErr] = useState<string | null>(null);
   const [createEntrySuggestions, setCreateEntrySuggestions] = useState<Array<any>>([]);
@@ -2488,6 +2512,11 @@ const isReconcileExemptEntry = (e: any) => {
                         markPending(bankId);
 
                         try {
+                          const topSuggestion = createEntrySuggestions[0] ?? null;
+                          const suggestedCategoryId = String(
+                            topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
+                          ).trim();
+
                           await createEntryFromBankTransaction({
                             businessId: selectedBusinessId,
                             accountId: selectedAccountId,
@@ -2496,6 +2525,7 @@ const isReconcileExemptEntry = (e: any) => {
                             memo: createEntryMemo,
                             method: createEntryMethod,
                             category_id: createEntryCategoryId.trim() || "",
+                            suggested_category_id: suggestedCategoryId || "",
                           });
 
                           await refreshTablesFully({ preserveOnEmpty: true });
@@ -2593,21 +2623,27 @@ const isReconcileExemptEntry = (e: any) => {
                         ) : createEntrySuggestions.length ? (
                           <div className="flex flex-col gap-2">
                             <div className="flex flex-wrap gap-2">
-                              {createEntrySuggestions.slice(0, 3).map((s: any) => {
-                                const id = String(s?.category_id ?? "");
-                                const name = String(s?.category_name ?? "—");
-                                const conf = Math.round((Number(s?.confidence ?? 0) || 0) * 100);
+                              {createEntrySuggestions.slice(0, 3).map((s: any, idx: number) => {
+                                const id = String(s?.category_id ?? s?.categoryId ?? "");
+                                const name = String(s?.category_name ?? s?.categoryName ?? "—");
+                                const conf = categorySuggestionConfidence(s?.confidence);
+                                const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
+                                const sourceLabel = categorySuggestionSourceLabel(s?.source);
+                                const reasonText = String(s?.reason ?? "").trim();
                                 const selected = createEntryCategoryId && createEntryCategoryId === id;
 
                                 return (
                                   <button
                                     key={id || name}
                                     type="button"
+                                    title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
                                     className={[
                                       "h-7 px-2.5 rounded-full border text-[11px] inline-flex items-center gap-2",
                                       selected
                                         ? "border-primary/20 bg-primary/10 text-primary"
-                                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                                        : idx === 0
+                                          ? "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
+                                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
                                       ringFocus,
                                     ].join(" ")}
                                     onClick={() => {
@@ -2631,16 +2667,27 @@ const isReconcileExemptEntry = (e: any) => {
                               })}
                             </div>
 
-                            <div className="text-[11px] text-slate-500 truncate" title={String(createEntrySuggestions?.[0]?.reason ?? "Based on your history")}>
+                            <div className="text-[11px] text-slate-500">
+                              {categorySuggestionTierLabel(createEntrySuggestions?.[0]?.confidence_tier)}
+                              {" • "}
+                              {categorySuggestionSourceLabel(createEntrySuggestions?.[0]?.source)}
+                              {" • "}
+                              {categorySuggestionConfidence(createEntrySuggestions?.[0]?.confidence)}%
+                            </div>
+
+                            <div
+                              className="text-[11px] text-slate-500 truncate"
+                              title={String(createEntrySuggestions?.[0]?.reason ?? "Review this entry before saving")}
+                            >
                               {String(createEntrySuggestions?.[0]?.reason ?? "").trim()
-                                ? `AI reason: ${String(createEntrySuggestions?.[0]?.reason ?? "")}`
-                                : "AI reason: Based on your history"}
+                                ? String(createEntrySuggestions?.[0]?.reason ?? "")
+                                : "Review this entry before saving"}
                             </div>
                           </div>
                         ) : createEntrySugErr ? (
                           <div className="text-[11px] text-slate-500">Suggestions unavailable</div>
                         ) : (
-                          <div className="text-[11px] text-slate-500">Suggestions will appear based on your history</div>
+                          <div className="text-[11px] text-slate-500">No strong suggestion yet. You can still choose a category below.</div>
                         )}
                       </div>
 

@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
+import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
 import { randomUUID } from "node:crypto";
 
 // Reuse the same auth-claims helper pattern used elsewhere
@@ -571,6 +572,9 @@ export async function handler(event: any) {
       const rawCategoryId = body?.category_id ? String(body.category_id) : "";
       const categoryIdOverride = rawCategoryId.trim() ? rawCategoryId.trim() : "";
 
+      const suggestedCategoryRaw = body?.suggested_category_id ?? body?.suggestedCategoryId ?? "";
+      const suggestedCategoryId = String(suggestedCategoryRaw ?? "").trim();
+
       const bankTxn = await prisma.bankTransaction.findFirst({
         where: {
           business_id: businessId,
@@ -798,6 +802,22 @@ export async function handler(event: any) {
 
         return { createdEntryId: createdEntry.id, createdMatchGroupId };
       });
+
+      if (categoryIdFinal) {
+        await writeCategoryMemoryFeedback({
+          prisma,
+          business_id: businessId,
+          entry: {
+            id: result.createdEntryId,
+            payee: (bankTxn.name ?? "").toString().trim() || "Bank transaction",
+            memo,
+            amount_cents: entryAmountCents,
+            type: entryType,
+          },
+          selected_category_id: categoryIdFinal,
+          suggested_category_id: suggestedCategoryId || null,
+        });
+      }
 
       await logActivity(prisma, {
         businessId: businessId,

@@ -253,6 +253,7 @@ export async function updateEntry(params: {
     method?: string;
     status?: string;
     category_id?: string | null;
+    suggested_category_id?: string | null;
     vendor_id?: string | null;
   };
 }): Promise<Entry> {
