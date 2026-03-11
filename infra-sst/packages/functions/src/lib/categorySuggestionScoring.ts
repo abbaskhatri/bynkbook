@@ -1,5 +1,9 @@
 import type { CandidateCategory, Direction } from "./categoryMemory";
-import { normalizeFreeText } from "./categoryMerchantNormalize";
+import {
+  normalizeFreeText,
+  normalizeMerchant,
+  tokenizeMerchantText,
+} from "./categoryMerchantNormalize";
 
 export type HeuristicInputItem = {
   id: string;
@@ -27,6 +31,17 @@ export type HeuristicSuggestion = {
   category_id: string;
   category_name: string;
   confidence: number;
+  reason: string;
+};
+
+type CategoryEvidence = {
+  score: number;
+  exactMerchantHits: number;
+  strongKeywordHits: number;
+  moderateKeywordHits: number;
+  vendorHits: number;
+  highSignalHits: number;
+  supportingRows: number;
   reason: string;
 };
 
@@ -59,6 +74,94 @@ function jaccard(a: Set<string>, b: Set<string>) {
   return uni <= 0 ? 0 : inter / uni;
 }
 
+function parseDateMs(value: any): number | null {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function recencyWeight(rowDate: any): number {
+  const ms = parseDateMs(rowDate);
+  if (!ms) return 1;
+
+  const ageDays = Math.max(0, (Date.now() - ms) / (1000 * 60 * 60 * 24));
+
+  if (ageDays <= 30) return 1.15;
+  if (ageDays <= 90) return 1.08;
+  if (ageDays <= 180) return 1.0;
+  if (ageDays <= 365) return 0.92;
+  return 0.82;
+}
+
+function supportingRowWeight(hitIndex: number): number {
+  if (hitIndex <= 0) return 1.0;
+  if (hitIndex === 1) return 0.72;
+  if (hitIndex === 2) return 0.5;
+  if (hitIndex === 3) return 0.35;
+  return 0.2;
+}
+
+function hasAnyToken(tokens: Set<string>, values: string[]) {
+  for (const v of values) {
+    if (tokens.has(v)) return true;
+  }
+  return false;
+}
+
+function hasTaxSignal(tokens: Set<string>) {
+  return hasAnyToken(tokens, [
+    "irs",
+    "eftps",
+    "usataxpymt",
+    "treas",
+    "treasury",
+    "tax",
+    "agency",
+  ]);
+}
+
+function hasPayrollSignal(tokens: Set<string>) {
+  return hasAnyToken(tokens, [
+    "adp",
+    "gusto",
+    "paychex",
+    "intuit",
+    "quickbooks",
+    "payroll",
+    "processor",
+  ]);
+}
+
+function hasHighSignalEntity(tokens: Set<string>) {
+  return hasTaxSignal(tokens) || hasPayrollSignal(tokens);
+}
+
+function confidenceTierFromEvidence(e: CategoryEvidence, relativeToTop: number, index: number) {
+  let confidence = 56 + relativeToTop * 18;
+
+  if (e.exactMerchantHits > 0) confidence += 14;
+  if (e.vendorHits > 0) confidence += 8;
+  if (e.highSignalHits > 0) confidence += 7;
+  if (e.strongKeywordHits > 0) confidence += 5;
+  if (e.moderateKeywordHits > 0 && e.strongKeywordHits === 0) confidence += 2;
+
+  const strongEvidenceCount =
+    (e.exactMerchantHits > 0 ? 1 : 0) +
+    (e.vendorHits > 0 ? 1 : 0) +
+    (e.highSignalHits > 0 ? 1 : 0) +
+    (e.strongKeywordHits > 0 ? 1 : 0);
+
+  if (strongEvidenceCount === 0) {
+    confidence = Math.min(confidence, 72);
+  } else if (strongEvidenceCount === 1 && e.exactMerchantHits === 0 && e.vendorHits === 0) {
+    confidence = Math.min(confidence, 82);
+  }
+
+  if (index > 0) confidence -= index * 5;
+
+  return clampInt(confidence, 60, 94);
+}
+
 export function clampSuggestionLimit(v: any) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 3;
@@ -80,11 +183,22 @@ export function buildHeuristicSuggestions(args: {
 }) {
   const limit = clampSuggestionLimit(args.limit);
   const categoryById = new Map(args.categories.map((c) => [c.id, c]));
-  const scoreByCat = new Map<string, number>();
-  const reasonByCat = new Map<string, string>();
+  const evidenceByCat = new Map<string, CategoryEvidence>();
 
-  const itemTokens = new Set(args.item.tokens ?? []);
   const itemMerchant = String(args.item.merchant_normalized ?? "").trim();
+  const itemTokens = new Set(args.item.tokens ?? []);
+  const itemContextMerchant = normalizeMerchant(args.item.payee_or_name ?? "", args.item.memo ?? "");
+  const itemContextTokens = new Set(tokenizeMerchantText(args.item.payee_or_name ?? "", args.item.memo ?? ""));
+
+  for (const token of itemTokens) itemContextTokens.add(token);
+  if (itemMerchant) {
+    for (const token of itemMerchant.split(" ").map((x) => x.trim()).filter(Boolean)) {
+      itemContextTokens.add(token);
+    }
+  }
+
+  const itemHasTaxSignal = hasTaxSignal(itemContextTokens);
+  const itemHasPayrollSignal = hasPayrollSignal(itemContextTokens);
 
   for (const row of args.history ?? []) {
     const categoryId = String(row?.category_id ?? "").trim();
@@ -92,51 +206,122 @@ export function buildHeuristicSuggestions(args: {
     if (!categoryById.has(categoryId)) continue;
     if (historyDirection(row) !== args.item.direction) continue;
 
-    let score = scoreByCat.get(categoryId) ?? 0;
-    let reason = reasonByCat.get(categoryId) ?? "Matched your account history";
+    const existing = evidenceByCat.get(categoryId) ?? {
+      score: 0,
+      exactMerchantHits: 0,
+      strongKeywordHits: 0,
+      moderateKeywordHits: 0,
+      vendorHits: 0,
+      highSignalHits: 0,
+      supportingRows: 0,
+      reason: "Matched your account history",
+    };
 
-    score += 1.5;
+    const rowMerchant = normalizeMerchant(row?.payee ?? "", row?.memo ?? "");
+    const rowTokens = new Set(tokenizeMerchantText(row?.payee ?? "", row?.memo ?? ""));
+    const rowHasTaxSignal = hasTaxSignal(rowTokens);
+    const rowHasPayrollSignal = hasPayrollSignal(rowTokens);
 
-    const rowMerchant = normalizeFreeText(row?.payee ?? "");
-    const rowMemo = normalizeFreeText(row?.memo ?? "");
-    const rowTokens = new Set(
-      `${rowMerchant} ${rowMemo}`
-        .trim()
-        .split(" ")
-        .map((x) => x.trim())
-        .filter(Boolean)
-    );
+    let rowScore = 0;
+    let rowReason = existing.reason;
 
-    if (itemMerchant && rowMerchant && itemMerchant === rowMerchant) {
-      score += 18;
-      reason = "Exact merchant match in account history";
-    } else if (itemTokens.size && rowTokens.size) {
-      const sim = jaccard(itemTokens, rowTokens);
-      if (sim >= 0.6) {
-        score += 10;
-        reason = "Strong keyword match in account history";
-      } else if (sim >= 0.3) {
-        score += 5;
-        reason = "Keyword overlap with account history";
+    const recency = recencyWeight(row?.date);
+    const supportWeight = supportingRowWeight(existing.supportingRows);
+
+    const exactMerchant =
+      !!itemMerchant &&
+      !!rowMerchant &&
+      (itemMerchant === rowMerchant || (!!itemContextMerchant && itemContextMerchant === rowMerchant));
+
+    const sameVendor =
+      !!args.item.vendor_id &&
+      !!row?.vendor_id &&
+      String(args.item.vendor_id) === String(row.vendor_id);
+
+    const tokenSim = itemContextTokens.size && rowTokens.size ? jaccard(itemContextTokens, rowTokens) : 0;
+
+    const sameHighSignalFamily =
+      (itemHasTaxSignal && rowHasTaxSignal) || (itemHasPayrollSignal && rowHasPayrollSignal);
+
+    if (exactMerchant) {
+      rowScore += 16;
+      rowReason = "Exact merchant match in account history";
+      existing.exactMerchantHits += 1;
+    }
+
+    if (sameVendor) {
+      rowScore += 10;
+      rowReason = "Matched vendor-linked account history";
+      existing.vendorHits += 1;
+    }
+
+    if (sameHighSignalFamily) {
+      rowScore += 9;
+      rowReason = itemHasTaxSignal
+        ? "Matched tax-related account history"
+        : "Matched payroll-related account history";
+      existing.highSignalHits += 1;
+    }
+
+    if (!exactMerchant && tokenSim >= 0.62) {
+      rowScore += 8;
+      rowReason = "Strong keyword match in account history";
+      existing.strongKeywordHits += 1;
+    } else if (!exactMerchant && tokenSim >= 0.35) {
+      rowScore += 3.5;
+      if (!sameHighSignalFamily && !sameVendor) {
+        rowReason = "Keyword overlap with account history";
       }
+      existing.moderateKeywordHits += 1;
     }
 
-    if (args.item.vendor_id && row?.vendor_id && String(args.item.vendor_id) === String(row.vendor_id)) {
-      score += 8;
-      reason = "Matched vendor-linked account history";
+    if (rowScore > 0) {
+      rowScore += 1.25 * supportWeight;
+    } else if (tokenSim >= 0.2) {
+      rowScore += 0.5 * supportWeight;
     }
 
-    scoreByCat.set(categoryId, score);
-    reasonByCat.set(categoryId, reason);
+    rowScore *= recency;
+
+    existing.score += rowScore;
+    existing.supportingRows += 1;
+    existing.reason = rowReason;
+
+    evidenceByCat.set(categoryId, existing);
   }
 
-  const scored = Array.from(scoreByCat.entries())
-    .map(([category_id, score]) => ({
-      category_id,
-      category_name: categoryById.get(category_id)?.name ?? "—",
-      score,
-      reason: reasonByCat.get(category_id) ?? "Matched your account history",
-    }))
+  const scored = Array.from(evidenceByCat.entries())
+    .map(([category_id, e]) => {
+      let adjustedScore = e.score;
+
+      const strongEvidenceCount =
+        (e.exactMerchantHits > 0 ? 1 : 0) +
+        (e.vendorHits > 0 ? 1 : 0) +
+        (e.highSignalHits > 0 ? 1 : 0) +
+        (e.strongKeywordHits > 0 ? 1 : 0);
+
+      if (strongEvidenceCount === 0 && e.supportingRows >= 4) {
+        adjustedScore *= 0.72;
+      } else if (strongEvidenceCount === 1 && e.exactMerchantHits === 0 && e.vendorHits === 0 && e.supportingRows >= 5) {
+        adjustedScore *= 0.84;
+      }
+
+      if (itemHasTaxSignal && e.highSignalHits === 0 && e.exactMerchantHits === 0 && e.vendorHits === 0) {
+        adjustedScore *= 0.82;
+      }
+
+      if (itemHasPayrollSignal && e.highSignalHits === 0 && e.exactMerchantHits === 0 && e.vendorHits === 0) {
+        adjustedScore *= 0.84;
+      }
+
+      return {
+        category_id,
+        category_name: categoryById.get(category_id)?.name ?? "—",
+        score: adjustedScore,
+        evidence: e,
+        reason: e.reason,
+      };
+    })
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score || a.category_name.localeCompare(b.category_name))
     .slice(0, limit);
@@ -147,16 +332,12 @@ export function buildHeuristicSuggestions(args: {
 
   return scored.map((row, index) => {
     const relative = row.score / Math.max(1, topScore);
-
-    let confidence = 58 + relative * 22;
-    if (row.reason.includes("Exact merchant match")) confidence += 10;
-    if (row.reason.includes("vendor-linked")) confidence += 6;
-    if (index > 0) confidence -= index * 5;
+    const confidence = confidenceTierFromEvidence(row.evidence, relative, index);
 
     return {
       category_id: row.category_id,
       category_name: row.category_name,
-      confidence: clampInt(confidence, 60, 94),
+      confidence,
       reason: row.reason,
     };
   });

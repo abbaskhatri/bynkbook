@@ -197,6 +197,15 @@ type Suggestion = {
   merchant_normalized: string;
 };
 
+type DeterministicStrength = {
+  topConfidence: number;
+  secondConfidence: number;
+  gap: number;
+  strength: number;
+  strongReason: boolean;
+  weakReason: boolean;
+};
+
 type InputItem = {
   kind: "BANK_TXN" | "ENTRY";
   id: string;
@@ -381,6 +390,110 @@ function dedupeSuggestions(items: Suggestion[], limit: number) {
   }
 
   return out;
+}
+
+function computeDeterministicStrength(args: {
+  memorySuggestions: Suggestion[];
+  heuristicSuggestions: Suggestion[];
+}): DeterministicStrength {
+  const topMemory = args.memorySuggestions?.[0];
+  const topHeuristic = args.heuristicSuggestions?.[0];
+
+  const topConfidence = Math.max(
+    Number(topMemory?.confidence ?? 0),
+    Number(topHeuristic?.confidence ?? 0)
+  );
+
+  const secondConfidence = Math.max(
+    Number(args.memorySuggestions?.[1]?.confidence ?? 0),
+    Number(args.heuristicSuggestions?.[1]?.confidence ?? 0),
+    Number(topMemory && topHeuristic ? Math.min(topMemory.confidence, topHeuristic.confidence) : 0)
+  );
+
+  const gap = Math.max(0, topConfidence - secondConfidence);
+  const topReason = String(topMemory?.reason || topHeuristic?.reason || "").toLowerCase();
+
+  const strongReason =
+    topReason.includes("exact merchant") ||
+    topReason.includes("vendor-linked") ||
+    topReason.includes("tax-related") ||
+    topReason.includes("payroll-related") ||
+    topReason.includes("accepted category history");
+
+  const weakReason =
+    topReason.includes("similar merchant") ||
+    topReason.includes("keyword overlap") ||
+    topReason.includes("account history");
+
+  let strength = topConfidence;
+
+  if (strongReason) strength += 4;
+  if (weakReason && !strongReason) strength -= 4;
+  if (gap >= 12) strength += 4;
+  else if (gap <= 4) strength -= 6;
+
+  return {
+    topConfidence,
+    secondConfidence,
+    gap,
+    strength,
+    strongReason,
+    weakReason,
+  };
+}
+
+function shouldRunAiFallback(args: {
+  deterministic: Suggestion[];
+  memorySuggestions: Suggestion[];
+  heuristicSuggestions: Suggestion[];
+}) {
+  const top = args.deterministic?.[0];
+  if (!top) return true;
+  if (top.source === "VENDOR_DEFAULT") return false;
+
+  const strength = computeDeterministicStrength({
+    memorySuggestions: args.memorySuggestions,
+    heuristicSuggestions: args.heuristicSuggestions,
+  });
+
+  if (strength.strength < 82) return true;
+  if (strength.topConfidence < 85) return true;
+
+  const source = String(top.source ?? "").toUpperCase();
+  if (source === "MEMORY" && strength.gap <= 5 && !strength.strongReason) {
+    return true;
+  }
+
+  if (source === "HEURISTIC" && strength.gap <= 4 && !strength.strongReason) {
+    return true;
+  }
+
+  return false;
+}
+
+function sortAndNormalizeMergedSuggestions(items: Suggestion[], limit: number) {
+  const sorted = dedupeSuggestions(
+    [...items].sort((a, b) => b.confidence - a.confidence || a.category_name.localeCompare(b.category_name)),
+    limit
+  );
+
+  return sorted.map((row, index) => {
+    let confidence = row.confidence;
+
+    if (row.source === "AI") {
+      confidence = Math.max(60, Math.min(84, confidence));
+    }
+
+    if (index > 0 && confidence >= sorted[0].confidence) {
+      confidence = Math.max(60, sorted[0].confidence - 2 - index);
+    }
+
+    return {
+      ...row,
+      confidence,
+      confidence_tier: confidenceTierFromScore(confidence),
+    } satisfies Suggestion;
+  });
 }
 
 function mapHeuristicToSuggestions(args: {
@@ -699,15 +812,21 @@ export async function handler(event: any) {
       limit: limitPerItem,
     });
 
-    const deterministic = dedupeSuggestions(
+    const deterministic = sortAndNormalizeMergedSuggestions(
       [...vendorDefault, ...memorySuggestions, ...mappedHeuristics],
       limitPerItem
     );
 
     suggestionsById[it.id] = deterministic;
 
-    const best = deterministic[0];
-    if ((best?.confidence ?? 0) < 85 && aiEligible.length < 25) {
+    if (
+      aiEligible.length < 25 &&
+      shouldRunAiFallback({
+        deterministic,
+        memorySuggestions,
+        heuristicSuggestions: mappedHeuristics,
+      })
+    ) {
       aiEligible.push({
         id: it.id,
         merchant_normalized: it.merchant_normalized,
@@ -733,8 +852,8 @@ export async function handler(event: any) {
         const aiSuggestions = Array.isArray(aiById[item.id]) ? aiById[item.id] : [];
         if (!aiSuggestions.length) continue;
 
-        suggestionsById[item.id] = dedupeSuggestions(
-          [...aiSuggestions, ...(suggestionsById[item.id] ?? [])],
+        suggestionsById[item.id] = sortAndNormalizeMergedSuggestions(
+          [...(suggestionsById[item.id] ?? []), ...aiSuggestions],
           limitPerItem
         );
       }
