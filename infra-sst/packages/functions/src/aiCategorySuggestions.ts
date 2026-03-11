@@ -1,4 +1,19 @@
 import { getPrisma } from "./lib/db";
+import { normalizeMerchant, tokenizeMerchantText } from "./lib/categoryMerchantNormalize";
+import {
+  buildCategoryMemoryMap,
+  buildMemorySuggestion,
+  directionFromEntryTypeOrAmount,
+  type Direction,
+  type CandidateCategory,
+} from "./lib/categoryMemory";
+import {
+  buildHeuristicSuggestions,
+  clampSuggestionLimit,
+  confidenceTierFromScore,
+  type HeuristicSuggestion,
+} from "./lib/categorySuggestionScoring";
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 
 function getClaims(event: any) {
   const auth = event?.requestContext?.authorizer ?? {};
@@ -29,12 +44,17 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
-// -------------------------
-// Simple in-memory TTL caches (best-effort; no DB scans)
-// -------------------------
 type CacheEntry<T> = { exp: number; value: T };
+
+const categoriesCache = new Map<string, CacheEntry<Array<{ id: string; name: string }>>>();
+const vendorsCache = new Map<string, CacheEntry<Map<string, { id: string; name: string; default_category_id: string | null }>>>();
 const historyCache = new Map<string, CacheEntry<any[]>>();
-const categoriesCache = new Map<string, CacheEntry<Map<string, { id: string; name: string }>>>();
+const memoryCache = new Map<string, CacheEntry<any[]>>();
+const entrySnapshotCache = new Map<
+  string,
+  CacheEntry<Map<string, { id: string; type: string; vendor_id: string | null; payee: string; memo: string }>>
+>();
+const aiBatchCache = new Map<string, CacheEntry<Record<string, Suggestion[]>>>();
 
 function nowMs() {
   return Date.now();
@@ -54,48 +74,127 @@ function setCached<T>(m: Map<string, CacheEntry<T>>, key: string, value: T, ttlM
   m.set(key, { exp: nowMs() + ttlMs, value });
 }
 
-function normalizeText(s: any): string {
-  return String(s ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function shortText(v: any, max = 140) {
+  const s = String(v ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 3)).trim()}...`;
 }
 
-function tokenize(s: any): string[] {
-  const t = normalizeText(s);
-  if (!t) return [];
-  const raw = t.split(" ").map((x) => x.trim()).filter(Boolean);
-  // Drop very short tokens and common noise
-  const stop = new Set(["the", "and", "for", "with", "from", "to", "of", "llc", "inc", "co"]);
-  return raw.filter((x) => x.length >= 2 && !stop.has(x));
+function safeJsonParse(s: any) {
+  try {
+    return JSON.parse(String(s ?? ""));
+  } catch {
+    return null;
+  }
 }
 
-function jaccard(a: Set<string>, b: Set<string>): number {
-  if (!a.size || !b.size) return 0;
-  let inter = 0;
-  for (const x of a) if (b.has(x)) inter++;
-  const uni = a.size + b.size - inter;
-  return uni ? inter / uni : 0;
+function parseJsonModelOutput(raw: string) {
+  const txt = String(raw ?? "").trim();
+  const unfenced = txt.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  return safeJsonParse(unfenced) ?? safeJsonParse(txt) ?? {};
 }
 
-function clamp01(n: number) {
+function clampPercent(v: any) {
+  const n = Number(v);
   if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(1, n));
+  if (n < 0) return 0;
+  if (n > 100) return 100;
+  return Math.round(n);
 }
 
-function pickTopK<T>(items: T[], k: number, score: (t: T) => number): T[] {
-  const arr = [...items];
-  arr.sort((x, y) => score(y) - score(x));
-  return arr.slice(0, k);
+function amountToBigInt(v: any): bigint {
+  try {
+    if (typeof v === "bigint") return v;
+    return BigInt(String(v ?? "0"));
+  } catch {
+    return 0n;
+  }
 }
+
+let cachedApiKey: string | null = null;
+let cachedModel: string | null = null;
+
+async function getSecretString(secretId: string) {
+  const region = process.env.AWS_REGION || "us-east-1";
+  const sm = new SecretsManagerClient({ region });
+  const res = await sm.send(new GetSecretValueCommand({ SecretId: secretId }));
+  if (!res.SecretString) throw new Error(`SecretString is empty for ${secretId}`);
+
+  const raw = String(res.SecretString ?? "");
+
+  try {
+    const obj: any = JSON.parse(raw);
+    if (obj && typeof obj === "object" && typeof obj.value === "string" && obj.value.trim()) {
+      return obj.value;
+    }
+  } catch {
+    // ignore non-json secret
+  }
+
+  return raw;
+}
+
+async function getOpenAiConfig() {
+  const keyId = process.env.OPENAI_API_KEY_SECRET_ID;
+  const modelId = process.env.OPENAI_MODEL_SECRET_ID;
+
+  if (!keyId) throw new Error("Missing env OPENAI_API_KEY_SECRET_ID");
+  if (!modelId) throw new Error("Missing env OPENAI_MODEL_SECRET_ID");
+
+  if (!cachedApiKey) cachedApiKey = (await getSecretString(keyId)).trim();
+  if (!cachedModel) cachedModel = (await getSecretString(modelId)).trim();
+
+  if (!cachedApiKey) throw new Error("OpenAI API key is empty");
+  if (!cachedModel) throw new Error("OpenAI model is empty");
+
+  return { apiKey: cachedApiKey, model: cachedModel };
+}
+
+async function openAiText(args: {
+  model: string;
+  apiKey: string;
+  system: string;
+  user: string;
+  maxTokens: number;
+}) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${args.apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: args.model,
+      messages: [
+        { role: "system", content: args.system },
+        { role: "user", content: args.user },
+      ],
+      temperature: 0.2,
+      max_tokens: args.maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`OpenAI error ${res.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const data: any = await res.json();
+  const out = data?.choices?.[0]?.message?.content ?? "";
+  return String(out ?? "").trim();
+}
+
+type SuggestionSource = "VENDOR_DEFAULT" | "MEMORY" | "HEURISTIC" | "AI";
 
 type Suggestion = {
   category_id: string;
   category_name: string;
   confidence: number;
+  confidence_tier: "SAFE_DETERMINISTIC" | "STRONG_SUGGESTION" | "ALTERNATE" | "REVIEW_BUCKET";
   reason: string;
-  source: "HEURISTIC";
+  source: SuggestionSource;
+  merchant_normalized: string;
 };
 
 type InputItem = {
@@ -107,8 +206,15 @@ type InputItem = {
   memo?: string;
 };
 
-async function loadCategoryMap(prisma: any, businessId: string) {
-  const cacheKey = `biz:${businessId}:cats:v1`;
+type ResolvedItem = InputItem & {
+  type?: string;
+  vendor_id?: string | null;
+  merchant_normalized: string;
+  direction: Direction;
+};
+
+async function loadCategories(prisma: any, businessId: string): Promise<CandidateCategory[]> {
+  const cacheKey = `biz:${businessId}:cats:v2`;
   const cached = getCached(categoriesCache, cacheKey);
   if (cached) return cached;
 
@@ -118,30 +224,106 @@ async function loadCategoryMap(prisma: any, businessId: string) {
     orderBy: { name: "asc" },
   });
 
-  const m = new Map<string, { id: string; name: string }>();
-  for (const r of rows) {
-    const id = String(r?.id ?? "").trim();
-    const name = String(r?.name ?? "").trim();
-    if (id && name) m.set(id, { id, name });
-  }
-
-  setCached(categoriesCache, cacheKey, m, 10 * 60 * 1000);
-  return m;
+  const out: CandidateCategory[] = (rows ?? []).map((r: any) => ({
+    id: String(r.id),
+    name: String(r.name),
+  }));
+  setCached(categoriesCache, cacheKey, out, 10 * 60 * 1000);
+  return out;
 }
 
-async function loadEntryHistory(prisma: any, businessId: string, accountId: string) {
-  const cacheKey = `biz:${businessId}:acct:${accountId}:hist:v1`;
+async function loadVendors(prisma: any, businessId: string) {
+  const cacheKey = `biz:${businessId}:vendors:v2`;
+  const cached = getCached(vendorsCache, cacheKey);
+  if (cached) return cached;
+
+  const rows = await prisma.vendor.findMany({
+    where: { business_id: businessId },
+    select: { id: true, name: true, default_category_id: true },
+    orderBy: { updated_at: "desc" },
+  });
+
+  const out = new Map<string, { id: string; name: string; default_category_id: string | null }>();
+  for (const row of rows ?? []) {
+    out.set(String(row.id), {
+      id: String(row.id),
+      name: String(row.name ?? ""),
+      default_category_id: row?.default_category_id ? String(row.default_category_id) : null,
+    });
+  }
+
+  setCached(vendorsCache, cacheKey, out, 5 * 60 * 1000);
+  return out;
+}
+
+async function loadBusinessMemory(prisma: any, businessId: string) {
+  const cacheKey = `biz:${businessId}:category-memory:v1`;
+  const cached = getCached(memoryCache, cacheKey);
+  if (cached) return cached;
+
+  const rows = await prisma.categoryMemory.findMany({
+    where: { business_id: businessId },
+    select: {
+      business_id: true,
+      merchant_normalized: true,
+      direction: true,
+      category_id: true,
+      accept_count: true,
+      override_count: true,
+      last_used_at: true,
+      confidence_score: true,
+    },
+    orderBy: [
+      { confidence_score: "desc" },
+      { accept_count: "desc" },
+      { last_used_at: "desc" },
+    ],
+    take: 5000,
+  });
+
+  setCached(memoryCache, cacheKey, rows ?? [], 3 * 60 * 1000);
+  return rows ?? [];
+}
+
+async function loadEntrySnapshots(prisma: any, businessId: string, itemIds: string[]) {
+  const ids = Array.from(new Set(itemIds.map((x) => String(x).trim()).filter(Boolean)));
+  const key = `biz:${businessId}:entry-snapshots:${ids.sort().join(",")}`;
+  const cached = getCached(entrySnapshotCache, key);
+  if (cached) return cached;
+
+  const rows = ids.length
+    ? await prisma.entry.findMany({
+        where: { business_id: businessId, id: { in: ids }, deleted_at: null },
+        select: { id: true, type: true, vendor_id: true, payee: true, memo: true },
+      })
+    : [];
+
+  const map = new Map<string, { id: string; type: string; vendor_id: string | null; payee: string; memo: string }>();
+  for (const row of rows ?? []) {
+    map.set(String(row.id), {
+      id: String(row.id),
+      type: String(row.type ?? ""),
+      vendor_id: row?.vendor_id ? String(row.vendor_id) : null,
+      payee: String(row?.payee ?? ""),
+      memo: String(row?.memo ?? ""),
+    });
+  }
+
+  setCached(entrySnapshotCache, key, map, 60 * 1000);
+  return map;
+}
+
+async function loadAccountHistory(prisma: any, businessId: string, accountId: string) {
+  const cacheKey = `biz:${businessId}:acct:${accountId}:hist:v2`;
   const cached = getCached(historyCache, cacheKey);
   if (cached) return cached;
 
-  // Keep it index-friendly + bounded
   const rows = await prisma.entry.findMany({
     where: {
       business_id: businessId,
       account_id: accountId,
       deleted_at: null,
       category_id: { not: null },
-      // Income/Expense only for Phase 3/4+ correctness
       type: { in: ["INCOME", "EXPENSE"] },
     },
     select: {
@@ -152,6 +334,7 @@ async function loadEntryHistory(prisma: any, businessId: string, accountId: stri
       vendor_id: true,
       category_id: true,
       amount_cents: true,
+      type: true,
     },
     orderBy: [{ date: "desc" }, { created_at: "desc" }],
     take: 1200,
@@ -161,117 +344,202 @@ async function loadEntryHistory(prisma: any, businessId: string, accountId: stri
   return rows ?? [];
 }
 
-function buildSuggestions(args: {
-  item: InputItem;
-  categoryMap: Map<string, { id: string; name: string }>;
-  history: any[];
+function buildVendorDefaultSuggestion(args: {
+  categoryById: Map<string, CandidateCategory>;
+  vendor: { id: string; name: string; default_category_id: string | null } | null;
+  merchant_normalized: string;
+}) {
+  const categoryId = args.vendor?.default_category_id ? String(args.vendor.default_category_id) : "";
+  if (!categoryId) return [] as Suggestion[];
+
+  const cat = args.categoryById.get(categoryId);
+  if (!cat) return [] as Suggestion[];
+
+  return [
+    {
+      category_id: cat.id,
+      category_name: cat.name,
+      confidence: 95,
+      confidence_tier: confidenceTierFromScore(95),
+      reason: `Vendor default category${args.vendor?.name ? ` for ${shortText(args.vendor.name, 60)}` : ""}`,
+      source: "VENDOR_DEFAULT" as const,
+      merchant_normalized: args.merchant_normalized,
+    },
+  ];
+}
+
+function dedupeSuggestions(items: Suggestion[], limit: number) {
+  const seen = new Set<string>();
+  const out: Suggestion[] = [];
+
+  for (const item of items) {
+    const id = String(item?.category_id ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(item);
+    if (out.length >= limit) break;
+  }
+
+  return out;
+}
+
+function mapHeuristicToSuggestions(args: {
+  heuristics: HeuristicSuggestion[];
+  merchant_normalized: string;
   limit: number;
-}): Suggestion[] {
-  const limit = Math.max(1, Math.min(3, Number(args.limit) || 3));
+}) {
+  return dedupeSuggestions(
+    (args.heuristics ?? []).slice(0, args.limit).map((h) => ({
+      category_id: h.category_id,
+      category_name: h.category_name,
+      confidence: h.confidence,
+      confidence_tier: confidenceTierFromScore(h.confidence),
+      reason: h.reason,
+      source: "HEURISTIC" as const,
+      merchant_normalized: args.merchant_normalized,
+    })),
+    args.limit
+  );
+}
 
-  const text = `${args.item.payee_or_name ?? ""} ${args.item.memo ?? ""}`.trim();
-  const tokens = new Set(tokenize(text));
-  const rawPayee = normalizeText(args.item.payee_or_name);
+async function runAiFallback(args: {
+  businessId: string;
+  items: Array<{
+    id: string;
+    merchant_normalized: string;
+    direction: Direction;
+    payee_or_name: string;
+    memo: string;
+    amount_cents: string;
+    topDeterministic: Suggestion[];
+  }>;
+  categories: CandidateCategory[];
+  limitPerItem: number;
+}) {
+  if (!args.items.length) return {} as Record<string, Suggestion[]>;
 
-  // Aggregate category scores
-  const scoreByCat = new Map<string, number>();
-  const exactPayeeCountByCat = new Map<string, number>();
-  const overlapTokenSampleByCat = new Map<string, string[]>();
+  const cacheKey = JSON.stringify({
+    businessId: args.businessId,
+    limitPerItem: args.limitPerItem,
+    categories: args.categories.map((c) => [c.id, c.name]),
+    items: args.items.map((x) => ({
+      id: x.id,
+      merchant_normalized: x.merchant_normalized,
+      direction: x.direction,
+      payee_or_name: x.payee_or_name,
+      memo: x.memo,
+      amount_cents: x.amount_cents,
+      topDeterministic: x.topDeterministic.map((s) => [s.category_id, s.confidence]),
+    })),
+  });
 
-  // Sign-aware: avoid suggesting expense categories for income-like items (and vice versa)
-  const itemSign = (() => {
-    try {
-      const v = args.item.amount_cents as any;
-      const n = typeof v === "bigint" ? v : BigInt(String(v ?? "0"));
-      if (n === 0n) return 0;
-      return n < 0n ? -1 : 1;
-    } catch {
-      return 0;
+  const cached = getCached(aiBatchCache, cacheKey);
+  if (cached) return cached;
+
+  const { apiKey, model } = await getOpenAiConfig();
+
+  const system = [
+    "You rank bookkeeping category suggestions.",
+    "Return strict JSON only.",
+    "Do not invent categories.",
+    "Only use category_id values supplied in the categories array.",
+    "Prefer deterministic candidates when they fit.",
+    "This fallback is only for ambiguous rows, so confidence must stay between 60 and 84.",
+    "Keep each reason short and concrete.",
+  ].join(" ");
+
+  const user = JSON.stringify(
+    {
+      task: "Rank category suggestions for ambiguous bookkeeping rows.",
+      output_format: {
+        items: [
+          {
+            id: "row-id",
+            suggestions: [
+              {
+                category_id: "uuid",
+                confidence: 72,
+                reason: "short explanation",
+              },
+            ],
+          },
+        ],
+      },
+      categories: args.categories,
+      items: args.items.map((item) => ({
+        id: item.id,
+        merchant_normalized: item.merchant_normalized,
+        direction: item.direction,
+        payee_or_name: item.payee_or_name,
+        memo: item.memo,
+        amount_cents: item.amount_cents,
+        deterministic_candidates: item.topDeterministic.map((s) => ({
+          category_id: s.category_id,
+          category_name: s.category_name,
+          confidence: s.confidence,
+          reason: s.reason,
+        })),
+      })),
+    },
+    null,
+    2
+  );
+
+  const raw = await openAiText({
+    model,
+    apiKey,
+    system,
+    user,
+    maxTokens: 1200,
+  });
+
+  const parsed: any = parseJsonModelOutput(raw);
+  const itemMap = new Map<string, Suggestion[]>();
+  const categoryById: Map<string, CandidateCategory> = new Map<string, CandidateCategory>(
+    args.categories.map((c): [string, CandidateCategory] => [c.id, c])
+  );
+
+  for (const row of Array.isArray(parsed?.items) ? parsed.items : []) {
+    const id = String(row?.id ?? "").trim();
+    if (!id) continue;
+
+    const suggestions: Suggestion[] = [];
+
+    for (const s of Array.isArray(row?.suggestions) ? row.suggestions : []) {
+      const categoryId = String(s?.category_id ?? "").trim();
+      if (!categoryId) continue;
+
+      const cat = categoryById.get(categoryId);
+      if (!cat) continue;
+
+      const confidence = Math.max(60, Math.min(84, clampPercent(s?.confidence)));
+
+      suggestions.push({
+        category_id: cat.id,
+        category_name: cat.name,
+        confidence,
+        confidence_tier: confidenceTierFromScore(confidence),
+        reason: shortText(s?.reason || "AI ranked this category for this merchant and memo.", 140),
+        source: "AI",
+        merchant_normalized: "",
+      });
     }
-  })();
 
-  // Baseline frequency fallback
-  for (const r of args.history) {
-    const catId = String(r?.category_id ?? "").trim();
-
-    // If we know the current sign, only learn from history with the same sign.
-    if (itemSign !== 0) {
-      try {
-        const hv = (r as any)?.amount_cents;
-        const hn = typeof hv === "bigint" ? hv : BigInt(String(hv ?? "0"));
-        const histSign = hn === 0n ? 0 : hn < 0n ? -1 : 1;
-        if (histSign !== 0 && histSign !== itemSign) continue;
-      } catch {
-        // ignore and allow row
-      }
-    }
-    if (!catId) continue;
-    if (!args.categoryMap.has(catId)) continue;
-
-    // base frequency
-    scoreByCat.set(catId, (scoreByCat.get(catId) ?? 0) + 1);
-
-    const hPayee = normalizeText(r?.payee);
-    const hMemo = normalizeText(r?.memo);
-
-    // exact-ish payee match boost
-    if (rawPayee && hPayee && rawPayee === hPayee) {
-      exactPayeeCountByCat.set(catId, (exactPayeeCountByCat.get(catId) ?? 0) + 1);
-      scoreByCat.set(catId, (scoreByCat.get(catId) ?? 0) + 20);
-      continue;
-    }
-
-    // token overlap boost
-    if (tokens.size) {
-      const hTokens = new Set(tokenize(`${hPayee} ${hMemo}`));
-      const sim = jaccard(tokens, hTokens);
-      if (sim > 0) {
-        scoreByCat.set(catId, (scoreByCat.get(catId) ?? 0) + sim * 8);
-        if (!overlapTokenSampleByCat.has(catId)) {
-          const overlap = Array.from(tokens).filter((t) => hTokens.has(t)).slice(0, 4);
-          if (overlap.length) overlapTokenSampleByCat.set(catId, overlap);
-        }
-      }
+    if (suggestions.length) {
+      itemMap.set(id, dedupeSuggestions(suggestions, args.limitPerItem));
     }
   }
 
-  // Convert to list
-  const scored = Array.from(scoreByCat.entries())
-    .map(([category_id, score]) => ({ category_id, score }))
-    .filter((x) => x.score > 0 && args.categoryMap.has(x.category_id));
+  const out: Record<string, Suggestion[]> = {};
+  for (const item of args.items) {
+    out[item.id] = (itemMap.get(item.id) ?? []).map((s) => ({
+      ...s,
+      merchant_normalized: item.merchant_normalized,
+    }));
+  }
 
-  if (scored.length === 0) return [];
-
-  const top = pickTopK(scored, limit, (x) => x.score);
-
-  // Confidence: normalize among top (cheap + stable)
-  const sum = top.reduce((a, b) => a + b.score, 0) || 1;
-  const max = top[0]?.score || 1;
-
-  return top.map((t, idx) => {
-    const name = args.categoryMap.get(t.category_id)?.name ?? "—";
-    const freqHits = exactPayeeCountByCat.get(t.category_id) ?? 0;
-    const overlap = overlapTokenSampleByCat.get(t.category_id) ?? [];
-
-    let reason = "Based on your category history";
-    if (freqHits > 0 && args.item.payee_or_name) {
-      reason = `Matched your past “${String(args.item.payee_or_name).trim()}” entries (${freqHits}×)`;
-    } else if (overlap.length) {
-      reason = `Matched keywords: ${overlap.join(", ")}`;
-    }
-
-    const confRaw = t.score / max;
-    const confAdj = idx === 0 ? confRaw : confRaw * 0.92;
-    const confidence = clamp01(0.35 + confAdj * 0.55);
-
-    return {
-      category_id: t.category_id,
-      category_name: name,
-      confidence,
-      reason,
-      source: "HEURISTIC",
-    };
-  });
+  setCached(aiBatchCache, cacheKey, out, 15 * 60 * 1000);
+  return out;
 }
 
 /**
@@ -288,7 +556,7 @@ export async function handler(event: any) {
   const sub = claims.sub as string | undefined;
   if (!sub) return json(401, { ok: false, error: "Unauthorized" });
 
-  const businessId = (event?.pathParameters?.businessId ?? "").toString().trim();
+  const businessId = String(event?.pathParameters?.businessId ?? "").trim();
   if (!businessId) return json(400, { ok: false, error: "Missing businessId" });
 
   let body: any = {};
@@ -300,10 +568,12 @@ export async function handler(event: any) {
 
   const accountId = String(body?.accountId ?? "").trim();
   const itemsIn: unknown[] = Array.isArray(body?.items) ? body.items : [];
-  const limitPerItem = Math.max(1, Math.min(3, Number(body?.limitPerItem ?? 3) || 3));
+  const limitPerItem = clampSuggestionLimit(body?.limitPerItem ?? 3);
 
   if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
-  if (!itemsIn.length) return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v1" } });
+  if (!itemsIn.length) {
+    return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v2" } });
+  }
 
   const items: InputItem[] = itemsIn
     .slice(0, 200)
@@ -320,9 +590,11 @@ export async function handler(event: any) {
         memo: x?.memo ? String(x.memo) : "",
       };
     })
-    .filter((x: InputItem) => !!x.id);
+    .filter((x) => !!x.id);
 
-  if (!items.length) return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v1" } });
+  if (!items.length) {
+    return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v2" } });
+  }
 
   const prisma = await getPrisma();
 
@@ -332,22 +604,153 @@ export async function handler(event: any) {
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
-  const categoryMap = await loadCategoryMap(prisma, businessId);
-  const history = await loadEntryHistory(prisma, businessId, accountId);
+  const [categories, vendorsById, history, memoryRows, entrySnapshots] = await Promise.all([
+    loadCategories(prisma, businessId),
+    loadVendors(prisma, businessId),
+    loadAccountHistory(prisma, businessId, accountId),
+    loadBusinessMemory(prisma, businessId),
+    loadEntrySnapshots(
+      prisma,
+      businessId,
+      items.filter((x) => x.kind === "ENTRY").map((x) => x.id)
+    ),
+  ]);
+
+  const categoryById: Map<string, CandidateCategory> = new Map<string, CandidateCategory>(
+    categories.map((c): [string, CandidateCategory] => [c.id, c])
+  );
+  const memoryMap = buildCategoryMemoryMap(memoryRows, categoryById);
+
+  const resolvedItems: ResolvedItem[] = items.map((it) => {
+    const snap = it.kind === "ENTRY" ? entrySnapshots.get(it.id) : null;
+
+    const payee = String(it.payee_or_name ?? snap?.payee ?? "");
+    const memo = String(it.memo ?? snap?.memo ?? "");
+    const amount = amountToBigInt(it.amount_cents);
+    const direction = directionFromEntryTypeOrAmount(snap?.type, amount);
+    const merchantNormalized = normalizeMerchant(payee, memo);
+
+    return {
+      ...it,
+      payee_or_name: payee,
+      memo,
+      amount_cents: amount,
+      type: snap?.type,
+      vendor_id: snap?.vendor_id ?? null,
+      merchant_normalized: merchantNormalized,
+      direction,
+    };
+  });
 
   const suggestionsById: Record<string, Suggestion[]> = {};
-  for (const it of items) {
-    suggestionsById[it.id] = buildSuggestions({
-      item: it,
-      categoryMap,
+  const aiEligible: Array<{
+    id: string;
+    merchant_normalized: string;
+    direction: Direction;
+    payee_or_name: string;
+    memo: string;
+    amount_cents: string;
+    topDeterministic: Suggestion[];
+  }> = [];
+
+  for (const it of resolvedItems) {
+    const vendor = it.vendor_id ? vendorsById.get(String(it.vendor_id)) ?? null : null;
+
+    const vendorDefault = buildVendorDefaultSuggestion({
+      categoryById,
+      vendor,
+      merchant_normalized: it.merchant_normalized,
+    });
+
+    const memorySuggestions = buildMemorySuggestion({
+      memoryMap,
+      merchant_normalized: it.merchant_normalized,
+      direction: it.direction,
+      limit: limitPerItem,
+    }).map((s) => ({
+      category_id: s.category_id,
+      category_name: s.category_name,
+      confidence: s.confidence,
+      confidence_tier: confidenceTierFromScore(s.confidence),
+      reason: s.reason,
+      source: "MEMORY" as const,
+      merchant_normalized: it.merchant_normalized,
+    }));
+
+    const heuristicSuggestions = buildHeuristicSuggestions({
+      item: {
+        id: it.id,
+        merchant_normalized: it.merchant_normalized,
+        payee_or_name: String(it.payee_or_name ?? ""),
+        memo: String(it.memo ?? ""),
+        vendor_id: it.vendor_id ?? null,
+        direction: it.direction,
+        amount_cents: amountToBigInt(it.amount_cents),
+        tokens: tokenizeMerchantText(it.payee_or_name, it.memo),
+      },
+      categories,
       history,
       limit: limitPerItem,
     });
+
+    const mappedHeuristics = mapHeuristicToSuggestions({
+      heuristics: heuristicSuggestions,
+      merchant_normalized: it.merchant_normalized,
+      limit: limitPerItem,
+    });
+
+    const deterministic = dedupeSuggestions(
+      [...vendorDefault, ...memorySuggestions, ...mappedHeuristics],
+      limitPerItem
+    );
+
+    suggestionsById[it.id] = deterministic;
+
+    const best = deterministic[0];
+    if ((best?.confidence ?? 0) < 85 && aiEligible.length < 25) {
+      aiEligible.push({
+        id: it.id,
+        merchant_normalized: it.merchant_normalized,
+        direction: it.direction,
+        payee_or_name: String(it.payee_or_name ?? ""),
+        memo: String(it.memo ?? ""),
+        amount_cents: String(it.amount_cents ?? "0"),
+        topDeterministic: deterministic.slice(0, 3),
+      });
+    }
+  }
+
+  if (aiEligible.length) {
+    try {
+      const aiById = await runAiFallback({
+        businessId,
+        items: aiEligible,
+        categories,
+        limitPerItem,
+      });
+
+      for (const item of aiEligible) {
+        const aiSuggestions = Array.isArray(aiById[item.id]) ? aiById[item.id] : [];
+        if (!aiSuggestions.length) continue;
+
+        suggestionsById[item.id] = dedupeSuggestions(
+          [...aiSuggestions, ...(suggestionsById[item.id] ?? [])],
+          limitPerItem
+        );
+      }
+    } catch {
+      // keep deterministic fallback only
+    }
   }
 
   return json(200, {
     ok: true,
     suggestionsById,
-    meta: { version: "catSug_v1", source: "HEURISTIC_ONLY" },
+    meta: {
+      version: "catSug_v2",
+      source: "CATEGORY_INTELLIGENCE_ENGINE",
+      aiBatchCap: 25,
+      aiRequestedRows: aiEligible.length,
+    },
   });
 }
