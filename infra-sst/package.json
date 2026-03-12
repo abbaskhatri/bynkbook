@@ -23,10 +23,11 @@
   ],
   "dependencies": {
     "@aws-sdk/client-kms": "^3.966.0",
-    "@aws-sdk/client-secrets-manager": "^3.957.0",
+    "@aws-sdk/client-secrets-manager": "^3.1008.0",
     "@aws-sdk/client-textract": "^3.980.0",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
+    "openai": "^6.27.0",
     "pg": "^8.16.3",
     "prisma": "^7.2.0"
   }

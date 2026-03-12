@@ -764,6 +764,48 @@ const issuesResolveHandler = {
 } satisfies ApiHandler;
 
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/issues/{issueId}/resolve", issuesResolveHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+// ---------- Issues Bulk Preview (Bundle D) ----------
+const issuesBulkPreviewHandler = {
+  ...issuesScanHandler,
+  handler: "packages/functions/src/issuesBulkPreview.handler",
+  environment: {
+    ...(issuesScanHandler as any).environment,
+    OPENAI_API_KEY_SECRET_ID: `${stagePrefix}/openai/api_key`,
+    OPENAI_MODEL_SECRET_ID: `${stagePrefix}/openai/model`,
+  },
+  permissions: [
+    ...(issuesScanHandler as any).permissions,
+    {
+      actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+      resources: [
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/api_key-*",
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/model-*",
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/api_key-*",
+        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/model-*",
+      ],
+    },
+  ],
+} satisfies ApiHandler;
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/issues/bulk-preview",
+  issuesBulkPreviewHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+// ---------- Issues Bulk Apply (Bundle D) ----------
+const issuesBulkApplyHandler = {
+  ...issuesScanHandler,
+  handler: "packages/functions/src/issuesBulkApply.handler",
+} satisfies ApiHandler;
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/issues/bulk-apply",
+  issuesBulkApplyHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
 // ---------- Issues Count (Bundle 1) ----------
 const issuesCountHandler = {
   ...issuesScanHandler,

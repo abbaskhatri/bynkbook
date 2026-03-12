@@ -252,10 +252,13 @@ export async function handler(event: any) {
     const isCheck = methodUpper === "CHECK";
 
     const payeeKey = normalizePayee(e.payee || "");
+    const descriptorKey = normalizePayee(String((e as any).memo ?? ""));
 
-    // Reduce false positives: skip NONCHECK duplicate detection when payee is too short/generic
-    // (CHECK duplicates remain allowed; they are higher-signal.)
-    if (!isCheck && payeeKey.length < 6) continue;
+    // Reduce false positives: skip NONCHECK duplicate detection when payee is too short/generic.
+    // Narrow exception: allow short-payee NONCHECK duplicate candidates only when a usable
+    // descriptor/memo is present. Exact payee/method/signed-amount matching still comes from the group key,
+    // and date-window matching still comes from the grouping pass below.
+    if (!isCheck && payeeKey.length < 6 && !descriptorKey) continue;
 
     const ymd = e.date.toISOString().slice(0, 10);
     const day = ymdToDay(ymd);

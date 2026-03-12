@@ -14,6 +14,71 @@ export type EntryIssueRow = {
   resolved_at?: string | null;
 };
 
+export type BulkIssueSafeAction = "ACK_STALE" | "LEGITIMIZE";
+export type BulkIssuePreviewBucket =
+  | "safe_auto_fix"
+  | "likely_duplicate"
+  | "needs_review"
+  | "unsupported";
+
+export type BulkIssuePreviewClass =
+  | "LIKELY_DUPLICATE"
+  | "LIKELY_LEGITIMATE_REPEAT"
+  | "NEEDS_REVIEW";
+
+export type BulkIssueConfidenceLabel = "HIGH" | "MEDIUM" | "REVIEW";
+
+export type BulkIssueSuggestedNextStep =
+  | "MARK_LEGITIMATE"
+  | "REVIEW_MANUALLY";
+
+export type BulkIssuePreviewItem = {
+  issue_id: string;
+  entry_id: string;
+  issue_type: string;
+  bucket: BulkIssuePreviewBucket;
+  action: BulkIssueSafeAction | null;
+  date: string | null;
+  payee: string;
+  amount_cents: string;
+  method: string | null;
+  details: string;
+  group_key: string | null;
+  status: string;
+  classification?: BulkIssuePreviewClass;
+  confidence_label?: BulkIssueConfidenceLabel;
+  explanation?: string;
+  suggested_next_step?: BulkIssueSuggestedNextStep;
+};
+
+export type BulkPreviewIssuesResponse = {
+  ok: true;
+  requested_count: number;
+  valid_open_selected_count: number;
+  eligible_previewed_count: number;
+  skipped_count: number;
+  counts_by_issue_type: Record<string, number>;
+  safe_by_action: Record<string, number>;
+  skipped_by_reason: Record<string, number>;
+  safe_auto_fix: BulkIssuePreviewItem[];
+  likely_duplicate: BulkIssuePreviewItem[];
+  needs_review: BulkIssuePreviewItem[];
+  unsupported: BulkIssuePreviewItem[];
+  summary_lines: string[];
+};
+
+export type BulkApplyIssuesResponse = {
+  ok: true;
+  requested_count: number;
+  eligible_count: number;
+  applied_count: number;
+  skipped_count: number;
+  blocked_count: number;
+  applied_by_action: Record<BulkIssueSafeAction, number>;
+  skipped_by_reason: Record<string, number>;
+  summary_lines: string[];
+};
+
 export const ISSUES_PAGE_TYPES = ["DUPLICATE", "STALE_CHECK"] as const;
 export type IssuesPageIssueType = (typeof ISSUES_PAGE_TYPES)[number];
 
@@ -93,4 +158,38 @@ export async function getIssuesCount(
 
   const n = Number(res?.count ?? res?.total_open ?? res?.open ?? 0) || 0;
   return { ok: true, count: n };
+}
+
+export async function bulkPreviewIssues(params: {
+  businessId: string;
+  accountId: string;
+  issueIds: string[];
+}): Promise<BulkPreviewIssuesResponse> {
+  const { businessId, accountId, issueIds } = params;
+  return apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/issues/bulk-preview`,
+    {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds }),
+    }
+  );
+}
+
+export async function bulkApplyIssues(params: {
+  businessId: string;
+  accountId: string;
+  issueIds: string[];
+  safeIssueIds?: string[];
+}): Promise<BulkApplyIssuesResponse> {
+  const { businessId, accountId, issueIds, safeIssueIds } = params;
+  return apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/issues/bulk-apply`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        issue_ids: issueIds,
+        safe_issue_ids: safeIssueIds ?? [],
+      }),
+    }
+  );
 }

@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FixIssueDialog } from "@/components/ledger/fix-issue-dialog";
+import { AutoFixIssuesDialog } from "@/components/issues/auto-fix-issues-dialog";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -435,6 +436,7 @@ export default function IssuesPageClient() {
         ok: boolean;
         status: string;
         issues: Array<{
+          id: string;
           entry_id: string;
           issue_type: string;
           status: string;
@@ -490,7 +492,7 @@ export default function IssuesPageClient() {
   }
 
   const openIssues = (issuesQ.data?.issues ?? []).map((it) => ({
-    id: `${it.entry_id}|${it.issue_type}|${it.detected_at ?? ""}`, // synthetic id if backend doesn't provide one
+    id: it.id,
     business_id: selectedBusinessId ?? "",
     account_id: selectedAccountId ?? "",
     entry_id: it.entry_id,
@@ -697,6 +699,25 @@ export default function IssuesPageClient() {
     return keys.filter((k) => !!selectedIds[k]);
   }, [filteredIssues, selectedIds]);
 
+  const selectedIssueBackendIds = useMemo(() => {
+    if (!selectedItemKeys.length) return [] as string[];
+
+    const selectedKeySet = new Set(selectedItemKeys);
+    const ids = new Set<string>();
+
+    for (const issue of openIssues) {
+      const kind = String(issue.issue_type || "").toUpperCase();
+      if (kind !== "DUPLICATE" && kind !== "STALE_CHECK") continue;
+
+      const key = `${issue.entry_id}|${kind}`;
+      if (!selectedKeySet.has(key)) continue;
+
+      if (issue.id) ids.add(String(issue.id));
+    }
+
+    return Array.from(ids);
+  }, [selectedItemKeys, openIssues]);
+
   const selectedCount = selectedItemKeys.length;
 
   function toggleRow(key: string) {
@@ -730,6 +751,8 @@ export default function IssuesPageClient() {
     }
     | null
   >(null);
+
+  const [autoFixDialogOpen, setAutoFixDialogOpen] = useState(false);
 
   // kept (category quick fix on Issues page is not used anymore, but update mutation remains harmless)
   const updateMut = useMutation({
@@ -823,6 +846,14 @@ export default function IssuesPageClient() {
 
         {selectedCount > 0 ? (
           <div className="ml-2 flex items-center gap-2 shrink-0">
+            <Button
+              className="h-7 px-2 text-xs"
+              onClick={() => setAutoFixDialogOpen(true)}
+              disabled={!selectedIssueBackendIds.length}
+            >
+              Auto Fix Issues
+            </Button>
+
             <Button variant="outline" className="h-7 px-2 text-xs" onClick={clearSelection}>
               Clear selection
             </Button>
@@ -1184,6 +1215,24 @@ export default function IssuesPageClient() {
           </div>
         </div>
       ) : null}
+
+      <AutoFixIssuesDialog
+        open={autoFixDialogOpen}
+        onOpenChange={setAutoFixDialogOpen}
+        businessId={selectedBusinessId ?? ""}
+        accountId={selectedAccountId ?? ""}
+        issueIds={selectedIssueBackendIds}
+        onDidApply={async () => {
+          clearSelection();
+          if (selectedBusinessId && selectedAccountId) {
+            await Promise.all([
+              qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
+              qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId, selectedAccountId, "OPEN"], exact: false }),
+              qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false }),
+            ]);
+          }
+        }}
+      />
 
       <FixIssueDialog
         open={!!fixDialog}
