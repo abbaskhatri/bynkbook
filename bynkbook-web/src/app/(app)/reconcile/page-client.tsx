@@ -500,8 +500,17 @@ export default function ReconcilePageClient() {
   const [rolePolicyRows, setRolePolicyRows] = useState<RolePolicyRow[]>([]);
   const [rolePolicyLoaded, setRolePolicyLoaded] = useState(false);
 
+  // Prevent duplicate support-metadata fetches for the same scope,
+  // especially during development strict-mode remounts.
+  const rolePoliciesLoadedForBizRef = useRef<string>("");
+  const teamLoadedForBizRef = useRef<string>("");
+  const plaidLoadedForScopeRef = useRef<string>("");
+
   useEffect(() => {
     if (!selectedBusinessId) return;
+
+    if (rolePoliciesLoadedForBizRef.current === String(selectedBusinessId)) return;
+    rolePoliciesLoadedForBizRef.current = String(selectedBusinessId);
 
     let cancelled = false;
     (async () => {
@@ -529,8 +538,12 @@ export default function ReconcilePageClient() {
   useEffect(() => {
     if (!selectedBusinessId) {
       setTeamEmailByUserId(new Map());
+      teamLoadedForBizRef.current = "";
       return;
     }
+
+    if (teamLoadedForBizRef.current === String(selectedBusinessId)) return;
+    teamLoadedForBizRef.current = String(selectedBusinessId);
 
     let cancelled = false;
     (async () => {
@@ -652,6 +665,28 @@ export default function ReconcilePageClient() {
   const [matches, setMatches] = useState<any[]>([]);
   const [matchGroups, setMatchGroups] = useState<any[]>([]);
   const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
+
+  // Real first-load truth hydration:
+  // do not treat bank / match-group truth as ready until each source
+  // has completed at least one fetch for the current reconcile scope.
+  const [bankTruthHydrated, setBankTruthHydrated] = useState(false);
+  const [matchGroupsTruthHydrated, setMatchGroupsTruthHydrated] = useState(false);
+
+  // Reconcile truth gating:
+  // keep last-good section results visible until placement truth is ready.
+  const [entriesTruthSnapshot, setEntriesTruthSnapshot] = useState<null | {
+    expectedList: any[];
+    matchedList: any[];
+    expectedCount: number;
+    matchedCount: number;
+  }>(null);
+
+  const [bankTruthSnapshot, setBankTruthSnapshot] = useState<null | {
+    unmatchedList: any[];
+    matchedList: any[];
+    unmatchedCount: number;
+    matchedCount: number;
+  }>(null);
 
   // Plaid status + sync UI
   const [plaidLoading, setPlaidLoading] = useState(false);
@@ -786,6 +821,10 @@ export default function ReconcilePageClient() {
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
 
+    const scopeKey = `${selectedBusinessId}:${selectedAccountId}`;
+    if (plaidLoadedForScopeRef.current === scopeKey) return;
+    plaidLoadedForScopeRef.current = scopeKey;
+
     let cancelled = false;
     (async () => {
       setPlaidLoading(true);
@@ -869,7 +908,10 @@ export default function ReconcilePageClient() {
           setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
         }
       } finally {
-        if (myEpoch === refreshEpochRef.current) setBankTxLoading(false);
+        if (myEpoch === refreshEpochRef.current) {
+          setBankTxLoading(false);
+          setBankTruthHydrated(true);
+        }
       }
 
       // -------------------------
@@ -905,7 +947,10 @@ export default function ReconcilePageClient() {
         if (myEpoch === refreshEpochRef.current) setMatchGroups([]);
         matchGroupItems = [];
       } finally {
-        if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(false);
+        if (myEpoch === refreshEpochRef.current) {
+          setMatchGroupsLoading(false);
+          setMatchGroupsTruthHydrated(true);
+        }
       }
 
       return { bank: bankItems, matches: matchItems, matchGroups: matchGroupItems };
@@ -1000,39 +1045,44 @@ export default function ReconcilePageClient() {
     });
   }
 
-  async function refreshTablesFully(opts?: { preserveOnEmpty?: boolean }) {
-    setRefreshBusy(true);
+  async function refreshTablesFully(
+    opts?: {
+      preserveOnEmpty?: boolean;
+      confirmSettle?: boolean;
+      skipLegacyMatches?: boolean;
+      silent?: boolean;
+    }
+  ) {
+    if (!opts?.silent) setRefreshBusy(true);
     try {
-      await refreshBankAndMatches({ preserveOnEmpty: true, ...(opts ?? {}) });
-      await entriesQ.refetch?.();
-      await runBoundedPostSyncRefresh({ preserveOnEmpty: true, ...(opts ?? {}) });
+      // Visible reconcile settle should prioritize the real placement truth:
+      // bank transactions + match groups + entries.
+      await refreshBankAndMatches({
+        preserveOnEmpty: true,
+        skipLegacyMatches: opts?.skipLegacyMatches ?? true,
+        ...(opts ?? {}),
+      });
 
-      // Critical: ensure Ledger page refetches without manual refresh.
-      // Ledger uses react-query cache keyed by ["entries", businessId, accountId, ...]
-      if (selectedBusinessId && selectedAccountId) {
-        void qc.invalidateQueries({
-          predicate: (q) =>
-            Array.isArray(q.queryKey) &&
-            q.queryKey[0] === "entries" &&
-            q.queryKey[1] === selectedBusinessId &&
-            q.queryKey[2] === selectedAccountId,
-        });
+      await entriesQ.refetch?.();
+
+      // Optional bounded confirmation pass only for connect flows where needed.
+      if (opts?.confirmSettle) {
+        await runBoundedPostSyncRefresh({ preserveOnEmpty: true });
       }
     } finally {
-      setRefreshBusy(false);
+      if (!opts?.silent) setRefreshBusy(false);
     }
   }
 
   function refreshAllDebounced() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
-      void refreshTablesFully({ preserveOnEmpty: true });
+      void refreshTablesFully({ preserveOnEmpty: true, skipLegacyMatches: true });
     }, 150);
   }
-
     useEffect(() => {
     const onLedgerRefresh = () => {
-      void refreshTablesFully({ preserveOnEmpty: true });
+      void refreshTablesFully({ preserveOnEmpty: true, skipLegacyMatches: true });
     };
 
     window.addEventListener("bynk:ledger-refresh", onLedgerRefresh as any);
@@ -1042,6 +1092,8 @@ export default function ReconcilePageClient() {
   // Create-entry busy state per bank txn (instant UX)
   const [createEntryBusyByBankId, setCreateEntryBusyByBankId] = useState<Record<string, boolean>>({});
   const [createEntryErr, setCreateEntryErr] = useState<string | null>(null);
+  const [optimisticHiddenBankTxnIds, setOptimisticHiddenBankTxnIds] = useState<Set<string>>(() => new Set());
+  const [optimisticPendingEntryDrafts, setOptimisticPendingEntryDrafts] = useState<any[]>([]);
 
   const createEntryBusy = useMemo(
     () => Object.values(createEntryBusyByBankId).some(Boolean),
@@ -1050,19 +1102,13 @@ export default function ReconcilePageClient() {
 
   const bankUpdating =
     plaidSyncing ||
-    refreshBusy ||
-    matchBusy ||
-    bulkCreateBusy ||
-    createEntryBusy ||
-    bankTxLoading;
+    bankTxLoading ||
+    matchGroupsLoading;
 
   const entriesUpdating =
     plaidSyncing ||
-    refreshBusy ||
-    matchBusy ||
-    bulkCreateBusy ||
-    createEntryBusy ||
-    entriesQ.isFetching;
+    entriesQ.isFetching ||
+    matchGroupsLoading;
 
   // Create-entry confirmation dialog
   const [openCreateEntry, setOpenCreateEntry] = useState(false);
@@ -1085,9 +1131,11 @@ export default function ReconcilePageClient() {
   const [categories, setCategories] = useState<any[]>([]);
   const [categoryQuery, setCategoryQuery] = useState("");
 
-  // Load categories once per business (used by create-entry dialog)
+  // Load categories only when Create Entry opens.
   useEffect(() => {
+    if (!openCreateEntry) return;
     if (!selectedBusinessId) return;
+    if (categories.length > 0) return;
 
     let cancelled = false;
     (async () => {
@@ -1116,7 +1164,7 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBusinessId]);
+  }, [openCreateEntry, selectedBusinessId, categories.length]);
 
   // Phase F1: fetch top 3 category suggestions when Create Entry dialog opens (single batch request)
   useEffect(() => {
@@ -1176,10 +1224,14 @@ export default function ReconcilePageClient() {
     };
   }, [openCreateEntry, createEntryBankTxnId, selectedBusinessId, selectedAccountId, bankTx]);
 
-  // Load bank txns + matches (single source of truth; no duplicate fetch)
+  // Load bank txns + match groups for the current reconcile scope.
   useEffect(() => {
     if (!selectedBusinessId) return;
     if (!selectedAccountId) return;
+
+    // Reset first-load truth hydration for the new scope before fetching.
+    setBankTruthHydrated(false);
+    setMatchGroupsTruthHydrated(false);
 
     // One targeted refresh on mount / scope change (prevents “needs manual refresh” after navigation)
     void qc.invalidateQueries({
@@ -1190,7 +1242,7 @@ export default function ReconcilePageClient() {
         q.queryKey[2] === selectedAccountId,
     });
 
-    void refreshBankAndMatches({ preserveOnEmpty: true });
+    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true });
   }, [selectedBusinessId, selectedAccountId, from, to]);
 
   // Phase 6B: Load snapshot list when dialog opens
@@ -2042,6 +2094,15 @@ const isReconcileExemptEntry = (e: any) => {
   // Tabs: Expected Entries (Phase 2: cap rendered rows for instant tab switches)
   const entriesExpectedList = useMemo(() => {
     const out: any[] = [];
+
+    for (const e of optimisticPendingEntryDrafts) {
+      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
+      if (!matchesRowSearch(hay)) continue;
+
+      out.push(e);
+      if (out.length >= expectedVisibleN) return out;
+    }
+
     for (const e of allEntriesSorted) {
       if (matchedEntryIdSet.has(e.id)) continue;
       if (isAdjustedEntry(e)) continue;
@@ -2054,7 +2115,7 @@ const isReconcileExemptEntry = (e: any) => {
       if (out.length >= expectedVisibleN) break;
     }
     return out;
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN, accountsQ.data, selectedAccountId]);
+  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN, accountsQ.data, selectedAccountId]);
 
   const entriesMatchedList = useMemo(() => {
     const out: any[] = [];
@@ -2075,6 +2136,13 @@ const isReconcileExemptEntry = (e: any) => {
   const { expectedCount, matchedCount } = useMemo(() => {
     let exp = 0;
     let mat = 0;
+
+    for (const e of optimisticPendingEntryDrafts) {
+      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
+      if (!matchesRowSearch(hay)) continue;
+      exp++;
+    }
+
     for (const e of allEntriesSorted) {
       if (isReconcileExemptEntry(e)) continue;
 
@@ -2088,7 +2156,7 @@ const isReconcileExemptEntry = (e: any) => {
       else exp++;
     }
     return { expectedCount: exp, matchedCount: mat };
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ, accountsQ.data, selectedAccountId]);
+  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, accountsQ.data, selectedAccountId]);
 
   // Tabs: Bank Transactions (Phase 2: cap rendered rows for instant tab switches)
   const bankUnmatchedList = useMemo(() => {
@@ -2099,13 +2167,14 @@ const isReconcileExemptEntry = (e: any) => {
 
       const id = String(t.id ?? "");
       if (!id) continue;
+      if (optimisticHiddenBankTxnIds.has(id)) continue;
       if (activeGroupByBankTxnId.has(id)) continue;
 
       out.push(t);
       if (out.length >= bankUnmatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, activeGroupByBankTxnId, searchQ, bankUnmatchedVisibleN]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, searchQ, bankUnmatchedVisibleN]);
 
   useEffect(() => {
     setSelectedBankTxnIds(new Set());
@@ -2139,10 +2208,84 @@ const isReconcileExemptEntry = (e: any) => {
       if (!id) continue;
 
       if (activeGroupByBankTxnId.has(id)) m++;
-      else u++;
+      else if (!optimisticHiddenBankTxnIds.has(id)) u++;
     }
     return { bankUnmatchedCount: u, bankMatchedCount: m };
-  }, [bankTxSorted, activeGroupByBankTxnId, searchQ]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, searchQ]);
+
+  const entriesTruthReady =
+    !entriesQ.isLoading &&
+    matchGroupsTruthHydrated &&
+    !matchGroupsLoading;
+
+  const bankTruthReady =
+    bankTruthHydrated &&
+    matchGroupsTruthHydrated &&
+    !bankTxLoading &&
+    !matchGroupsLoading;
+
+  useEffect(() => {
+    if (!entriesTruthReady) return;
+    setEntriesTruthSnapshot({
+      expectedList: entriesExpectedList,
+      matchedList: entriesMatchedList,
+      expectedCount,
+      matchedCount,
+    });
+  }, [entriesTruthReady, entriesExpectedList, entriesMatchedList, expectedCount, matchedCount]);
+
+  useEffect(() => {
+    if (!bankTruthReady) return;
+    setBankTruthSnapshot({
+      unmatchedList: bankUnmatchedList,
+      matchedList: bankMatchedList,
+      unmatchedCount: bankUnmatchedCount,
+      matchedCount: bankMatchedCount,
+    });
+  }, [bankTruthReady, bankUnmatchedList, bankMatchedList, bankUnmatchedCount, bankMatchedCount]);
+
+  const entriesTruthSettling = !entriesTruthReady && !!entriesTruthSnapshot;
+  const bankTruthSettling = !bankTruthReady && !!bankTruthSnapshot;
+
+  const entriesTruthBlocking = !entriesTruthReady && !entriesTruthSnapshot;
+  const bankTruthBlocking = !bankTruthReady && !bankTruthSnapshot;
+
+  const displayEntriesExpectedList = entriesTruthReady
+    ? entriesExpectedList
+    : (entriesTruthSnapshot?.expectedList ?? []);
+  const displayEntriesMatchedList = entriesTruthReady
+    ? entriesMatchedList
+    : (entriesTruthSnapshot?.matchedList ?? []);
+  const displayExpectedCount = entriesTruthReady
+    ? expectedCount
+    : (entriesTruthSnapshot?.expectedCount ?? 0);
+  const displayMatchedCount = entriesTruthReady
+    ? matchedCount
+    : (entriesTruthSnapshot?.matchedCount ?? 0);
+
+  const displayBankUnmatchedList = bankTruthReady
+    ? bankUnmatchedList
+    : (bankTruthSnapshot?.unmatchedList ?? []);
+  const displayBankMatchedList = bankTruthReady
+    ? bankMatchedList
+    : (bankTruthSnapshot?.matchedList ?? []);
+  const displayBankUnmatchedCount = bankTruthReady
+    ? bankUnmatchedCount
+    : (bankTruthSnapshot?.unmatchedCount ?? 0);
+  const displayBankMatchedCount = bankTruthReady
+    ? bankMatchedCount
+    : (bankTruthSnapshot?.matchedCount ?? 0);
+
+const displayEntriesActiveList = useMemo(() => {
+  return expectedTab === "expected"
+    ? displayEntriesExpectedList
+    : displayEntriesMatchedList;
+}, [expectedTab, displayEntriesExpectedList, displayEntriesMatchedList]);
+const displayBankActiveList = useMemo(() => {
+  return bankTab === "unmatched"
+    ? displayBankUnmatchedList
+    : displayBankMatchedList;
+}, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
 
   // -------------------------
   // Phase 5E: State summary (read-only, instant-fast)
@@ -2504,12 +2647,35 @@ const isReconcileExemptEntry = (e: any) => {
                         const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
                         if (!bankId) return;
 
+                        const bankTxn = bankTxSorted.find((x: any) => String(x.id) === bankId) ?? null;
+                        const optimisticEntryId = `optimistic-entry:${bankId}`;
+
                         setCreateEntryErr(null);
                         clearMutErr();
                         setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: true }));
 
-                        // Row-level pending (UI only)
+                        // Instant UX: hide bank row and show pending expected entry immediately.
                         markPending(bankId);
+                        setOptimisticHiddenBankTxnIds((prev) => {
+                          const next = new Set(prev);
+                          next.add(bankId);
+                          return next;
+                        });
+
+                        if (bankTxn) {
+                          setOptimisticPendingEntryDrafts((prev) => {
+                            const next = prev.filter((x: any) => String(x?.id) !== optimisticEntryId);
+                            next.unshift({
+                              id: optimisticEntryId,
+                              date: bankTxn?.posted_date ? String(bankTxn.posted_date).slice(0, 10) : "",
+                              payee: String(bankTxn?.name ?? "").trim() || "Bank transaction",
+                              amount_cents: bankTxn?.amount_cents ?? 0,
+                              __optimistic_pending: true,
+                              __source_bank_txn_id: bankId,
+                            });
+                            return next;
+                          });
+                        }
 
                         try {
                           const topSuggestion = createEntrySuggestions[0] ?? null;
@@ -2528,12 +2694,34 @@ const isReconcileExemptEntry = (e: any) => {
                             suggested_category_id: suggestedCategoryId || "",
                           });
 
-                          await refreshTablesFully({ preserveOnEmpty: true });
+                          await refreshTablesFully({
+                            preserveOnEmpty: true,
+                            skipLegacyMatches: true,
+                            silent: true,
+                          });
+
+                          setOptimisticPendingEntryDrafts((prev) =>
+                            prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
+                          );
+                          setOptimisticHiddenBankTxnIds((prev) => {
+                            const next = new Set(prev);
+                            next.delete(bankId);
+                            return next;
+                          });
 
                           clearMutErr();
                           setOpenCreateEntry(false);
                           setCreateEntryBankTxnId(null);
                         } catch (e: any) {
+                          setOptimisticPendingEntryDrafts((prev) =>
+                            prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
+                          );
+                          setOptimisticHiddenBankTxnIds((prev) => {
+                            const next = new Set(prev);
+                            next.delete(bankId);
+                            return next;
+                          });
+
                           applyMutationError(e, "Can’t create entry");
                           setCreateEntryErr(null);
                         } finally {
@@ -2800,7 +2988,14 @@ const isReconcileExemptEntry = (e: any) => {
                 <div className="text-sm font-semibold text-slate-900">Expected Entries</div>
                 <div className="text-xs text-slate-500">Ledger entries awaiting reconciliation</div>
               </div>
-              <div className="text-xs text-slate-400">&nbsp;</div>
+              <div className="text-[11px] text-slate-500 min-h-[16px]">
+                {entriesTruthSettling || entriesUpdating ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <TinySpinner />
+                    <span>{plaidSyncing ? "Syncing bank data…" : "Saving changes…"}</span>
+                  </span>
+                ) : "\u00A0"}
+              </div>
             </div>
           </div>
 
@@ -2812,7 +3007,7 @@ const isReconcileExemptEntry = (e: any) => {
                   }`}
                 onClick={() => setExpectedTab("expected")}
               >
-                Expected ({expectedCount})
+                Expected ({displayExpectedCount})
               </button>
               <button
                 type="button"
@@ -2820,7 +3015,7 @@ const isReconcileExemptEntry = (e: any) => {
                   }`}
                 onClick={() => setExpectedTab("matched")}
               >
-                Matched ({matchedCount})
+                Matched ({displayMatchedCount})
               </button>
             </div>
 
@@ -2898,7 +3093,11 @@ const isReconcileExemptEntry = (e: any) => {
                           return next;
                         });
 
-                        await refreshTablesFully({ preserveOnEmpty: true });
+                        await refreshTablesFully({
+                          preserveOnEmpty: true,
+                          skipLegacyMatches: true,
+                          silent: true,
+                        });
 
                         // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
                         setSelectedBankTxnIds((prev) => {
@@ -2931,13 +3130,12 @@ const isReconcileExemptEntry = (e: any) => {
           <div className="h-px bg-slate-200" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
-            {entriesUpdating ? <UpdatingOverlay label={plaidSyncing ? "Syncing…" : "Updating…"} /> : null}
-            <div className={`h-full min-h-0 overflow-y-auto overflow-x-hidden ${entriesUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
-              {entriesQ.isLoading ? (
+            <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+              {entriesTruthBlocking ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
                 </div>
-              ) : (expectedTab === "expected" ? entriesExpectedList : entriesMatchedList).length === 0 ? (
+              ) : displayEntriesActiveList.length === 0 ? (
                 <EmptyState label={expectedTab === "expected" ? "No expected entries in this period" : "No matched entries in this period"} />
               ) : (
                 <>
@@ -2961,16 +3159,17 @@ const isReconcileExemptEntry = (e: any) => {
                   </thead>
 
                   <tbody>
-                    {(expectedTab === "expected" ? entriesExpectedList : entriesMatchedList).map((e: any) => {
+                    {useMemo(() => displayEntriesActiveList.map((e: any) => {
                       const amt = toBigIntSafe(e.amount_cents);
                       const payee = (e.payee ?? "").trim();
+                      const isOptimisticPending = Boolean(e?.__optimistic_pending);
 
-                      const isMatched = matchedEntryIdSet.has(e.id);
+                      const isMatched = !isOptimisticPending && matchedEntryIdSet.has(e.id);
 
-                      const g = activeGroupByEntryId.get(String(e.id)) ?? null;
+                      const g = !isOptimisticPending ? (activeGroupByEntryId.get(String(e.id)) ?? null) : null;
                       const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
 
-                      const rowTone = isMatched ? " bg-primary/10" : "";
+                      const rowTone = isMatched ? " bg-primary/10" : isOptimisticPending ? " bg-amber-50/70" : "";
 
                       const deEmphasis = expectedTab === "matched" ? " text-slate-600" : "";
 
@@ -3004,15 +3203,18 @@ const isReconcileExemptEntry = (e: any) => {
                           <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-center pl-3${deEmphasis}`}>
                             <div className="inline-flex items-center justify-center gap-2">
-                              <StatusChip label={isMatched ? "Matched" : "Expected"} tone={isMatched ? "success" : "default"} />
+                              <StatusChip
+                                label={isOptimisticPending ? "Saving" : isMatched ? "Matched" : "Expected"}
+                                tone={isOptimisticPending ? "warning" : isMatched ? "success" : "default"}
+                              />
                               {hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
                             </div>
                           </td>
                           <td className={`${tdClass} text-right`}>
                             <div className="flex items-center justify-end gap-2">
-                              {pendingById[String(e.id)] ? <TinySpinner /> : null}
+                              {pendingById[String(e.id)] || isOptimisticPending ? <TinySpinner /> : null}
 
-                              {expectedTab === "matched" ? (
+                              {isOptimisticPending ? null : expectedTab === "matched" ? (
                                 <button
                                   type="button"
                                   className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
@@ -3075,12 +3277,12 @@ const isReconcileExemptEntry = (e: any) => {
                           </td>
                         </tr>
                       );
-                    })}
+                    }), [displayEntriesActiveList])}
                   </tbody>
                 </table>
 
                 {/* Phase 2 Performance: load more (keeps initial render bounded) */}
-                {expectedTab === "expected" && expectedCount > entriesExpectedList.length ? (
+                {expectedTab === "expected" && displayExpectedCount > displayEntriesExpectedList.length ? (
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
@@ -3090,7 +3292,7 @@ const isReconcileExemptEntry = (e: any) => {
                       Load more
                     </button>
                   </div>
-                ) : expectedTab === "matched" && matchedCount > entriesMatchedList.length ? (
+                ) : expectedTab === "matched" && displayMatchedCount > displayEntriesMatchedList.length ? (
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
@@ -3163,7 +3365,10 @@ const isReconcileExemptEntry = (e: any) => {
                           const res = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(res);
 
-                          await refreshTablesFully({ preserveOnEmpty: true });
+                          await refreshTablesFully({
+                            preserveOnEmpty: true,
+                            skipLegacyMatches: true,
+                          });
                         } finally {
                           setPlaidLoading(false);
                         }
@@ -3202,7 +3407,11 @@ const isReconcileExemptEntry = (e: any) => {
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
 
-                          await refreshTablesFully({ preserveOnEmpty: true });
+                          await refreshTablesFully({
+                            preserveOnEmpty: true,
+                            skipLegacyMatches: true,
+                            silent: true,
+                          });
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Sync failed");
                         } finally {
@@ -3220,13 +3429,19 @@ const isReconcileExemptEntry = (e: any) => {
 
           <div className="px-3 pb-2">
             <div className="flex items-center gap-2">
+              {bankTruthSettling || bankUpdating ? (
+                <span className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+                  <TinySpinner />
+                  <span>{plaidSyncing ? "Syncing bank data…" : "Saving changes…"}</span>
+                </span>
+              ) : null}
               <button
                 type="button"
                 className={`h-7 px-3 text-xs rounded-md border ${bankTab === "unmatched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
                   }`}
                 onClick={() => setBankTab("unmatched")}
               >
-                Unmatched ({bankUnmatchedCount})
+                Unmatched ({displayBankUnmatchedCount})
               </button>
               <button
                 type="button"
@@ -3234,7 +3449,7 @@ const isReconcileExemptEntry = (e: any) => {
                   }`}
                 onClick={() => setBankTab("matched")}
               >
-                Matched ({bankMatchedCount})
+                Matched ({displayBankMatchedCount})
               </button>
             </div>
           </div>
@@ -3242,13 +3457,12 @@ const isReconcileExemptEntry = (e: any) => {
           <div className="h-px bg-slate-200" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
-            {bankUpdating ? <UpdatingOverlay label={plaidSyncing ? "Syncing…" : "Updating…"} /> : null}
-            <div className={`h-full min-h-0 overflow-y-auto overflow-x-hidden ${bankUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
-              {bankTxLoading ? (
+            <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+              {bankTruthBlocking ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
                 </div>
-              ) : (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0 ? (
+              ) : displayBankActiveList.length === 0 ? (
                 <EmptyState
                   label={
                     bankTab === "unmatched"
@@ -3275,12 +3489,12 @@ const isReconcileExemptEntry = (e: any) => {
                             type="checkbox"
                             className="h-4 w-4"
                             checked={
-                              bankUnmatchedList.length > 0 &&
-                              selectedBankTxnIds.size === bankUnmatchedList.length
+                              displayBankUnmatchedList.length > 0 &&
+                              selectedBankTxnIds.size === displayBankUnmatchedList.length
                             }
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedBankTxnIds(new Set(bankUnmatchedList.map((x: any) => String(x.id))));
+                                setSelectedBankTxnIds(new Set(displayBankUnmatchedList.map((x: any) => String(x.id))));
                               } else {
                                 setSelectedBankTxnIds(new Set());
                               }
@@ -3297,7 +3511,7 @@ const isReconcileExemptEntry = (e: any) => {
                   </thead>
 
                   <tbody>
-                    {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).map((t: any) => {
+                    {useMemo(() => displayBankActiveList.map((t: any) => {
 
                       const txnId = String(t.id ?? "");
                       const isSelected = txnId ? selectedBankTxnIds.has(txnId) : false;
@@ -3529,12 +3743,12 @@ const isReconcileExemptEntry = (e: any) => {
                           </td>
                         </tr>
                       );
-                    })}
+                    }), [displayBankActiveList])}
                   </tbody>
                 </table>
 
                 {/* Phase 2 Performance: load more (keeps initial render bounded) */}
-                {bankTab === "unmatched" && bankUnmatchedCount > bankUnmatchedList.length ? (
+                {bankTab === "unmatched" && displayBankUnmatchedCount > displayBankUnmatchedList.length ? (
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
@@ -3544,7 +3758,7 @@ const isReconcileExemptEntry = (e: any) => {
                       Load more
                     </button>
                   </div>
-                ) : bankTab === "matched" && bankMatchedCount > bankMatchedList.length ? (
+                ) : bankTab === "matched" && displayBankMatchedCount > displayBankMatchedList.length ? (
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
@@ -3986,7 +4200,11 @@ const isReconcileExemptEntry = (e: any) => {
                           });
                         }
 
-                        await refreshTablesFully({ preserveOnEmpty: true });
+                        await refreshTablesFully({
+                          preserveOnEmpty: true,
+                          skipLegacyMatches: true,
+                          silent: true,
+                        });
 
                         clearMutErr();
                         setOpenMatch(false);
@@ -4494,7 +4712,11 @@ const isReconcileExemptEntry = (e: any) => {
                           });
                         }
 
-                        await refreshTablesFully({ preserveOnEmpty: true });
+                        await refreshTablesFully({
+                          preserveOnEmpty: true,
+                          skipLegacyMatches: true,
+                          silent: true,
+                        });
 
                         clearMutErr();
                         setOpenEntryMatch(false);

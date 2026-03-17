@@ -97,6 +97,7 @@ export async function handler(event: any) {
         issue_type: true,
         status: true,
         resolved_at: true,
+        group_key: true,
       },
     });
     if (!row) return json(404, { ok: false, error: "Issue not found" });
@@ -150,10 +151,31 @@ export async function handler(event: any) {
     }
 
     // LEGITIMIZE or ACK_STALE: resolve issue only (no entry mutation)
+    const now = new Date();
+    const duplicateSuppressionPrefix = "LEGIT_DUP:";
+
     await prisma.$transaction(async (tx: any) => {
+      if (action === "LEGITIMIZE" && row.issue_type === "DUPLICATE" && row.group_key) {
+        await tx.entryIssue.updateMany({
+          where: {
+            business_id: biz,
+            account_id: acct,
+            issue_type: "DUPLICATE",
+            group_key: row.group_key,
+          },
+          data: {
+            status: "RESOLVED",
+            resolved_at: now,
+            updated_at: now,
+            group_key: `${duplicateSuppressionPrefix}${row.group_key}`,
+          },
+        });
+        return;
+      }
+
       await tx.entryIssue.updateMany({
         where: { id: issue, business_id: biz, account_id: acct },
-        data: { status: "RESOLVED", resolved_at: new Date(), updated_at: new Date() },
+        data: { status: "RESOLVED", resolved_at: now, updated_at: now },
       });
     });
 

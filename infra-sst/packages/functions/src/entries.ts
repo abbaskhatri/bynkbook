@@ -369,7 +369,9 @@ export async function handler(event: any) {
     const cp2 = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: dup.date });
     if (!cp2.ok) return cp2.response;
 
-    // Block if entries differ on key lineage fields
+    // Decide survivor/duplicate using source-linkage-aware rules.
+    // Valid duplicate merge is allowed when only one entry has source linkage:
+    // keep the linked entry, merge/delete the unlinked duplicate.
     const sUpload = survivor.sourceUploadId ?? null;
     const dUpload = dup.sourceUploadId ?? null;
 
@@ -379,13 +381,39 @@ export async function handler(event: any) {
     const sTransfer = survivor.transfer_id ?? null;
     const dTransfer = dup.transfer_id ?? null;
 
-    if (sUpload !== dUpload || sBank !== dBank || sTransfer !== dTransfer) {
+    const hasSourceLinkage = (row: { sourceUploadId: string | null; sourceBankTransactionId: string | null }) =>
+      !!(row.sourceUploadId ?? row.sourceBankTransactionId);
+
+    const survivorHasSourceLinkage = hasSourceLinkage(survivor);
+    const duplicateHasSourceLinkage = hasSourceLinkage(dup);
+
+    let survivorEntryId = ent;
+    let duplicateEntryId = duplicate_entry_id;
+
+    if (sTransfer !== dTransfer) {
       return json(409, {
         ok: false,
         code: "MERGE_BLOCKED",
-        error: "Entries differ in source linkage; merge blocked.",
+        error: "Entries differ in transfer linkage; merge blocked.",
         reason: "SOURCE_MISMATCH",
       });
+    }
+
+    const bothHaveSourceLinkage = survivorHasSourceLinkage && duplicateHasSourceLinkage;
+    const sameSourceLinkage = sUpload === dUpload && sBank === dBank;
+
+    if (bothHaveSourceLinkage && !sameSourceLinkage) {
+      return json(409, {
+        ok: false,
+        code: "MERGE_BLOCKED",
+        error: "Entries have competing source linkage; merge blocked.",
+        reason: "SOURCE_MISMATCH",
+      });
+    }
+
+    if (!survivorHasSourceLinkage && duplicateHasSourceLinkage) {
+      survivorEntryId = duplicate_entry_id;
+      duplicateEntryId = ent;
     }
 
     // Block if either entry is reconciled (ACTIVE MatchGroupEntry)
@@ -393,7 +421,7 @@ export async function handler(event: any) {
       where: {
         business_id: biz,
         account_id: acct,
-        entry_id: { in: [ent, duplicate_entry_id] },
+        entry_id: { in: [survivorEntryId, duplicateEntryId] },
         matchGroup: { status: "ACTIVE" },
       },
     });
@@ -412,7 +440,7 @@ export async function handler(event: any) {
       where: {
         business_id: biz,
         account_id: acct,
-        entry_id: { in: [ent, duplicate_entry_id] },
+        entry_id: { in: [survivorEntryId, duplicateEntryId] },
         is_active: true,
       },
     });
@@ -434,8 +462,8 @@ export async function handler(event: any) {
           id: mergeId,
           business_id: biz,
           account_id: acct,
-          survivor_entry_id: ent,
-          merged_entry_id: duplicate_entry_id,
+          survivor_entry_id: survivorEntryId,
+          merged_entry_id: duplicateEntryId,
           reason,
           actor_user_id: sub,
         },
@@ -443,7 +471,7 @@ export async function handler(event: any) {
 
       // Soft-delete ONLY the duplicate. Survivor remains unchanged.
       await tx.entry.updateMany({
-        where: { id: duplicate_entry_id, business_id: biz, account_id: acct, deleted_at: null },
+        where: { id: duplicateEntryId, business_id: biz, account_id: acct, deleted_at: null },
         data: { deleted_at: new Date(), updated_at: new Date() },
       });
 
@@ -452,7 +480,7 @@ export async function handler(event: any) {
         where: {
           business_id: biz,
           account_id: acct,
-          entry_id: { in: [ent, duplicate_entry_id] },
+          entry_id: { in: [survivorEntryId, duplicateEntryId] },
           issue_type: "DUPLICATE",
           status: "OPEN",
         },
@@ -466,8 +494,8 @@ export async function handler(event: any) {
         eventType: "MERGE_ENTRY",
         payloadJson: {
           account_id: acct,
-          survivor_entry_id: ent,
-          merged_entry_id: duplicate_entry_id,
+          survivor_entry_id: survivorEntryId,
+          merged_entry_id: duplicateEntryId,
           reason,
         },
       });
@@ -476,8 +504,8 @@ export async function handler(event: any) {
     return json(200, {
       ok: true,
       merge_id: mergeId,
-      survivor_entry_id: ent,
-      deleted_entry_id: duplicate_entry_id,
+      survivor_entry_id: survivorEntryId,
+      deleted_entry_id: duplicateEntryId,
     });
   }
 

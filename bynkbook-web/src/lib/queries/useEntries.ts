@@ -19,8 +19,16 @@ export function useEntries(params: {
         includeDeleted: !!includeDeleted,
       }),
     enabled: !!businessId && !!accountId,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
+
+    // Align entries with app-wide query discipline so page revisits,
+    // focus changes, and small follow-up refreshes do not feel heavy.
+    staleTime: 30_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+
+    // Keep last-good rows visible while a background refresh resolves.
+    placeholderData: (prev) => prev,
   });
 }

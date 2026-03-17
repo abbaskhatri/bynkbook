@@ -10,7 +10,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
-import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry, aiMerchantNormalize } from "@/lib/api/ai";
+import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
@@ -245,9 +245,6 @@ export default function CategoryReviewPageClient() {
   const [whyText, setWhyText] = useState<string | null>(null);
   const [whyErr, setWhyErr] = useState<string | null>(null);
 
-  const merchantCacheRef = useRef<Record<string, { merchant: string; confidence: number; reason: string }>>({});
-  const [merchantBusyId, setMerchantBusyId] = useState<string | null>(null);
-  const [merchantErrByEntryId, setMerchantErrByEntryId] = useState<Record<string, "429" | "ERR">>({});
   // Now that entriesQ exists, include it in the banner mapping
   const bannerMsgWithEntries =
     bannerMsg || appErrorMessageOrNull(entriesQ.error) || null;
@@ -667,81 +664,6 @@ export default function CategoryReviewPageClient() {
       setWhyErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
     } finally {
       setWhyBusy(false);
-    }
-  }
-
-  async function getMerchant(entryId: string, payee: string, memo?: string) {
-    const cached = merchantCacheRef.current[entryId];
-    if (cached) return cached;
-
-    if (!selectedBusinessId) return null;
-
-    setMerchantBusyId(entryId);
-    setMerchantErrByEntryId((m) => {
-      const next = { ...m };
-      delete next[entryId];
-      return next;
-    });
-
-    try {
-      const res: any = await aiMerchantNormalize({ businessId: selectedBusinessId, payee, memo: memo ?? "" });
-      if (!res?.ok) throw new Error(res?.error || "Merchant detect failed");
-
-      const out = {
-        merchant: String(res.merchant ?? "").trim(),
-        confidence: Number(res.confidence ?? 0),
-        reason: String(res.reason ?? "").trim(),
-      };
-
-      if (out.merchant) merchantCacheRef.current[entryId] = out;
-      return out;
-    } catch (e: any) {
-      const msg = String(e?.message ?? "Merchant detect failed");
-      setMerchantErrByEntryId((m) => ({
-        ...m,
-        [entryId]: msg.includes("429") ? "429" : "ERR",
-      }));
-      return null;
-    } finally {
-      setMerchantBusyId(null);
-    }
-  }
-
-  async function applyMerchant(entryId: string, merchant: string) {
-    if (!selectedBusinessId || !selectedAccountId) return;
-
-    // Suggestion-only: apply only on explicit click (writes through existing entry update API)
-    setPendingIds((m) => ({ ...m, [entryId]: true }));
-    setFailedById((m) => {
-      const next = { ...m };
-      delete next[entryId];
-      return next;
-    });
-
-    try {
-      await updateEntry({
-        businessId: selectedBusinessId,
-        accountId: selectedAccountId,
-        entryId,
-        updates: { payee: merchant },
-      });
-
-      await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
-      await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
-
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
-      }
-    } catch (e: any) {
-      const r = applyMutationError(e, "Can’t apply merchant");
-      if (!r.isClosed) setFailedById((m) => ({ ...m, [entryId]: r.msg }));
-    } finally {
-      setPendingIds((m) => {
-        const next = { ...m };
-        delete next[entryId];
-        return next;
-      });
     }
   }
 
@@ -1224,54 +1146,6 @@ export default function CategoryReviewPageClient() {
                               <div className="flex flex-col min-w-0">
                                 <div className="text-xs text-slate-900 truncate font-medium">{payee}</div>
 
-                                {(() => {
-                                  const memo = String(e.memo ?? "");
-                                  const looksNoisy = /[#\d]{2,}|(POS|WEB|ACH|DEBIT|CREDIT)/i.test(payee) && payee.length >= 8;
-                                  if (!looksNoisy) return null;
-
-                                  const cached = merchantCacheRef.current[id] ?? null;
-                                  const merchantErr = merchantErrByEntryId[id] ?? null;
-
-                                  if (merchantErr === "429") {
-                                    return <div className="mt-0.5 text-[11px] text-amber-700">AI limit reached. Merchant suggestion unavailable.</div>;
-                                  }
-
-                                  if (merchantErr === "ERR") {
-                                    return <div className="mt-0.5 text-[11px] text-slate-500">AI merchant suggestion unavailable right now.</div>;
-                                  }
-
-                                  return (
-                                    <div className="mt-0.5 flex items-center gap-2">
-                                      {cached ? (
-                                        <>
-                                          <div className="text-[11px] text-slate-600">
-                                            Merchant detected: <span className="font-semibold text-slate-900">{cached.merchant}</span>
-                                            <span className="text-slate-400"> • {Math.round((cached.confidence || 0) * 100)}%</span>
-                                          </div>
-
-                                          <button
-                                            type="button"
-                                            className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                                            disabled={!!pendingIds[id]}
-                                            onClick={() => void applyMerchant(id, cached.merchant)}
-                                          >
-                                            Apply
-                                          </button>
-                                        </>
-                                      ) : merchantBusyId === id ? (
-                                        <div className="h-3 w-44 rounded bg-slate-200 animate-pulse" />
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          className="text-[11px] text-slate-600 hover:text-slate-900 underline"
-                                          onClick={() => void getMerchant(id, payee, memo)}
-                                        >
-                                          Detect merchant
-                                        </button>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
                               </div>
                             </td>
 

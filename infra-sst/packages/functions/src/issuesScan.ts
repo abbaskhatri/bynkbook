@@ -355,12 +355,40 @@ export async function handler(event: any) {
   }
   const finalDetected = Array.from(dedup.values());
 
+  // Respect minimal durable duplicate legitimize suppression.
+  // Suppress only the exact same duplicate family signature from reopening.
+  const duplicateSuppressionPrefix = "LEGIT_DUP:";
+  const suppressedDuplicateRows = await prisma.entryIssue.findMany({
+    where: {
+      business_id: biz,
+      account_id: acct,
+      issue_type: "DUPLICATE",
+      status: "RESOLVED",
+      group_key: { startsWith: duplicateSuppressionPrefix },
+    },
+    select: { group_key: true },
+  });
+
+  const suppressedDuplicateGroupKeys = new Set<string>(
+    suppressedDuplicateRows
+      .map((r: any) => String(r.group_key ?? ""))
+      .filter(Boolean)
+      .map((k: string) => k.slice(duplicateSuppressionPrefix.length))
+      .filter(Boolean)
+  );
+
+  const persistDetected = finalDetected.filter((d) => {
+    if (d.issue_type !== "DUPLICATE") return true;
+    if (!d.group_key) return true;
+    return !suppressedDuplicateGroupKeys.has(String(d.group_key));
+  });
+
   if (dryRun) {
     return json(200, {
       ok: true,
       dryRun: true,
-      detected: finalDetected.length,
-      detectedByType: finalDetected.reduce((acc: any, x) => {
+      detected: persistDetected.length,
+      detectedByType: persistDetected.reduce((acc: any, x) => {
         acc[x.issue_type] = (acc[x.issue_type] || 0) + 1;
         return acc;
       }, {}),
@@ -384,7 +412,7 @@ export async function handler(event: any) {
     select: { id: true, entry_id: true, issue_type: true },
   });
 
-  const detectedKeys = new Set(finalDetected.map((d) => `${d.entry_id}|${d.issue_type}`));
+  const detectedKeys = new Set(persistDetected.map((d) => `${d.entry_id}|${d.issue_type}`));
 
   // Resolve issues no longer detected
   const toResolveIds = existing
@@ -393,7 +421,7 @@ export async function handler(event: any) {
 
   // Upsert detected issues
   let upserted = 0;
-  for (const d of finalDetected) {
+  for (const d of persistDetected) {
     // Manual upsert (avoid Prisma unique-selector name mismatch):
 // 1) find existing OPEN/RESOLVED row for this scope+entry+type
 // 2) update if found, otherwise create
@@ -454,7 +482,7 @@ if (existingIssue?.id) {
     ok: true,
     businessId: biz,
     accountId: acct,
-    detected: finalDetected.length,
+    detected: persistDetected.length,
     upserted,
     resolved: toResolveIds.length,
   });
