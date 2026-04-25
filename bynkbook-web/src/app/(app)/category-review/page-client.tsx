@@ -614,6 +614,7 @@ export default function CategoryReviewPageClient() {
       });
 
       // Refresh all ledger/account entry surfaces immediately.
+      await qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId], exact: false });
       await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
       await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
       await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
@@ -1509,6 +1510,7 @@ export default function CategoryReviewPageClient() {
                       });
 
                       await entriesQ.refetch?.();
+                      await qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId], exact: false });
                       await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
                       await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
                       await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });

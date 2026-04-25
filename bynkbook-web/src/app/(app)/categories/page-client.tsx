@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { PageHeader } from "@/components/app/page-header";
@@ -15,6 +16,7 @@ import { createCategory, listCategories, updateCategory, type CategoryRow } from
 export default function CategoriesPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
+  const qc = useQueryClient();
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
@@ -66,6 +68,7 @@ export default function CategoriesPageClient() {
     try {
       await createCategory(businessId, name);
       setNewName("");
+      void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Create failed");
@@ -83,6 +86,7 @@ export default function CategoriesPageClient() {
     setErr(null);
     try {
       await updateCategory(businessId, id, { name });
+      void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Rename failed");
@@ -97,6 +101,7 @@ export default function CategoriesPageClient() {
     setErr(null);
     try {
       await updateCategory(businessId, id, { archived: nextArchived });
+      void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Update failed");
