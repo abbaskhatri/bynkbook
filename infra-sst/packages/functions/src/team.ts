@@ -35,11 +35,6 @@ function normalizeRole(input: string) {
   return role;
 }
 
-const WRITE_ROLES = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
-function canWrite(role: string | null | undefined) {
-  return !!role && WRITE_ROLES.has(String(role).toUpperCase());
-}
-
 const MANAGE_MEMBER_ROLES = new Set(["OWNER", "ADMIN"]);
 function canManageMemberRoles(role: string | null | undefined) {
   return !!role && MANAGE_MEMBER_ROLES.has(String(role).toUpperCase());
@@ -319,7 +314,7 @@ export async function handler(event: any) {
 
   // POST /v1/businesses/{businessId}/team/invites/{inviteId}/revoke (idempotent)
   if (method === "POST" && path === `/v1/businesses/${biz}/team/invites/${inviteId}/revoke`) {
-    if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    if (!canManageMemberRoles(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
 
     const id = String(inviteId ?? "").trim();
     if (!id) return json(400, { ok: false, error: "Missing inviteId" });
@@ -372,7 +367,7 @@ export async function handler(event: any) {
 
   // PATCH /v1/businesses/{businessId}/team/members/{userId}
   if (method === "PATCH" && path === `/v1/businesses/${biz}/team/members/${userId}`) {
-    if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    if (!canManageMemberRoles(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
 
     let body: any = {};
     try {
@@ -444,7 +439,7 @@ export async function handler(event: any) {
 
   // DELETE /v1/businesses/{businessId}/team/members/{userId}
   if (method === "DELETE" && path === `/v1/businesses/${biz}/team/members/${userId}`) {
-    if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    if (!canManageMemberRoles(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
 
     const az = await authorizeWrite(prisma, {
       businessId: biz,

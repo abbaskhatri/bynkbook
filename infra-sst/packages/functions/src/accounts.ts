@@ -295,6 +295,8 @@ export async function handler(event: any) {
 
   // POST /v1/businesses/{businessId}/accounts
   if (method === "POST") {
+    if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
