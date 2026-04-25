@@ -3,13 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession } from "aws-amplify/auth";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { useEntries } from "@/lib/queries/useEntries";
 
-import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -75,7 +73,7 @@ type IssueRow = {
   status: "OPEN" | "RESOLVED";
   groupKey?: string | null;
 
-  // Display fields (joined from entries)
+  // Display fields from the /issues entry snapshot
   date: string;
   payee: string;
   amountStr: string;
@@ -87,6 +85,25 @@ type IssueRow = {
 
   // for dialog flags
   flags: { dup: boolean; stale: boolean; missing: boolean };
+};
+
+type ApiIssue = {
+  id: string;
+  entry_id: string;
+  issue_type: string;
+  status: string;
+  severity: string;
+  group_key: string | null;
+  details: string;
+  detected_at: string;
+  entry_date?: string | null;
+  entry_payee?: string | null;
+  entry_memo?: string | null;
+  entry_amount_cents?: string | null;
+  entry_type?: string | null;
+  entry_method?: string | null;
+  entry_category_id?: string | null;
+  entry_category_name?: string | null;
 };
 
 export default function IssuesPageClient() {
@@ -119,11 +136,6 @@ export default function IssuesPageClient() {
     if (accountIdFromUrl) return accountIdFromUrl;
     return list.find((a) => !a.archived_at)?.id ?? "";
   }, [accountsQ.data, accountIdFromUrl]);
-
-  const selectedAccount = useMemo(() => {
-    const list = accountsQ.data ?? [];
-    return list.find((a) => a.id === selectedAccountId) ?? null;
-  }, [accountsQ.data, selectedAccountId]);
 
   // ================================
   // Filters (UI-only, local)
@@ -344,24 +356,6 @@ export default function IssuesPageClient() {
     return () => cancelAnimationFrame(raf);
   }, [selectedBusinessId, selectedAccountId, scanKey, lastScanAt]);
 
-  // ================================
-  // Entries (for display/join)
-  // ================================
-  const entriesQ = useEntries({
-    businessId: selectedBusinessId,
-    accountId: selectedAccountId,
-    limit: 500,
-    includeDeleted: false,
-  });
-
-  const entries = useMemo(() => (entriesQ.data ?? []) as Entry[], [entriesQ.data]);
-
-  const entryById = useMemo(() => {
-    const m = new Map<string, Entry>();
-    for (const e of entries) m.set(e.id, e);
-    return m;
-  }, [entries]);
-
   // Real categories (needed for FixIssueDialog: missing category fix)
   const categoriesQ = useQuery({
     queryKey: ["categories", selectedBusinessId],
@@ -373,27 +367,6 @@ export default function IssuesPageClient() {
   });
 
   const categoryRows = categoriesQ.data?.rows ?? [];
-
-  const categoryNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const c of categoryRows) m.set(c.id, c.name);
-    return m;
-  }, [categoryRows]);
-
-  const categoryIdByNormName = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const c of categoryRows) m.set(c.name.trim().toLowerCase(), c.id);
-    return m;
-  }, [categoryRows]);
-
-  const categoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const e of entries) {
-      const c = (e.memo || "").trim();
-      if (c && c !== (selectedAccount?.name ?? "")) set.add(c);
-    }
-    return Array.from(set);
-  }, [entries, selectedAccount?.name]);
 
   // ================================
   // Stage B issues query
@@ -435,16 +408,7 @@ export default function IssuesPageClient() {
       return (await res.json()) as {
         ok: boolean;
         status: string;
-        issues: Array<{
-          id: string;
-          entry_id: string;
-          issue_type: string;
-          status: string;
-          severity: string;
-          group_key: string | null;
-          details: string;
-          detected_at: string;
-        }>;
+        issues: ApiIssue[];
       };
     },
   });
@@ -452,7 +416,6 @@ export default function IssuesPageClient() {
   const bannerMsg =
     appErrorMessageOrNull(businessesQ.error) ||
     appErrorMessageOrNull(accountsQ.error) ||
-    appErrorMessageOrNull(entriesQ.error) ||
     appErrorMessageOrNull(categoriesQ.error) ||
     appErrorMessageOrNull(issuesQ.error) ||
     null;
@@ -514,12 +477,10 @@ export default function IssuesPageClient() {
       if (kind === "MISSING_CATEGORY") continue; // Category Review owns it
 
       const entryId = it.entry_id;
-      const e = entryById.get(entryId);
-
-      const rawMethod = (e?.method ?? "").toString();
-      const amt = toBigIntSafe(e?.amount_cents);
+      const rawMethod = (it.entry_method ?? "").toString();
+      const amt = toBigIntSafe(it.entry_amount_cents);
       const amountCents = amt.toString();
-      const amountStr = e ? formatUsdFromCents(amt) : "—";
+      const amountStr = it.entry_amount_cents != null ? formatUsdFromCents(amt) : "—";
 
       out.push({
         id: entryId,
@@ -527,13 +488,13 @@ export default function IssuesPageClient() {
         status: (it.status || "OPEN").toUpperCase() === "RESOLVED" ? "RESOLVED" : "OPEN",
         groupKey: it.group_key ?? null,
 
-        date: e?.date ?? "",
-        payee: e?.payee ?? "—",
+        date: it.entry_date ?? "",
+        payee: it.entry_payee ?? "Entry unavailable",
         amountStr,
         amountCents,
         methodDisplay: titleCase(rawMethod),
         rawMethod,
-        category: (e?.memo ?? "") || "",
+        category: it.entry_category_name ?? it.entry_memo ?? "",
         details: it.details || "",
         flags: {
           dup: kind === "DUPLICATE",
@@ -550,7 +511,7 @@ export default function IssuesPageClient() {
     });
 
     return out;
-  }, [issuesQ.data, entryById]);
+  }, [issuesQ.data]);
 
   const filteredIssues = useMemo(() => {
     const q = debouncedPayee.trim().toLowerCase();
@@ -754,26 +715,6 @@ export default function IssuesPageClient() {
 
   const [autoFixDialogOpen, setAutoFixDialogOpen] = useState(false);
 
-  // kept (category quick fix on Issues page is not used anymore, but update mutation remains harmless)
-  const updateMut = useMutation({
-    mutationFn: async (vars: { entryId: string; memo: string | null }) => {
-      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
-      return updateEntry({
-        businessId: selectedBusinessId,
-        accountId: selectedAccountId,
-        entryId: vars.entryId,
-        updates: ({ memo: vars.memo } as any),
-      });
-    },
-    onSuccess: async () => {
-      clearMutErr();
-      void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId] });
-    },
-    onError: (e: any) => {
-      applyMutationError(e, "Can’t update entry");
-    },
-  });
-
   const accountCapsuleEl = (
     <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
       <CapsuleSelect
@@ -873,7 +814,6 @@ export default function IssuesPageClient() {
   function retrySurfaceLoads() {
     void businessesQ.refetch?.();
     void accountsQ.refetch?.();
-    void entriesQ.refetch?.();
     void categoriesQ.refetch?.();
     void issuesQ.refetch();
   }
@@ -1011,7 +951,7 @@ export default function IssuesPageClient() {
               </thead>
 
               <tbody>
-                {(issuesQ.isLoading || entriesQ.isLoading) ? (
+                {issuesQ.isLoading ? (
                   <>
                     {Array.from({ length: 10 }).map((_, i) => (
                       <tr key={`sk-${i}`} className="h-[24px] border-b border-slate-200">
@@ -1245,22 +1185,18 @@ export default function IssuesPageClient() {
         entryId={fixDialog?.id ?? null}
         issues={openIssues as any}
         rowsById={Object.fromEntries(
-          entries.map((e) => {
-            const amt = toBigIntSafe(e.amount_cents);
-            const categoryName =
-              categoryNameById.get((e as any).category_id ?? "") ??
-              "";
-
+          (issuesQ.data?.issues ?? []).map((it) => {
+            const amt = toBigIntSafe(it.entry_amount_cents);
             return [
-              e.id,
+              it.entry_id,
               {
-                id: e.id,
-                date: e.date,
-                payee: e.payee ?? "",
-                amountStr: e.id ? formatUsdFromCents(amt) : "—",
-                methodDisplay: titleCase((e.method ?? "").toString()),
-                category: categoryName,
-                categoryId: ((e as any).category_id ?? null) as string | null,
+                id: it.entry_id,
+                date: it.entry_date ?? "",
+                payee: it.entry_payee ?? "",
+                amountStr: it.entry_amount_cents != null ? formatUsdFromCents(amt) : "—",
+                methodDisplay: titleCase((it.entry_method ?? "").toString()),
+                category: it.entry_category_name ?? "",
+                categoryId: it.entry_category_id ?? null,
               },
             ];
           })
