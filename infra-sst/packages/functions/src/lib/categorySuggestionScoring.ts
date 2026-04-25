@@ -34,6 +34,21 @@ export type HeuristicSuggestion = {
   reason: string;
 };
 
+export type CategorySuggestionSafetyInput = {
+  category_id?: unknown;
+  categoryId?: unknown;
+  confidence?: unknown;
+  confidence_tier?: unknown;
+  confidenceTier?: unknown;
+  review_only?: unknown;
+  reviewOnly?: unknown;
+  protected?: unknown;
+  is_protected?: unknown;
+  isProtected?: unknown;
+  protected_class?: unknown;
+  protectedClass?: unknown;
+};
+
 type CategoryEvidence = {
   score: number;
   exactMerchantHits: number;
@@ -173,6 +188,47 @@ export function confidenceTierFromScore(score: number) {
   if (score >= 85) return "STRONG_SUGGESTION" as const;
   if (score >= 60) return "ALTERNATE" as const;
   return "REVIEW_BUCKET" as const;
+}
+
+function suggestionConfidenceValue(raw: unknown) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return clampInt(n, 0, 100);
+}
+
+function suggestionHasCategoryId(suggestion: CategorySuggestionSafetyInput | null | undefined) {
+  return !!String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
+}
+
+function suggestionMarkedReviewOnlyOrProtected(suggestion: CategorySuggestionSafetyInput | null | undefined) {
+  if (!suggestion) return false;
+
+  return (
+    suggestion.review_only === true ||
+    suggestion.reviewOnly === true ||
+    suggestion.protected === true ||
+    suggestion.is_protected === true ||
+    suggestion.isProtected === true ||
+    !!String(suggestion.protected_class ?? suggestion.protectedClass ?? "").trim()
+  );
+}
+
+export function isBulkSafeCategorySuggestion(
+  suggestion: CategorySuggestionSafetyInput | null | undefined,
+  suggestionIndex: number
+) {
+  if (suggestionIndex !== 0) return false;
+  if (!suggestionHasCategoryId(suggestion)) return false;
+  if (suggestionMarkedReviewOnlyOrProtected(suggestion)) return false;
+
+  const confidence = suggestionConfidenceValue(suggestion?.confidence);
+  if (confidence === null || confidence < 85) return false;
+
+  const tier = String(suggestion?.confidence_tier ?? suggestion?.confidenceTier ?? "")
+    .trim()
+    .toUpperCase();
+
+  return tier === "SAFE_DETERMINISTIC" || tier === "STRONG_SUGGESTION";
 }
 
 export function buildHeuristicSuggestions(args: {

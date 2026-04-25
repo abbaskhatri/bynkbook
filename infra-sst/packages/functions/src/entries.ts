@@ -3,6 +3,8 @@ import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
+import { computeCategorySuggestionsForItems } from "./aiCategorySuggestions";
+import { isBulkSafeCategorySuggestion } from "./lib/categorySuggestionScoring";
 import { randomUUID } from "node:crypto";
 
 const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
@@ -200,6 +202,26 @@ export async function handler(event: any) {
 
     const validCat = new Set<string>(catRows.map((c: any) => String(c?.id ?? "").trim()).filter(Boolean));
 
+    const suggestionItems = rows
+      .map((r: any) => ({
+        kind: "ENTRY" as const,
+        id: String(r?.id ?? "").trim(),
+        date: r?.date ? new Date(r.date).toISOString().slice(0, 10) : undefined,
+        amount_cents: r?.amount_cents,
+        payee_or_name: String(r?.payee ?? ""),
+        memo: String(r?.memo ?? ""),
+      }))
+      .filter((r) => !!r.id);
+
+    const currentSuggestions = await computeCategorySuggestionsForItems({
+      prisma,
+      businessId: biz,
+      accountId: acct,
+      items: suggestionItems,
+      limitPerItem: 3,
+      includeAiFallback: false,
+    });
+
     const results: any[] = [];
     let applied = 0;
     let blocked = 0;
@@ -216,6 +238,61 @@ export async function handler(event: any) {
 
       if (!categoryId || !isUuid(categoryId) || !validCat.has(categoryId)) {
         results.push({ entryId, ok: false, code: "INVALID_CATEGORY", error: "Invalid category" });
+        blocked++;
+        continue;
+      }
+
+      const suggestedCategoryId = String(it.suggested_category_id ?? "").trim();
+      if (!suggestedCategoryId) {
+        results.push({
+          entryId,
+          ok: false,
+          code: "SUGGESTION_REQUIRED",
+          error: "Batch category apply requires a current strong category suggestion.",
+        });
+        blocked++;
+        continue;
+      }
+
+      const topSuggestion = (currentSuggestions.suggestionsById?.[entryId] ?? [])[0] ?? null;
+      const topSuggestionAny: any = topSuggestion;
+      const topCategoryId = String(topSuggestionAny?.category_id ?? topSuggestionAny?.categoryId ?? "").trim();
+
+      if (!topSuggestion || !topCategoryId) {
+        results.push({
+          entryId,
+          ok: false,
+          code: "SUGGESTION_UNAVAILABLE",
+          error: "No current category suggestion is available for this entry.",
+        });
+        blocked++;
+        continue;
+      }
+
+      if (!isBulkSafeCategorySuggestion(topSuggestion, 0)) {
+        results.push({
+          entryId,
+          ok: false,
+          code: "UNSAFE_SUGGESTION",
+          error: "This category suggestion needs manual review before applying.",
+          suggested_category_id: topCategoryId,
+          confidence: topSuggestion.confidence,
+          confidence_tier: topSuggestion.confidence_tier,
+        });
+        blocked++;
+        continue;
+      }
+
+      if (categoryId !== suggestedCategoryId || categoryId !== topCategoryId) {
+        results.push({
+          entryId,
+          ok: false,
+          code: "SUGGESTION_MISMATCH",
+          error: "Requested category does not match the current top category suggestion.",
+          suggested_category_id: topCategoryId,
+          confidence: topSuggestion.confidence,
+          confidence_tier: topSuggestion.confidence_tier,
+        });
         blocked++;
         continue;
       }

@@ -11,6 +11,10 @@ import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry } from "@/lib/api/ai";
+import {
+  categorySuggestionConfidenceValue,
+  isBulkSafeCategorySuggestion,
+} from "@/lib/categorySuggestions";
 
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
@@ -71,9 +75,7 @@ function firstOfThisMonth() {
 }
 
 function categorySuggestionConfidence(raw: unknown) {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
+  return categorySuggestionConfidenceValue(raw) ?? 0;
 }
 
 function categorySuggestionTierLabel(raw: unknown) {
@@ -531,7 +533,7 @@ export default function CategoryReviewPageClient() {
     applyBusy ||
     Object.keys(pendingIds).length > 0;
 
-  // F7a (session-local): AI attribution + undo (suggestion-pill applies only; dropdown does NOT set AI)
+  // F7a (session-local): AI badge + undo for suggestion-pill applies only when source is AI.
   const [aiAppliedById, setAiAppliedById] = useState<Record<string, boolean>>({});
   const [undoByEntryId, setUndoByEntryId] = useState<
     Record<string, { prevCategoryId: string | null; nextCategoryId: string | null; expiresAt: number }>
@@ -708,6 +710,8 @@ export default function CategoryReviewPageClient() {
       const list = Array.isArray(sugByEntryId[entryId]) ? sugByEntryId[entryId] : [];
       const top = list[0] ?? null;
       const suggested_category_id = String(top?.category_id ?? top?.categoryId ?? "").trim();
+      if (!isBulkSafeCategorySuggestion(top, 0)) continue;
+      if (!suggested_category_id || category_id !== suggested_category_id) continue;
 
       out.push({
         entryId,
@@ -727,12 +731,13 @@ export default function CategoryReviewPageClient() {
         const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
         const top = suggestions[0] ?? null;
         const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+        const bulkSafeTopCategoryId = isBulkSafeCategorySuggestion(top, 0) ? topCategoryId : "";
 
         return {
           entry: e,
           suggestions,
           topCategoryId,
-          selectedCategoryId: String(selectedSuggestionByEntryId[id] ?? topCategoryId ?? "").trim(),
+          selectedCategoryId: String(selectedSuggestionByEntryId[id] ?? bulkSafeTopCategoryId ?? "").trim(),
         };
       });
   }, [visibleRows, selectedIds, sugByEntryId, selectedSuggestionByEntryId]);
@@ -742,6 +747,8 @@ export default function CategoryReviewPageClient() {
   const autoFixTotalAmountCents = useMemo(() => {
     return autoFixRows.reduce((sum, row) => sum + Number(row.entry?.amount_cents ?? 0), 0);
   }, [autoFixRows]);
+
+  const autoFixReviewNeededCount = Math.max(0, autoFixRows.length - selectedApplyItems.length);
 
   const autoFixGroups = useMemo(() => {
     const categoryNameById = new Map<string, string>(
@@ -811,7 +818,7 @@ export default function CategoryReviewPageClient() {
       const top = suggestions[0] ?? null;
       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
 
-      if (topCategoryId) next[id] = topCategoryId;
+      if (topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
     }
 
     const categoryNameById = new Map<string, string>(
@@ -992,7 +999,7 @@ export default function CategoryReviewPageClient() {
                       const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
                       const top = suggestions[0] ?? null;
                       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                      if (!next[id] && topCategoryId) next[id] = topCategoryId;
+                      if (!next[id] && topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
                     }
 
                     const groupCounts = new Map<string, number>();
@@ -1333,7 +1340,13 @@ export default function CategoryReviewPageClient() {
 
                                                     try {
                                                       await applyCategoryToEntry(id, catId, catId);
-                                                      setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                                      const isAiSuggestion = String(s?.source ?? "").trim().toUpperCase() === "AI";
+                                                      setAiAppliedById((m) => {
+                                                        const next = { ...m };
+                                                        if (isAiSuggestion) next[id] = true;
+                                                        else delete next[id];
+                                                        return next;
+                                                      });
                                                       setUndoWindow(id, prevCategoryId, catId);
                                                     } catch {}
                                                   }}
@@ -1369,7 +1382,7 @@ export default function CategoryReviewPageClient() {
                                           {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" /> : null}
                                           {!sugLoading && suggestionsQ.error && !list.length ? (
                                             <div className="inline-flex items-center gap-2 min-w-0">
-                                              <span className="text-[10px] text-slate-500">AI suggestions unavailable</span>
+                                              <span className="text-[10px] text-slate-500">Category suggestions unavailable</span>
                                               <button
                                                 type="button"
                                                 className="text-[10px] text-primary hover:underline"
@@ -1380,7 +1393,7 @@ export default function CategoryReviewPageClient() {
                                             </div>
                                           ) : null}
                                           {!sugLoading && !suggestionsQ.error && !list.length ? (
-                                            <span className="text-[10px] text-slate-400">No AI suggestions</span>
+                                            <span className="text-[10px] text-slate-400">No category suggestions</span>
                                           ) : null}
                                         </>
                                       );
@@ -1518,15 +1531,20 @@ export default function CategoryReviewPageClient() {
             }
           >
             <div className="space-y-2">
-              <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 sm:grid-cols-4">
                 <div>
                   <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Selected</div>
                   <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixRows.length}</div>
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Groups</div>
-                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixGroups.length}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Ready</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{selectedApplyItems.length}</div>
+                </div>
+
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Review needed</div>
+                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixReviewNeededCount}</div>
                 </div>
 
                 <div>
@@ -1538,7 +1556,7 @@ export default function CategoryReviewPageClient() {
               </div>
 
               <div className="text-[11px] text-slate-600">
-                AI grouped the selected entries by suggested category. Expand any group to verify or edit.
+                Suggested categories are grouped for review. Entries without a strong top suggestion stay unassigned for manual review.
               </div>
 
               <div className="h-[320px] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">

@@ -187,7 +187,7 @@ async function openAiText(args: {
 
 type SuggestionSource = "VENDOR_DEFAULT" | "MEMORY" | "HEURISTIC" | "AI";
 
-type Suggestion = {
+export type CategorySuggestion = {
   category_id: string;
   category_name: string;
   confidence: number;
@@ -196,6 +196,8 @@ type Suggestion = {
   source: SuggestionSource;
   merchant_normalized: string;
 };
+
+type Suggestion = CategorySuggestion;
 
 type DeterministicStrength = {
   topConfidence: number;
@@ -206,7 +208,7 @@ type DeterministicStrength = {
   weakReason: boolean;
 };
 
-type InputItem = {
+export type CategorySuggestionInputItem = {
   kind: "BANK_TXN" | "ENTRY";
   id: string;
   date?: string;
@@ -214,6 +216,8 @@ type InputItem = {
   payee_or_name?: string;
   memo?: string;
 };
+
+type InputItem = CategorySuggestionInputItem;
 
 type ResolvedItem = InputItem & {
   type?: string;
@@ -655,75 +659,33 @@ async function runAiFallback(args: {
   return out;
 }
 
-/**
- * POST /v1/businesses/{businessId}/ai/category-suggestions
- * Body:
- * {
- *   accountId: string,
- *   items: [{ kind, id, date?, amount_cents?, payee_or_name?, memo? }],
- *   limitPerItem?: number
- * }
- */
-export async function handler(event: any) {
-  const claims = getClaims(event);
-  const sub = claims.sub as string | undefined;
-  if (!sub) return json(401, { ok: false, error: "Unauthorized" });
+export async function computeCategorySuggestionsForItems(args: {
+  prisma: any;
+  businessId: string;
+  accountId: string;
+  items: InputItem[];
+  limitPerItem?: number;
+  includeAiFallback?: boolean;
+}) {
+  const businessId = String(args.businessId ?? "").trim();
+  const accountId = String(args.accountId ?? "").trim();
+  const limitPerItem = clampSuggestionLimit(args.limitPerItem ?? 3);
+  const items = (args.items ?? []).slice(0, 200).filter((x) => !!String(x?.id ?? "").trim());
 
-  const businessId = String(event?.pathParameters?.businessId ?? "").trim();
-  if (!businessId) return json(400, { ok: false, error: "Missing businessId" });
-
-  let body: any = {};
-  try {
-    body = event?.body ? JSON.parse(event.body) : {};
-  } catch {
-    body = {};
+  if (!businessId || !accountId || !items.length) {
+    return {
+      suggestionsById: {} as Record<string, Suggestion[]>,
+      meta: { version: "catSug_v2", source: "CATEGORY_INTELLIGENCE_ENGINE", aiBatchCap: 25, aiRequestedRows: 0 },
+    };
   }
-
-  const accountId = String(body?.accountId ?? "").trim();
-  const itemsIn: unknown[] = Array.isArray(body?.items) ? body.items : [];
-  const limitPerItem = clampSuggestionLimit(body?.limitPerItem ?? 3);
-
-  if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
-  if (!itemsIn.length) {
-    return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v2" } });
-  }
-
-  const items: InputItem[] = itemsIn
-    .slice(0, 200)
-    .map((x: any): InputItem => {
-      const k = String(x?.kind ?? "").toUpperCase();
-      const kind: "BANK_TXN" | "ENTRY" = k === "BANK_TXN" ? "BANK_TXN" : "ENTRY";
-
-      return {
-        kind,
-        id: String(x?.id ?? "").trim(),
-        date: x?.date ? String(x.date).trim() : undefined,
-        amount_cents: x?.amount_cents,
-        payee_or_name: x?.payee_or_name ? String(x.payee_or_name) : "",
-        memo: x?.memo ? String(x.memo) : "",
-      };
-    })
-    .filter((x) => !!x.id);
-
-  if (!items.length) {
-    return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v2" } });
-  }
-
-  const prisma = await getPrisma();
-
-  const role = await requireMembership(prisma, businessId, sub);
-  if (!role) return json(403, { ok: false, error: "Forbidden" });
-
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
   const [categories, vendorsById, history, memoryRows, entrySnapshots] = await Promise.all([
-    loadCategories(prisma, businessId),
-    loadVendors(prisma, businessId),
-    loadAccountHistory(prisma, businessId, accountId),
-    loadBusinessMemory(prisma, businessId),
+    loadCategories(args.prisma, businessId),
+    loadVendors(args.prisma, businessId),
+    loadAccountHistory(args.prisma, businessId, accountId),
+    loadBusinessMemory(args.prisma, businessId),
     loadEntrySnapshots(
-      prisma,
+      args.prisma,
       businessId,
       items.filter((x) => x.kind === "ENTRY").map((x) => x.id)
     ),
@@ -820,6 +782,7 @@ export async function handler(event: any) {
     suggestionsById[it.id] = deterministic;
 
     if (
+      args.includeAiFallback !== false &&
       aiEligible.length < 25 &&
       shouldRunAiFallback({
         deterministic,
@@ -862,8 +825,7 @@ export async function handler(event: any) {
     }
   }
 
-  return json(200, {
-    ok: true,
+  return {
     suggestionsById,
     meta: {
       version: "catSug_v2",
@@ -871,5 +833,78 @@ export async function handler(event: any) {
       aiBatchCap: 25,
       aiRequestedRows: aiEligible.length,
     },
+  };
+}
+
+/**
+ * POST /v1/businesses/{businessId}/ai/category-suggestions
+ * Body:
+ * {
+ *   accountId: string,
+ *   items: [{ kind, id, date?, amount_cents?, payee_or_name?, memo? }],
+ *   limitPerItem?: number
+ * }
+ */
+export async function handler(event: any) {
+  const claims = getClaims(event);
+  const sub = claims.sub as string | undefined;
+  if (!sub) return json(401, { ok: false, error: "Unauthorized" });
+
+  const businessId = String(event?.pathParameters?.businessId ?? "").trim();
+  if (!businessId) return json(400, { ok: false, error: "Missing businessId" });
+
+  let body: any = {};
+  try {
+    body = event?.body ? JSON.parse(event.body) : {};
+  } catch {
+    body = {};
+  }
+
+  const accountId = String(body?.accountId ?? "").trim();
+  const itemsIn: unknown[] = Array.isArray(body?.items) ? body.items : [];
+  const limitPerItem = clampSuggestionLimit(body?.limitPerItem ?? 3);
+
+  if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
+  if (!itemsIn.length) {
+    return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v2" } });
+  }
+
+  const items: InputItem[] = itemsIn
+    .slice(0, 200)
+    .map((x: any): InputItem => {
+      const k = String(x?.kind ?? "").toUpperCase();
+      const kind: "BANK_TXN" | "ENTRY" = k === "BANK_TXN" ? "BANK_TXN" : "ENTRY";
+
+      return {
+        kind,
+        id: String(x?.id ?? "").trim(),
+        date: x?.date ? String(x.date).trim() : undefined,
+        amount_cents: x?.amount_cents,
+        payee_or_name: x?.payee_or_name ? String(x.payee_or_name) : "",
+        memo: x?.memo ? String(x.memo) : "",
+      };
+    })
+    .filter((x) => !!x.id);
+
+  if (!items.length) {
+    return json(200, { ok: true, suggestionsById: {}, meta: { version: "catSug_v2" } });
+  }
+
+  const prisma = await getPrisma();
+
+  const role = await requireMembership(prisma, businessId, sub);
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
+
+  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
+  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+
+  const computed = await computeCategorySuggestionsForItems({
+    prisma,
+    businessId,
+    accountId,
+    items,
+    limitPerItem,
   });
+
+  return json(200, { ok: true, suggestionsById: computed.suggestionsById, meta: computed.meta });
 }
