@@ -7,12 +7,27 @@ bynkbook-web/.env.local
 infra-sst/node_modules/
 infra-sst/.sst/
 infra-sst/.env
+infra-sst/.env.*
+!infra-sst/.env.example
 infra-sst/**/*.pem
 infra-sst/ca-secret
+infra-sst/ca-secret.json
+infra-sst/*secret*.json
 infra-sst/sst-state-*
 infra-sst/sst-deploy-debug
+infra-sst/sst-deploy-debug*.txt
+infra-sst/*deploy-debug*.txt
 infra-sst/debug/
+infra-sst/debug
+infra-sst/debug.*
 infra-sst/invoke-*
+infra-sst/invoke*.json
+infra-sst/*.out.json
+infra-sst/out.json
+infra-sst/payload.json
+infra-sst/payload*.json
+infra-sst/apigw*_test.json
+infra-sst/cognito-*-auth.json
 infra-sst/npm-install
 
 # --- OS / Editor ---

@@ -127,6 +127,9 @@ const ACTION_POLICY_KEY: Record<string, string> = {
   // Snapshots
   "snapshots.create": "snapshots",
   "snapshots.export.download": "exports",
+
+  // AI/category automation
+  "category.review.bulk.apply": "ai_automation",
 };
 
 function normalizeMode(m: any): AuthzMode {
@@ -204,6 +207,9 @@ function actionWave(actionKey: string): number {
 
   // Wave 3: snapshots/exports
   if (actionKey === "snapshots.create" || actionKey === "snapshots.export.download") return 3;
+
+  // Wave 4: AI/category automation writes
+  if (actionKey === "category.review.bulk.apply") return 4;
 
   // Unknown actionKeys are never enforced in 7.2 (safe default)
   return 0;
