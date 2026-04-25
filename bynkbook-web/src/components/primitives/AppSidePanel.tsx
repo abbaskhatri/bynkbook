@@ -18,9 +18,9 @@ type AppSidePanelProps = {
 };
 
 const panelWidthBySize: Record<PanelSize, string> = {
-  sm: "w-[400px]",
-  md: "w-[500px]",
-  lg: "w-[600px]",
+  sm: "sm:w-[400px]",
+  md: "sm:w-[500px]",
+  lg: "sm:w-[600px]",
 };
 
 export function AppSidePanel({
@@ -64,14 +64,14 @@ export function AppSidePanel({
   };
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50 overflow-hidden">
       <div
         className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] transition-opacity duration-200"
         onClick={handleOverlayClick}
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-stretch justify-end">
+      <div className="absolute inset-0 flex min-w-0 items-stretch justify-end overflow-hidden">
         <div
           ref={containerRef}
           tabIndex={-1}
@@ -79,13 +79,13 @@ export function AppSidePanel({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "h-full rounded-none border-l border-slate-200/90 bg-white shadow-2xl",
+            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-slate-200/90 bg-white shadow-2xl",
             "transition-transform duration-200 ease-out animate-in slide-in-from-right",
             widthClass,
-            "flex flex-col",
+            "flex min-h-0 flex-col overflow-hidden",
           ].join(" ")}
         >
-          <div className="shrink-0 px-5 py-4 border-b border-slate-200/80 flex items-start justify-between gap-3 bg-white/95">
+          <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200/80 flex items-start justify-between gap-3 bg-white/95">
             <div className="min-w-0 text-sm font-semibold text-slate-900 leading-6">
               {title}
             </div>
@@ -106,9 +106,9 @@ export function AppSidePanel({
             ) : null}
           </div>
 
-          <div className="flex-1 overflow-auto px-5 py-4">{children}</div>
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-5 sm:py-4">{children}</div>
 
-          <div className="shrink-0 px-5 py-4 border-t border-slate-200/80 bg-slate-50/70">
+          <div className="min-w-0 shrink-0 overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4 border-t border-slate-200/80 bg-slate-50/70">
             {footer ?? null}
           </div>
         </div>

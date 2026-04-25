@@ -11,9 +11,11 @@ export type DialogFooterProps = {
 
 export function DialogFooter({ left, right }: DialogFooterProps) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0 flex items-center gap-2">{left}</div>
-      <div className="shrink-0 flex items-center gap-2">{right}</div>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+      <div className="min-w-0 flex flex-wrap items-center gap-2">{left}</div>
+      <div className="min-w-0 flex flex-wrap items-center justify-end gap-2 sm:shrink-0">
+        {right}
+      </div>
     </div>
   );
 }

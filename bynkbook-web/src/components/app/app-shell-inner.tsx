@@ -750,7 +750,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {activityOpen ? (
-                <div className="absolute right-0 mt-2 w-[420px] rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
                   <div className="px-3 h-10 flex items-center justify-between border-b border-slate-200 bg-slate-50">
                     <div className="text-xs font-semibold text-slate-700">Activity</div>
 
@@ -770,7 +770,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   </div>
 
                   {/* Body */}
-                  <div className="max-h-[420px] overflow-auto">
+                  <div className="max-h-[calc(100dvh-5rem)] sm:max-h-[420px] overflow-auto">
                     {/* Error line (never hides last-good list) */}
                     {activityErr ? (
                       <div className="px-3 py-2 text-xs text-rose-700 border-b border-slate-100 flex items-center justify-between gap-2">
