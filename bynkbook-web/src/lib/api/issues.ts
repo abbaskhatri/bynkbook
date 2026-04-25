@@ -12,6 +12,15 @@ export type EntryIssueRow = {
   details?: string;
   detected_at?: string;
   resolved_at?: string | null;
+
+  entry_date?: string | null;
+  entry_payee?: string | null;
+  entry_memo?: string | null;
+  entry_amount_cents?: string | null;
+  entry_type?: string | null;
+  entry_method?: string | null;
+  entry_category_id?: string | null;
+  entry_category_name?: string | null;
 };
 
 export type BulkIssueSafeAction = "ACK_STALE" | "LEGITIMIZE";

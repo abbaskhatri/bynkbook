@@ -1074,6 +1074,55 @@ export default function ReconcilePageClient() {
     }
   }
 
+  function issueScanStorageKey(businessId: string, accountId: string) {
+    return `bynkbook:lastScanAt:${businessId}:${accountId}`;
+  }
+
+  function clearIssueScanThrottle(businessId: string, accountId: string) {
+    try {
+      localStorage.removeItem(issueScanStorageKey(businessId, accountId));
+    } catch {
+      // localStorage may be unavailable; issue freshness still proceeds via API/query invalidation.
+    }
+  }
+
+  async function refreshIssuesAfterBankEntryCreate() {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    const businessId = selectedBusinessId;
+    const accountId = selectedAccountId;
+
+    clearIssueScanThrottle(businessId, accountId);
+
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["entryIssues", businessId, accountId], exact: false }),
+      qc.invalidateQueries({ queryKey: ["issuesCount", businessId, accountId], exact: false }),
+    ]);
+
+    try {
+      await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/issues/scan`, {
+        method: "POST",
+        body: JSON.stringify({
+          includeMissingCategory: false,
+          dryRun: false,
+        }),
+      });
+
+      try {
+        localStorage.setItem(issueScanStorageKey(businessId, accountId), new Date().toISOString());
+      } catch {
+        // ignore
+      }
+    } catch {
+      clearIssueScanThrottle(businessId, accountId);
+    } finally {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["entryIssues", businessId, accountId], exact: false }),
+        qc.invalidateQueries({ queryKey: ["issuesCount", businessId, accountId], exact: false }),
+      ]);
+    }
+  }
+
   function refreshAllDebounced() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
@@ -2699,6 +2748,7 @@ const displayBankActiveList = useMemo(() => {
                             skipLegacyMatches: true,
                             silent: true,
                           });
+                          await refreshIssuesAfterBankEntryCreate();
 
                           setOptimisticPendingEntryDrafts((prev) =>
                             prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
@@ -3098,6 +3148,9 @@ const displayBankActiveList = useMemo(() => {
                           skipLegacyMatches: true,
                           silent: true,
                         });
+                        if (list.some((r: any) => String(r?.status ?? "") === "CREATED")) {
+                          await refreshIssuesAfterBankEntryCreate();
+                        }
 
                         // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
                         setSelectedBankTxnIds((prev) => {

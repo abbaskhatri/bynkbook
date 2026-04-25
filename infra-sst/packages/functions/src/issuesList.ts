@@ -24,6 +24,29 @@ function getClaims(event: any) {
   return claims as any;
 }
 
+function ymd(v: any): string | null {
+  if (!v) return null;
+  if (typeof v === "string") return v.slice(0, 10);
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  try {
+    return new Date(v).toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}
+
+function cents(v: any): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "number") return String(Math.trunc(v));
+  if (typeof v === "string") return v;
+  try {
+    return String(v);
+  } catch {
+    return null;
+  }
+}
+
 async function requireRole(prisma: any, userId: string, businessId: string) {
   const row = await prisma.userBusinessRole.findFirst({
     where: { business_id: businessId, user_id: userId },
@@ -110,5 +133,44 @@ export async function handler(event: any) {
     return (dupCounts.get(k) || 0) >= 2;
   });
 
-  return json(200, { ok: true, status, issues: rows });
+  const entryIds = Array.from(new Set(rows.map((r) => r.entry_id).filter(Boolean)));
+  const entries = entryIds.length
+    ? await prisma.entry.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        id: { in: entryIds },
+        deleted_at: null,
+      },
+      select: {
+        id: true,
+        date: true,
+        payee: true,
+        memo: true,
+        amount_cents: true,
+        type: true,
+        method: true,
+        category_id: true,
+        category: { select: { name: true } },
+      },
+    })
+    : [];
+
+  const entryById = new Map(entries.map((e: any) => [e.id, e]));
+  const withEntrySnapshots = rows.map((r) => {
+    const e = entryById.get(r.entry_id) ?? null;
+    return {
+      ...r,
+      entry_date: ymd(e?.date),
+      entry_payee: e?.payee ?? null,
+      entry_memo: e?.memo ?? null,
+      entry_amount_cents: cents(e?.amount_cents),
+      entry_type: e?.type ?? null,
+      entry_method: e?.method ?? null,
+      entry_category_id: e?.category_id ?? null,
+      entry_category_name: e?.category?.name ?? null,
+    };
+  });
+
+  return json(200, { ok: true, status, issues: withEntrySnapshots });
 }
