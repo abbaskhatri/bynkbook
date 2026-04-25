@@ -42,6 +42,18 @@ function navVariant(active: boolean) {
 
 const NAV_ICON_CLASS = "h-5 w-5";
 
+function AuthRedirectScreen() {
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
+      <div className="w-full max-w-sm rounded-md border border-slate-200 bg-white p-6 shadow-sm">
+        <BrandLogo variant="full" size="md" priority className="mb-6" />
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="mt-3 h-4 w-56" />
+      </div>
+    </div>
+  );
+}
+
 export default function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -180,7 +192,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     });
   }
 
-  const businessesQ = useBusinesses();
+  const appDataEnabled = showChrome && authChecked && isAuthed;
+  const businessesQ = useBusinesses({ enabled: appDataEnabled });
 
   // Stage 1: if signed in but has no businesses, force create-business (except when already there)
   useEffect(() => {
@@ -551,6 +564,10 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }
 
   if (!showChrome) return <>{children}</>;
+
+  if (!authChecked || !isAuthed) {
+    return <AuthRedirectScreen />;
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-50">
