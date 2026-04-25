@@ -6,6 +6,7 @@ import { Pool } from "pg";
 let prisma: PrismaClient | null = null;
 let pool: Pool | null = null;
 let cachedDatabaseUrl: string | null = null;
+let cachedDatabaseCa: string | null = null;
 
 async function getSecretString(secretId: string) {
   const region = process.env.AWS_REGION || "us-east-1";
@@ -23,15 +24,36 @@ async function getDatabaseUrl() {
   return cachedDatabaseUrl;
 }
 
+async function getDatabaseCa() {
+  const inlineCa = (process.env.DB_SSL_CA ?? "").replace(/\\n/g, "\n").trim();
+  if (inlineCa) return inlineCa;
+
+  if (cachedDatabaseCa) return cachedDatabaseCa;
+
+  const secretId = process.env.DB_SSL_CA_SECRET_ID;
+  if (!secretId) return "";
+
+  cachedDatabaseCa = (await getSecretString(secretId)).replace(/\\n/g, "\n").trim();
+  return cachedDatabaseCa;
+}
+
+async function getSslConfig() {
+  if ((process.env.DB_SSL ?? "").trim().toLowerCase() === "disable") return false;
+
+  const rejectUnauthorized = (process.env.DB_SSL_REJECT_UNAUTHORIZED ?? "true").trim().toLowerCase() !== "false";
+  const ca = await getDatabaseCa();
+
+  return ca ? { rejectUnauthorized, ca } : { rejectUnauthorized };
+}
+
 export async function getPrisma() {
   if (prisma) return prisma;
 
   const url = await getDatabaseUrl();
 
-  // DEV unblocker: TLS on, cert verification off
   pool = new Pool({
     connectionString: url,
-    ssl: { rejectUnauthorized: false },
+    ssl: await getSslConfig(),
   });
 
   const adapter = new PrismaPg(pool);

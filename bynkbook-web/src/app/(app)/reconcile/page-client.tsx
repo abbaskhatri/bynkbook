@@ -3159,7 +3159,7 @@ const displayBankActiveList = useMemo(() => {
                   </thead>
 
                   <tbody>
-                    {useMemo(() => displayEntriesActiveList.map((e: any) => {
+                    {displayEntriesActiveList.map((e: any) => {
                       const amt = toBigIntSafe(e.amount_cents);
                       const payee = (e.payee ?? "").trim();
                       const isOptimisticPending = Boolean(e?.__optimistic_pending);
@@ -3277,7 +3277,7 @@ const displayBankActiveList = useMemo(() => {
                           </td>
                         </tr>
                       );
-                    }), [displayEntriesActiveList])}
+                    })}
                   </tbody>
                 </table>
 
@@ -3511,7 +3511,7 @@ const displayBankActiveList = useMemo(() => {
                   </thead>
 
                   <tbody>
-                    {useMemo(() => displayBankActiveList.map((t: any) => {
+                    {displayBankActiveList.map((t: any) => {
 
                       const txnId = String(t.id ?? "");
                       const isSelected = txnId ? selectedBankTxnIds.has(txnId) : false;
@@ -3743,7 +3743,7 @@ const displayBankActiveList = useMemo(() => {
                           </td>
                         </tr>
                       );
-                    }), [displayBankActiveList])}
+                    })}
                   </tbody>
                 </table>
 

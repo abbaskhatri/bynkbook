@@ -39,6 +39,11 @@
     return !!acct;
   }
 
+  function canWrite(role: string | null) {
+    const r = (role ?? "").toString().trim().toUpperCase();
+    return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+  }
+
   function toIso(d: any) {
     if (!d) return null;
     try {
@@ -120,6 +125,7 @@
       // Permission checks consistent with entries.handler
       const role = await requireMembership(prisma, biz, sub);
       if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+      if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
 
       const acctOk = await requireAccountInBusiness(prisma, biz, acct);
       if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });

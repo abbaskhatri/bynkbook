@@ -47,6 +47,11 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
+function canWrite(role: string | null) {
+  const r = (role ?? "").toString().trim().toUpperCase();
+  return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+}
+
 function sanitizeFilename(name: string) {
   const base = name.split("/").pop()?.split("\\").pop() ?? "file";
   return base.replace(/[^\w.\-]+/g, "_").slice(0, 180);
@@ -153,6 +158,10 @@ export async function handler(event: any) {
 
   const role = await requireMembership(prisma, biz, sub);
   if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+  const requireWrite = () => {
+    if (canWrite(role)) return null;
+    return json(403, { ok: false, error: "Insufficient permissions" });
+  };
 
   const region = process.env.AWS_REGION || "us-east-1";
   const s3 = new S3Client({ region });
@@ -167,6 +176,9 @@ export async function handler(event: any) {
   // INIT (presign PUT)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/init`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -341,6 +353,9 @@ export async function handler(event: any) {
   // MARK UPLOADED (client confirms PUT succeeded)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/mark-uploaded`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -389,6 +404,9 @@ export async function handler(event: any) {
   // COMPLETE (verify object exists)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/complete`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -681,6 +699,9 @@ export async function handler(event: any) {
   // CREATE ENTRY FROM UPLOAD (POST /uploads/{uploadId}/create-entry)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/create-entry`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     const requestedUploadId = uploadId?.toString?.().trim();
     if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
 
@@ -778,6 +799,9 @@ export async function handler(event: any) {
   // body: { upload_ids: string[] }
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/create-entries`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     try {
       let body: any = {};
       try {
@@ -901,6 +925,9 @@ export async function handler(event: any) {
   // Safe for scale: paging via created_at/id cursor. Idempotent: never double-creates bills.
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/backfill-bills`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -1027,6 +1054,9 @@ export async function handler(event: any) {
   // Strict checks: 409 if referenced by Bill.upload_id or Entry.sourceUploadId
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/delete`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     const requestedUploadId = uploadId?.toString?.().trim();
     if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
 
@@ -1062,6 +1092,9 @@ export async function handler(event: any) {
   // Manual CSV import -> BankTransaction rows ONLY (no ledger mutations)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/import`) {
+    const denied = requireWrite();
+    if (denied) return denied;
+
     const requestedUploadId = uploadId?.toString?.().trim();
     if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
 
