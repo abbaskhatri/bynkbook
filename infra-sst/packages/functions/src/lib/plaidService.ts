@@ -2,6 +2,7 @@ import { getPrisma } from "./db";
 import { Products, CountryCode } from "plaid";
 import { getPlaidClient } from "./plaidClient";
 import { encryptAccessToken, decryptAccessToken } from "./plaidCrypto";
+import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 
 function json(statusCode: number, body: any) {
   return {
@@ -9,6 +10,96 @@ function json(statusCode: number, body: any) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   };
+}
+
+type PlaidWebhookRequest = {
+  body: any;
+  rawBody: string;
+  headers: Record<string, string | string[] | undefined>;
+};
+
+const plaidWebhookKeyCache = new Map<string, any>();
+
+function getHeader(headers: Record<string, string | string[] | undefined>, name: string) {
+  const wanted = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers ?? {})) {
+    if (k.toLowerCase() !== wanted) continue;
+    return Array.isArray(v) ? v[0] : v;
+  }
+  return undefined;
+}
+
+function decodeJwtPart(part: string) {
+  return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+}
+
+function timingSafeEqualString(a: string, b: string) {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+async function verifyPlaidWebhook(rawBody: string, headers: Record<string, string | string[] | undefined>) {
+  const signedJwt = String(getHeader(headers, "plaid-verification") ?? "").trim();
+  if (!signedJwt) return false;
+
+  const parts = signedJwt.split(".");
+  if (parts.length !== 3) return false;
+
+  let header: any;
+  let payload: any;
+  try {
+    header = decodeJwtPart(parts[0]);
+    payload = decodeJwtPart(parts[1]);
+  } catch {
+    return false;
+  }
+
+  const kid = String(header?.kid ?? "").trim();
+  if (header?.alg !== "ES256" || !kid) return false;
+
+  let jwk = plaidWebhookKeyCache.get(kid);
+  if (!jwk) {
+    try {
+      const plaid = await getPlaidClient();
+      const response = await plaid.webhookVerificationKeyGet({ key_id: kid });
+      jwk = response.data.key;
+      if (jwk) plaidWebhookKeyCache.set(kid, jwk);
+    } catch {
+      return false;
+    }
+  }
+
+  if (!jwk || (jwk.expired_at && Number(jwk.expired_at) * 1000 <= Date.now())) return false;
+
+  try {
+    const publicKey = createPublicKey({ key: jwk as any, format: "jwk" as any });
+    const signature = Buffer.from(parts[2], "base64url");
+    const signingInput = Buffer.from(`${parts[0]}.${parts[1]}`);
+    const validSignature = cryptoVerify(
+      "sha256",
+      signingInput,
+      { key: publicKey, dsaEncoding: "ieee-p1363" },
+      signature
+    );
+    if (!validSignature) return false;
+  } catch {
+    plaidWebhookKeyCache.delete(kid);
+    return false;
+  }
+
+  const issuedAtMs = Number(payload?.iat ?? 0) * 1000;
+  const now = Date.now();
+  if (!Number.isFinite(issuedAtMs) || issuedAtMs <= 0) return false;
+  if (issuedAtMs > now + 60_000) return false;
+  if (now - issuedAtMs > 5 * 60_000) return false;
+
+  const claimedBodyHash = String(payload?.request_body_sha256 ?? "").trim();
+  if (!claimedBodyHash) return false;
+
+  const bodyHash = createHash("sha256").update(rawBody).digest("hex");
+  return timingSafeEqualString(bodyHash, claimedBodyHash);
 }
 
 export function getClaims(event: any) {
@@ -743,7 +834,11 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   });
 }
 
-export async function handleWebhook(body: any) {
+export async function handleWebhook(request: PlaidWebhookRequest) {
+  const verified = await verifyPlaidWebhook(request.rawBody, request.headers);
+  if (!verified) return json(401, { ok: false, error: "Invalid Plaid webhook signature" });
+
+  const body = request.body;
   const prisma = await getPrisma();
 
   const itemId = (body?.item_id ?? "").toString();

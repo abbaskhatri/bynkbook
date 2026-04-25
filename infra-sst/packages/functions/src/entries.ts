@@ -743,6 +743,8 @@ export async function handler(event: any) {
 
   // POST /entries (create)
   if (method === "POST" && path?.endsWith("/entries")) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};
@@ -870,6 +872,8 @@ export async function handler(event: any) {
 
   // DELETE /entries/{entryId} (soft delete)
   if (method === "DELETE" && ent) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
     // AP invariant: block delete if this entry has ACTIVE bill applications.
     const activeApps = await prisma.billPaymentApplication.count({
       where: { business_id: biz, entry_id: ent, is_active: true },
@@ -931,6 +935,8 @@ export async function handler(event: any) {
 
   // POST /entries/{entryId}/restore
   if (method === "POST" && ent && path?.endsWith("/restore")) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
     const existing = await prisma.entry.findFirst({
       where: { id: ent, business_id: biz, account_id: acct },
       select: { date: true },
@@ -1101,4 +1107,3 @@ export async function handler(event: any) {
 
   return json(404, { ok: false, error: "Not Found", method, path });
 }
-

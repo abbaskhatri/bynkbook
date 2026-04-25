@@ -34,6 +34,11 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
+function canWrite(role: string | null) {
+  const r = (role ?? "").toString().trim().toUpperCase();
+  return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
+}
+
 export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
@@ -61,6 +66,7 @@ export async function handler(event: any) {
 
     const role = await requireMembership(prisma, biz, sub);
     if (!role) return json(403, { ok: false, error: "Forbidden" });
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
 
     const acctOk = await requireAccountInBusiness(prisma, biz, acct);
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });

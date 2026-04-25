@@ -9,6 +9,40 @@ export default $config({
   },
 
   async run() {
+    const awsAccountId = "116846786465";
+    const region = "us-east-1";
+    const isProd = $app.stage === "prod";
+    const resourcePrefix = isProd ? "ledrigo-prod" : "ledrigo-dev";
+    const secretArnFor = (secretId: string) =>
+      secretId.startsWith("arn:")
+        ? secretId
+        : `arn:aws:secretsmanager:${region}:${awsAccountId}:secret:${secretId}-*`;
+    const uploadsBucketName = isProd
+      ? process.env.BYNKBOOK_PROD_UPLOADS_BUCKET_NAME
+      : "ledrigo-dev-uploads-116846786465-us-east-1";
+    const cognitoUserPoolId = isProd
+      ? process.env.BYNKBOOK_PROD_COGNITO_USER_POOL_ID
+      : "us-east-1_tmyPJwsJb";
+    const cognitoAppClientId = isProd
+      ? process.env.BYNKBOOK_PROD_COGNITO_APP_CLIENT_ID
+      : "38gus49pnfilbc4u2f7b68ist7";
+
+    if (!uploadsBucketName) throw new Error("Missing BYNKBOOK_PROD_UPLOADS_BUCKET_NAME for prod stage");
+    if (!cognitoUserPoolId) throw new Error("Missing BYNKBOOK_PROD_COGNITO_USER_POOL_ID for prod stage");
+    if (!cognitoAppClientId) throw new Error("Missing BYNKBOOK_PROD_COGNITO_APP_CLIENT_ID for prod stage");
+
+    const databaseSecretId = `${resourcePrefix}/rds/database_url`;
+    const databaseCaSecretId = isProd
+      ? process.env.BYNKBOOK_PROD_DB_CA_SECRET_ID
+      : "ledrigo-dev/rds/ca_bundle_us_east_1";
+
+    if (!databaseCaSecretId) throw new Error("Missing BYNKBOOK_PROD_DB_CA_SECRET_ID for prod stage");
+
+    const databaseSecretArn = secretArnFor(databaseSecretId);
+    const databaseCaSecretArn = secretArnFor(databaseCaSecretId);
+    const uploadsBucketPrivateArn = `arn:aws:s3:::${uploadsBucketName}/private/biz/*`;
+    const sharedKmsKeyArn = `arn:aws:kms:${region}:${awsAccountId}:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36`;
+
     const api = new sst.aws.ApiGatewayV2("ledrigo-dev-sst-api", {
       cors: {
         allowHeaders: ["authorization", "content-type"],
@@ -21,10 +55,10 @@ export default $config({
     });
 
     const authorizer = api.addAuthorizer({
-      name: "ledrigo-dev-cognito-jwt",
+      name: `${resourcePrefix}-cognito-jwt`,
       jwt: {
-        issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_tmyPJwsJb",
-        audiences: ["38gus49pnfilbc4u2f7b68ist7"],
+        issuer: `https://cognito-idp.${region}.amazonaws.com/${cognitoUserPoolId}`,
+        audiences: [cognitoAppClientId],
         identitySource: "$request.header.Authorization",
       },
     });
@@ -63,8 +97,9 @@ export default $config({
         privateSubnets: ["subnet-016a9caf338ab17e3", "subnet-04ff62b426b19d70b"],
       },
       environment: {
-        DB_URL_SECRET_ID: "ledrigo-dev/rds/database_url",
-        NODE_TLS_REJECT_UNAUTHORIZED: "0",
+        DB_URL_SECRET_ID: databaseSecretId,
+        DB_SSL_CA_SECRET_ID: databaseCaSecretId,
+        DB_SSL_REJECT_UNAUTHORIZED: "true",
         CACHE_BUSTER: "20260207171000",
       },
       permissions: [
@@ -77,12 +112,13 @@ export default $config({
         {
           actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
           resources: [
-            "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/rds/database_url-*",
+            databaseSecretArn,
+            databaseCaSecretArn,
           ],
         },
         {
           actions: ["kms:Decrypt"],
-          resources: ["arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36"],
+          resources: [sharedKmsKeyArn],
         },
       ],
     } satisfies ApiHandler;
@@ -122,7 +158,7 @@ api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}", acctHandler
       handler: "packages/functions/src/uploads.handler",
       environment: {
         ...bizHandler.environment,
-        UPLOADS_BUCKET_NAME: "ledrigo-dev-uploads-116846786465-us-east-1",
+        UPLOADS_BUCKET_NAME: uploadsBucketName,
       },
       permissions: [
         ...(bizHandler as any).permissions,
@@ -130,13 +166,13 @@ api.route("DELETE /v1/businesses/{businessId}/accounts/{accountId}", acctHandler
         // S3 least-privilege: only our uploads prefix
         {
           actions: ["s3:PutObject", "s3:GetObject"],
-          resources: ["arn:aws:s3:::ledrigo-dev-uploads-116846786465-us-east-1/private/biz/*"],
+          resources: [uploadsBucketPrivateArn],
         },
 
         // KMS scoped to key ARN (SSE-KMS)
         {
           actions: ["kms:Encrypt", "kms:GenerateDataKey", "kms:DescribeKey", "kms:Decrypt"],
-          resources: ["arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36"],
+          resources: [sharedKmsKeyArn],
         },
 
         // Textract (AnalyzeExpense) for invoice/receipt parsing
@@ -176,7 +212,7 @@ const plaidHandler = {
     // Dev is using production Plaid; therefore dev must read production Plaid credentials.
     PLAID_CLIENT_ID_SECRET_ID: "ledrigo-prod/plaid/client_id",
     PLAID_SECRET_SECRET_ID: "ledrigo-prod/plaid/secret",
-    PLAID_TOKEN_KMS_KEY_ARN: "arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36",
+    PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -322,7 +358,7 @@ const plaidWebhookHandler = {
     // Dev is using production Plaid; therefore dev must read production Plaid credentials.
     PLAID_CLIENT_ID_SECRET_ID: "ledrigo-prod/plaid/client_id",
     PLAID_SECRET_SECRET_ID: "ledrigo-prod/plaid/secret",
-    PLAID_TOKEN_KMS_KEY_ARN: "arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36",
+    PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -475,7 +511,7 @@ const aiCategorySuggestionsHandler = {
 } satisfies ApiHandler;
 
 // ---------- AI (Bundle E) ----------
-const stagePrefix = $app.stage === "prod" ? "ledrigo-prod" : "ledrigo-dev";
+const stagePrefix = resourcePrefix;
 
 const aiHandler = {
   ...bizHandler,
@@ -636,7 +672,7 @@ const reconcileSnapshotsHandler = {
   handler: "packages/functions/src/reconcileSnapshots.handler",
   environment: {
     ...bizHandler.environment,
-    UPLOADS_BUCKET_NAME: "ledrigo-dev-uploads-116846786465-us-east-1",
+    UPLOADS_BUCKET_NAME: uploadsBucketName,
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -644,13 +680,13 @@ const reconcileSnapshotsHandler = {
     // S3 least-privilege: only our private business prefix
     {
       actions: ["s3:PutObject", "s3:GetObject"],
-      resources: ["arn:aws:s3:::ledrigo-dev-uploads-116846786465-us-east-1/private/biz/*"],
+      resources: [uploadsBucketPrivateArn],
     },
 
     // KMS scoped to key ARN (SSE-KMS)
     {
       actions: ["kms:Encrypt", "kms:GenerateDataKey", "kms:DescribeKey", "kms:Decrypt"],
-      resources: ["arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36"],
+      resources: [sharedKmsKeyArn],
     },
   ],
 } satisfies ApiHandler;
@@ -723,8 +759,9 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
         privateSubnets: ["subnet-016a9caf338ab17e3", "subnet-04ff62b426b19d70b"],
       },
       environment: {
-        DB_URL_SECRET_ID: "ledrigo-dev/rds/database_url",
-        NODE_TLS_REJECT_UNAUTHORIZED: "0",
+        DB_URL_SECRET_ID: databaseSecretId,
+        DB_SSL_CA_SECRET_ID: databaseCaSecretId,
+        DB_SSL_REJECT_UNAUTHORIZED: "true",
         CACHE_BUSTER: "202601030001",
       },
       permissions: [
@@ -737,12 +774,13 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
         {
           actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
           resources: [
-            "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/rds/database_url-*",
+            databaseSecretArn,
+            databaseCaSecretArn,
           ],
         },
         {
           actions: ["kms:Decrypt"],
-          resources: ["arn:aws:kms:us-east-1:116846786465:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36"],
+          resources: [sharedKmsKeyArn],
         },
       ],
     } satisfies ApiHandler;
