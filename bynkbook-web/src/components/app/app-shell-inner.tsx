@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentUser, signOut } from "aws-amplify/auth";
 import {
   Bell,
+  Menu,
+  X,
   HelpCircle,
   UserCircle,
   Building2,
@@ -143,6 +145,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }
 
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Topbar user menu (Settings + Sign out)
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -190,6 +193,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       } catch {}
       return next;
     });
+  }
+
+  function openMobileNav() {
+    setActivityOpen(false);
+    setUserMenuOpen(false);
+    setMobileNavOpen(true);
   }
 
   const appDataEnabled = showChrome && authChecked && isAuthed;
@@ -484,13 +493,107 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     },
   ];
 
+  const renderNavGroups = (isCollapsed: boolean, onNavigate?: () => void) => (
+    <div className="p-3 space-y-3 flex-1 overflow-y-auto">
+      {navGroups.map((group) => {
+        if (!group.items.length) return null;
+
+        return (
+          <div key={group.group} className="space-y-2">
+            {/* Group label (hidden when collapsed to keep width stable) */}
+            {!isCollapsed ? (
+              <div className="px-1 text-[10px] uppercase tracking-[0.16em] text-slate-500 transition-opacity duration-200">
+                {group.group}
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              {group.items.map((item) => {
+                const active = pathname.startsWith(item.path);
+                const link = href(item.path, item.needsAccountId);
+
+                if (isCollapsed) {
+                  const showIssues =
+                    item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0;
+                  const showIssuesSkeleton = item.label === "Issues" && issuesCountQ.isLoading;
+
+                  return (
+                    <Button
+                      key={item.path}
+                      asChild
+                      variant={navVariant(active)}
+                      className="w-full justify-center transition-colors duration-200"
+                      size="sm"
+                      title={
+                        item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
+                          ? `Issues (${attnIssues})`
+                          : item.label
+                      }
+                    >
+                      <Link
+                        href={link}
+                        prefetch
+                        className="relative flex items-center justify-center w-full"
+                        onClick={onNavigate}
+                      >
+                        <span>{item.icon}</span>
+
+                        {showIssues ? (
+                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-amber-50 px-1 text-[10px] font-semibold text-amber-800 border border-amber-200">
+                            {attnIssues}
+                          </span>
+                        ) : showIssuesSkeleton ? (
+                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1 animate-pulse" />
+                        ) : null}
+                      </Link>
+                    </Button>
+                  );
+                }
+
+                return (
+                  <Button
+                    key={item.path}
+                    asChild
+                    variant={navVariant(active)}
+                    className="w-full justify-start transition-colors duration-200"
+                    size="sm"
+                  >
+                    <Link
+                      href={link}
+                      prefetch
+                      className="flex w-full items-center gap-2 transition-all duration-200"
+                      onClick={onNavigate}
+                    >
+                      <span className="shrink-0 text-slate-600">{item.icon}</span>
+                      <span className="truncate">{item.label}</span>
+                      {item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0 ? (
+                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+                          {attnIssues}
+                        </span>
+                      ) : item.label === "Issues" && issuesCountQ.isLoading ? (
+                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1.5 animate-pulse" />
+                      ) : null}
+                    </Link>
+                  </Button>
+                );
+              })}
+            </div>
+
+            {/* Divider between groups */}
+            <div className="border-t border-slate-200 pt-2" />
+          </div>
+        );
+      })}
+    </div>
+  );
+
   // Stage 1: prevent app-page flash while we determine whether user must create a business
   if (showChrome && authChecked && isAuthed && !pathname.startsWith("/create-business")) {
     if (businessesQ.isLoading) {
       return (
         <div className="min-h-screen flex bg-slate-50">
           {/* Sidebar skeleton */}
-          <div className="w-64 border-r border-slate-200 bg-white p-3 space-y-3">
+          <div className="hidden md:block w-64 border-r border-slate-200 bg-white p-3 space-y-3">
             <Skeleton className="h-6 w-36" />
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-full" />
@@ -504,7 +607,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           </div>
 
           {/* Main skeleton */}
-          <div className="flex-1 p-6">
+          <div className="flex-1 min-w-0 p-4 md:p-6">
             <div className="flex items-center justify-between">
               <Skeleton className="h-6 w-44" />
               <div className="flex items-center gap-2">
@@ -529,7 +632,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       return (
         <div className="min-h-screen flex bg-slate-50">
           {/* Sidebar skeleton */}
-          <div className="w-64 border-r border-slate-200 bg-white p-3 space-y-3">
+          <div className="hidden md:block w-64 border-r border-slate-200 bg-white p-3 space-y-3">
             <Skeleton className="h-6 w-36" />
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-full" />
@@ -543,7 +646,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           </div>
 
           {/* Main skeleton */}
-          <div className="flex-1 p-6">
+          <div className="flex-1 min-w-0 p-4 md:p-6">
             <div className="flex items-center justify-between">
               <Skeleton className="h-6 w-44" />
               <div className="flex items-center gap-2">
@@ -575,7 +678,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "border-r border-slate-200 bg-white/95 backdrop-blur flex flex-col sticky top-0 h-screen",
+          "border-r border-slate-200 bg-white/95 backdrop-blur hidden md:flex flex-col sticky top-0 h-screen",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
@@ -597,87 +700,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           </div>
         </div>
 
-        <div className="p-3 space-y-3 flex-1 overflow-y-auto">
-          {navGroups.map((group) => {
-            if (!group.items.length) return null;
-
-            return (
-              <div key={group.group} className="space-y-2">
-                {/* Group label (hidden when collapsed to keep width stable) */}
-                {!collapsed ? (
-                  <div className="px-1 text-[10px] uppercase tracking-[0.16em] text-slate-500 transition-opacity duration-200">
-                    {group.group}
-                  </div>
-                ) : null}
-
-                <div className="space-y-2">
-                  {group.items.map((item) => {
-                    const active = pathname.startsWith(item.path);
-                    const link = href(item.path, item.needsAccountId);
-
-                    if (collapsed) {
-                      const showIssues =
-                        item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0;
-                      const showIssuesSkeleton = item.label === "Issues" && issuesCountQ.isLoading;
-
-                      return (
-                        <Button
-                          key={item.path}
-                          asChild
-                          variant={navVariant(active)}
-                          className="w-full justify-center transition-colors duration-200"
-                          size="sm"
-                          title={
-                            item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
-                              ? `Issues (${attnIssues})`
-                              : item.label
-                          }
-                        >
-                          <Link href={link} prefetch className="relative flex items-center justify-center w-full">
-                            <span>{item.icon}</span>
-
-                            {showIssues ? (
-                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-amber-50 px-1 text-[10px] font-semibold text-amber-800 border border-amber-200">
-                                {attnIssues}
-                              </span>
-                            ) : showIssuesSkeleton ? (
-                              <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1 animate-pulse" />
-                            ) : null}
-                          </Link>
-                        </Button>
-                      );
-                    }
-
-                    return (
-                      <Button
-                        key={item.path}
-                        asChild
-                        variant={navVariant(active)}
-                        className="w-full justify-start transition-colors duration-200"
-                        size="sm"
-                      >
-                        <Link href={link} prefetch className="flex w-full items-center gap-2 transition-all duration-200">
-                          <span className="shrink-0 text-slate-600">{item.icon}</span>
-                          <span className="truncate">{item.label}</span>
-                          {item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0 ? (
-                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
-                              {attnIssues}
-                            </span>
-                          ) : item.label === "Issues" && issuesCountQ.isLoading ? (
-                            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1.5 animate-pulse" />
-                          ) : null}
-                        </Link>
-                      </Button>
-                    );
-                  })}
-                </div>
-
-                {/* Divider between groups */}
-                <div className="border-t border-slate-200 pt-2" />
-              </div>
-            );
-          })}
-        </div>
+        {renderNavGroups(collapsed)}
 
         <div className="p-3 border-t border-slate-200 bg-white/95">
           <Button
@@ -700,24 +723,36 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-40 bg-white">
+        <header className="h-14 border-b border-slate-200 flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-white">
           {/* Left: Business pill (display-only; we expect 1 business) */}
-          <div className="flex items-center gap-3 min-w-0">
-            <Pill title="Business">
-              <span className="inline-flex items-center gap-2 min-w-0">
-                <Building2 className="h-4 w-4 text-slate-500 shrink-0" />
-                <span className="truncate">
-                  {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
+          <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
+            <button
+              type="button"
+              className="md:hidden h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+              title="Open navigation"
+              aria-label="Open navigation"
+              onClick={openMobileNav}
+            >
+              <Menu className={NAV_ICON_CLASS} />
+            </button>
+
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Pill title="Business">
+                <span className="inline-flex items-center gap-2 min-w-0">
+                  <Building2 className="h-4 w-4 text-slate-500 shrink-0" />
+                  <span className="truncate">
+                    {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
+                  </span>
                 </span>
-              </span>
-            </Pill>
+              </Pill>
+            </div>
           </div>
 
           {/* Center spacer */}
-          <div className="flex-1" />
+          <div className="hidden md:block flex-1" />
 
           {/* Right: Global search + bell + user menu */}
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {businessId ? (
               <div className="hidden md:block">
                 <GlobalSearch
@@ -899,10 +934,38 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         </header>
 
         {/* Content: ledger must not page-scroll */}
-        <main className={(noPageScroll ? "p-6 overflow-hidden flex-1 min-h-0" : "p-6 overflow-y-auto flex-1 min-h-0")}>
+        <main className={(noPageScroll ? "p-4 md:p-6 overflow-hidden flex-1 min-h-0" : "p-4 md:p-6 overflow-y-auto flex-1 min-h-0")}>
           {children}
         </main>
       </div>
+
+      {mobileNavOpen ? (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/45"
+            aria-label="Close navigation"
+            onClick={() => setMobileNavOpen(false)}
+          />
+
+          <aside className="relative flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-slate-200 bg-white shadow-xl">
+            <div className="h-14 px-3 border-b border-slate-200 flex items-center justify-between bg-white">
+              <BrandLogo variant="full" size="md" priority className="translate-y-[1px]" />
+              <button
+                type="button"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                title="Close navigation"
+                aria-label="Close navigation"
+                onClick={() => setMobileNavOpen(false)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {renderNavGroups(false, () => setMobileNavOpen(false))}
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }
