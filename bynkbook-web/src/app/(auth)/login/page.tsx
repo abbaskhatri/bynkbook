@@ -12,11 +12,34 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const NEXT_KEY = "bb_auth_next";
+const GOOGLE_PROVIDER = "Google";
+const GOOGLE_PROVIDER_PARAM = "google";
+
+function getOAuthRedirectOrigin() {
+  if (typeof window === "undefined") return null;
+
+  const redirectSignIn = process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_IN;
+  if (!redirectSignIn) return null;
+
+  try {
+    return new URL(redirectSignIn, window.location.origin).origin;
+  } catch {
+    return null;
+  }
+}
+
+function getCanonicalCurrentUrl(origin: string) {
+  const current = new URL(window.location.href);
+  return `${origin}${current.pathname}${current.search}${current.hash}`;
+}
+
 function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
   const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
+  const oauthStart = useMemo(() => sp.get("oauth"), [sp]);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -38,6 +61,47 @@ function LoginInner() {
       }
     })();
   }, [router, nextUrl]);
+
+  useEffect(() => {
+    if (checkingSession || needsNewPassword || typeof window === "undefined") return;
+
+    if (oauthStart !== GOOGLE_PROVIDER_PARAM) return;
+
+    const redirectOrigin = getOAuthRedirectOrigin();
+    if (redirectOrigin && redirectOrigin !== window.location.origin) return;
+
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("oauth");
+    window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+
+    window.sessionStorage.setItem(NEXT_KEY, nextUrl);
+
+    signInWithRedirect({ provider: GOOGLE_PROVIDER }).catch((err: any) => {
+      const msg = err?.message ?? "Google sign-in failed";
+
+      if (/already a signed in user/i.test(msg)) {
+        router.replace(nextUrl);
+        return;
+      }
+
+      setError(msg);
+    });
+  }, [checkingSession, needsNewPassword, nextUrl, oauthStart, router]);
+
+  async function startGoogleSignIn() {
+    try {
+      await signInWithRedirect({ provider: GOOGLE_PROVIDER });
+    } catch (err: any) {
+      const msg = err?.message ?? "Google sign-in failed";
+
+      if (/already a signed in user/i.test(msg)) {
+        router.replace(nextUrl);
+        return;
+      }
+
+      setError(msg);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -263,8 +327,19 @@ function LoginInner() {
                         variant="outline"
                         className="h-11 w-full rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
                         onClick={async () => {
-                          if (typeof window !== "undefined") window.sessionStorage.setItem("bb_auth_next", nextUrl);
-                          await signInWithRedirect({ provider: "Google" });
+                          if (typeof window !== "undefined") {
+                            window.sessionStorage.setItem(NEXT_KEY, nextUrl);
+
+                            const redirectOrigin = getOAuthRedirectOrigin();
+                            if (redirectOrigin && redirectOrigin !== window.location.origin) {
+                              const canonicalUrl = new URL(getCanonicalCurrentUrl(redirectOrigin));
+                              canonicalUrl.searchParams.set("oauth", GOOGLE_PROVIDER_PARAM);
+                              window.location.assign(canonicalUrl.toString());
+                              return;
+                            }
+                          }
+
+                          await startGoogleSignIn();
                         }}
                       >
                         Continue with Google
