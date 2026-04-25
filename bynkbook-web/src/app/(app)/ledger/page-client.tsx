@@ -2870,6 +2870,20 @@ export default function LedgerPageClient() {
 
       scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "update");
 
+      const updates = vars?.updates ?? {};
+      const shouldRefreshCategorySuggestions = [
+        "date",
+        "payee",
+        "memo",
+        "amount_cents",
+        "type",
+        "category_id",
+      ].some((field) => Object.prototype.hasOwnProperty.call(updates, field));
+
+      if (shouldRefreshCategorySuggestions) {
+        void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId], exact: false });
+      }
+
       // Update footer totals promptly (cheap query; no entries refetch storm)
       void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
     },
@@ -3249,6 +3263,7 @@ export default function LedgerPageClient() {
         if (categoryInputRef.current) categoryInputRef.current.value = res.row.name;
 
         void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+        void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
       } catch (e: any) {
         setErr(e?.message || "Failed to create category");
         return;
@@ -3482,6 +3497,7 @@ export default function LedgerPageClient() {
               if (categoryInputRef.current) categoryInputRef.current.value = res.row.name;
 
               void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId] });
+              void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
             }}
             onSubmit={submitInline}
           />
@@ -3878,6 +3894,7 @@ export default function LedgerPageClient() {
 
         // ensure category list updates (so suggestions are fresh)
         void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
+        void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
       }
 
       if (!catId) throw new Error("Failed to resolve category");

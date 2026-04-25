@@ -1880,6 +1880,7 @@ export default function SettingsPageClient() {
                       try {
                         await createCategory(selectedBusinessId, name);
                         setCatNewName("");
+                        void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
                         const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                         setCategories(res?.rows ?? res?.items ?? []);
                       } catch (err: any) {
@@ -1900,6 +1901,7 @@ export default function SettingsPageClient() {
                     try {
                       await createCategory(selectedBusinessId, name);
                       setCatNewName("");
+                      void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
                       const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                       setCategories(res?.rows ?? res?.items ?? []);
                     } catch (e: any) {
@@ -1940,6 +1942,7 @@ export default function SettingsPageClient() {
                               setCatError(null);
                               try {
                                 await updateCategory(selectedBusinessId, c.id, { archived: true });
+                                void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
                                 const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                                 setCategories(res?.rows ?? res?.items ?? []);
                               } catch (e: any) {
@@ -1960,6 +1963,7 @@ export default function SettingsPageClient() {
                                 setCatError(null);
                                 try {
                                   await updateCategory(selectedBusinessId, c.id, { archived: false });
+                                  void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
                                   const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                                   setCategories(res?.rows ?? res?.items ?? []);
                                 } catch (e: any) {
@@ -3359,6 +3363,7 @@ export default function SettingsPageClient() {
                 setCatError(null);
                 try {
                   await deleteCategory(selectedBusinessId, categoryDeleteTarget.id);
+                  void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
                   const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
                   setCategories(res?.rows ?? res?.items ?? []);
                   setCategoryDeleteOpen(false);
