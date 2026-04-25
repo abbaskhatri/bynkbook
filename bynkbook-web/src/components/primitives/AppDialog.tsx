@@ -71,7 +71,7 @@ export function AppDialog({
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-4 overflow-x-hidden">
+      <div className="absolute inset-0 flex items-center justify-center overflow-x-hidden p-2 sm:p-4">
         <div
           ref={containerRef}
           tabIndex={-1}
@@ -79,8 +79,8 @@ export function AppDialog({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "w-auto min-w-0 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-slate-200/90 bg-white shadow-2xl",
-            "max-h-[85vh] flex flex-col overflow-hidden",
+            "w-full min-w-0 max-w-[calc(100vw-1rem)] sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200/90 bg-white shadow-2xl",
+            "max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
             "transition-all duration-200 ease-out",
             "animate-in fade-in zoom-in-95",
             widthClass,
@@ -107,10 +107,10 @@ export function AppDialog({
             ) : null}
           </div>
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-3.5 py-2.5">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-3.5 py-2.5">{children}</div>
 
           {footer ? (
-            <div className="shrink-0 px-3.5 py-2.5 border-t border-slate-200/80 bg-slate-50/70">
+            <div className="min-w-0 shrink-0 px-3.5 py-2.5 border-t border-slate-200/80 bg-slate-50/70">
               {footer}
             </div>
           ) : null}
