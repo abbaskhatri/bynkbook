@@ -13,3 +13,23 @@ node_modules
 
 # local env files
 .env*.local
+.env
+.env.*
+!.env.example
+
+# local debug/test payloads and outputs
+debug
+debug.*
+sst-deploy-debug*.txt
+*deploy-debug*.txt
+apigw*_test.json
+cognito-*-auth.json
+invoke*.json
+*.out.json
+out.json
+payload.json
+payload*.json
+
+# local secret dumps
+ca-secret.json
+*secret*.json

@@ -17,6 +17,11 @@ export default $config({
       secretId.startsWith("arn:")
         ? secretId
         : `arn:aws:secretsmanager:${region}:${awsAccountId}:secret:${secretId}-*`;
+    const requiredEnv = (name: string) => {
+      const value = process.env[name]?.trim();
+      if (!value) throw new Error(`Missing required environment variable ${name} for ${$app.stage} stage`);
+      return value;
+    };
     const uploadsBucketName = isProd
       ? process.env.BYNKBOOK_PROD_UPLOADS_BUCKET_NAME
       : "ledrigo-dev-uploads-116846786465-us-east-1";
@@ -42,6 +47,30 @@ export default $config({
     const databaseCaSecretArn = secretArnFor(databaseCaSecretId);
     const uploadsBucketPrivateArn = `arn:aws:s3:::${uploadsBucketName}/private/biz/*`;
     const sharedKmsKeyArn = `arn:aws:kms:${region}:${awsAccountId}:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36`;
+    const plaidEnv = isProd
+      ? requiredEnv("BYNKBOOK_PROD_PLAID_ENV")
+      : (process.env.BYNKBOOK_DEV_PLAID_ENV?.trim() || "sandbox");
+    const plaidClientIdSecretId = isProd
+      ? requiredEnv("BYNKBOOK_PROD_PLAID_CLIENT_ID_SECRET_ID")
+      : (process.env.BYNKBOOK_DEV_PLAID_CLIENT_ID_SECRET_ID?.trim() || `${resourcePrefix}/plaid/client_id`);
+    const plaidSecretSecretId = isProd
+      ? requiredEnv("BYNKBOOK_PROD_PLAID_SECRET_SECRET_ID")
+      : (process.env.BYNKBOOK_DEV_PLAID_SECRET_SECRET_ID?.trim() || `${resourcePrefix}/plaid/secret`);
+    const validPlaidEnvs = new Set(["sandbox", "development", "production"]);
+    if (!validPlaidEnvs.has(plaidEnv)) {
+      throw new Error(`Invalid Plaid environment "${plaidEnv}" for ${$app.stage} stage`);
+    }
+    if (isProd && plaidEnv !== "production") {
+      throw new Error("Prod stage requires BYNKBOOK_PROD_PLAID_ENV=production");
+    }
+    if (!isProd && plaidEnv === "production") {
+      throw new Error("Dev stage must not use Plaid production; set BYNKBOOK_DEV_PLAID_ENV to sandbox or development");
+    }
+    if (!isProd && (plaidClientIdSecretId.includes("ledrigo-prod/") || plaidSecretSecretId.includes("ledrigo-prod/"))) {
+      throw new Error("Dev stage must not use ledrigo-prod Plaid secrets");
+    }
+    const plaidClientIdSecretArn = secretArnFor(plaidClientIdSecretId);
+    const plaidSecretSecretArn = secretArnFor(plaidSecretSecretId);
 
     const api = new sst.aws.ApiGatewayV2("ledrigo-dev-sst-api", {
       cors: {
@@ -206,12 +235,9 @@ const plaidHandler = {
   handler: "packages/functions/src/plaidLinkToken.handler",
   environment: {
     ...bizHandler.environment,
-    // Do not hardcode Plaid env by stage. Use SST secret/env so dev can be production when needed.
-    PLAID_ENV: "production",
-
-    // Dev is using production Plaid; therefore dev must read production Plaid credentials.
-    PLAID_CLIENT_ID_SECRET_ID: "ledrigo-prod/plaid/client_id",
-    PLAID_SECRET_SECRET_ID: "ledrigo-prod/plaid/secret",
+    PLAID_ENV: plaidEnv,
+    PLAID_CLIENT_ID_SECRET_ID: plaidClientIdSecretId,
+    PLAID_SECRET_SECRET_ID: plaidSecretSecretId,
     PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
   },
   permissions: [
@@ -220,13 +246,13 @@ const plaidHandler = {
     // Read Plaid creds from Secrets Manager (IDs/names referenced above)
     {
       actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
-      resources: ["*"],
+      resources: [plaidClientIdSecretArn, plaidSecretSecretArn],
     },
 
     // Encrypt/decrypt Plaid access tokens
     {
       actions: ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
-      resources: ["*"],
+      resources: [sharedKmsKeyArn],
     },
   ],
 } satisfies ApiHandler;
@@ -352,12 +378,9 @@ const plaidWebhookHandler = {
   handler: "packages/functions/src/plaidWebhook.handler",
   environment: {
     ...bizHandler.environment,
-    // Do not hardcode Plaid env by stage. Use SST secret/env so dev can be production when needed.
-    PLAID_ENV: "production",
-
-    // Dev is using production Plaid; therefore dev must read production Plaid credentials.
-    PLAID_CLIENT_ID_SECRET_ID: "ledrigo-prod/plaid/client_id",
-    PLAID_SECRET_SECRET_ID: "ledrigo-prod/plaid/secret",
+    PLAID_ENV: plaidEnv,
+    PLAID_CLIENT_ID_SECRET_ID: plaidClientIdSecretId,
+    PLAID_SECRET_SECRET_ID: plaidSecretSecretId,
     PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
   },
   permissions: [
@@ -366,13 +389,13 @@ const plaidWebhookHandler = {
     // Read Plaid creds from Secrets Manager
     {
       actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
-      resources: ["*"],
+      resources: [plaidClientIdSecretArn, plaidSecretSecretArn],
     },
 
     // Encrypt/decrypt Plaid access tokens if webhook needs it (safe, broad)
     {
       actions: ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
-      resources: ["*"],
+      resources: [sharedKmsKeyArn],
     },
   ],
 } satisfies ApiHandler;

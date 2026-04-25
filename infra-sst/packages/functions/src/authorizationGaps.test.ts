@@ -147,4 +147,54 @@ describe("P1 authorization gaps", () => {
     expect(res.statusCode).toBe(403);
     expect(prisma.userBusinessRole.delete).not.toHaveBeenCalled();
   });
+
+  test("custom ai_automation policy can deny category.review.bulk.apply", async () => {
+    vi.resetModules();
+    vi.doUnmock("./lib/authz");
+
+    const logActivity = vi.fn(async () => undefined);
+    vi.doMock("./lib/activityLog", () => ({
+      logActivity,
+    }));
+
+    const prisma = {
+      business: {
+        findFirst: vi.fn(async () => ({ authz_mode: "ENFORCE", authz_enforce_wave: 4 })),
+      },
+      businessRolePolicy: {
+        findFirst: vi.fn(async () => ({ policy_json: { ai_automation: "NONE" } })),
+      },
+    };
+
+    const { authorizeWrite } = await import("./lib/authz");
+    const res = await authorizeWrite(prisma, {
+      businessId: "biz-1",
+      scopeAccountId: "acct-1",
+      actorUserId: "actor",
+      actorRole: "OWNER",
+      actionKey: "category.review.bulk.apply",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/apply-category-batch",
+    });
+
+    expect(res).toMatchObject({
+      allowed: false,
+      enforced: true,
+      code: "POLICY_DENIED",
+      policyKey: "ai_automation",
+      policyValue: "NONE",
+    });
+    expect(logActivity).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        eventType: "AUTHZ_ENFORCED_DENIED",
+        payloadJson: expect.objectContaining({
+          actionKey: "category.review.bulk.apply",
+          policyKey: "ai_automation",
+          policyValue: "NONE",
+          result: "DENY",
+        }),
+      }),
+    );
+  });
 });
