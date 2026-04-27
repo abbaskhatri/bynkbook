@@ -2336,6 +2336,20 @@ const displayBankActiveList = useMemo(() => {
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
 
+  const bankPanelHasRows = displayBankActiveList.length > 0;
+  const bankPanelShowInitialLoading =
+    bankTruthBlocking ||
+    (!bankTruthReady && !bankPanelHasRows) ||
+    (bankUpdating && !bankPanelHasRows);
+  const bankPanelShowEmpty =
+    bankTruthReady &&
+    !bankPanelHasRows &&
+    !bankUpdating &&
+    !bankTruthBlocking;
+  const bankPanelShowRows = bankPanelHasRows;
+  const bankPanelShowStatusWhileRows =
+    bankPanelShowRows && (bankTruthSettling || bankUpdating);
+
   // -------------------------
   // Phase 5E: State summary (read-only, instant-fast)
   // -------------------------
@@ -3488,7 +3502,7 @@ const displayBankActiveList = useMemo(() => {
 
           <div className="px-3 pb-2">
             <div className="flex items-center gap-2">
-              {bankTruthSettling || bankUpdating ? (
+              {bankPanelShowStatusWhileRows ? (
                 <span className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
                   <TinySpinner />
                   <span>{plaidSyncing ? "Syncing bank data…" : "Saving changes…"}</span>
@@ -3517,11 +3531,11 @@ const displayBankActiveList = useMemo(() => {
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
             <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
-              {bankTruthBlocking ? (
+              {bankPanelShowInitialLoading ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
                 </div>
-              ) : displayBankActiveList.length === 0 ? (
+              ) : bankPanelShowEmpty ? (
                 <EmptyState
                   label={
                     bankTab === "unmatched"
@@ -3529,7 +3543,7 @@ const displayBankActiveList = useMemo(() => {
                       : "No matched bank transactions in this period"
                   }
                 />
-              ) : (
+              ) : bankPanelShowRows ? (
                 <>
                   <table className="w-full min-w-[720px] table-fixed border-collapse">
                   <colgroup>
@@ -3829,7 +3843,7 @@ const displayBankActiveList = useMemo(() => {
                   </div>
                 ) : null}
                 </>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
