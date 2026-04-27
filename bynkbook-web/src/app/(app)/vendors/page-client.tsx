@@ -81,24 +81,18 @@ export default function VendorsPageClient() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<SortKey>("name_asc");
 
-  const [loading, setLoading] = useState(false);
-
-  // Phase 1 Stabilization:
-  // - Loading token prevents overlapping async flows from clearing each other’s busy state
-  // - Refresh epoch + coalescing prevents stale refresh commits and overlapping refreshes
-  const loadingTokenRef = useRef(0);
-  function beginLoading() {
-    const token = ++loadingTokenRef.current;
-    setLoading(true);
-    return token;
-  }
-  function endLoading(token: number) {
-    if (token === loadingTokenRef.current) setLoading(false);
-  }
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [apSummaryLoading, setApSummaryLoading] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
 
   const refreshEpochRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshQueuedRef = useRef(false);
+  const apSummaryEpochRef = useRef(0);
+  const categoriesLoadEpochRef = useRef(0);
+  const categoriesBusinessIdRef = useRef<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const bannerMsg = err || appErrorMessageOrNull(businessesQ.error) || null;
@@ -114,6 +108,74 @@ export default function VendorsPageClient() {
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [categoryRows, setCategoryRows] = useState<CategoryRow[]>([]);
 
+  async function hydrateApSummary(list: any[], sourceRefreshEpoch: number, sourceBusinessId: string) {
+    const myApEpoch = ++apSummaryEpochRef.current;
+    const ids = list.map((v: any) => String(v.id));
+    if (ids.length === 0) {
+      setApByVendorId({});
+      setApSummaryLoading(false);
+      return;
+    }
+
+    setApSummaryLoading(true);
+    try {
+      const chunks = Array.from({ length: Math.ceil(ids.length / VENDOR_AP_SUMMARY_BATCH_SIZE) }, (_, i) =>
+        ids.slice(i * VENDOR_AP_SUMMARY_BATCH_SIZE, (i + 1) * VENDOR_AP_SUMMARY_BATCH_SIZE)
+      );
+      const summaryResponses = await Promise.all(
+        chunks.map((chunk) => getVendorsApSummary({ businessId: sourceBusinessId, vendorIds: chunk, limit: chunk.length }))
+      );
+      if (sourceRefreshEpoch !== refreshEpochRef.current || myApEpoch !== apSummaryEpochRef.current) return;
+
+      const m: Record<string, any> = {};
+      for (const res of summaryResponses) {
+        for (const row of (res.vendors ?? [])) m[String(row.vendor_id)] = row;
+      }
+      setApByVendorId(m);
+    } catch (e: any) {
+      if (sourceRefreshEpoch !== refreshEpochRef.current || myApEpoch !== apSummaryEpochRef.current) return;
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
+    } finally {
+      if (sourceRefreshEpoch === refreshEpochRef.current && myApEpoch === apSummaryEpochRef.current) {
+        setApSummaryLoading(false);
+      }
+    }
+  }
+
+  async function ensureCategoriesLoaded() {
+    if (!businessId) return;
+    if (categoriesLoading) return;
+    if (categoriesLoaded && categoriesBusinessIdRef.current === businessId) return;
+
+    const myEpoch = ++categoriesLoadEpochRef.current;
+    if (categoriesBusinessIdRef.current !== businessId) {
+      setCategoryRows([]);
+      setDefaultCategoryId("");
+      setCategoriesLoaded(false);
+    }
+    setCategoriesLoading(true);
+    setErr(null);
+
+    try {
+      const catsRes = await listCategories(businessId, { includeArchived: false });
+      if (myEpoch !== categoriesLoadEpochRef.current) return;
+
+      setCategoryRows(Array.isArray(catsRes.rows) ? catsRes.rows : []);
+      setCategoriesLoaded(true);
+      categoriesBusinessIdRef.current = businessId;
+    } catch (e: any) {
+      if (myEpoch !== categoriesLoadEpochRef.current) return;
+      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
+    } finally {
+      if (myEpoch === categoriesLoadEpochRef.current) setCategoriesLoading(false);
+    }
+  }
+
+  function openCreateVendorDialog() {
+    setCreateOpen(true);
+    void ensureCategoriesLoaded();
+  }
+
   async function refresh() {
     if (!businessId) return;
 
@@ -124,40 +186,25 @@ export default function VendorsPageClient() {
     }
 
     const myEpoch = ++refreshEpochRef.current;
-    const loadingToken = beginLoading();
+    ++apSummaryEpochRef.current;
+    setVendorsLoading(true);
+    setApSummaryLoading(false);
     setErr(null);
 
     const run = (async () => {
       try {
-        const [res, catsRes] = await Promise.all([
-          listVendors({ businessId, q: q.trim() || undefined, sort }),
-          listCategories(businessId, { includeArchived: false }),
-        ]);
+        const res = await listVendors({ businessId, q: q.trim() || undefined, sort });
         if (myEpoch !== refreshEpochRef.current) return;
 
         const list = res.vendors ?? [];
         setVendors(list);
-        setCategoryRows(Array.isArray(catsRes.rows) ? catsRes.rows : []);
-
-        const ids = list.map((v: any) => String(v.id));
-        const chunks = Array.from({ length: Math.ceil(ids.length / VENDOR_AP_SUMMARY_BATCH_SIZE) }, (_, i) =>
-          ids.slice(i * VENDOR_AP_SUMMARY_BATCH_SIZE, (i + 1) * VENDOR_AP_SUMMARY_BATCH_SIZE)
-        );
-        const summaryResponses = chunks.length
-          ? await Promise.all(chunks.map((chunk) => getVendorsApSummary({ businessId, vendorIds: chunk, limit: chunk.length })))
-          : [];
-        if (myEpoch !== refreshEpochRef.current) return;
-
-        const m: Record<string, any> = {};
-        for (const res of summaryResponses) {
-          for (const row of (res.vendors ?? [])) m[String(row.vendor_id)] = row;
-        }
-        setApByVendorId(m);
+        setApByVendorId({});
+        void hydrateApSummary(list, myEpoch, businessId);
       } catch (e: any) {
         if (myEpoch !== refreshEpochRef.current) return;
         setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
       } finally {
-        endLoading(loadingToken);
+        if (myEpoch === refreshEpochRef.current) setVendorsLoading(false);
       }
     })();
 
@@ -179,7 +226,7 @@ export default function VendorsPageClient() {
   async function onCreate() {
     if (!businessId) return;
     if (!name.trim()) return;
-    const loadingToken = beginLoading();
+    setCreateLoading(true);
     setErr(null);
     try {
       const res = await createVendor({
@@ -197,13 +244,13 @@ export default function VendorsPageClient() {
     } catch (e: any) {
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
-      endLoading(loadingToken);
+      setCreateLoading(false);
     }
   }
 
   // auto-load
   useEffect(() => {
-    if (businessId && vendors.length === 0 && !loading && !err) refresh();
+    if (businessId && vendors.length === 0 && !vendorsLoading && !err) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
 
@@ -238,7 +285,7 @@ export default function VendorsPageClient() {
                   className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
                   disabled={!canWrite}
                   title={!canWrite ? "Insufficient permissions" : "Add vendor"}
-                  onClick={() => setCreateOpen(true)}
+                  onClick={openCreateVendorDialog}
                 >
                   Add Vendor
                 </button>
@@ -276,9 +323,9 @@ export default function VendorsPageClient() {
         </select>
       </div>
 
-      <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={!businessId || loading}>
+      <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={!businessId || vendorsLoading}>
         <span className="inline-flex items-center gap-2">
-          {loading ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
+          {vendorsLoading ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
           <span>Refresh</span>
         </span>
       </Button>
@@ -307,20 +354,20 @@ export default function VendorsPageClient() {
         ) : null}
       </div>
 
-      {vendors.length === 0 && !loading ? (
+      {vendors.length === 0 && !vendorsLoading ? (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-6">
           <div className="text-sm font-semibold text-slate-900">No vendors yet</div>
           <div className="text-sm text-slate-600 mt-1">Create a vendor to track invoices and activity.</div>
           <div className="mt-3">
-            <Button className="h-7 px-3 text-xs" onClick={() => setCreateOpen(true)} disabled={!canWrite}>
+            <Button className="h-7 px-3 text-xs" onClick={openCreateVendorDialog} disabled={!canWrite}>
               Add Vendor
             </Button>
           </div>
         </div>
       ) : (
         <div className="relative">
-          {loading && vendors.length > 0 ? <UpdatingOverlay /> : null}
-          <div className={loading && vendors.length > 0 ? "pointer-events-none select-none blur-[1px]" : ""}>
+          {vendorsLoading && vendors.length > 0 ? <UpdatingOverlay /> : null}
+          <div className={vendorsLoading && vendors.length > 0 ? "pointer-events-none select-none blur-[1px]" : ""}>
             <LedgerTableShell
           colgroup={
             <>
@@ -342,7 +389,7 @@ export default function VendorsPageClient() {
           }
           addRow={null}
           body={
-            loading && vendors.length === 0 ? (
+            vendorsLoading && vendors.length === 0 ? (
               <>
                 {Array.from({ length: 10 }).map((_, i) => (
                   <tr key={`sk-${i}`} className="h-9 border-b border-slate-100">
@@ -382,7 +429,15 @@ export default function VendorsPageClient() {
                     <td className="px-3 text-sm tabular-nums font-semibold">
                       {(() => {
                         const row = apByVendorId[String(v.id)];
-                        if (!row) return <span className="text-slate-400">—</span>;
+                        if (!row) {
+                          return apSummaryLoading ? (
+                            <span className="inline-flex items-center text-slate-400" title="Loading AP summary">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          );
+                        }
                         const txt = formatOptionalUsdFromCents(row?.total_open_cents);
                         if (!txt) return <span className="text-slate-400">—</span>;
                         const cents = toBigIntSafe(row.total_open_cents);
@@ -394,7 +449,7 @@ export default function VendorsPageClient() {
                       {(() => {
                         const row = apByVendorId[String(v.id)];
                         const a = row?.aging;
-                        if (!a) return "—";
+                        if (!a) return apSummaryLoading ? <span className="text-slate-400">Loading…</span> : "—";
                         const current = formatOptionalUsdFromCents(a.current);
                         const days30 = formatOptionalUsdFromCents(a.days_30);
                         const days60 = formatOptionalUsdFromCents(a.days_60);
@@ -436,11 +491,11 @@ export default function VendorsPageClient() {
         size="xs"
         footer={
           <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setCreateOpen(false)} disabled={loading}>
+            <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setCreateOpen(false)} disabled={createLoading}>
               Cancel
             </Button>
-            <Button className="h-7 px-3 text-xs" onClick={onCreate} disabled={loading || !name.trim()}>
-              Create
+            <Button className="h-7 px-3 text-xs" onClick={onCreate} disabled={createLoading || !name.trim()}>
+              {createLoading ? "Creating…" : "Create"}
             </Button>
           </div>
         }
@@ -462,14 +517,21 @@ export default function VendorsPageClient() {
               className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
               value={defaultCategoryId}
               onChange={(e) => setDefaultCategoryId(e.target.value)}
+              disabled={categoriesLoading && categoryRows.length === 0}
             >
-              <option value="">None</option>
+              <option value="">{categoriesLoading ? "Loading categories…" : "None"}</option>
               {categoryRows.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
             </select>
+            {categoriesLoading ? (
+              <div className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Loading categories</span>
+              </div>
+            ) : null}
           </div>
         </div>
       </AppDialog>
