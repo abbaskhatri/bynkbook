@@ -56,6 +56,11 @@ function formatUsdFromCents(cents: bigint) {
   return neg ? `($${core})` : `$${core}`;
 }
 
+function formatOptionalUsdFromCents(cents: any) {
+  if (cents === null || cents === undefined) return null;
+  return formatUsdFromCents(toBigIntSafe(cents));
+}
+
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -953,7 +958,7 @@ export default function VendorDetailPageClient() {
           <div className="rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-[11px] text-slate-600">AP Balance (open)</div>
             <div className="mt-1 text-sm font-semibold tabular-nums">
-              {formatUsdFromCents(toBigIntSafe(apSummary?.total_open_cents ?? 0))}
+              {formatOptionalUsdFromCents(apSummary?.total_open_cents) ?? <span className="text-slate-400">—</span>}
             </div>
 
             <div className="mt-1 text-xs text-slate-600">
@@ -966,19 +971,27 @@ export default function VendorDetailPageClient() {
             <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
               <div className="rounded-md border border-slate-200 p-2">
                 <div className="text-[11px] text-slate-600">Current</div>
-                <div className="font-semibold tabular-nums">{formatUsdFromCents(toBigIntSafe(apSummary?.aging?.current ?? 0))}</div>
+                <div className="font-semibold tabular-nums">
+                  {formatOptionalUsdFromCents(apSummary?.aging?.current) ?? <span className="text-slate-400">—</span>}
+                </div>
               </div>
               <div className="rounded-md border border-slate-200 p-2">
                 <div className="text-[11px] text-slate-600">30</div>
-                <div className="font-semibold tabular-nums">{formatUsdFromCents(toBigIntSafe(apSummary?.aging?.days_30 ?? 0))}</div>
+                <div className="font-semibold tabular-nums">
+                  {formatOptionalUsdFromCents(apSummary?.aging?.days_30) ?? <span className="text-slate-400">—</span>}
+                </div>
               </div>
               <div className="rounded-md border border-slate-200 p-2">
                 <div className="text-[11px] text-slate-600">60</div>
-                <div className="font-semibold tabular-nums">{formatUsdFromCents(toBigIntSafe(apSummary?.aging?.days_60 ?? 0))}</div>
+                <div className="font-semibold tabular-nums">
+                  {formatOptionalUsdFromCents(apSummary?.aging?.days_60) ?? <span className="text-slate-400">—</span>}
+                </div>
               </div>
               <div className="rounded-md border border-slate-200 p-2">
                 <div className="text-[11px] text-slate-600">90+</div>
-                <div className="font-semibold tabular-nums">{formatUsdFromCents(toBigIntSafe(apSummary?.aging?.days_90 ?? 0))}</div>
+                <div className="font-semibold tabular-nums">
+                  {formatOptionalUsdFromCents(apSummary?.aging?.days_90) ?? <span className="text-slate-400">—</span>}
+                </div>
               </div>
             </div>
           </div>

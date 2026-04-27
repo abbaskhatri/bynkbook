@@ -46,6 +46,11 @@ function formatUsdFromCents(cents: bigint) {
   return neg ? `($${core})` : `$${core}`;
 }
 
+function formatOptionalUsdFromCents(cents: any) {
+  if (cents === null || cents === undefined) return null;
+  return formatUsdFromCents(toBigIntSafe(cents));
+}
+
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
     <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
@@ -378,8 +383,9 @@ export default function VendorsPageClient() {
                       {(() => {
                         const row = apByVendorId[String(v.id)];
                         if (!row) return <span className="text-slate-400">—</span>;
-                        const cents = toBigIntSafe(row?.total_open_cents ?? 0);
-                        const txt = formatUsdFromCents(cents);
+                        const txt = formatOptionalUsdFromCents(row?.total_open_cents);
+                        if (!txt) return <span className="text-slate-400">—</span>;
+                        const cents = toBigIntSafe(row.total_open_cents);
                         return <span className={cents > 0n ? "text-slate-900" : "text-slate-400"}>{txt}</span>;
                       })()}
                     </td>
@@ -389,11 +395,12 @@ export default function VendorsPageClient() {
                         const row = apByVendorId[String(v.id)];
                         const a = row?.aging;
                         if (!a) return "—";
-                        const c = toBigIntSafe(a.current ?? 0);
-                        const d30 = toBigIntSafe(a.days_30 ?? 0);
-                        const d60 = toBigIntSafe(a.days_60 ?? 0);
-                        const d90 = toBigIntSafe(a.days_90 ?? 0);
-                        const text = `C ${formatUsdFromCents(c)} • 30 ${formatUsdFromCents(d30)} • 60 ${formatUsdFromCents(d60)} • 90+ ${formatUsdFromCents(d90)}`;
+                        const current = formatOptionalUsdFromCents(a.current);
+                        const days30 = formatOptionalUsdFromCents(a.days_30);
+                        const days60 = formatOptionalUsdFromCents(a.days_60);
+                        const days90 = formatOptionalUsdFromCents(a.days_90);
+                        if (!current || !days30 || !days60 || !days90) return "—";
+                        const text = `C ${current} • 30 ${days30} • 60 ${days60} • 90+ ${days90}`;
                         return <div className="truncate" title={text}>{text}</div>;
                       })()}
                     </td>
