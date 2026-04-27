@@ -1057,18 +1057,21 @@ AND (
     const result = await prisma.$transaction(async (tx: any) => {
       const entry = await tx.entry.findFirst({
         where: { id: entId, business_id: biz, account_id: acctId, deleted_at: null },
-        select: { id: true, vendor_id: true },
+        select: { id: true, vendor_id: true, date: true },
       });
       if (!entry) return { ok: false, status: 404, error: "Entry not found" };
 
       const entryVendorId = entry.vendor_id ? String(entry.vendor_id) : null;
       if (!entryVendorId) return { ok: false, status: 400, error: "Entry must be linked to a vendor" };
 
-      const where: any = { business_id: biz, entry_id: entId, is_active: true };
+      const where: any = { business_id: biz, account_id: acctId, entry_id: entId, is_active: true };
       if (!body?.all) {
         if (!billIds.length) return { ok: false, status: 400, error: "bill_ids is required (or all=true)" };
         where.bill_id = { in: billIds.slice(0, 200) };
       }
+
+      const cp = await assertNotClosedPeriod({ prisma: tx, businessId: biz, dateInput: entry.date });
+      if (!cp.ok) return { ok: false, status: cp.response.statusCode, response: cp.response };
 
       const apps = await tx.billPaymentApplication.findMany({ where, select: { id: true, bill_id: true } });
       if (!apps.length) return { ok: true };
@@ -1081,7 +1084,7 @@ AND (
       if (bills.length !== affectedBillIds.length) return { ok: false, status: 400, error: "All bills must belong to the same vendor as the entry" };
 
       await tx.billPaymentApplication.updateMany({
-        where: { id: { in: apps.map((a: any) => a.id) } },
+        where: { business_id: biz, account_id: acctId, entry_id: entId, is_active: true, id: { in: apps.map((a: any) => a.id) } },
         data: { is_active: false, voided_at: new Date(), voided_by_user_id: sub, void_reason: reason },
       });
 
@@ -1101,6 +1104,7 @@ AND (
       return { ok: true };
     });
 
+    if (!result.ok && (result as any).response) return (result as any).response;
     if (!result.ok) return json(result.status ?? 400, { ok: false, error: result.error });
 
     // Minimal response: bills likely affected are those referenced by bill_ids (or empty if all=true)
@@ -1149,20 +1153,23 @@ AND (
     const result = await prisma.$transaction(async (tx: any) => {
       const entry = await tx.entry.findFirst({
         where: { id: entId, business_id: biz, account_id: acctId, deleted_at: null },
-        select: { id: true, vendor_id: true },
+        select: { id: true, vendor_id: true, date: true },
       });
       if (!entry) return { ok: false, status: 404, error: "Entry not found" };
 
+      const cp = await assertNotClosedPeriod({ prisma: tx, businessId: biz, dateInput: entry.date });
+      if (!cp.ok) return { ok: false, status: cp.response.statusCode, response: cp.response };
+
       // Void (auditable) all active apps for this entry
       const apps = await tx.billPaymentApplication.findMany({
-        where: { business_id: biz, entry_id: entId, is_active: true },
+        where: { business_id: biz, account_id: acctId, entry_id: entId, is_active: true },
         select: { id: true, bill_id: true },
       });
 
       const affectedBillIds = Array.from(new Set<string>(apps.map((a: any) => String(a.bill_id))));
       if (apps.length) {
         await tx.billPaymentApplication.updateMany({
-          where: { id: { in: apps.map((a: any) => a.id) } },
+          where: { business_id: biz, account_id: acctId, entry_id: entId, is_active: true, id: { in: apps.map((a: any) => a.id) } },
           data: { is_active: false, voided_at: new Date(), voided_by_user_id: sub, void_reason: reason },
         });
 
@@ -1178,8 +1185,8 @@ AND (
       }
 
       // Soft delete the ledger entry explicitly (no silent cascade)
-      await tx.entry.update({
-        where: { id: entId },
+      await tx.entry.updateMany({
+        where: { id: entId, business_id: biz, account_id: acctId, deleted_at: null },
         data: {
           deleted_at: new Date(),
           vendor_id: null,
@@ -1191,6 +1198,7 @@ AND (
       return { ok: true };
     });
 
+    if (!result.ok && (result as any).response) return (result as any).response;
     if (!result.ok) return json(result.status ?? 400, { ok: false, error: result.error });
     return json(200, { ok: true });
   }
