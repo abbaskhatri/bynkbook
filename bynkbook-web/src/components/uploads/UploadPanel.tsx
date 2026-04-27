@@ -334,6 +334,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
   const showBankFields = type === "BANK_STATEMENT";
   const showVendorField = false; // vendor is extracted during parsing
+  const summaryTableMinWidth =
+    type === "INVOICE" ? "min-w-[1260px]" : type === "RECEIPT" ? "min-w-[980px]" : "min-w-[560px]";
 
   function pickFiles() {
     inputRef.current?.click();
@@ -499,7 +501,36 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
             {/* Table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className={`w-full ${summaryTableMinWidth} table-fixed text-xs`}>
+                {type === "INVOICE" ? (
+                  <colgroup>
+                    <col style={{ width: 44 }} />
+                    <col style={{ width: 220 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 190 }} />
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 266 }} />
+                    <col style={{ width: 80 }} />
+                  </colgroup>
+                ) : type === "RECEIPT" ? (
+                  <colgroup>
+                    <col style={{ width: 44 }} />
+                    <col style={{ width: 260 }} />
+                    <col style={{ width: 170 }} />
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 196 }} />
+                    <col style={{ width: 80 }} />
+                  </colgroup>
+                ) : (
+                  <colgroup>
+                    <col style={{ width: 280 }} />
+                    <col style={{ width: 200 }} />
+                    <col style={{ width: 80 }} />
+                  </colgroup>
+                )}
                 <thead className="bg-slate-50 text-slate-700">
                   {type === "INVOICE" ? (
                     <tr className="border-b border-slate-200">
@@ -666,13 +697,15 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         {type === "INVOICE" ? (
                           <>
                             <td className="px-3 py-2 text-slate-700">
-                              <div className="text-slate-900 font-medium">{vendor || "—"}</div>
-                              <div className="text-[11px] text-slate-500 truncate max-w-[260px]" title={it.file.name}>
+                              <div className="truncate font-medium text-slate-900" title={String(vendor || "")}>{vendor || "—"}</div>
+                              <div className="truncate text-[11px] text-slate-500" title={it.file.name}>
                                 ({it.file.name})
                               </div>
                             </td>
 
-                            <td className="px-3 py-2 text-slate-700">{invoiceNo || "—"}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              <div className="truncate" title={String(invoiceNo || "")}>{invoiceNo || "—"}</div>
+                            </td>
                             <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
 
                             <td className="px-3 py-2 text-slate-700">
@@ -757,7 +790,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 </span>
 
                                 {uploadReason(it) ? (
-                                  <div className="mt-1 max-w-[360px] text-[11px] leading-4 text-slate-500">
+                                  <div className="mt-1 truncate text-[11px] leading-4 text-slate-500" title={uploadReason(it)}>
                                     {uploadReason(it)}
                                   </div>
                                 ) : null}
@@ -767,10 +800,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         ) : type === "RECEIPT" ? (
                           <>
                             <td className="px-3 py-2 text-slate-700">
-                              <div className="text-slate-900 font-medium">{it.file?.name || "—"}</div>
+                              <div className="truncate font-medium text-slate-900" title={String(it.file?.name || "")}>{it.file?.name || "—"}</div>
                             </td>
 
-                            <td className="px-3 py-2 text-slate-700">{vendor || "—"}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              <div className="truncate" title={String(vendor || "")}>{vendor || "—"}</div>
+                            </td>
                             <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
                             <td className="px-3 py-2 text-right text-slate-900">{total || "—"}</td>
 

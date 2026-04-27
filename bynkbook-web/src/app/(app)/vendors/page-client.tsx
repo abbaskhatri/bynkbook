@@ -310,10 +310,11 @@ export default function VendorsPageClient() {
             <LedgerTableShell
           colgroup={
             <>
-              <col />
-              <col style={{ width: 160 }} />
-              <col style={{ width: 220 }} />
-              <col style={{ width: 220 }} />
+              <col style={{ width: 260 }} />
+              <col style={{ width: 140 }} />
+              <col style={{ width: 360 }} />
+              <col style={{ width: 120 }} />
+              <col style={{ width: 120 }} />
             </>
           }
           header={
@@ -360,7 +361,9 @@ export default function VendorsPageClient() {
                       router.push(`/vendors/${v.id}?businessId=${encodeURIComponent(businessId)}`);
                     }}
                   >
-                    <td className="px-3 text-sm">{v.name}</td>
+                    <td className="px-3 text-sm">
+                      <div className="truncate" title={String(v.name ?? "")}>{v.name}</div>
+                    </td>
 
                     <td className="px-3 text-sm tabular-nums font-semibold">
                       {(() => {
@@ -380,7 +383,8 @@ export default function VendorsPageClient() {
                         const d30 = toBigIntSafe(a.days_30 ?? 0);
                         const d60 = toBigIntSafe(a.days_60 ?? 0);
                         const d90 = toBigIntSafe(a.days_90 ?? 0);
-                        return `C ${formatUsdFromCents(c)} • 30 ${formatUsdFromCents(d30)} • 60 ${formatUsdFromCents(d60)} • 90+ ${formatUsdFromCents(d90)}`;
+                        const text = `C ${formatUsdFromCents(c)} • 30 ${formatUsdFromCents(d30)} • 60 ${formatUsdFromCents(d60)} • 90+ ${formatUsdFromCents(d90)}`;
+                        return <div className="truncate" title={text}>{text}</div>;
                       })()}
                     </td>
 
