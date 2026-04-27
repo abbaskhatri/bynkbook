@@ -31,7 +31,6 @@ export default function CreateBusinessClient() {
   }
 
   const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
-  const businessesQ = useBusinesses();
 
   const [checkingSession, setCheckingSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -65,6 +64,8 @@ export default function CreateBusinessClient() {
       }
     })();
   }, [router, nextUrl]);
+
+  const businessesQ = useBusinesses({ enabled: !checkingSession });
 
   useEffect(() => {
     if (checkingSession) return;

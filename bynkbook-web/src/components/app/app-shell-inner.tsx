@@ -56,6 +56,21 @@ function AuthRedirectScreen() {
   );
 }
 
+function NoWorkspaceRedirectScreen() {
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
+      <div className="w-full max-w-sm rounded-md border border-slate-200 bg-white p-6 shadow-sm">
+        <BrandLogo variant="full" size="md" priority className="mb-6" />
+        <div className="text-sm font-semibold text-slate-950">Opening business setup</div>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          You need one business workspace before entering the app.
+        </p>
+        <Skeleton className="mt-5 h-9 w-full rounded-md" />
+      </div>
+    </div>
+  );
+}
+
 export default function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -93,6 +108,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       pathname.startsWith("/reset-password") ||
       pathname.startsWith("/accept-invite") ||
       pathname.startsWith("/oauth-callback") ||
+      pathname.startsWith("/create-business") ||
       pathname.startsWith("/privacy") ||
       pathname.startsWith("/terms")
     ) {
@@ -628,41 +644,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
     const list = businessesQ.data ?? [];
     if (list.length === 0) {
-      // Redirect effect will run; render a stable loading state to avoid flashing Dashboard.
-      return (
-        <div className="min-h-screen flex bg-slate-50">
-          {/* Sidebar skeleton */}
-          <div className="hidden md:block w-64 border-r border-slate-200 bg-white p-3 space-y-3">
-            <Skeleton className="h-6 w-36" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <div className="pt-2 space-y-2">
-              <Skeleton className="h-3 w-20" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          </div>
-
-          {/* Main skeleton */}
-          <div className="flex-1 min-w-0 p-4 md:p-6">
-            <div className="flex items-center justify-between">
-              <Skeleton className="h-6 w-44" />
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-6 w-28" />
-                <Skeleton className="h-6 w-28" />
-              </div>
-            </div>
-
-            <div className="mt-6 space-y-4">
-              <Skeleton className="h-28 w-full" />
-              <Skeleton className="h-28 w-full" />
-              <Skeleton className="h-28 w-full" />
-            </div>
-          </div>
-        </div>
-      );
+      // Redirect effect will run; keep the protected shell/sidebar out of the
+      // transition so no-workspace users get a clear setup state, not a blank app.
+      return <NoWorkspaceRedirectScreen />;
     }
   }
 
