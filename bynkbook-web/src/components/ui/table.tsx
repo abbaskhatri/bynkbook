@@ -4,15 +4,29 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+type TableProps = React.ComponentProps<"table"> & {
+  containerClassName?: string
+  minWidth?: React.CSSProperties["minWidth"]
+}
+
+function Table({
+  className,
+  containerClassName,
+  minWidth,
+  style,
+  ...props
+}: TableProps) {
+  const tableStyle = minWidth === undefined ? style : { ...style, minWidth }
+
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
     >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}
+        style={tableStyle}
         {...props}
       />
     </div>
