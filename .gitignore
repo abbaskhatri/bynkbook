@@ -30,6 +30,18 @@ infra-sst/apigw*_test.json
 infra-sst/cognito-*-auth.json
 infra-sst/npm-install
 
+# --- Generated metadata / logs / local backups ---
+*.tsbuildinfo
+*.log
+*.bak
+*.backup.*
+*_backup_*
+*.tmp
+*.temp
+
+# --- Local database scratch files ---
+infra-sst/prisma/tmp_*.sql
+
 # --- OS / Editor ---
 .DS_Store
 Thumbs.db
