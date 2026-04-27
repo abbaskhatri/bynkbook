@@ -119,8 +119,8 @@ export async function getVendorsApSummary(args: {
 }> {
   const qs = new URLSearchParams();
   if (args.asOf) qs.set("asOf", args.asOf);
-  qs.set("limit", String(Math.max(1, Math.min(200, args.limit ?? 200))));
-  if (args.vendorIds?.length) qs.set("vendor_ids", args.vendorIds.slice(0, 200).join(","));
+  qs.set("limit", String(Math.max(1, Math.min(500, args.limit ?? 500))));
+  if (args.vendorIds?.length) qs.set("vendor_ids", args.vendorIds.slice(0, 500).join(","));
   return apiFetch(`/v1/businesses/${args.businessId}/ap/vendors-summary?${qs.toString()}`);
 }
 

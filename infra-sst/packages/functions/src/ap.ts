@@ -51,6 +51,12 @@ function clampLimit(raw: any) {
   return Math.max(1, Math.min(200, safe || 200));
 }
 
+function clampVendorsSummaryLimit(raw: any) {
+  const n = Number(raw);
+  const safe = Number.isFinite(n) ? Math.trunc(n) : 500;
+  return Math.max(1, Math.min(500, safe || 500));
+}
+
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || "").trim());
 }
@@ -554,15 +560,15 @@ export async function handler(event: any) {
     return json(200, { ok: true, summary });
   }
 
-  // ---------- Business vendors summary (aggregate SQL; limit <= 200) ----------
+  // ---------- Business vendors summary (aggregate SQL; limit <= 500) ----------
   if (method === "GET" && path === `/v1/businesses/${biz}/ap/vendors-summary`) {
     const q = qp(event);
     const asOf = String(q.asOf ?? "").trim() || new Date().toISOString().slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return json(400, { ok: false, error: "asOf must be YYYY-MM-DD" });
 
-    const limit = clampLimit(q.limit);
+    const limit = clampVendorsSummaryLimit(q.limit);
     const vendorIds = String(q.vendor_ids ?? "").trim();
-    const ids = vendorIds ? vendorIds.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200) : [];
+    const ids = vendorIds ? vendorIds.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500) : [];
 
     const rows: any[] = await prisma.$queryRaw`
       WITH vendors AS (
