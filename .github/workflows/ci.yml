@@ -38,6 +38,8 @@ jobs:
   infra:
     name: Infra
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bynkbook_ci
 
     defaults:
       run:
@@ -66,6 +68,8 @@ jobs:
   backend-critical-tests:
     name: Backend critical tests
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bynkbook_ci
 
     steps:
       - name: Checkout
