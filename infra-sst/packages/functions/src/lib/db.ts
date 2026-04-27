@@ -1,12 +1,43 @@
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
+import { Pool, type PoolConfig } from "pg";
 
 let prisma: PrismaClient | null = null;
 let pool: Pool | null = null;
 let cachedDatabaseUrl: string | null = null;
 let cachedDatabaseCa: string | null = null;
+
+type DbSslConfig = false | { rejectUnauthorized: boolean; ca?: string };
+
+const CONNECTION_STRING_SSL_PARAMS = new Set([
+  "ssl",
+  "sslmode",
+  "sslcert",
+  "sslkey",
+  "sslrootcert",
+  "sslpassword",
+  "sslcrl",
+]);
+
+export function stripConnectionStringSslParams(databaseUrl: string) {
+  const url = new URL(databaseUrl);
+
+  for (const key of Array.from(url.searchParams.keys())) {
+    if (CONNECTION_STRING_SSL_PARAMS.has(key.toLowerCase())) {
+      url.searchParams.delete(key);
+    }
+  }
+
+  return url.toString();
+}
+
+export function buildPgPoolConfig(args: { databaseUrl: string; ssl: DbSslConfig }): PoolConfig {
+  return {
+    connectionString: stripConnectionStringSslParams(args.databaseUrl),
+    ssl: args.ssl,
+  };
+}
 
 async function getSecretString(secretId: string) {
   const region = process.env.AWS_REGION || "us-east-1";
@@ -37,7 +68,7 @@ async function getDatabaseCa() {
   return cachedDatabaseCa;
 }
 
-async function getSslConfig() {
+async function getSslConfig(): Promise<DbSslConfig> {
   if ((process.env.DB_SSL ?? "").trim().toLowerCase() === "disable") return false;
 
   const rejectUnauthorized = (process.env.DB_SSL_REJECT_UNAUTHORIZED ?? "true").trim().toLowerCase() !== "false";
@@ -51,10 +82,10 @@ export async function getPrisma() {
 
   const url = await getDatabaseUrl();
 
-  pool = new Pool({
-    connectionString: url,
+  pool = new Pool(buildPgPoolConfig({
+    databaseUrl: url,
     ssl: await getSslConfig(),
-  });
+  }));
 
   const adapter = new PrismaPg(pool);
   prisma = new PrismaClient({ adapter });
