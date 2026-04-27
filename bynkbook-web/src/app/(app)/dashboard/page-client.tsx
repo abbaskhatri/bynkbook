@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useAccounts } from "@/lib/queries/useAccounts";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getIssuesCount } from "@/lib/api/issues";
 
@@ -368,6 +369,8 @@ export default function DashboardPageClient() {
     return list[0]?.id ?? null;
   }, [bizIdFromUrl, businessesQ.data]);
 
+  const accountsQ = useAccounts(selectedBusinessId);
+
   const spKey = sp.toString();
 
   useEffect(() => {
@@ -422,6 +425,22 @@ export default function DashboardPageClient() {
   // Account scope selector: All accounts vs a specific account
   const [accountScopeId, setAccountScopeId] = useState<string>("all");
 
+  const issuesAccountScopeId = useMemo(() => {
+    if (accountScopeId && accountScopeId !== "all") return accountScopeId;
+    const list = accountsQ.data ?? [];
+    return list.find((a) => !a.archived_at)?.id ?? "";
+  }, [accountScopeId, accountsQ.data]);
+
+  const issuesHref = useMemo(() => {
+    if (!selectedBusinessId) return "/issues";
+
+    const params = new URLSearchParams();
+    params.set("businessId", selectedBusinessId);
+    if (issuesAccountScopeId) params.set("accountId", issuesAccountScopeId);
+
+    return `/issues?${params.toString()}`;
+  }, [selectedBusinessId, issuesAccountScopeId]);
+
   // Keep-last-good: preserve previous data while fetching new period.
   const pnlQ = useQuery({
     queryKey: ["dashboardExec", "pnlSummary", selectedBusinessId, accountScopeId, range.from, range.to, range.mode,],
@@ -460,9 +479,9 @@ export default function DashboardPageClient() {
   });
 
   const issuesCountQ = useQuery({
-    queryKey: ["dashboardExec", "issuesCount", selectedBusinessId, accountScopeId, "OPEN"],
-    queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: accountScopeId }),
-    enabled: dashEnabled,
+    queryKey: ["dashboardExec", "issuesCount", selectedBusinessId, issuesAccountScopeId, "OPEN", "issuesPageVisible"],
+    queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: issuesAccountScopeId }),
+    enabled: dashEnabled && !!issuesAccountScopeId,
     staleTime: 20_000,
     placeholderData: (prev) => prev,
   });
@@ -1795,7 +1814,7 @@ export default function DashboardPageClient() {
               <div className="-mt-1 divide-y divide-slate-100">
                 <button
                   type="button"
-                  onClick={() => router.push("/issues")}
+                  onClick={() => router.push(issuesHref)}
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
                 >
                   <div className="flex items-center gap-3">
