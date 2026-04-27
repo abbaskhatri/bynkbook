@@ -2362,10 +2362,15 @@ const displayBankActiveList = useMemo(() => {
 
   const entryStateSummary = useMemo(() => {
     return {
-      expectedN: entriesExpectedList.length,
-      matchedN: entriesMatchedList.length,
+      expectedN: displayExpectedCount,
+      matchedN: displayMatchedCount,
     };
-  }, [entriesExpectedList.length, entriesMatchedList.length]);
+  }, [displayExpectedCount, displayMatchedCount]);
+
+  const entriesSummarySettling =
+    entriesTruthBlocking ||
+    entriesTruthSettling ||
+    entriesUpdating;
 
   const revertsInScope = voidedGroups.length;
 
@@ -2520,8 +2525,9 @@ const displayBankActiveList = useMemo(() => {
 
           <div className="leading-tight">
             <div className="text-slate-500">Entries</div>
-            <div className="font-semibold text-slate-900">
+            <div className="font-semibold text-slate-900 inline-flex items-center gap-2">
               Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}
+              {entriesSummarySettling ? <TinySpinner /> : null}
             </div>
           </div>
 
