@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { userFacingErrorMessage } from "@/lib/errors";
+import { formatDateOnlyShort, normalizeDateOnly } from "@/lib/dateOnly";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { patchBusiness, resetBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
@@ -60,11 +61,6 @@ function todayYmd() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function ymdToIso(ymd: string) {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return `${ymd}T00:00:00Z`;
-  return ymd;
-}
-
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -88,12 +84,7 @@ function formatShortDate(input?: string | null) {
   const d = new Date(input);
   if (Number.isNaN(d.getTime())) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
-      const [y, m, day] = input.split("-").map(Number);
-      const dd = new Date(Date.UTC(y, m - 1, day));
-      const mm2 = String(dd.getUTCMonth() + 1).padStart(2, "0");
-      const dd2 = String(dd.getUTCDate()).padStart(2, "0");
-      const yy2 = String(dd.getUTCFullYear()).slice(-2);
-      return `${mm2}/${dd2}/${yy2}`;
+      return formatDateOnlyShort(input);
     }
     return input;
   }
@@ -726,7 +717,7 @@ export default function SettingsPageClient() {
         name: name.trim(),
         type,
         opening_balance_cents: cents,
-        opening_balance_date: ymdToIso(openingDate),
+        opening_balance_date: openingDate,
 
         // Manual metadata (optional)
         currency_code: manualCurrency || null,
@@ -2564,7 +2555,7 @@ export default function SettingsPageClient() {
                             const patch: any = { name: editName.trim(), type: editType };
                             if (canEditOpening) {
                               patch.opening_balance_cents = cents;
-                              patch.opening_balance_date = ymdToIso(editOpeningDate);
+                              patch.opening_balance_date = editOpeningDate;
                             }
 
                             await patchAccount(selectedBusinessId, editAccountId, patch);
@@ -2668,7 +2659,7 @@ export default function SettingsPageClient() {
                   <TableBody>
                     {visibleAccounts.map((a) => {
                       const amount = currency.format(a.opening_balance_cents / 100);
-                      const date = formatShortDate(a.opening_balance_date);
+                      const date = formatDateOnlyShort(a.opening_balance_date);
                       const isArchived = !!a.archived_at;
 
                       const st = plaidByAccount[a.id];
@@ -2897,19 +2888,9 @@ export default function SettingsPageClient() {
                                     setEditName(a.name);
                                     setEditType(a.type as AccountType);
                                     setEditOpeningBalance(String((Number(a.opening_balance_cents ?? 0) as any) / 100));
-                                    setEditOpeningDate(todayYmd());
+                                    setEditOpeningDate(normalizeDateOnly(a.opening_balance_date) || todayYmd());
                                     setEditErr(null);
                                     setEditOpen(true);
-
-                                    try {
-                                      const d = new Date(a.opening_balance_date as any);
-                                      if (!Number.isNaN(d.getTime())) {
-                                        const y = d.getFullYear();
-                                        const m = String(d.getMonth() + 1).padStart(2, "0");
-                                        const day = String(d.getDate()).padStart(2, "0");
-                                        setEditOpeningDate(`${y}-${m}-${day}`);
-                                      }
-                                    } catch { }
                                   }}
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
