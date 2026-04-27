@@ -145,9 +145,9 @@ export default function CategoriesPageClient() {
             </div>
           ) : null}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
-              className="h-7 text-xs max-w-sm"
+              className="h-7 min-w-[220px] max-w-sm flex-1 text-xs"
               placeholder="New category name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -157,8 +157,8 @@ export default function CategoriesPageClient() {
             </Button>
           </div>
 
-          <div className="rounded-lg border border-slate-200 overflow-hidden">
-            <div className="grid grid-cols-[1fr_220px_120px] bg-slate-50 border-b border-slate-200">
+          <div className="rounded-lg border border-slate-200 overflow-x-auto overflow-y-hidden">
+            <div className="grid min-w-[620px] grid-cols-[minmax(0,1fr)_260px_132px] bg-slate-50 border-b border-slate-200">
               <div className="px-3 py-2 text-[11px] font-semibold text-slate-600">Name</div>
               <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 text-center">Rename</div>
               <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 text-center">Archive</div>
@@ -176,21 +176,21 @@ export default function CategoriesPageClient() {
                 return (
                   <div
                     key={c.id}
-                    className="grid grid-cols-[1fr_220px_120px] items-center border-b border-slate-200 last:border-b-0"
+                    className="grid min-w-[620px] grid-cols-[minmax(0,1fr)_260px_132px] items-center border-b border-slate-200 last:border-b-0"
                   >
                     <div className="px-3 py-2 text-sm text-slate-900 truncate">
                       {c.name} {isArchived ? <span className="text-[11px] text-slate-500">(archived)</span> : null}
                     </div>
 
-                    <div className="px-3 py-2 flex items-center gap-2 justify-center">
+                    <div className="px-3 py-2 flex min-w-0 items-center gap-2 justify-center">
                       <Input
-                        className="h-7 text-xs"
+                        className="h-7 min-w-0 text-xs"
                         value={draft}
                         onChange={(e) => setEditNameById((m) => ({ ...m, [c.id]: e.target.value }))}
                       />
                       <Button
                         variant="outline"
-                        className="h-7 px-3 text-xs"
+                        className="h-7 shrink-0 px-3 text-xs"
                         onClick={() => onRename(c.id)}
                         disabled={!businessId || savingId === c.id || draft.trim() === c.name}
                         title={draft.trim() === c.name ? "No changes" : "Rename"}
@@ -202,7 +202,7 @@ export default function CategoriesPageClient() {
                     <div className="px-3 py-2 flex justify-center">
                       <Button
                         variant="outline"
-                        className="h-7 px-3 text-xs"
+                        className="h-7 shrink-0 px-3 text-xs"
                         onClick={() => onToggleArchive(c.id, !isArchived)}
                         disabled={!businessId || savingId === c.id}
                       >

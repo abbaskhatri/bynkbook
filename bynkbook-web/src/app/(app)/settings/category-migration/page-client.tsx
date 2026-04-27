@@ -254,9 +254,9 @@ export default function CategoryMigrationPageClient() {
 
       <Card>
         <CHeader className="pb-2">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-sm">Migration Wizard (Owner only)</CardTitle>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="min-w-0 text-sm">Migration Wizard (Owner only)</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 className="h-7 px-3 text-xs"
@@ -308,7 +308,7 @@ export default function CategoryMigrationPageClient() {
                     max={50}
                   />
                 </div>
-                <div className="ml-2 flex flex-col justify-end">
+                <div className="ml-2 flex min-w-0 flex-col justify-end">
                   <div className="text-[11px] text-slate-500">Source: entry memo</div>
                   <div className="text-[11px] text-slate-400">Only entries with category_id = null are eligible</div>
                 </div>
@@ -337,8 +337,8 @@ export default function CategoryMigrationPageClient() {
           ) : null}
 
           {rows.length > 0 ? (
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="grid grid-cols-[1fr_90px_220px] gap-0 bg-slate-50 border-b border-slate-200">
+            <div className="rounded-lg border border-slate-200 overflow-x-auto overflow-y-hidden">
+              <div className="grid min-w-[560px] grid-cols-[minmax(0,1fr)_90px_240px] gap-0 bg-slate-50 border-b border-slate-200">
                 <div className="px-3 py-2 text-[11px] font-semibold text-slate-600">Memo value</div>
                 <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 text-right">Count</div>
                 <div className="px-3 py-2 text-[11px] font-semibold text-slate-600">Mapping</div>
@@ -347,7 +347,7 @@ export default function CategoryMigrationPageClient() {
               {rows.map((r) => {
                 const choice = choiceByMemo[r.memoValue] ?? { mode: "CREATE_SAME" as const };
                 return (
-                  <div key={r.memoValue} className="grid grid-cols-[1fr_90px_220px] gap-0 border-b border-slate-200 last:border-b-0">
+                  <div key={r.memoValue} className="grid min-w-[560px] grid-cols-[minmax(0,1fr)_90px_240px] gap-0 border-b border-slate-200 last:border-b-0">
                     <div className="px-3 py-2 text-sm text-slate-900 truncate">{r.memoValue}</div>
                     <div className="px-3 py-2 text-sm text-slate-900 text-right tabular-nums">{r.count}</div>
 

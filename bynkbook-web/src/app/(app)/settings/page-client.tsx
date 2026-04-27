@@ -1242,7 +1242,7 @@ export default function SettingsPageClient() {
               <div className="text-xs text-muted-foreground">No activity found for the current filters.</div>
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                <Table>
+                <Table minWidth={640}>
                   <THead className="bg-slate-50">
                     <TableRow className="hover:bg-slate-50">
                       <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">When</TableHead>
@@ -1270,7 +1270,11 @@ export default function SettingsPageClient() {
                         <Fragment key={it.id}>
                           <TableRow className="hover:bg-slate-50">
                             <TableCell className="py-2 text-slate-700 text-xs whitespace-nowrap">{when}</TableCell>
-                            <TableCell className="py-2 text-slate-900 text-xs font-medium">{humanize(it.event_type)}</TableCell>
+                            <TableCell className="py-2 text-slate-900 text-xs font-medium">
+                              <span className="inline-block max-w-[220px] truncate" title={humanize(it.event_type)}>
+                                {humanize(it.event_type)}
+                              </span>
+                            </TableCell>
                             <TableCell className="py-2 text-slate-700 text-xs">
                               {currentUserId && String(it.actor_user_id) === String(currentUserId) ? "You" : "Member"}
                             </TableCell>
@@ -1433,7 +1437,7 @@ export default function SettingsPageClient() {
                   ) : teamInvites.length === 0 ? (
                     <div className="p-3 text-xs text-muted-foreground">No pending invites.</div>
                   ) : (
-                    <Table>
+                    <Table minWidth={640}>
                       <THead className="bg-slate-50">
                         <TableRow className="hover:bg-slate-50">
                           <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Email</TableHead>
@@ -1445,7 +1449,11 @@ export default function SettingsPageClient() {
                       <TableBody>
                         {teamInvites.map((i) => (
                           <TableRow key={i.id} className="hover:bg-slate-50">
-                            <TableCell className="py-2 font-medium text-slate-900">{i.email}</TableCell>
+                            <TableCell className="py-2 font-medium text-slate-900">
+                              <span className="inline-block max-w-[280px] truncate" title={i.email}>
+                                {i.email}
+                              </span>
+                            </TableCell>
                             <TableCell className="py-2 text-slate-700">{i.role}</TableCell>
                             <TableCell className="py-2 text-slate-700">{formatShortDate(i.expires_at)}</TableCell>
                             <TableCell className="py-2 text-right">
@@ -1480,7 +1488,7 @@ export default function SettingsPageClient() {
                   ) : teamError ? (
                     <div className="p-3 text-xs text-red-600">{teamError}</div>
                   ) : (
-                    <Table>
+                    <Table minWidth={720}>
                       <THead className="bg-slate-50">
                         <TableRow className="hover:bg-slate-50">
                           <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Email</TableHead>
@@ -1503,7 +1511,7 @@ export default function SettingsPageClient() {
                           return (
                             <TableRow key={m.user_id} className="hover:bg-slate-50">
                               <TableCell className="py-2 font-medium text-slate-900">
-                                <span className="inline-flex items-center rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-800">
+                                <span className="inline-flex max-w-[280px] items-center truncate rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-800" title={shownEmail || "Email not available"}>
                                   {shownEmail || "Email not available"}
                                 </span>
                               </TableCell>
@@ -1591,7 +1599,7 @@ export default function SettingsPageClient() {
                     <div className="text-xs font-medium text-slate-700">Permissions matrix</div>
                   </div>
 
-                  <Table>
+                  <Table minWidth={720}>
                     <THead className="bg-slate-50">
                       <TableRow className="hover:bg-slate-50">
                         <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Feature</TableHead>
@@ -1615,7 +1623,11 @@ export default function SettingsPageClient() {
                         ["team_management", "Team Management"],
                       ].map(([key, label]) => (
                         <TableRow key={key} className="hover:bg-slate-50">
-                          <TableCell className="py-2 font-medium text-slate-900">{label}</TableCell>
+                          <TableCell className="py-2 font-medium text-slate-900">
+                            <span className="inline-block max-w-[180px] truncate" title={label}>
+                              {label}
+                            </span>
+                          </TableCell>
 
                           {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => {
                             const row = polRows.find((x) => String(x.role).toUpperCase() === r);
@@ -2639,7 +2651,7 @@ export default function SettingsPageClient() {
               </div>
             ) : (
               <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                <Table>
+                <Table minWidth={1180}>
                   <THead className="bg-slate-50">
                     <TableRow className="hover:bg-slate-50">
                       <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Name</TableHead>
@@ -2665,7 +2677,11 @@ export default function SettingsPageClient() {
 
                       return (
                         <TableRow key={a.id} className="hover:bg-slate-50">
-                          <TableCell className="py-2 font-medium text-slate-900">{a.name}</TableCell>
+                          <TableCell className="py-2 font-medium text-slate-900">
+                            <span className="inline-block max-w-[180px] truncate" title={a.name}>
+                              {a.name}
+                            </span>
+                          </TableCell>
                           <TableCell className="py-2 text-slate-700">{formatAccountType(a.type)}</TableCell>
 
                           {/* Institution (Plaid OR manual) */}
