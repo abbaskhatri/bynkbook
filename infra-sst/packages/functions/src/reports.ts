@@ -265,7 +265,7 @@ export async function handler(event: any) {
   if (path === `/v1/businesses/${biz}/reports/categories`) {
     const grouped = await prisma.entry.groupBy({
       by: ["category_id"],
-      where: baseWhere,
+      where: { ...baseWhere, type: "EXPENSE" },
       _sum: { amount_cents: true },
       _count: { _all: true },
       orderBy: [{ _sum: { amount_cents: "desc" } }],
@@ -916,6 +916,7 @@ export async function handler(event: any) {
 
     const where: any = {
       ...baseWhere,
+      type: "EXPENSE",
       ...(categoryIdRaw === "" ? {} : categoryIdRaw === "null" ? { category_id: null } : { category_id: categoryIdRaw }),
     };
 
