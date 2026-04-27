@@ -38,6 +38,13 @@ async function requireMembership(prisma: any, businessId: string, userId: string
   return row?.role ?? null;
 }
 
+async function findAccountInBusiness(prisma: any, businessId: string, accountId: string, select: any = { id: true }) {
+  return prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select,
+  });
+}
+
 export async function handler(event: any) {
   const method = (event?.requestContext?.http?.method ?? "").toString().toUpperCase();
 
@@ -93,6 +100,9 @@ export async function handler(event: any) {
     } catch {
       return json(400, { ok: false, error: "Invalid JSON body" });
     }
+
+    const existing = await findAccountInBusiness(prisma, businessId, accountId);
+    if (!existing) return json(404, { ok: false, error: "Account not found" });
 
     const patch: any = {};
 
@@ -162,21 +172,28 @@ export async function handler(event: any) {
 
     if (Object.keys(patch).length === 0) return json(400, { ok: false, error: "No fields to update" });
 
-    const updated = await prisma.account.update({
-      where: { id: accountId },
+    const updateResult = await prisma.account.updateMany({
+      where: { id: accountId, business_id: businessId },
       data: patch,
-      select: {
-        id: true,
-        business_id: true,
-        name: true,
-        type: true,
-        opening_balance_cents: true,
-        opening_balance_date: true,
-        archived_at: true,
-        created_at: true,
-        updated_at: true,
-      },
     });
+
+    if ((updateResult?.count ?? 0) === 0) {
+      return json(404, { ok: false, error: "Account not found" });
+    }
+
+    const updated = await findAccountInBusiness(prisma, businessId, accountId, {
+      id: true,
+      business_id: true,
+      name: true,
+      type: true,
+      opening_balance_cents: true,
+      opening_balance_date: true,
+      archived_at: true,
+      created_at: true,
+      updated_at: true,
+    });
+
+    if (!updated) return json(404, { ok: false, error: "Account not found" });
 
     return json(200, {
       ok: true,
@@ -200,12 +217,19 @@ export async function handler(event: any) {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
 
+    const existing = await findAccountInBusiness(prisma, businessId, accountId);
+    if (!existing) return json(404, { ok: false, error: "Account not found" });
+
     const now = new Date();
 
-    await prisma.$transaction([
+    const [updateResult] = await prisma.$transaction([
+      prisma.account.updateMany({ where: { id: accountId, business_id: businessId }, data: { archived_at: now } }),
       prisma.bankConnection.deleteMany({ where: { business_id: businessId, account_id: accountId } }),
-      prisma.account.update({ where: { id: accountId }, data: { archived_at: now } }),
     ]);
+
+    if ((updateResult?.count ?? 0) === 0) {
+      return json(404, { ok: false, error: "Account not found" });
+    }
 
     return json(200, { ok: true, account: { id: accountId, archived_at: now.toISOString() } });
   }
@@ -215,15 +239,22 @@ export async function handler(event: any) {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
 
-    const updated = await prisma.account.update({
-      where: { id: accountId },
+    const existing = await findAccountInBusiness(prisma, businessId, accountId);
+    if (!existing) return json(404, { ok: false, error: "Account not found" });
+
+    const updateResult = await prisma.account.updateMany({
+      where: { id: accountId, business_id: businessId },
       data: { archived_at: null },
     });
+
+    if ((updateResult?.count ?? 0) === 0) {
+      return json(404, { ok: false, error: "Account not found" });
+    }
 
     return json(200, {
       ok: true,
       account: {
-        id: updated.id,
+        id: accountId,
         archived_at: null,
       },
     });
@@ -263,6 +294,9 @@ export async function handler(event: any) {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
 
+    const existing = await findAccountInBusiness(prisma, businessId, accountId);
+    if (!existing) return json(404, { ok: false, error: "Account not found" });
+
     const eligRes = await (async () => {
       const counts = await prisma.$transaction([
         prisma.entry.count({ where: { business_id: businessId, account_id: accountId } }),
@@ -290,7 +324,11 @@ export async function handler(event: any) {
       return json(409, { ok: false, error: "Account has related rows; archive instead", related_total: eligRes.total });
     }
 
-    await prisma.account.delete({ where: { id: accountId } });
+    const deleteResult = await prisma.account.deleteMany({ where: { id: accountId, business_id: businessId } });
+    if ((deleteResult?.count ?? 0) === 0) {
+      return json(404, { ok: false, error: "Account not found" });
+    }
+
     return json(200, { ok: true, deleted: true });
   }
 
