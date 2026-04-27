@@ -1363,31 +1363,35 @@ export default function ReportsPageClient() {
                       <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
                     </div>
 
-                    <div className="divide-y divide-slate-100">
-                      <div className="h-9 px-3 grid grid-cols-4 items-center text-[11px] font-semibold text-slate-700 bg-white">
-                        <div>Month</div>
-                        <div className="text-right">Income</div>
-                        <div className="text-right">Expenses</div>
-                        <div className="text-right">Net</div>
-                      </div>
-
-                      {(pnl.monthly ?? []).map((r: any, idx: number) => (
-                        <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-4 items-center gap-3 text-sm">
-                          <div className="w-[90px] tabular-nums text-slate-700">{formatBucketLabel(String(r.month), rangeMode)}</div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.income_cents).text}
-                          </div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.expense_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.expense_cents).text}
-                          </div>
-                          <div className={`w-[160px] text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
-                            {formatUsdAccountingFromCents(r.net_cents).text}
-                          </div>
+                    <div className="overflow-x-auto">
+                      <div className="min-w-[640px] divide-y divide-slate-100">
+                        <div className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-[11px] font-semibold text-slate-700 bg-white">
+                          <div className="truncate">Month</div>
+                          <div className="text-right">Income</div>
+                          <div className="text-right">Expenses</div>
+                          <div className="text-right">Net</div>
                         </div>
-                      ))}
-                      {(pnl.monthly ?? []).length === 0 ? (
-                        <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
-                      ) : null}
+
+                        {(pnl.monthly ?? []).map((r: any, idx: number) => (
+                          <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-sm">
+                            <div className="truncate tabular-nums text-slate-700" title={formatBucketLabel(String(r.month), rangeMode)}>
+                              {formatBucketLabel(String(r.month), rangeMode)}
+                            </div>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(r.income_cents).text}
+                            </div>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(r.expense_cents).text}
+                            </div>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
+                              {formatUsdAccountingFromCents(r.net_cents).text}
+                            </div>
+                          </div>
+                        ))}
+                        {(pnl.monthly ?? []).length === 0 ? (
+                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </>
@@ -1529,32 +1533,36 @@ export default function ReportsPageClient() {
                         <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
                       </div>
 
-                      <div className="divide-y divide-slate-100">
-                        <div className="h-9 px-3 grid grid-cols-[110px_1fr_1fr_1fr] items-center text-[11px] font-semibold text-slate-700 bg-white">
-                          <div>Period</div>
-                          <div className="text-right">Cash In</div>
-                          <div className="text-right">Cash Out</div>
-                          <div className="text-right">Net</div>
-                        </div>
-
-                        {(cashflow.monthly ?? []).map((r: any, idx: number) => (
-                          <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_1fr_1fr_1fr] items-center text-sm">
-                            <div className="tabular-nums text-slate-700">{formatBucketLabel(String(r.month), rangeMode)}</div>
-                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
-                              {formatUsdAccountingFromCents(r.cash_in_cents).text}
-                            </div>
-                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_out_cents).isNeg ? "text-red-600" : ""}`}>
-                              {formatUsdAccountingFromCents(r.cash_out_cents).text}
-                            </div>
-                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
-                              {formatUsdAccountingFromCents(r.net_cents).text}
-                            </div>
+                      <div className="overflow-x-auto">
+                        <div className="min-w-[640px] divide-y divide-slate-100">
+                          <div className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-[11px] font-semibold text-slate-700 bg-white">
+                            <div className="truncate">Period</div>
+                            <div className="text-right">Cash In</div>
+                            <div className="text-right">Cash Out</div>
+                            <div className="text-right">Net</div>
                           </div>
-                        ))}
 
-                        {(cashflow.monthly ?? []).length === 0 ? (
-                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
-                        ) : null}
+                          {(cashflow.monthly ?? []).map((r: any, idx: number) => (
+                            <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-sm">
+                              <div className="truncate tabular-nums text-slate-700" title={formatBucketLabel(String(r.month), rangeMode)}>
+                                {formatBucketLabel(String(r.month), rangeMode)}
+                              </div>
+                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
+                                {formatUsdAccountingFromCents(r.cash_in_cents).text}
+                              </div>
+                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_out_cents).isNeg ? "text-red-600" : ""}`}>
+                                {formatUsdAccountingFromCents(r.cash_out_cents).text}
+                              </div>
+                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
+                                {formatUsdAccountingFromCents(r.net_cents).text}
+                              </div>
+                            </div>
+                          ))}
+
+                          {(cashflow.monthly ?? []).length === 0 ? (
+                            <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>

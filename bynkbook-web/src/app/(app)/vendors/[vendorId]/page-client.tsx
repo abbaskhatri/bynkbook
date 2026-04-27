@@ -1015,7 +1015,17 @@ export default function VendorDetailPageClient() {
 
               <div className="rounded-lg border border-slate-200 overflow-hidden">
                 <div className="max-h-[420px] overflow-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[1070px] table-fixed text-sm">
+                    <colgroup>
+                      <col style={{ width: 110 }} />
+                      <col style={{ width: 110 }} />
+                      <col style={{ width: 220 }} />
+                      <col style={{ width: 130 }} />
+                      <col style={{ width: 130 }} />
+                      <col style={{ width: 140 }} />
+                      <col style={{ width: 100 }} />
+                      <col style={{ width: 130 }} />
+                    </colgroup>
                     <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                       <tr className="h-9">
                         <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
@@ -1071,13 +1081,13 @@ export default function VendorDetailPageClient() {
                             >
                               <td className="px-3 text-sm tabular-nums">{String(b.invoice_date ?? "").slice(0, 10)}</td>
                               <td className="px-3 text-sm tabular-nums">{String(b.due_date ?? "").slice(0, 10)}</td>
-                              <td className="px-3 text-sm text-slate-700 truncate max-w-[260px]" title={String(b.memo ?? "")}>
-                                {b.memo ?? "—"}
+                              <td className="px-3 text-sm text-slate-700" title={String(b.memo ?? "")}>
+                                <div className="truncate">{b.memo ?? "—"}</div>
                               </td>
                               <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(amount)}</td>
                               <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(applied)}</td>
                               <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(outstanding)}</td>
-                              <td className="px-3 text-xs">
+                              <td className="px-3 text-xs whitespace-nowrap">
                                 <span
                                   className={
                                     "inline-flex h-6 items-center rounded-full px-2 " +
@@ -1091,7 +1101,7 @@ export default function VendorDetailPageClient() {
                                   {st}
                                 </span>
                               </td>
-                              <td className="px-3 text-right">
+                              <td className="px-3 text-right whitespace-nowrap">
                                 <div className="inline-flex items-center gap-2">
                                   {pendingBillById[String(b.id)] ? (
                                     <span className="inline-flex items-center" title="Saving…">
@@ -1142,7 +1152,16 @@ export default function VendorDetailPageClient() {
           ) : (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
               <div className="max-h-[420px] overflow-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[1150px] table-fixed text-sm">
+                  <colgroup>
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 220 }} />
+                    <col style={{ width: 260 }} />
+                    <col style={{ width: 130 }} />
+                    <col style={{ width: 130 }} />
+                    <col style={{ width: 140 }} />
+                    <col style={{ width: 160 }} />
+                  </colgroup>
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                     <tr className="h-9">
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
@@ -1157,7 +1176,7 @@ export default function VendorDetailPageClient() {
                   <tbody>
                     {paymentsErr ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-red-700" colSpan={4}>
+                        <td className="px-3 py-4 text-sm text-red-700" colSpan={7}>
                           <div>{paymentsErr}</div>
 
                           {paymentsErrIsClosed ? (
@@ -1176,7 +1195,7 @@ export default function VendorDetailPageClient() {
                       </tr>
                     ) : vendorPayments.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={4}>
+                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={7}>
                           No vendor-linked payments yet.
                         </td>
                       </tr>
@@ -1190,24 +1209,24 @@ export default function VendorDetailPageClient() {
                           <tr key={entryId} className="h-9 border-b border-slate-100 hover:bg-slate-50">
                             <td className="px-3 text-sm tabular-nums">{String(p.date ?? "").slice(0, 10)}</td>
                             <td className="px-3 text-sm">
-                              <span className="inline-flex items-center gap-2">
+                              <span className="flex min-w-0 items-center gap-2">
                                 {isPending ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
-                                <span>{p.payee}</span>
+                                <span className="truncate" title={String(p.payee ?? "")}>{p.payee}</span>
                                 {pendingAction === "APPLYING" ? (
-                                  <span className="text-[11px] text-slate-500">Applying…</span>
+                                  <span className="shrink-0 text-[11px] text-slate-500">Applying…</span>
                                 ) : pendingAction === "UNAPPLYING" ? (
-                                  <span className="text-[11px] text-slate-500">Unapplying…</span>
+                                  <span className="shrink-0 text-[11px] text-slate-500">Unapplying…</span>
                                 ) : null}
                               </span>
                             </td>
                             <td className="px-3 text-xs">
                               {Array.isArray(p.applied_bills) && p.applied_bills.length ? (
-                                <div className="flex flex-wrap gap-1.5">
+                                <div className="flex min-w-0 flex-wrap gap-1.5">
                                   {p.applied_bills.slice(0, 6).map((x: any) => (
                                     <button
                                       key={String(x.bill_id)}
                                       type="button"
-                                      className="inline-flex h-6 items-center rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-50"
+                                      className="inline-flex h-6 max-w-[120px] items-center rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-50"
                                       title="View invoice"
                                       onClick={() => {
                                         setApTab("bills");
@@ -1219,7 +1238,7 @@ export default function VendorDetailPageClient() {
                                         }, 50);
                                       }}
                                     >
-                                      {String(x.memo ?? "Invoice")}
+                                      <span className="truncate">{String(x.memo ?? "Invoice")}</span>
                                     </button>
                                   ))}
                                   {p.applied_bills.length > 6 ? <span className="text-[11px] text-slate-500">+{p.applied_bills.length - 6}</span> : null}
@@ -1231,7 +1250,7 @@ export default function VendorDetailPageClient() {
                             <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.amount_cents))}</td>
                             <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(centsFromAny(p.applied_cents))}</td>
                             <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.unapplied_cents))}</td>
-                            <td className="px-3 text-right">
+                            <td className="px-3 text-right whitespace-nowrap">
                               <div className="inline-flex items-center gap-2">
                                 <button
                                   type="button"
@@ -1274,7 +1293,13 @@ export default function VendorDetailPageClient() {
           <CardContent>
             <div className="rounded-lg border border-slate-200 overflow-hidden">
               <div className="max-h-[320px] overflow-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[1000px] table-fixed text-sm">
+                  <colgroup>
+                    <col style={{ width: 260 }} />
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 360 }} />
+                    <col style={{ width: 260 }} />
+                  </colgroup>
                   <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                     <tr className="h-9">
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">File</th>
@@ -1303,8 +1328,8 @@ export default function VendorDetailPageClient() {
                         return (
                           <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50 align-top">
                             <td className="px-3 py-2 text-sm">
-                              <div className="font-medium text-slate-900">{u.original_filename}</div>
-                              <div className="mt-0.5 text-[11px] text-slate-500">
+                              <div className="truncate font-medium text-slate-900" title={String(u.original_filename ?? "")}>{u.original_filename}</div>
+                              <div className="mt-0.5 truncate text-[11px] text-slate-500" title={String(meta?.vendor_name ?? parsed?.vendor_name ?? vendor?.name ?? "Vendor")}>
                                 {String(meta?.vendor_name ?? parsed?.vendor_name ?? vendor?.name ?? "Vendor")}
                               </div>
                             </td>
@@ -1318,7 +1343,7 @@ export default function VendorDetailPageClient() {
                                 <span className={invoiceStatusClass(status.tone)}>{status.label}</span>
                               </div>
                               {detail ? (
-                                <div className="mt-1 max-w-[420px] text-[11px] text-slate-500">{detail}</div>
+                                <div className="mt-1 truncate text-[11px] text-slate-500" title={detail}>{detail}</div>
                               ) : null}
                             </td>
 
@@ -1850,7 +1875,12 @@ export default function VendorDetailPageClient() {
               </div>
 
               <div className="max-h-[320px] overflow-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[560px] table-fixed text-sm">
+                  <colgroup>
+                    <col style={{ width: 270 }} />
+                    <col style={{ width: 140 }} />
+                    <col style={{ width: 150 }} />
+                  </colgroup>
                   <thead className="sticky top-0 bg-white border-b border-slate-200">
                     <tr className="h-9">
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
@@ -1867,8 +1897,10 @@ export default function VendorDetailPageClient() {
                         .map((b: any) => (
                           <tr key={b.id} className="h-9 border-b border-slate-100">
                             <td className="px-3 text-sm tabular-nums">
-                              {String(b.invoice_date ?? "").slice(0, 10)}{" "}
-                              <span className="text-xs text-slate-500">({b.memo ?? "—"})</span>
+                              <div className="flex min-w-0 items-center gap-1">
+                                <span className="shrink-0">{String(b.invoice_date ?? "").slice(0, 10)}</span>
+                                <span className="truncate text-xs text-slate-500" title={String(b.memo ?? "")}>({b.memo ?? "—"})</span>
+                              </div>
                             </td>
                             <td className="px-3 text-right text-sm tabular-nums font-semibold">
                               {formatUsdFromCents(centsFromAny(b.outstanding_cents))}
@@ -2197,7 +2229,12 @@ export default function VendorDetailPageClient() {
               </div>
 
               <div className="max-h-[360px] overflow-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[560px] table-fixed text-sm">
+                  <colgroup>
+                    <col style={{ width: 270 }} />
+                    <col style={{ width: 140 }} />
+                    <col style={{ width: 150 }} />
+                  </colgroup>
                   <thead className="sticky top-0 bg-white border-b border-slate-200">
                     <tr className="h-9">
                       <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
@@ -2220,8 +2257,10 @@ export default function VendorDetailPageClient() {
                           return (
                             <tr key={b.id} className="h-9 border-b border-slate-100">
                               <td className="px-3 text-sm tabular-nums">
-                                {String(b.invoice_date ?? "").slice(0, 10)}{" "}
-                                <span className="text-xs text-slate-500">({b.memo ?? "—"})</span>
+                                <div className="flex min-w-0 items-center gap-1">
+                                  <span className="shrink-0">{String(b.invoice_date ?? "").slice(0, 10)}</span>
+                                  <span className="truncate text-xs text-slate-500" title={String(b.memo ?? "")}>({b.memo ?? "—"})</span>
+                                </div>
                               </td>
                               <td className="px-3 text-right text-sm tabular-nums font-semibold">
                                 {formatUsdFromCents(outstanding)}
