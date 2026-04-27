@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: bynkbook-web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: bynkbook-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm exec tsc -- -p tsconfig.json --noEmit --pretty false --incremental false
+
+      - name: Lint
+        run: npm run lint
+
+  infra:
+    name: Infra
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bynkbook_ci
+
+    defaults:
+      run:
+        working-directory: infra-sst
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: infra-sst/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck infra
+        run: npm run typecheck
+
+      - name: Typecheck functions
+        run: npm run --workspace @infra-sst/functions typecheck
+
+  backend-critical-tests:
+    name: Backend critical tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bynkbook_ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: infra-sst/package-lock.json
+
+      - name: Install dependencies
+        working-directory: infra-sst
+        run: npm ci
+
+      - name: Run critical tests
+        working-directory: infra-sst/packages/functions
+        run: npm exec vitest -- run src/authorizationGaps.test.ts src/entriesApplyCategoryBatch.test.ts src/lib/db.test.ts
