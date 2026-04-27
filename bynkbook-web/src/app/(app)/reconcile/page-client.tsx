@@ -3183,7 +3183,7 @@ const displayBankActiveList = useMemo(() => {
           <div className="h-px bg-slate-200" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
-            <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+            <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
               {entriesTruthBlocking ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
@@ -3192,7 +3192,7 @@ const displayBankActiveList = useMemo(() => {
                 <EmptyState label={expectedTab === "expected" ? "No expected entries in this period" : "No matched entries in this period"} />
               ) : (
                 <>
-                  <table className="w-full table-fixed border-collapse">
+                  <table className="w-full min-w-[680px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col />
@@ -3510,7 +3510,7 @@ const displayBankActiveList = useMemo(() => {
           <div className="h-px bg-slate-200" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
-            <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+            <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
               {bankTruthBlocking ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
@@ -3525,7 +3525,7 @@ const displayBankActiveList = useMemo(() => {
                 />
               ) : (
                 <>
-                  <table className="w-full table-fixed border-collapse">
+                  <table className="w-full min-w-[720px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 36 }} />
                     <col style={{ width: 110 }} />
@@ -4466,8 +4466,8 @@ const displayBankActiveList = useMemo(() => {
             })()}
 
             <div className="rounded-md border border-slate-200 overflow-hidden">
-              <div className="max-h-[44vh] overflow-y-auto">
-                <table className="w-full table-fixed border-collapse">
+              <div className="max-h-[44vh] overflow-y-auto overflow-x-auto">
+                <table className="w-full min-w-[520px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col />
@@ -4987,8 +4987,8 @@ const displayBankActiveList = useMemo(() => {
             {/* (removed stray pasted code) */}
 
             <div className="rounded-md border border-slate-200 overflow-hidden">
-              <div className="max-h-[44vh] overflow-y-auto">
-                <table className="w-full table-fixed border-collapse">
+              <div className="max-h-[44vh] overflow-y-auto overflow-x-auto">
+                <table className="w-full min-w-[520px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 110 }} />
                     <col />
@@ -5135,7 +5135,7 @@ const displayBankActiveList = useMemo(() => {
 
           <div className="h-px bg-slate-200" />
 
-          <div className="mt-2 max-h-[64vh] overflow-y-auto overflow-x-hidden">
+          <div className="mt-2 max-h-[64vh] overflow-y-auto overflow-x-auto">
             {matchesLoading ? (
               <div className="p-2">
                 <Skeleton className="h-24 w-full" />
@@ -5143,8 +5143,8 @@ const displayBankActiveList = useMemo(() => {
             ) : reconAuditVisible.length === 0 ? (
               <EmptyState label="No reconciliation history in this period" />
             ) : (
-              <div className="mt-2 rounded-xl border border-slate-200 bg-white overflow-hidden">
-                <table className="w-full table-fixed border-collapse">
+              <div className="mt-2 min-w-[1190px] rounded-xl border border-slate-200 bg-white overflow-hidden">
+                <table className="w-full min-w-[1190px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 190 }} />
                     <col style={{ width: 120 }} />
@@ -5632,9 +5632,9 @@ const displayBankActiveList = useMemo(() => {
               {visible.length === 0 ? (
                 <EmptyState label="No issues found" />
               ) : (
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  <div className="max-h-[64vh] overflow-y-auto overflow-x-hidden">
-                    <table className="w-full table-fixed border-collapse">
+                <div className="min-w-[820px] rounded-xl border border-slate-200 bg-white overflow-hidden">
+                  <div className="max-h-[64vh] overflow-y-auto overflow-x-auto">
+                    <table className="w-full min-w-[820px] table-fixed border-collapse">
                       <colgroup>
                         <col style={{ width: 120 }} />
                         <col />
