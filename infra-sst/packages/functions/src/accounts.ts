@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { parseDateOnlyToUtcDate, serializeDateOnly } from "./lib/dateOnly";
 import { randomUUID } from "node:crypto";
 
 const ACCOUNT_TYPES = ["CHECKING", "SAVINGS", "CREDIT_CARD", "CASH", "OTHER"] as const;
@@ -68,7 +69,7 @@ export async function handler(event: any) {
         name: a.name,
         type: a.type,
         opening_balance_cents: a.opening_balance_cents?.toString?.() ?? String(a.opening_balance_cents),
-        opening_balance_date: a.opening_balance_date?.toISOString?.() ?? a.opening_balance_date,
+        opening_balance_date: serializeDateOnly(a.opening_balance_date),
         archived_at: a.archived_at ? a.archived_at.toISOString() : null,
         created_at: a.created_at?.toISOString?.() ?? a.created_at,
         updated_at: a.updated_at?.toISOString?.() ?? a.updated_at,
@@ -153,8 +154,8 @@ export async function handler(event: any) {
       }
 
       if ("opening_balance_date" in body) {
-        const d = new Date(String(body.opening_balance_date));
-        if (Number.isNaN(d.getTime())) return json(400, { ok: false, error: "opening_balance_date must be a valid ISO date/time" });
+        const d = parseDateOnlyToUtcDate(body.opening_balance_date);
+        if (!d) return json(400, { ok: false, error: "opening_balance_date must be a valid YYYY-MM-DD date" });
         patch.opening_balance_date = d;
       }
     }
@@ -185,7 +186,7 @@ export async function handler(event: any) {
         name: updated.name,
         type: updated.type,
         opening_balance_cents: updated.opening_balance_cents?.toString?.() ?? String(updated.opening_balance_cents),
-        opening_balance_date: updated.opening_balance_date?.toISOString?.() ?? updated.opening_balance_date,
+        opening_balance_date: serializeDateOnly(updated.opening_balance_date),
         archived_at: updated.archived_at ? updated.archived_at.toISOString() : null,
         created_at: updated.created_at?.toISOString?.() ?? updated.created_at,
         updated_at: updated.updated_at?.toISOString?.() ?? updated.updated_at,
@@ -314,16 +315,16 @@ export async function handler(event: any) {
 
     if (name.length < 2) return json(400, { ok: false, error: "Account name is required (min 2 chars)" });
     if (!ACCOUNT_TYPES.includes(type as any)) return json(400, { ok: false, error: "Invalid account type" });
-    if (!opening_balance_date_raw) return json(400, { ok: false, error: "opening_balance_date is required (ISO string)" });
+    if (!opening_balance_date_raw) return json(400, { ok: false, error: "opening_balance_date is required (YYYY-MM-DD)" });
 
     const openingBalanceNumber = Number(opening_balance_cents_raw);
     if (!Number.isFinite(openingBalanceNumber)) {
       return json(400, { ok: false, error: "opening_balance_cents must be a number" });
     }
 
-    const openingDate = new Date(opening_balance_date_raw);
-    if (Number.isNaN(openingDate.getTime())) {
-      return json(400, { ok: false, error: "opening_balance_date must be a valid ISO date/time" });
+    const openingDate = parseDateOnlyToUtcDate(opening_balance_date_raw);
+    if (!openingDate) {
+      return json(400, { ok: false, error: "opening_balance_date must be a valid YYYY-MM-DD date" });
     }
 
     const accountId = randomUUID();
@@ -350,7 +351,7 @@ export async function handler(event: any) {
         name: created.name,
         type: created.type,
         opening_balance_cents: created.opening_balance_cents.toString(),
-        opening_balance_date: created.opening_balance_date.toISOString(),
+        opening_balance_date: serializeDateOnly(created.opening_balance_date),
       },
     });
   }

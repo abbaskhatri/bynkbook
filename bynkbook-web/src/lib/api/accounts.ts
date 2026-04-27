@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api/client";
+import { normalizeDateOnly } from "@/lib/dateOnly";
 
 export type AccountType = "CHECKING" | "SAVINGS" | "CREDIT_CARD" | "CASH" | "OTHER";
 
@@ -8,7 +9,7 @@ export type Account = {
   name: string;
   type: AccountType;
   opening_balance_cents: number;
-  opening_balance_date: string;
+  opening_balance_date: string; // YYYY-MM-DD
   archived_at: string | null;
   created_at?: string;
   updated_at?: string;
@@ -21,7 +22,7 @@ export async function listAccounts(businessId: string): Promise<Account[]> {
   return rows.map((a) => ({
     ...a,
     opening_balance_cents: Number(a.opening_balance_cents ?? 0),
-    opening_balance_date: String(a.opening_balance_date ?? ""),
+    opening_balance_date: normalizeDateOnly(a.opening_balance_date),
     archived_at: a.archived_at ?? null,
   })) as Account[];
 }
@@ -32,7 +33,7 @@ export async function createAccount(
     name: string;
     type: AccountType;
     opening_balance_cents: number;
-    opening_balance_date: string; // ISO date/time string
+    opening_balance_date: string; // YYYY-MM-DD
   }
 ): Promise<Account> {
   const res: any = await apiFetch(`/v1/businesses/${businessId}/accounts`, {
@@ -44,7 +45,7 @@ export async function createAccount(
   return {
     ...a,
     opening_balance_cents: Number(a.opening_balance_cents ?? 0),
-    opening_balance_date: String(a.opening_balance_date ?? ""),
+    opening_balance_date: normalizeDateOnly(a.opening_balance_date),
     archived_at: a.archived_at ?? null,
   } as Account;
 }
@@ -59,7 +60,7 @@ export async function patchAccountName(businessId: string, accountId: string, na
   return {
     ...a,
     opening_balance_cents: Number(a.opening_balance_cents ?? 0),
-    opening_balance_date: String(a.opening_balance_date ?? ""),
+    opening_balance_date: normalizeDateOnly(a.opening_balance_date),
     archived_at: a.archived_at ?? null,
   } as Account;
 }
@@ -85,7 +86,7 @@ export async function patchAccount(
   return {
     ...a,
     opening_balance_cents: Number(a.opening_balance_cents ?? 0),
-    opening_balance_date: String(a.opening_balance_date ?? ""),
+    opening_balance_date: normalizeDateOnly(a.opening_balance_date),
     archived_at: a.archived_at ?? null,
   } as Account;
 }
