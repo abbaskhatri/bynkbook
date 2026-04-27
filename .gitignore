@@ -36,6 +36,14 @@ Thumbs.db
 .vscode/
 
 # --- Snapshots: never track secrets/certs ---
+docs/snapshot_*/
+docs/*snapshot*.zip
 docs/**/.env
 docs/**/ca-secret*.json
 docs/**/*.pem
+docs/**/cognito-*-auth.json
+docs/**/invoke*.json
+docs/**/apigw*.json
+docs/**/payload*.json
+docs/**/out*.json
+docs/**/debug*
