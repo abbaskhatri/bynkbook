@@ -666,6 +666,27 @@ export async function handler(event: any) {
     const authz = await requireOwner(prisma, businessId, sub);
     if (!authz.ok) return json(authz.status, { ok: false, error: authz.error });
 
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+
+    const confirm = String(body?.confirm ?? "").trim().toUpperCase();
+    if (confirm !== "DELETE") {
+      return json(400, { ok: false, error: 'Confirmation text must be "DELETE"' });
+    }
+
+    await logActivity(prisma, {
+      businessId,
+      actorUserId: sub,
+      eventType: "BUSINESS_DELETE",
+      payloadJson: {
+        business_name: authz.business.name,
+      },
+    });
+
     await prisma.business.delete({ where: { id: businessId } });
     return json(200, { ok: true });
   }
