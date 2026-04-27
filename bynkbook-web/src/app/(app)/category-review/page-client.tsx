@@ -1093,8 +1093,8 @@ export default function CategoryReviewPageClient() {
             <div className="relative min-h-0 flex-1 rounded-lg border border-slate-200 overflow-hidden bg-white">
               {tableUpdating ? <UpdatingOverlay /> : null}
               <div className={`min-h-0 h-full ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
-                <div className="h-full overflow-y-auto">
-                  <table className="w-full border-separate border-spacing-0">
+                <div className="h-full overflow-auto">
+                  <table className="w-full min-w-[760px] border-separate border-spacing-0">
                     <colgroup>
                       <col style={{ width: 36 }} />
                       <col style={{ width: 98 }} />
@@ -1168,7 +1168,7 @@ export default function CategoryReviewPageClient() {
                             <td className="px-2 py-2 border-b border-slate-100">
                               <div className="flex items-start justify-start gap-1.5 flex-wrap">
                                 <select
-                                  className="h-6 max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+                                  className="h-6 w-full min-w-[160px] max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
                                   value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
                                   disabled={isOpening || !!pendingIds[id]}
                                   onChange={async (ev) => {
@@ -1302,7 +1302,7 @@ export default function CategoryReviewPageClient() {
                                 ) : null}
 
                                 {!e.category_id ? (
-                                  <div className="flex items-center gap-1 overflow-hidden flex-wrap">
+                                  <div className="flex min-w-0 items-center gap-1 overflow-hidden flex-wrap">
                                     {(() => {
                                       const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
                                       const top = list.slice(0, 2);
@@ -1369,7 +1369,7 @@ export default function CategoryReviewPageClient() {
                                           })}
 
                                           {top[0] ? (
-                                            <div className="text-[10px] text-slate-500">
+                                            <div className="min-w-0 basis-full break-words text-[10px] text-slate-500">
                                               {categorySuggestionTierLabel(top[0]?.confidence_tier)}
                                               {" • "}
                                               {categorySuggestionSourceLabel(top[0]?.source)}
@@ -1561,13 +1561,13 @@ export default function CategoryReviewPageClient() {
                 Suggested categories are grouped for review. Entries without a strong top suggestion stay unassigned for manual review.
               </div>
 
-              <div className="h-[320px] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
+              <div className="h-[320px] overflow-auto rounded-lg border border-slate-200">
                 {autoFixGroups.length === 0 ? (
                   <div className="px-4 py-6 text-center text-sm text-slate-500">
                     No selected rows available for auto-fix.
                   </div>
                 ) : (
-                  <div className="divide-y divide-slate-200">
+                  <div className="min-w-[420px] divide-y divide-slate-200">
                     {autoFixGroups.map((group) => {
                       const isExpanded = !!expandedAutoFixGroups[group.groupKey];
 
