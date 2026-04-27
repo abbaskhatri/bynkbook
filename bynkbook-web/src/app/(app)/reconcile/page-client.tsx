@@ -881,77 +881,75 @@ export default function ReconcilePageClient() {
     let matchGroupItems: any[] = [];
 
     const run = (async () => {
-      // -------------------------
-      // Bank transactions
-      // -------------------------
-      if (myEpoch === refreshEpochRef.current) setBankTxLoading(true);
-      try {
-        const res = await listBankTransactions({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          from: from || undefined,
-          to: to || undefined,
-          limit: 500,
-        });
-
-        const next = res?.items ?? [];
-        bankItems = next;
-
-        if (myEpoch === refreshEpochRef.current) {
-          setBankTx((prev) => {
-            if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
-            return next;
-          });
-        }
-      } catch {
-        if (myEpoch === refreshEpochRef.current) {
-          setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
-        }
-      } finally {
-        if (myEpoch === refreshEpochRef.current) {
-          setBankTxLoading(false);
-          setBankTruthHydrated(true);
-        }
-      }
-
-      // -------------------------
-      // Legacy matches (read-only, used for export/history fallback)
-      // Skip during bounded settle retries to avoid extra post-sync churn.
-      // -------------------------
-      if (!opts?.skipLegacyMatches) {
-        if (myEpoch === refreshEpochRef.current) setMatchesLoading(true);
+      const bankPromise = (async () => {
+        if (myEpoch === refreshEpochRef.current) setBankTxLoading(true);
         try {
-          const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
-          matchItems = m?.items ?? [];
-          if (myEpoch === refreshEpochRef.current) setMatches(matchItems);
-        } catch {
-          if (myEpoch === refreshEpochRef.current) setMatches([]);
-        } finally {
-          if (myEpoch === refreshEpochRef.current) setMatchesLoading(false);
-        }
-      }
+          const res = await listBankTransactions({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            from: from || undefined,
+            to: to || undefined,
+            limit: 500,
+          });
 
-      // -------------------------
-      // MatchGroups (source of truth for matched state)
-      // -------------------------
-      if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(true);
-      try {
-        const mg: any = await listMatchGroups({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          status: "all", // needed for History (includes voided groups)
-        });
-        matchGroupItems = mg?.items ?? [];
-        if (myEpoch === refreshEpochRef.current) setMatchGroups(matchGroupItems);
-      } catch {
-        if (myEpoch === refreshEpochRef.current) setMatchGroups([]);
-        matchGroupItems = [];
-      } finally {
-        if (myEpoch === refreshEpochRef.current) {
-          setMatchGroupsLoading(false);
-          setMatchGroupsTruthHydrated(true);
+          const next = res?.items ?? [];
+          bankItems = next;
+
+          if (myEpoch === refreshEpochRef.current) {
+            setBankTx((prev) => {
+              if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
+              return next;
+            });
+          }
+        } catch {
+          if (myEpoch === refreshEpochRef.current) {
+            setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
+          }
+        } finally {
+          if (myEpoch === refreshEpochRef.current) {
+            setBankTxLoading(false);
+            setBankTruthHydrated(true);
+          }
         }
-      }
+      })();
+
+      const matchesPromise = opts?.skipLegacyMatches
+        ? Promise.resolve()
+        : (async () => {
+            if (myEpoch === refreshEpochRef.current) setMatchesLoading(true);
+            try {
+              const m = await listMatches({ businessId: selectedBusinessId, accountId: selectedAccountId });
+              matchItems = m?.items ?? [];
+              if (myEpoch === refreshEpochRef.current) setMatches(matchItems);
+            } catch {
+              if (myEpoch === refreshEpochRef.current) setMatches([]);
+            } finally {
+              if (myEpoch === refreshEpochRef.current) setMatchesLoading(false);
+            }
+          })();
+
+      const matchGroupsPromise = (async () => {
+        if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(true);
+        try {
+          const mg: any = await listMatchGroups({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            status: "all", // needed for History (includes voided groups)
+          });
+          matchGroupItems = mg?.items ?? [];
+          if (myEpoch === refreshEpochRef.current) setMatchGroups(matchGroupItems);
+        } catch {
+          if (myEpoch === refreshEpochRef.current) setMatchGroups([]);
+          matchGroupItems = [];
+        } finally {
+          if (myEpoch === refreshEpochRef.current) {
+            setMatchGroupsLoading(false);
+            setMatchGroupsTruthHydrated(true);
+          }
+        }
+      })();
+
+      await Promise.all([bankPromise, matchesPromise, matchGroupsPromise]);
 
       return { bank: bankItems, matches: matchItems, matchGroups: matchGroupItems };
     })();
@@ -1057,13 +1055,15 @@ export default function ReconcilePageClient() {
     try {
       // Visible reconcile settle should prioritize the real placement truth:
       // bank transactions + match groups + entries.
-      await refreshBankAndMatches({
+      const placementTruthRefresh = refreshBankAndMatches({
         preserveOnEmpty: true,
         skipLegacyMatches: opts?.skipLegacyMatches ?? true,
         ...(opts ?? {}),
       });
 
-      await entriesQ.refetch?.();
+      const entriesRefresh = entriesQ.refetch ? entriesQ.refetch() : Promise.resolve(undefined);
+
+      await Promise.all([placementTruthRefresh, entriesRefresh]);
 
       // Optional bounded confirmation pass only for connect flows where needed.
       if (opts?.confirmSettle) {
@@ -2337,18 +2337,18 @@ const displayBankActiveList = useMemo(() => {
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
 
   const bankPanelHasRows = displayBankActiveList.length > 0;
+  const bankPanelHasSettledSnapshot = !!bankTruthSnapshot && (bankTruthHydrated || matchGroupsTruthHydrated);
   const bankPanelShowInitialLoading =
     bankTruthBlocking ||
-    (!bankTruthReady && !bankPanelHasRows) ||
-    (bankUpdating && !bankPanelHasRows);
+    (!bankTruthReady && !bankPanelHasRows && !bankPanelHasSettledSnapshot) ||
+    (bankUpdating && !bankPanelHasRows && !bankPanelHasSettledSnapshot);
   const bankPanelShowEmpty =
-    bankTruthReady &&
+    (bankTruthReady || bankPanelHasSettledSnapshot) &&
     !bankPanelHasRows &&
-    !bankUpdating &&
     !bankTruthBlocking;
   const bankPanelShowRows = bankPanelHasRows;
   const bankPanelShowStatusWhileRows =
-    bankPanelShowRows && (bankTruthSettling || bankUpdating);
+    (bankPanelShowRows || bankPanelShowEmpty) && (bankTruthSettling || bankUpdating);
 
   // -------------------------
   // Phase 5E: State summary (read-only, instant-fast)
