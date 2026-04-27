@@ -11,8 +11,7 @@ import { userFacingErrorMessage } from "@/lib/errors";
 import { formatDateOnlyShort, normalizeDateOnly } from "@/lib/dateOnly";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { patchBusiness, resetBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
-import { apiFetch } from "@/lib/api/client";
+import { patchBusiness, resetBusiness, deleteBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
 import { listEntries } from "@/lib/api/entries";
 import { listMatchGroups } from "@/lib/api/match-groups";
 import { listVendors } from "@/lib/api/vendors";
@@ -3659,9 +3658,7 @@ export default function SettingsPageClient() {
                 try {
                   const deletingId = selectedBusinessId;
 
-                  await apiFetch(`/v1/businesses/${deletingId}`, {
-                    method: "DELETE",
-                  });
+                  await deleteBusiness(deletingId, deleteBusinessConfirm);
 
                   await qc.invalidateQueries({ queryKey: ["businesses"] });
 

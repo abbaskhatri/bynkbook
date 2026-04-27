@@ -34,7 +34,8 @@ export type ActivityEventType =
   | "AI_EXPLAIN_REPORT"
   | "AI_SUGGEST_CATEGORY"
   | "AI_CHAT"
-  | "BUSINESS_RESET";
+  | "BUSINESS_RESET"
+  | "BUSINESS_DELETE";
 
 export async function logActivity(prisma: any, args: {
   businessId: string;
