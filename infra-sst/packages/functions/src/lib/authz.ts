@@ -107,7 +107,7 @@ const DEFAULTS: Record<string, Record<string, PolicyValue>> = {
  * Map actionKey -> policy key (not endpoint-based).
  * Handlers provide actionKey + requiredLevel explicitly.
  */
-const ACTION_POLICY_KEY: Record<string, string> = {
+export const ACTION_POLICY_KEY: Record<string, string> = {
   // Team
   "team.invite.create": "team_management",
   "team.invite.revoke": "team_management",
@@ -119,8 +119,17 @@ const ACTION_POLICY_KEY: Record<string, string> = {
   "roles.policy.update": "roles_policy",
 
   // Reconcile
+  "ledger.transfer.write": "ledger",
+  "budgets.write": "ledger",
+  "goals.write": "ledger",
   "reconcile.match.create": "reconcile",
+  "reconcile.match.batch": "reconcile",
   "reconcile.match.void": "reconcile",
+  "reconcile.entry.create": "reconcile",
+  "reconcile.entry.create.batch": "reconcile",
+  "reconcile.matchGroup.create": "reconcile",
+  "reconcile.matchGroup.batchCreate": "reconcile",
+  "reconcile.matchGroup.void": "reconcile",
   "reconcile.adjustment.mark": "reconcile",
   "reconcile.adjustment.unmark": "reconcile",
 
@@ -130,6 +139,38 @@ const ACTION_POLICY_KEY: Record<string, string> = {
 
   // AI/category automation
   "category.review.bulk.apply": "ai_automation",
+};
+
+export const ACTION_WAVE: Record<string, number> = {
+  // Wave 1: business admin writes (team + role policies)
+  "team.invite.create": 1,
+  "team.invite.revoke": 1,
+  "team.invite.accept": 1,
+  "team.member.role_change": 1,
+  "team.member.remove": 1,
+  "roles.policy.update": 1,
+
+  // Wave 2: core financial writes (ledger + reconcile)
+  "ledger.transfer.write": 2,
+  "budgets.write": 2,
+  "goals.write": 2,
+  "reconcile.match.create": 2,
+  "reconcile.match.batch": 2,
+  "reconcile.match.void": 2,
+  "reconcile.entry.create": 2,
+  "reconcile.entry.create.batch": 2,
+  "reconcile.matchGroup.create": 2,
+  "reconcile.matchGroup.batchCreate": 2,
+  "reconcile.matchGroup.void": 2,
+  "reconcile.adjustment.mark": 2,
+  "reconcile.adjustment.unmark": 2,
+
+  // Wave 3: snapshots/exports
+  "snapshots.create": 3,
+  "snapshots.export.download": 3,
+
+  // Wave 4: AI/category automation writes
+  "category.review.bulk.apply": 4,
 };
 
 function normalizeMode(m: any): AuthzMode {
@@ -187,32 +228,8 @@ async function getPolicyForRole(prisma: any, businessId: string, role: string): 
   return merged;
 }
 
-function actionWave(actionKey: string): number {
-  // Wave 1: business admin writes (team + role policies)
-  if (
-    actionKey === "team.invite.create" ||
-    actionKey === "team.invite.revoke" ||
-    actionKey === "team.member.role_change" ||
-    actionKey === "team.member.remove" ||
-    actionKey === "roles.policy.update"
-  ) return 1;
-
-  // Wave 2: reconcile writes
-  if (
-    actionKey === "reconcile.match.create" ||
-    actionKey === "reconcile.match.void" ||
-    actionKey === "reconcile.adjustment.mark" ||
-    actionKey === "reconcile.adjustment.unmark"
-  ) return 2;
-
-  // Wave 3: snapshots/exports
-  if (actionKey === "snapshots.create" || actionKey === "snapshots.export.download") return 3;
-
-  // Wave 4: AI/category automation writes
-  if (actionKey === "category.review.bulk.apply") return 4;
-
-  // Unknown actionKeys are never enforced in 7.2 (safe default)
-  return 0;
+export function actionWave(actionKey: string): number {
+  return ACTION_WAVE[actionKey] ?? 0;
 }
 
 async function getBusinessAuthz(prisma: any, businessId: string): Promise<{ mode: AuthzMode; wave: number }> {
