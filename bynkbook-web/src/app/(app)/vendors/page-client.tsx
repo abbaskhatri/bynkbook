@@ -25,6 +25,8 @@ import { UploadPanel } from "@/components/uploads/UploadPanel";
 
 type SortKey = "name_asc" | "name_desc" | "updated_desc";
 
+const VENDOR_AP_SUMMARY_BATCH_SIZE = 100;
+
 function toBigIntSafe(v: any): bigint {
   try {
     if (typeof v === "bigint") return v;
@@ -132,12 +134,19 @@ export default function VendorsPageClient() {
         setVendors(list);
         setCategoryRows(Array.isArray(catsRes.rows) ? catsRes.rows : []);
 
-        const ids = list.map((v: any) => String(v.id)).slice(0, 200);
-        const sumRes = await getVendorsApSummary({ businessId, vendorIds: ids, limit: 200 });
+        const ids = list.map((v: any) => String(v.id));
+        const chunks = Array.from({ length: Math.ceil(ids.length / VENDOR_AP_SUMMARY_BATCH_SIZE) }, (_, i) =>
+          ids.slice(i * VENDOR_AP_SUMMARY_BATCH_SIZE, (i + 1) * VENDOR_AP_SUMMARY_BATCH_SIZE)
+        );
+        const summaryResponses = chunks.length
+          ? await Promise.all(chunks.map((chunk) => getVendorsApSummary({ businessId, vendorIds: chunk, limit: chunk.length })))
+          : [];
         if (myEpoch !== refreshEpochRef.current) return;
 
         const m: Record<string, any> = {};
-        for (const row of (sumRes.vendors ?? [])) m[String(row.vendor_id)] = row;
+        for (const res of summaryResponses) {
+          for (const row of (res.vendors ?? [])) m[String(row.vendor_id)] = row;
+        }
         setApByVendorId(m);
       } catch (e: any) {
         if (myEpoch !== refreshEpochRef.current) return;
@@ -368,6 +377,7 @@ export default function VendorsPageClient() {
                     <td className="px-3 text-sm tabular-nums font-semibold">
                       {(() => {
                         const row = apByVendorId[String(v.id)];
+                        if (!row) return <span className="text-slate-400">—</span>;
                         const cents = toBigIntSafe(row?.total_open_cents ?? 0);
                         const txt = formatUsdFromCents(cents);
                         return <span className={cents > 0n ? "text-slate-900" : "text-slate-400"}>{txt}</span>;
