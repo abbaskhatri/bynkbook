@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -311,6 +311,70 @@ function mkComboSeriesData(months: string[], a: string[], b: string[], l: string
   });
 }
 
+function ReportsResponsiveChartFrame({
+  children,
+  className = "h-[260px] min-h-[260px]",
+}: {
+  children: ReactElement;
+  className?: string;
+}) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [initialDimension, setInitialDimension] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    let rafId = 0;
+    let disposed = false;
+
+    const markReadyIfMeasured = () => {
+      const el = frameRef.current;
+      if (!el || disposed) return;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setInitialDimension((current) => current ?? {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        });
+      }
+    };
+
+    rafId = window.requestAnimationFrame(markReadyIfMeasured);
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(markReadyIfMeasured);
+
+    if (frameRef.current) {
+      resizeObserver?.observe(frameRef.current);
+    }
+
+    return () => {
+      disposed = true;
+      window.cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  return (
+    <div ref={frameRef} className={`min-w-0 w-full ${className}`}>
+      {initialDimension ? (
+        <ResponsiveContainer
+          width="99%"
+          height="99%"
+          minWidth={0}
+          minHeight={0}
+          initialDimension={initialDimension}
+        >
+          {children}
+        </ResponsiveContainer>
+      ) : (
+        <div className="h-full w-full" />
+      )}
+    </div>
+  );
+}
+
 function ComboBarLineChart({
   title,
   months,
@@ -348,64 +412,62 @@ function ComboBarLineChart({
   };
 
   return (
-    <div className="h-[260px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 6, left: 8 }}>
-          <CartesianGrid stroke="var(--bb-chart-grid)" strokeDasharray="3 3" />
+    <ReportsResponsiveChartFrame>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 6, left: 8 }}>
+        <CartesianGrid stroke="var(--bb-chart-grid)" strokeDasharray="3 3" />
 
-          <XAxis
-            dataKey="month"
-            tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
-            tickFormatter={(v: any) => formatBucketLabel(String(v), rangeMode)}
-          />
-          <YAxis
-            tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
-            tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
-            width={72}
-          />
+        <XAxis
+          dataKey="month"
+          tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
+          tickFormatter={(v: any) => formatBucketLabel(String(v), rangeMode)}
+        />
+        <YAxis
+          tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
+          tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
+          width={72}
+        />
 
-          <Tooltip
-            formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
-            labelFormatter={(label: any) => formatBucketLabel(String(label), rangeMode)}
-            contentStyle={{
-              fontSize: 12,
-              background: "var(--bb-chart-tooltip-bg)",
-              border: "1px solid var(--bb-chart-tooltip-border)",
-              borderRadius: 10,
-            }}
-            labelStyle={{ color: "var(--bb-chart-tooltip-text)", fontWeight: 600 }}
-            itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
-          />
+        <Tooltip
+          formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
+          labelFormatter={(label: any) => formatBucketLabel(String(label), rangeMode)}
+          contentStyle={{
+            fontSize: 12,
+            background: "var(--bb-chart-tooltip-bg)",
+            border: "1px solid var(--bb-chart-tooltip-border)",
+            borderRadius: 10,
+          }}
+          labelStyle={{ color: "var(--bb-chart-tooltip-text)", fontWeight: 600 }}
+          itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
+        />
 
-          <Bar
-            dataKey="a"
-            name={aLabel}
-            fill="var(--bb-green-600)"
-            radius={[4, 4, 0, 0]}
-            isAnimationActive
-            animationDuration={200}
-          />
-          <Bar
-            dataKey="b"
-            name={bLabel}
-            fill="var(--bb-red-600)"
-            radius={[4, 4, 0, 0]}
-            isAnimationActive
-            animationDuration={200}
-          />
-          <Line
-            dataKey="l"
-            name={lineLabel}
-            type="monotone"
-            stroke="var(--bb-slate-600)"
-            strokeWidth={2.25}
-            dot={false}
-            isAnimationActive
-            animationDuration={200}
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
+        <Bar
+          dataKey="a"
+          name={aLabel}
+          fill="var(--bb-green-600)"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive
+          animationDuration={200}
+        />
+        <Bar
+          dataKey="b"
+          name={bLabel}
+          fill="var(--bb-red-600)"
+          radius={[4, 4, 0, 0]}
+          isAnimationActive
+          animationDuration={200}
+        />
+        <Line
+          dataKey="l"
+          name={lineLabel}
+          type="monotone"
+          stroke="var(--bb-slate-600)"
+          strokeWidth={2.25}
+          dot={false}
+          isAnimationActive
+          animationDuration={200}
+        />
+      </ComposedChart>
+    </ReportsResponsiveChartFrame>
   );
 }
 
@@ -454,24 +516,22 @@ function DonutBreakdown({
       </div>
 
       <div className="mt-2 grid grid-cols-[260px_1fr] gap-6 items-start">
-        <div className="h-[260px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Tooltip
-                formatter={(v: any, name: any, props: any) => {
-                  const cents = props?.payload?.cents ?? "0";
-                  return [formatUsdAccountingFromCents(String(cents)).text, String(name)];
-                }}
-                contentStyle={{ fontSize: 12 }}
-              />
-              <Pie data={slices} dataKey="value" nameKey="name" innerRadius={62} outerRadius={90} paddingAngle={2}>
-                {slices.map((_, i) => (
-                  <Cell key={`cell-${i}`} fill={palette[i % palette.length]} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+        <ReportsResponsiveChartFrame>
+          <PieChart>
+            <Tooltip
+              formatter={(v: any, name: any, props: any) => {
+                const cents = props?.payload?.cents ?? "0";
+                return [formatUsdAccountingFromCents(String(cents)).text, String(name)];
+              }}
+              contentStyle={{ fontSize: 12 }}
+            />
+            <Pie data={slices} dataKey="value" nameKey="name" innerRadius={62} outerRadius={90} paddingAngle={2}>
+              {slices.map((_, i) => (
+                <Cell key={`cell-${i}`} fill={palette[i % palette.length]} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ReportsResponsiveChartFrame>
 
         <div className="min-w-0">
           <div className="space-y-1">
