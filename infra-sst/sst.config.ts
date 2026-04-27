@@ -552,14 +552,12 @@ const aiHandler = {
   permissions: [
     ...(bizHandler as any).permissions,
 
-    // OpenAI secrets (dev + prod ARNs allowed; stagePrefix selects which SecretId is used)
+    // OpenAI secrets (stage-scoped; stagePrefix selects which SecretId is used)
     {
       actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
       resources: [
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/api_key-*",
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/model-*",
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/api_key-*",
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/model-*",
+        secretArnFor(`${stagePrefix}/openai/api_key`),
+        secretArnFor(`${stagePrefix}/openai/model`),
       ],
     },
   ],
@@ -840,10 +838,8 @@ const issuesBulkPreviewHandler = {
     {
       actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
       resources: [
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/api_key-*",
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-dev/openai/model-*",
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/api_key-*",
-        "arn:aws:secretsmanager:us-east-1:116846786465:secret:ledrigo-prod/openai/model-*",
+        secretArnFor(`${stagePrefix}/openai/api_key`),
+        secretArnFor(`${stagePrefix}/openai/model`),
       ],
     },
   ],
