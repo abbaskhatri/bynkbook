@@ -274,7 +274,7 @@ function categorySuggestionSourceLabel(raw: unknown) {
   return "Suggestion";
 }
 
-function aiUiMessage(err: any, fallback = "AI suggestions are unavailable right now.") {
+function aiUiMessage(err: any, fallback = "Smart suggestions are unavailable right now.") {
   const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
   const raw = String(
     err?.message ??
@@ -299,6 +299,230 @@ function truncateAiReason(reason: string, max = 120) {
   const s = String(reason ?? "").replace(/\s+/g, " ").trim();
   if (!s) return "";
   return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+}
+
+type MatchSignalTone = "default" | "success" | "warning" | "danger";
+
+function MatchSignalChip({ label, tone = "default", title }: { label: string; tone?: MatchSignalTone; title?: string }) {
+  const cls =
+    tone === "success"
+      ? "border-primary/20 bg-primary/10 text-primary"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-800"
+        : tone === "danger"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-slate-200 bg-white text-slate-700";
+
+  return (
+    <span
+      title={title}
+      className={`inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium ${cls}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function ymdFromBankTxn(bank: any) {
+  const raw = String(bank?.posted_date ?? "");
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  return isoToYmd(raw);
+}
+
+function compactText(value: unknown, fallback = "—") {
+  const s = String(value ?? "").trim();
+  return s || fallback;
+}
+
+function entryCategoryLabel(entry: any) {
+  return compactText(
+    entry?.category_name ??
+      entry?.categoryName ??
+      entry?.category?.name ??
+      entry?.category?.title ??
+      ""
+  );
+}
+
+function bankCategoryLabel(bank: any) {
+  return compactText(
+    bank?.category_name ??
+      bank?.categoryName ??
+      bank?.category?.name ??
+      bank?.merchant_category ??
+      bank?.personal_finance_category?.primary ??
+      ""
+  );
+}
+
+function accountLabelFor(row: any, fallbackAccountName?: string) {
+  return compactText(row?.account_name ?? row?.accountName ?? row?.account?.name ?? fallbackAccountName ?? "");
+}
+
+function matchSignalMeta(bank: any, entry: any, direction: "bankToEntry" | "entryToBank") {
+  return direction === "bankToEntry" ? scoreEntryCandidate(bank, entry) : scoreBankCandidate(entry, bank);
+}
+
+function matchSignalChips(meta: any, similarCandidateCount: number, aiConfidence?: number | null) {
+  const chips: Array<{ label: string; tone?: MatchSignalTone; title?: string }> = [];
+  const diff = toBigIntSafe(meta?.diff);
+  const dtDays = Number(meta?.dtDays ?? 9999);
+  const overlap = Number(meta?.overlap ?? 0);
+  const confidence = typeof aiConfidence === "number" ? Math.max(0, Math.min(1, aiConfidence)) : null;
+
+  if (diff === 0n) chips.push({ label: "Exact amount", tone: "success" });
+  else chips.push({ label: "Amount mismatch", tone: "danger", title: `Difference ${formatUsdFromCents(diff)}` });
+
+  if (dtDays === 0) chips.push({ label: "Same date", tone: "success" });
+  else if (dtDays <= 3) chips.push({ label: "Near date", tone: "default", title: `${dtDays} day${dtDays === 1 ? "" : "s"} apart` });
+  else chips.push({ label: "Date mismatch", tone: "warning", title: `${dtDays} day${dtDays === 1 ? "" : "s"} apart` });
+
+  if (overlap >= 2) chips.push({ label: "Similar payee", tone: "success" });
+  else if (overlap === 1) chips.push({ label: "Some payee overlap", tone: "default" });
+  else chips.push({ label: "Payee differs", tone: "warning" });
+
+  if (similarCandidateCount > 1) {
+    chips.push({
+      label: "Not unique",
+      tone: "warning",
+      title: `${similarCandidateCount} similar candidates are visible for review`,
+    });
+  }
+
+  if (confidence !== null && confidence < 0.75) {
+    chips.push({ label: "Review needed", tone: "warning", title: `Confidence ${pctConfidence(confidence)}` });
+  } else if (diff !== 0n || dtDays > 3 || overlap === 0 || similarCandidateCount > 1) {
+    chips.push({ label: "Review needed", tone: "warning" });
+  }
+
+  return chips;
+}
+
+function MatchSideCard({
+  label,
+  title,
+  date,
+  amountCents,
+  account,
+  categoryOrStatus,
+}: {
+  label: string;
+  title: string;
+  date: string;
+  amountCents: unknown;
+  account?: string;
+  categoryOrStatus?: string;
+}) {
+  const amount = toBigIntSafe(amountCents);
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-white p-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-slate-900" title={title}>
+        {compactText(title)}
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+        <div className="min-w-0">
+          <div className="text-slate-500">Date</div>
+          <div className="truncate text-slate-800">{compactText(date)}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-slate-500">Amount</div>
+          <div className={`tabular-nums font-semibold ${amount < 0n ? "text-red-700" : "text-slate-900"}`}>
+            {formatUsdFromCents(amount)}
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="text-slate-500">Account</div>
+          <div className="truncate text-slate-800" title={account}>
+            {compactText(account)}
+          </div>
+        </div>
+        <div className="min-w-0 text-right">
+          <div className="text-slate-500">Category/status</div>
+          <div className="truncate text-slate-800" title={categoryOrStatus}>
+            {compactText(categoryOrStatus)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MatchPairPreview({
+  bank,
+  bankTxns,
+  entries,
+  accountName,
+  direction,
+  similarCandidateCount,
+  aiConfidence,
+}: {
+  bank: any | null;
+  bankTxns?: any[];
+  entries: any[];
+  accountName?: string;
+  direction: "bankToEntry" | "entryToBank";
+  similarCandidateCount: number;
+  aiConfidence?: number | null;
+}) {
+  const banks = bank ? [bank] : (bankTxns ?? []);
+  const firstBank = banks[0] ?? null;
+  if (!firstBank && entries.length === 0) return null;
+  const firstEntry = entries[0] ?? null;
+  const isSinglePair = Boolean(firstBank && firstEntry && entries.length === 1 && banks.length === 1);
+  const meta = isSinglePair ? matchSignalMeta(firstBank, firstEntry, direction) : null;
+  const chips = meta ? matchSignalChips(meta, similarCandidateCount, aiConfidence) : [];
+  const entryTotal = entries.reduce((sum, e) => sum + absBig(toBigIntSafe(e?.amount_cents)), 0n);
+  const bankTotal = banks.reduce((sum, t) => sum + absBig(toBigIntSafe(t?.amount_cents)), 0n);
+
+  return (
+    <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold text-slate-900">Review the match pair</div>
+          <div className="text-[11px] text-slate-500">Confirm exactly which ledger and bank records will be linked.</div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {chips.map((chip) => (
+            <MatchSignalChip key={`${chip.label}-${chip.title ?? ""}`} {...chip} />
+          ))}
+          {!isSinglePair && entries.length > 1 ? <MatchSignalChip label={`${entries.length} ledger entries`} tone="warning" /> : null}
+          {!isSinglePair && banks.length > 1 ? <MatchSignalChip label={`${banks.length} bank transactions`} tone="warning" /> : null}
+        </div>
+      </div>
+
+      <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
+        <MatchSideCard
+          label={entries.length > 1 ? "Ledger entries" : "Ledger entry"}
+          title={
+            entries.length > 1
+              ? entries.map((e) => compactText(e?.payee, "Entry")).join(", ")
+              : compactText(firstEntry?.payee, "Select a ledger entry")
+          }
+          date={entries.length > 1 ? `${entries.length} selected` : compactText(firstEntry?.date)}
+          amountCents={entries.length > 1 ? entryTotal : firstEntry?.amount_cents ?? 0n}
+          account={accountLabelFor(firstEntry, accountName)}
+          categoryOrStatus={entries.length > 1 ? "Selected" : entryCategoryLabel(firstEntry)}
+        />
+
+        <div className="hidden items-center justify-center text-[11px] font-semibold text-slate-400 md:flex">to</div>
+
+        <MatchSideCard
+          label={banks.length > 1 ? "Bank transactions" : "Bank transaction"}
+          title={
+            banks.length > 1
+              ? banks.map((t) => compactText(t?.name, "Bank transaction")).join(", ")
+              : compactText(firstBank?.name, "Select a bank transaction")
+          }
+          date={banks.length > 1 ? `${banks.length} selected` : ymdFromBankTxn(firstBank)}
+          amountCents={banks.length > 1 ? bankTotal : firstBank?.amount_cents ?? 0n}
+          account={accountLabelFor(firstBank, accountName)}
+          categoryOrStatus={banks.length > 1 ? "Selected" : bankCategoryLabel(firstBank)}
+        />
+      </div>
+    </div>
+  );
 }
 
 function bankSignature(items: any[]): string {
@@ -1572,6 +1796,11 @@ const isReconcileExemptEntry = (e: any) => {
     return m;
   }, [bankTxSorted]);
 
+  const selectedAccountName = useMemo(() => {
+    const a = (accountsQ.data ?? []).find((row: any) => String(row.id) === String(selectedAccountId));
+    return String(a?.name ?? "");
+  }, [accountsQ.data, selectedAccountId]);
+
   // MatchGroups lookup maps (read-only for now; used in next step to flip matched state)
   const matchGroupHasAdjustment = (g: any): boolean => {
     const entries = Array.isArray(g?.entries) ? g.entries : [];
@@ -1793,7 +2022,7 @@ const isReconcileExemptEntry = (e: any) => {
       });
     } catch (e: any) {
       setMatchSuggestError(
-        aiUiMessage(e, "AI suggestions are unavailable right now. Review the top candidates below.")
+        aiUiMessage(e, "Smart suggestions are unavailable right now. Review the top candidates below.")
       );
       const ranked = buildBankAiCandidates(bank);
       const best = ranked[0]?.e ?? null;
@@ -1847,7 +2076,7 @@ const isReconcileExemptEntry = (e: any) => {
       });
     } catch (e: any) {
       setEntrySuggestError(
-        aiUiMessage(e, "AI suggestions are unavailable right now. Review the top candidates below.")
+        aiUiMessage(e, "Smart suggestions are unavailable right now. Review the top candidates below.")
       );
       const ranked = buildEntryAiCandidates(entry);
       const best = ranked[0]?.t ?? null;
@@ -2616,14 +2845,14 @@ const displayBankActiveList = useMemo(() => {
                 ? "No unmatched bank transactions"
               : entriesExpectedList.length === 0
                   ? "No expected entries"
-                  : "Review AI suggestions"
+                  : "Review match suggestions"
           }
           onClick={() => {
             if (!canWriteReconcileEffective) return;
             setOpenAutoReconcile(true);
           }}
         >
-          <Sparkles className="h-3.5 w-3.5" /> AI suggestions
+          <Sparkles className="h-3.5 w-3.5" /> Match suggestions
         </button>
       </HintWrap>
 
@@ -3491,7 +3720,7 @@ const displayBankActiveList = useMemo(() => {
                                       type="button"
                                       className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "Match ledger entry (AI assisted)" : (reconcileWriteReason ?? noPermTitle)}
+                                      title={canWriteReconcileEffective ? "Review match suggestions for this ledger entry" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match entry"
                                       onClick={() => {
                                         if (!canWriteReconcileEffective) return;
@@ -3906,7 +4135,7 @@ const displayBankActiveList = useMemo(() => {
                                       type="button"
                                       className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "Match bank transaction to entry (AI assisted)" : (reconcileWriteReason ?? noPermTitle)}
+                                      title={canWriteReconcileEffective ? "Review match suggestions for this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match bank transaction"
                                       onClick={() => {
                                         if (!canWriteReconcileEffective) return;
@@ -4494,10 +4723,14 @@ const displayBankActiveList = useMemo(() => {
                         setMatchBusy(false);
                       }
                     }}
-                    title={matchBusy ? "Matching…" : "Match selected entries (exact sum required)"}
-                    aria-label="Match selected entries"
+                    title={matchBusy ? "Matching…" : matchSelectedEntryIds.size === 1 ? "Match these two records" : "Match selected entries (exact sum required)"}
+                    aria-label={matchSelectedEntryIds.size === 1 ? "Match these two" : "Match selected entries"}
                   >
-                    {matchBusy ? "Matching…" : `Match ${matchSelectedEntryIds.size} entr${matchSelectedEntryIds.size === 1 ? "y" : "ies"}`}
+                    {matchBusy
+                      ? "Matching…"
+                      : matchSelectedEntryIds.size === 1
+                        ? "Match these two"
+                        : `Match ${matchSelectedEntryIds.size} entries`}
                   </BusyButton>
                 </HintWrap>
               </>
@@ -4517,6 +4750,41 @@ const displayBankActiveList = useMemo(() => {
                 onChange={(e) => setMatchSearch(e.target.value)}
               />
             </div>
+
+            {(() => {
+              const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
+              if (!bank) return null;
+              const selectedEntries = Array.from(matchSelectedEntryIds)
+                .map((id) => entryByIdFast.get(String(id)) ?? null)
+                .filter(Boolean) as any[];
+              const bankAmt = toBigIntSafe(bank.amount_cents);
+              const bankSign = bankAmt < 0n ? -1n : 1n;
+              const similarCandidateCount = allEntriesSorted
+                .filter((e: any) => {
+                  if (matchByEntryId.has(e.id)) return false;
+                  const entryAmt = toBigIntSafe(e.amount_cents);
+                  const entrySign = entryAmt < 0n ? -1n : 1n;
+                  return entrySign === bankSign;
+                })
+                .map((e: any) => scoreEntryCandidate(bank, e))
+                .filter((meta: any) => meta.exactAmount && Number(meta.dtDays ?? 9999) <= 3)
+                .length;
+              const selectedEntryId = selectedEntries.length === 1 ? String(selectedEntries[0]?.id ?? "") : "";
+              const aiConfidence = selectedEntryId
+                ? matchAiSuggestions.find((s) => String(s.entryId) === selectedEntryId)?.confidence ?? null
+                : null;
+
+              return (
+                <MatchPairPreview
+                  bank={bank}
+                  entries={selectedEntries}
+                  accountName={selectedAccountName}
+                  direction="bankToEntry"
+                  similarCandidateCount={similarCandidateCount}
+                  aiConfidence={aiConfidence}
+                />
+              );
+            })()}
 
             {(() => {
               const bank = matchBankTxnId ? (bankByIdFast.get(String(matchBankTxnId)) ?? null) : null;
@@ -4563,7 +4831,7 @@ const displayBankActiveList = useMemo(() => {
 
             {matchError ? <div className="text-xs text-red-700 mb-2">{matchError}</div> : null}
 
-            {/* AI suggestions (LLM rerank on deterministic candidate gate; full-match only) */}
+            {/* Match suggestions (AI rerank when available; deterministic fallback otherwise) */}
             {(() => {
               const bank = bankTxSorted.find((x: any) => x.id === matchBankTxnId);
               if (!bank) return null;
@@ -4591,7 +4859,7 @@ const displayBankActiveList = useMemo(() => {
               if (matchSuggestLoading) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-primary mb-2">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary mb-2">Finding match suggestions</div>
                     <div className="space-y-2">
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
@@ -4609,11 +4877,12 @@ const displayBankActiveList = useMemo(() => {
                 .filter(Boolean) as Array<{ e: any; meta: any; ai: ReconcileBankSuggestion }>;
 
               const rows = aiRows.length > 0 ? aiRows : ranked.map(({ e, meta }: any) => ({ e, meta, ai: null }));
+              const hasAiSuggestions = aiRows.length > 0;
 
               if (rows.length === 0) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary">Match suggestions</div>
                     <div className="mt-1 text-[11px] text-slate-500">
                       No eligible suggestions found for this bank transaction.
                     </div>
@@ -4624,8 +4893,12 @@ const displayBankActiveList = useMemo(() => {
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
-                    <div className="text-[11px] text-slate-500">LLM rerank • full-match only</div>
+                    <div className="text-[11px] font-semibold text-primary">
+                      {hasAiSuggestions ? "AI reranked suggestions" : "Match suggestions"}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {hasAiSuggestions ? "AI rerank" : "Rule-ranked candidates"} • full-match only
+                    </div>
                   </div>
 
                   {matchSuggestError ? (
@@ -4916,8 +5189,8 @@ const displayBankActiveList = useMemo(() => {
                       }
                       return selectedAbs !== entryAbs;
                     })()}
-                    title="Create combine match (exact sum required)"
-                    aria-label="Create combine match"
+                    title={entryMatchSelectedBankTxnIds.size === 1 ? "Match these two records" : "Create combine match (exact sum required)"}
+                    aria-label={entryMatchSelectedBankTxnIds.size === 1 ? "Match these two" : "Create combine match"}
                     onClick={async () => {
                       if (!selectedBusinessId || !selectedAccountId) return;
                       if (!canWriteReconcileEffective) return;
@@ -5007,7 +5280,11 @@ const displayBankActiveList = useMemo(() => {
                       }
                     }}
                   >
-                    {entryMatchBusy ? "Saving…" : "Create match"}
+                    {entryMatchBusy
+                      ? "Saving…"
+                      : entryMatchSelectedBankTxnIds.size === 1
+                        ? "Match these two"
+                        : "Create match"}
                   </BusyButton>
                 </HintWrap>
               </>
@@ -5030,9 +5307,46 @@ const displayBankActiveList = useMemo(() => {
               />
             </div>
 
+            {(() => {
+              const entry = entryMatchEntryId ? (entryByIdFast.get(String(entryMatchEntryId)) ?? null) : null;
+              if (!entry) return null;
+              const selectedBanks = Array.from(entryMatchSelectedBankTxnIds)
+                .map((id) => bankByIdFast.get(String(id)) ?? null)
+                .filter(Boolean) as any[];
+              const entryAmt = toBigIntSafe(entry.amount_cents);
+              const entrySign = entryAmt < 0n ? -1n : 1n;
+              const similarCandidateCount = bankTxSorted
+                .filter((t: any) => {
+                  const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
+                  if (remaining <= 0n) return false;
+                  const bankAmt = toBigIntSafe(t.amount_cents);
+                  const bankSign = bankAmt < 0n ? -1n : 1n;
+                  return bankSign === entrySign;
+                })
+                .map((t: any) => scoreBankCandidate(entry, t))
+                .filter((meta: any) => meta.exactAmount && Number(meta.dtDays ?? 9999) <= 3)
+                .length;
+              const selectedBankId = selectedBanks.length === 1 ? String(selectedBanks[0]?.id ?? "") : "";
+              const aiConfidence = selectedBankId
+                ? entryAiSuggestions.find((s) => String(s.bankTransactionId) === selectedBankId)?.confidence ?? null
+                : null;
+
+              return (
+                <MatchPairPreview
+                  bank={null}
+                  bankTxns={selectedBanks}
+                  entries={[entry]}
+                  accountName={selectedAccountName}
+                  direction="entryToBank"
+                  similarCandidateCount={similarCandidateCount}
+                  aiConfidence={aiConfidence}
+                />
+              );
+            })()}
+
             {entryMatchError ? <div className="text-xs text-red-700 mb-2">{entryMatchError}</div> : null}
 
-            {/* AI suggestions */}
+            {/* Match suggestions (AI rerank when available; deterministic fallback otherwise) */}
             {(() => {
               const entry = allEntriesSorted.find((x: any) => x.id === entryMatchEntryId);
               if (!entry) return null;
@@ -5062,7 +5376,7 @@ const displayBankActiveList = useMemo(() => {
               if (entrySuggestLoading) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-primary mb-2">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary mb-2">Finding match suggestions</div>
                     <div className="space-y-2">
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
                       <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
@@ -5080,11 +5394,12 @@ const displayBankActiveList = useMemo(() => {
                 .filter(Boolean) as Array<{ t: any; meta: any; ai: ReconcileEntrySuggestion }>;
 
               const rows = aiRows.length > 0 ? aiRows : ranked.map(({ t, meta }: any) => ({ t, meta, ai: null }));
+              const hasAiSuggestions = aiRows.length > 0;
 
               if (rows.length === 0) {
                 return (
                   <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
-                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
+                    <div className="text-[11px] font-semibold text-primary">Match suggestions</div>
                     <div className="mt-1 text-[11px] text-slate-500">
                       No eligible suggestions found for this entry.
                     </div>
@@ -5095,8 +5410,12 @@ const displayBankActiveList = useMemo(() => {
               return (
                 <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-primary">AI suggestions</div>
-                    <div className="text-[11px] text-slate-500">LLM rerank • full-match only</div>
+                    <div className="text-[11px] font-semibold text-primary">
+                      {hasAiSuggestions ? "AI reranked suggestions" : "Match suggestions"}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {hasAiSuggestions ? "AI rerank" : "Rule-ranked candidates"} • full-match only
+                    </div>
                   </div>
 
                   {entrySuggestError ? (
