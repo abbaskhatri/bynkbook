@@ -1268,13 +1268,13 @@ export default function LedgerPageClient() {
     return ids;
   }, [anomaliesQ.data]);
 
-  // MatchGroups (ACTIVE) drive the separate bank-match indicator, not the ledger entry status.
+  // MatchGroups (ACTIVE) drive the canonical Ledger status pill for bank-match state.
   const matchGroupsQ = useQuery({
     queryKey: ["matchGroups", selectedBusinessId, selectedAccountId],
     enabled: !!selectedBusinessId && !!selectedAccountId,
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId) return { items: [] as any[] };
-      // status=active is sufficient for the ledger bank-match indicator.
+      // status=active is sufficient for Ledger's displayed bank-match status.
       return listMatchGroups({ businessId: selectedBusinessId, accountId: selectedAccountId, status: "active" } as any);
     },
     staleTime: 15_000,
@@ -1560,6 +1560,21 @@ export default function LedgerPageClient() {
       const tDir = ((e as any).transfer_direction ?? null) as ("IN" | "OUT" | null);
       const isOpeningBalanceEntry =
         String(e.type ?? "").toUpperCase() === "OPENING" || isOpeningLikePayee(e.payee);
+      const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
+      const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
+      const bankMatchRawStatus =
+        matchedAbs >= entryAbs && entryAbs > 0n
+          ? "MATCHED"
+          : matchedAbs > 0n && matchedAbs < entryAbs
+            ? "PARTIAL"
+            : "";
+      const entryRawStatus = String(e.status ?? "EXPECTED").trim().toUpperCase() || "EXPECTED";
+      const displayRawStatus = (() => {
+        if (isDeleted) return "DELETED";
+        if (bankMatchRawStatus) return bankMatchRawStatus;
+        if (entryRawStatus === "SYSTEM") return "SYSTEM";
+        return "EXPECTED";
+      })();
 
       return {
         id: e.id,
@@ -1618,37 +1633,9 @@ export default function LedgerPageClient() {
         balanceStr: isDeleted || rowBal === undefined ? "—" : formatUsdFromCents(rowBal),
         balanceNeg: !isDeleted && rowBal !== undefined ? rowBal < ZERO : false,
 
-        status: (() => {
-          if (isDeleted) return "Deleted";
-          return statusLabel(e.status);
-        })(),
+        status: statusLabel(displayRawStatus),
 
-        rawStatus: (() => {
-          if (isDeleted) return "DELETED";
-          return String(e.status ?? "EXPECTED").trim().toUpperCase() || "EXPECTED";
-        })(),
-
-        reconciliationStatus: (() => {
-          if (isDeleted) return null;
-
-          const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
-          const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
-
-          if (matchedAbs >= entryAbs && entryAbs > 0n) return "Matched to bank";
-          if (matchedAbs > 0n && matchedAbs < entryAbs) return "Partially matched";
-          return null;
-        })(),
-
-        rawReconciliationStatus: (() => {
-          if (isDeleted) return "";
-
-          const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
-          const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
-
-          if (matchedAbs >= entryAbs && entryAbs > 0n) return "MATCHED";
-          if (matchedAbs > 0n && matchedAbs < entryAbs) return "PARTIAL";
-          return "";
-        })(),
+        rawStatus: displayRawStatus,
 
         hasAdjustment: hasAdjustmentByEntryId.get(String(e.id)) ?? false,
         isDeleted,
@@ -3314,7 +3301,7 @@ export default function LedgerPageClient() {
     <col key="c6" style={{ width: "120px" }} />,  // category (restore width so Actions stays visible)
     <col key="c7" style={{ width: "110px" }} />,  // amount (tighter)
     <col key="c8" style={{ width: "110px" }} />,  // balance (tighter)
-    <col key="c9" style={{ width: "148px" }} />,  // status + bank match indicator
+    <col key="c9" style={{ width: "148px" }} />,  // status
     <col key="c10" style={{ width: "20px" }} />,  // dup icon (tight ~60%)
     <col key="c11" style={{ width: "20px" }} />,  // cat icon (tight ~60%)
     <col key="c12" style={{ width: "96px" }} />,  // actions (tighter)
@@ -4563,13 +4550,6 @@ export default function LedgerPageClient() {
           <td className={td + " " + center}>
             <div className="inline-flex flex-wrap items-center justify-center gap-1">
               <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
-              {r.reconciliationStatus ? (
-                <StatusChip
-                  label={r.reconciliationStatus}
-                  tone={statusTone(r.rawReconciliationStatus)}
-                />
-              ) : null}
-              {r.hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
             </div>
           </td>
 
