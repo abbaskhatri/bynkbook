@@ -12,6 +12,26 @@ function json(statusCode: number, body: any) {
   };
 }
 
+function compactSafePlaidValue(value: any, fallback: string) {
+  const raw = String(value ?? "").trim();
+  const text = raw || fallback;
+  return text
+    .replace(/access[_ -]?token\s*[:=]?\s*["']?[^"',\s)]+/gi, "access_token [redacted]")
+    .replace(/client[_ -]?id\s*[:=]?\s*["']?[^"',\s)]+/gi, "client_id [redacted]")
+    .replace(/secret\s*[:=]?\s*["']?[^"',\s)]+/gi, "secret [redacted]")
+    .slice(0, 240);
+}
+
+function plaidErrorCode(error: any) {
+  const data = error?.response?.data ?? {};
+  return compactSafePlaidValue(data?.error_code ?? data?.error_type ?? error?.code, "PLAID_SYNC_FAILED").slice(0, 80);
+}
+
+function plaidErrorMessage(error: any) {
+  const data = error?.response?.data ?? {};
+  return compactSafePlaidValue(data?.error_message ?? data?.display_message ?? error?.message, "Plaid sync failed");
+}
+
 type PlaidWebhookRequest = {
   body: any;
   rawBody: string;
@@ -475,33 +495,49 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   });
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
 
-  const plaid = await getPlaidClient();
-  const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+  const recordSyncFailure = async (error: any) => {
+    const code = plaidErrorCode(error);
+    const message = plaidErrorMessage(error);
+    await prisma.bankConnection.updateMany({
+      where: { business_id: businessId, account_id: accountId },
+      data: {
+        status: "ERROR",
+        error_code: code,
+        error_message: message,
+        updated_at: new Date(),
+      },
+    });
+    return json(502, { ok: false, error: "Plaid sync failed", errorCode: code });
+  };
 
-  // Fetch current balance (backend-provided; stored for UI)
-  // Note: this returns all accounts on the item, we select the mapped one.
-  const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
-  const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-  const currentBalance = acct?.balances?.current ?? null;
-  const currentBalanceCents = currentBalance == null ? null : BigInt(Math.round(currentBalance * 100));
+  try {
+    const plaid = await getPlaidClient();
+    const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
 
-  // Initial backfill deletion rule (only delete PLAID-sourced rows older than effectiveStartDate)
-  // Because Phase 4B has no CSV parsing, PLAID is the only source inserted here.
-  await prisma.bankTransaction.deleteMany({
-    where: {
-      business_id: businessId,
-      account_id: accountId,
-      posted_date: { lt: conn.effective_start_date },
+    // Fetch current balance (backend-provided; stored for UI)
+    // Note: this returns all accounts on the item, we select the mapped one.
+    const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
+    const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
+    const currentBalance = acct?.balances?.current ?? null;
+    const currentBalanceCents = currentBalance == null ? null : BigInt(Math.round(currentBalance * 100));
 
-      // Critical: do NOT delete CSV-imported history.
-      // Only delete Plaid-sourced rows (source="PLAID" or null legacy Plaid rows) that have plaid_transaction_id.
-      plaid_transaction_id: { not: null },
-      OR: [{ source: "PLAID" }, { source: null }],
-    },
-  });
+    // Initial backfill deletion rule (only delete PLAID-sourced rows older than effectiveStartDate)
+    // Because Phase 4B has no CSV parsing, PLAID is the only source inserted here.
+    await prisma.bankTransaction.deleteMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        posted_date: { lt: conn.effective_start_date },
 
-  let cursor = conn.sync_cursor ?? null;
-  let hasMore = true;
+        // Critical: do NOT delete CSV-imported history.
+        // Only delete Plaid-sourced rows (source="PLAID" or null legacy Plaid rows) that have plaid_transaction_id.
+        plaid_transaction_id: { not: null },
+        OR: [{ source: "PLAID" }, { source: null }],
+      },
+    });
+
+    let cursor = conn.sync_cursor ?? null;
+    let hasMore = true;
 
   // Drain safety (production hardening)
   const MAX_PAGES = 20;          // safety cap
@@ -518,7 +554,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   // pendingCount will be computed from DB at end (accurate), not guessed during loop
   let pendingCount = 0;
 
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   async function syncPage() {
     for (let attempt = 0; attempt < RETRY_MAX; attempt++) {
@@ -533,7 +569,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
         // light backoff for transient errors / rate limiting
         const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt);
         if (attempt < RETRY_MAX - 1) await sleep(backoff);
-        else throw new Error(`Plaid transactions/sync failed: ${msg}`);
+        else throw e;
       }
     }
     throw new Error("Plaid transactions/sync failed");
@@ -555,8 +591,8 @@ export async function syncTransactions(params: { businessId: string; accountId: 
     totalSeen += pageSeen;
     if (totalSeen >= MAX_TOTAL) hasMore = false;
 
-    // Upsert added + modified
-    const upserts = [...data.added, ...data.modified];
+    // Upsert added + modified only for the Plaid account mapped to this Bynkbook account.
+    const upserts = [...data.added, ...data.modified].filter((t) => t.account_id === conn.plaid_account_id);
     for (const t of upserts) {
       // Retention: do not retain anything older than effectiveStartDate
       const posted = t.date ? new Date(`${t.date}T00:00:00Z`) : null;
@@ -577,6 +613,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
               business_id: businessId,
               account_id: accountId,
               plaid_transaction_id: pendingId,
+              plaid_account_id: conn.plaid_account_id,
             },
             data: {
               plaid_transaction_id: t.transaction_id,
@@ -623,6 +660,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
             business_id: businessId,
             account_id: accountId,
             plaid_transaction_id: t.transaction_id,
+            plaid_account_id: conn.plaid_account_id,
           },
           data: {
             posted_date: posted,
@@ -649,6 +687,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
           business_id: businessId,
           account_id: accountId,
           plaid_transaction_id: removed.transaction_id,
+          plaid_account_id: conn.plaid_account_id,
         },
         data: { is_removed: true, removed_at: new Date(), updated_at: new Date() },
       });
@@ -803,17 +842,17 @@ export async function syncTransactions(params: { businessId: string; accountId: 
     });
   }
 
-  // Clear webhook flag only if newCount > 0 (your rule)
-  const clearNewFlag = newCount > 0;
-
   await prisma.bankConnection.updateMany({
     where: { business_id: businessId, account_id: accountId },
     data: {
       sync_cursor: cursor,
       last_sync_at: now,
-      has_new_transactions: clearNewFlag ? false : conn.has_new_transactions,
+      has_new_transactions: false,
       last_known_balance_cents: currentBalanceCents,
       last_known_balance_at: currentBalanceCents == null ? null : now,
+      status: "CONNECTED",
+      error_code: null,
+      error_message: null,
       updated_at: now,
     },
   });
@@ -832,6 +871,9 @@ export async function syncTransactions(params: { businessId: string; accountId: 
     capped: pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL,
     hasMore: hasMore,
   });
+  } catch (error) {
+    return recordSyncFailure(error);
+  }
 }
 
 export async function handleWebhook(request: PlaidWebhookRequest) {
