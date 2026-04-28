@@ -453,8 +453,10 @@ const matchGroupsHandler = {
 } satisfies ApiHandler;
 
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/match-groups", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/match-groups/revert-preview", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/batch", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/revert", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/{matchGroupId}/void", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Team & Roles (Phase 6C) ----------

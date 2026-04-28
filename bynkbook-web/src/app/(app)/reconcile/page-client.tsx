@@ -36,7 +36,11 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, createMatchBatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
-import { voidMatchGroup } from "@/lib/api/match-groups";
+import {
+  previewGeneratedEntryRevert,
+  confirmGeneratedEntryRevert,
+  type MatchGroupRevertPreview,
+} from "@/lib/api/match-groups";
 import { createMatchGroupsBatch } from "@/lib/api/match-groups";
 import { listMatchGroups } from "@/lib/api/match-groups";
 import { getRolePolicies, type RolePolicyRow } from "@/lib/api/rolePolicies";
@@ -770,10 +774,38 @@ export default function ReconcilePageClient() {
   const [openReconAuditDetail, setOpenReconAuditDetail] = useState(false);
   const [selectedReconAudit, setSelectedReconAudit] = useState<any | null>(null);
 
-  // Phase 5B-1: Revert (void) from audit detail (voids ALL active matches for selected bank txn)
+  // Safe generated-entry revert from audit detail.
   const [revertBusy, setRevertBusy] = useState(false);
+  const [revertPreviewLoading, setRevertPreviewLoading] = useState(false);
+  const [revertPreview, setRevertPreview] = useState<MatchGroupRevertPreview | null>(null);
   const [revertError, setRevertError] = useState<string | null>(null);
   const [revertConfirmOpen, setRevertConfirmOpen] = useState(false);
+
+  async function openGeneratedRevertPreview(args: { matchGroupId: string; bankTransactionId?: string | null }) {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (!canWriteReconcileEffective) return;
+
+    setRevertConfirmOpen(true);
+    setRevertPreview(null);
+    setRevertError(null);
+    setRevertPreviewLoading(true);
+
+    try {
+      const preview = await previewGeneratedEntryRevert({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        matchGroupId: args.matchGroupId,
+        bankTransactionId: args.bankTransactionId ?? null,
+      });
+      setRevertPreview(preview);
+    } catch (e: any) {
+      const r = applyMutationError(e, "Can’t preview revert");
+      if (!r.isClosed) setRevertError(r.msg);
+      else setRevertError(null);
+    } finally {
+      setRevertPreviewLoading(false);
+    }
+  }
 
   // Phase 6B: Reconcile snapshots
   const [openSnapshots, setOpenSnapshots] = useState(false);
@@ -5423,6 +5455,8 @@ const displayBankActiveList = useMemo(() => {
           setOpenReconAuditDetail(false);
           setSelectedReconAudit(null);
           setRevertBusy(false);
+          setRevertPreviewLoading(false);
+          setRevertPreview(null);
           setRevertError(null);
         }}
         title="Audit detail"
@@ -5433,8 +5467,7 @@ const displayBankActiveList = useMemo(() => {
             const groupId = ev?.groupId ? String(ev.groupId) : null;
             const bankTxnId = ev?.bankTxnIds?.[0] ? String(ev.bankTxnIds[0]) : null;
 
-            const isActiveGroup = !!groupId && activeGroupByBankTxnId.has(String(bankTxnId ?? ""));
-            const canRevert = Boolean(canWrite && selectedBusinessId && selectedAccountId && groupId && isActiveGroup);
+            const canRevert = Boolean(canWriteReconcileEffective && selectedBusinessId && selectedAccountId && groupId && bankTxnId);
 
             return (
               <DialogFooter
@@ -5446,6 +5479,8 @@ const displayBankActiveList = useMemo(() => {
                       setOpenReconAuditDetail(false);
                       setSelectedReconAudit(null);
                       setRevertBusy(false);
+                      setRevertPreviewLoading(false);
+                      setRevertPreview(null);
                       setRevertError(null);
                     }}
                     disabled={revertBusy}
@@ -5459,16 +5494,16 @@ const displayBankActiveList = useMemo(() => {
                     size="md"
                     busy={revertBusy}
                     busyLabel="Reverting…"
-                    disabled={!canRevert}
-                    title={!canWrite ? noPermTitle : "Revert bank match (void all active matches for this bank transaction)"}
+                    disabled={!canRevert || revertPreviewLoading}
+                    title={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : "Preview generated-entry revert"}
                     aria-label="Revert bank match"
                     onClick={() => {
                       if (!selectedBusinessId || !selectedAccountId) return;
                       if (!bankTxnId) return;
-                      setRevertConfirmOpen(true);
+                      void openGeneratedRevertPreview({ matchGroupId: String(groupId), bankTransactionId: bankTxnId });
                     }}
                   >
-                    Revert bank match
+                    {revertPreviewLoading ? "Previewing…" : "Revert bank match"}
                   </BusyButton>
                 }
               />
@@ -5485,15 +5520,14 @@ const displayBankActiveList = useMemo(() => {
 
             // v1 behavior: "Revert bank match" voids ALL active matches for this bank transaction.
             const isActiveGroup = !!groupId && activeGroupByBankTxnId.has(String(bankTxnId ?? ""));
-            const canRevert = Boolean(canWrite && selectedBusinessId && selectedAccountId && groupId && isActiveGroup);
             const alreadyVoided = !!groupId && !isActiveGroup;
 
             return (
               <div className="mb-2 text-[11px] text-slate-500">
                 {bankTxnId
                   ? alreadyVoided
-                    ? "No active bank matches to revert."
-                    : "Use “Revert bank match” below to void all active matches for this bank transaction."
+                    ? "This match is already voided. Preview can still remove generated entries if they are safe."
+                    : "Preview the revert before confirming. Generated entries can be removed only when the backend marks them safe."
                   : "Bank transaction id unavailable."}
               </div>
             );
@@ -5615,19 +5649,25 @@ const displayBankActiveList = useMemo(() => {
         </div>
       </AppDialog>
 
-            <AppDialog
+      <AppDialog
         open={revertConfirmOpen}
         onClose={() => {
           if (revertBusy) return;
           setRevertConfirmOpen(false);
+          setRevertPreview(null);
+          setRevertPreviewLoading(false);
         }}
         title="Revert bank match"
-        size="xs"
+        size="md"
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button
               variant="outline"
-              onClick={() => setRevertConfirmOpen(false)}
+              onClick={() => {
+                setRevertConfirmOpen(false);
+                setRevertPreview(null);
+                setRevertPreviewLoading(false);
+              }}
               disabled={revertBusy}
             >
               Cancel
@@ -5638,12 +5678,18 @@ const displayBankActiveList = useMemo(() => {
               size="md"
               busy={revertBusy}
               busyLabel="Reverting…"
+              disabled={
+                revertPreviewLoading ||
+                !revertPreview ||
+                revertPreview.blocked ||
+                revertPreview.already_reverted
+              }
               onClick={async () => {
                 const ev = selectedReconAudit as any | null;
                 const groupId = ev?.groupId ? String(ev.groupId) : null;
                 const bankTxnId = ev?.bankTxnIds?.[0] ? String(ev.bankTxnIds[0]) : null;
 
-                if (!selectedBusinessId || !selectedAccountId || !groupId || !bankTxnId) return;
+                if (!selectedBusinessId || !selectedAccountId || !groupId || !bankTxnId || !revertPreview) return;
 
                 setRevertBusy(true);
                 setRevertError(null);
@@ -5653,17 +5699,21 @@ const displayBankActiveList = useMemo(() => {
                 markPending(String(groupId));
 
                 try {
-                  await voidMatchGroup({
+                  const willSoftDelete = (revertPreview.generated_entries_to_soft_delete ?? []).length > 0;
+
+                  await confirmGeneratedEntryRevert({
                     businessId: selectedBusinessId,
                     accountId: selectedAccountId,
                     matchGroupId: groupId,
-                    reason: "User unmatch",
+                    bankTransactionId: bankTxnId,
+                    confirmSoftDelete: willSoftDelete,
                   });
 
                   await refreshTablesFully({ preserveOnEmpty: true });
 
                   clearMutErr();
                   setRevertConfirmOpen(false);
+                  setRevertPreview(null);
                   setOpenReconAuditDetail(false);
                   setSelectedReconAudit(null);
                 } catch (e: any) {
@@ -5677,16 +5727,96 @@ const displayBankActiveList = useMemo(() => {
                 }
               }}
             >
-              Revert match
+              {(() => {
+                const n = revertPreview?.generated_entries_to_soft_delete?.length ?? 0;
+                if (n > 0) return `Confirm and remove ${n} generated ${n === 1 ? "entry" : "entries"}`;
+                return "Confirm revert";
+              })()}
             </BusyButton>
           </div>
         }
       >
         <div className="space-y-3 text-sm text-slate-700">
-          <div className="font-medium text-slate-900">Revert bank match?</div>
-          <div className="text-xs text-slate-600">
-            This will void all active matches for the selected bank transaction. The action is recorded in history and can be re-matched later.
-          </div>
+          {revertPreviewLoading ? (
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <TinySpinner />
+              <span>Checking generated entries and closed periods…</span>
+            </div>
+          ) : revertPreview ? (
+            <>
+              <div className="font-medium text-slate-900">
+                {revertPreview.already_reverted ? "Already reverted" : "Review revert actions"}
+              </div>
+              <div className="text-xs text-slate-600">
+                This will unmatch the bank transaction and remove only generated ledger entries that are safe to soft-delete.
+                Manual ledger entries will be preserved.
+              </div>
+
+              {revertPreview.blocked ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {revertPreview.closed_period_blocked
+                    ? "This action is blocked by a closed period. Reopen the period to modify."
+                    : `This action is blocked: ${revertPreview.block_reasons.join(", ")}`}
+                </div>
+              ) : null}
+
+              <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                <div className="text-[11px] font-semibold text-slate-500">Bank transaction</div>
+                <div className="mt-1 text-xs text-slate-900">
+                  {revertPreview.bank_transaction
+                    ? `${isoToYmd(String(revertPreview.bank_transaction.posted_date ?? ""))} • ${String(revertPreview.bank_transaction.name ?? "—")} • ${formatUsdFromCents(toBigIntSafe(revertPreview.bank_transaction.amount_cents))}`
+                    : "Not found in scope"}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
+                <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600">
+                  <span>Ledger entry</span>
+                  <span>Action</span>
+                </div>
+                <div className="max-h-56 overflow-y-auto">
+                  {(revertPreview.ledger_entries ?? []).map((entry) => {
+                    const actionLabel = entry.will_soft_delete
+                      ? "Soft-delete generated"
+                      : entry.closed_period_blocks_action
+                        ? "Blocked by closed period"
+                        : "Preserve";
+                    const actionTone = entry.will_soft_delete
+                      ? "text-red-700"
+                      : entry.closed_period_blocks_action
+                        ? "text-amber-800"
+                        : "text-slate-600";
+
+                    return (
+                      <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-medium text-slate-900">
+                            {entry.date ?? "—"} • {entry.payee || "—"} • {formatUsdFromCents(toBigIntSafe(entry.amount_cents))}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">
+                            {entry.will_soft_delete
+                              ? "Generated from this bank transaction."
+                              : entry.preserve_reasons.join(", ")}
+                          </div>
+                        </div>
+                        <div className={`whitespace-nowrap text-[11px] font-semibold ${actionTone}`}>
+                          {actionLabel}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                {(revertPreview.generated_entries_to_soft_delete ?? []).length > 0
+                  ? "Destructive confirmation required: generated entries are soft-deleted, not hard-deleted."
+                  : "No generated ledger entry will be deleted. The match group will be voided when active."}
+              </div>
+            </>
+          ) : (
+            <div className="text-xs text-slate-600">No revert preview loaded.</div>
+          )}
 
           {revertError ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
