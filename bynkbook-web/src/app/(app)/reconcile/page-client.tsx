@@ -2654,6 +2654,9 @@ const displayBankActiveList = useMemo(() => {
   const thClass = "px-1.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-slate-600 text-left";
   const tdClass = "px-1.5 py-0.5 align-middle text-xs text-slate-800";
   const trClass = "h-[24px] border-b border-slate-100";
+  const stickyActionHeaderClass = "sticky right-0 z-20 bg-slate-50 border-l border-slate-200 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
+  const stickyActionCellClass = "sticky right-0 z-[5] border-l border-slate-200 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
+  const reconcileTextClampClass = "block min-w-0 max-w-[22rem] overflow-hidden text-ellipsis whitespace-nowrap xl:max-w-[30rem] xl:whitespace-normal xl:[display:-webkit-box] xl:[-webkit-line-clamp:2] xl:[-webkit-box-orient:vertical]";
 
   function EmptyState({ label }: { label: string }) {
     return (
@@ -3295,13 +3298,13 @@ const displayBankActiveList = useMemo(() => {
                 <EmptyState label={expectedTab === "expected" ? "No expected entries in this period" : "No matched entries in this period"} />
               ) : (
                 <>
-                  <table className="w-full min-w-[680px] table-fixed border-collapse">
+                  <table className="w-full min-w-[740px] table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 110 }} />
-                    <col />
-                    <col style={{ width: 140 }} />
-                    <col style={{ width: 120 }} />
-                    <col style={{ width: 90 }} />
+                    <col style={{ width: 104 }} />
+                    <col style={{ width: 260 }} />
+                    <col style={{ width: 128 }} />
+                    <col style={{ width: 132 }} />
+                    <col style={{ width: 116 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -3310,7 +3313,7 @@ const displayBankActiveList = useMemo(() => {
                       <th className={thClass}>PAYEE</th>
                       <th className={`${thClass} text-right pr-4`}>AMOUNT</th>
                       <th className={`${thClass} pl-8.5`}>STATUS</th>
-                      <th className={`${thClass} text-right`}>ACTIONS</th>
+                      <th className={`${thClass} ${stickyActionHeaderClass} text-right pr-2`}>ACTIONS</th>
                     </tr>
                   </thead>
 
@@ -3326,6 +3329,7 @@ const displayBankActiveList = useMemo(() => {
                       const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
 
                       const rowTone = isMatched ? " bg-primary/10" : isOptimisticPending ? " bg-amber-50/70" : "";
+                      const actionCellBg = isMatched ? "bg-primary/10" : isOptimisticPending ? "bg-amber-50" : "bg-white";
 
                       const deEmphasis = expectedTab === "matched" ? " text-slate-600" : "";
 
@@ -3355,7 +3359,9 @@ const displayBankActiveList = useMemo(() => {
                           title={expectedTab === "matched" ? "View audit detail" : undefined}
                         >
                           <td className={`${tdClass} text-center${deEmphasis}`}>{e.date}</td>
-                          <td className={`${tdClass} font-medium truncate${deEmphasis}`}>{payee}</td>
+                          <td className={`${tdClass} font-medium min-w-0${deEmphasis}`} title={payee}>
+                            <span className={reconcileTextClampClass}>{payee}</span>
+                          </td>
                           <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-center pl-3${deEmphasis}`}>
                             <div className="inline-flex items-center justify-center gap-2">
@@ -3366,7 +3372,7 @@ const displayBankActiveList = useMemo(() => {
                               {hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
                             </div>
                           </td>
-                          <td className={`${tdClass} text-right`}>
+                          <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2`}>
                             <div className="flex items-center justify-end gap-2">
                               {pendingById[String(e.id)] || isOptimisticPending ? <TinySpinner /> : null}
 
@@ -3628,13 +3634,13 @@ const displayBankActiveList = useMemo(() => {
                 />
               ) : bankPanelShowRows ? (
                 <>
-                  <table className="w-full min-w-[720px] table-fixed border-collapse">
+                  <table className="w-full min-w-[760px] table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 36 }} />
-                    <col style={{ width: 110 }} />
-                    <col />
-                    <col style={{ width: 140 }} />
-                    <col style={{ width: 110 }} />
+                    <col style={{ width: 40 }} />
+                    <col style={{ width: 104 }} />
+                    <col style={{ width: 300 }} />
+                    <col style={{ width: 128 }} />
+                    <col style={{ width: 188 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -3662,7 +3668,7 @@ const displayBankActiveList = useMemo(() => {
                       <th className={`${thClass} pl-8.5`}>DATE</th>
                       <th className={thClass}>DESCRIPTION</th>
                       <th className={`${thClass} text-right pr-4`}>AMOUNT</th>
-                      <th className={`${thClass} text-right`}>ACTIONS</th>
+                      <th className={`${thClass} ${stickyActionHeaderClass} text-right pr-2`}>ACTIONS</th>
                     </tr>
                   </thead>
 
@@ -3686,6 +3692,7 @@ const displayBankActiveList = useMemo(() => {
                         activeGroupByBankTxnId.has(String(t.id)) ||
                         activeLegacyMatchByBankTxnId.has(String(t.id));
                       const rowTone = isMatched ? " bg-primary/10" : "";
+                      const actionCellBg = isMatched ? "bg-primary/10" : "bg-white";
 
                       const deEmphasis = bankTab === "matched" ? " text-slate-600" : "";
 
@@ -3739,9 +3746,9 @@ const displayBankActiveList = useMemo(() => {
                           </td>
 
                           <td className={`${tdClass} text-center${deEmphasis}`}>{dateStr}</td>
-                          <td className={`${tdClass} font-medium truncate${deEmphasis}`}>
+                          <td className={`${tdClass} font-medium min-w-0${deEmphasis}`} title={String(t.name ?? "")}>
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="truncate">{t.name}</span>
+                              <span className={reconcileTextClampClass}>{t.name}</span>
 
                               {hasVoidByBankTxnId.has(String(t.id)) ? (
                                 <button
@@ -3771,7 +3778,7 @@ const displayBankActiveList = useMemo(() => {
                             {formatUsdFromCents(amt)}
                           </td>
 
-                          <td className={`${tdClass} text-right`}>
+                          <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2`}>
                             <div className="flex items-center justify-end gap-2">
                               {pendingById[String(t.id)] ? <TinySpinner /> : null}
 
