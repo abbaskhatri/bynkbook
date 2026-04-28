@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
@@ -1520,14 +1520,14 @@ const isReconcileExemptEntry = (e: any) => {
   }, [matchGroups]);
 
   // Treat voided matches as inactive (UI-only safety; listMatches may already exclude them)
-  const isActiveMatch = (x: any) => {
+  const isActiveMatch = useCallback((x: any) => {
     if (!x) return false;
     if (x.voided_at) return false;
     if (x.voidedAt) return false;
     if (x.is_voided) return false;
     if (x.isVoided) return false;
     return true;
-  };
+  }, []);
 
   // Legacy helper (v1 BankMatch). Keep for CSV export + "Not in view" diagnostics only.
   function stableLegacyMatchId(x: any) {
