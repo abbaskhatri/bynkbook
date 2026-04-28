@@ -3364,13 +3364,13 @@ const displayBankActiveList = useMemo(() => {
                 <EmptyState label={expectedTab === "expected" ? "No expected entries in this period" : "No matched entries in this period"} />
               ) : (
                 <>
-                  <table className="w-full min-w-[740px] table-fixed border-collapse">
+                  <table className="w-full min-w-[704px] table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 104 }} />
-                    <col style={{ width: 260 }} />
-                    <col style={{ width: 128 }} />
-                    <col style={{ width: 132 }} />
+                    <col style={{ width: 96 }} />
+                    <col style={{ width: 276 }} />
+                    <col style={{ width: 112 }} />
                     <col style={{ width: 116 }} />
+                    <col style={{ width: 104 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -3378,7 +3378,7 @@ const displayBankActiveList = useMemo(() => {
                       <th className={`${thClass} pl-8.5`}>DATE</th>
                       <th className={thClass}>PAYEE</th>
                       <th className={`${thClass} text-right pr-4`}>AMOUNT</th>
-                      <th className={`${thClass} pl-8.5`}>STATUS</th>
+                      <th className={`${thClass} text-right pr-2`}>STATUS</th>
                       <th className={`${thClass} ${stickyActionHeaderClass} text-right pr-2`}>ACTIONS</th>
                     </tr>
                   </thead>
@@ -3429,8 +3429,8 @@ const displayBankActiveList = useMemo(() => {
                             <span className={reconcileTextClampClass}>{payee}</span>
                           </td>
                           <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
-                          <td className={`${tdClass} text-center pl-3${deEmphasis}`}>
-                            <div className="inline-flex items-center justify-center gap-2">
+                          <td className={`${tdClass} text-right pr-2${deEmphasis}`}>
+                            <div className="inline-flex items-center justify-end gap-1.5">
                               <StatusChip
                                 label={isOptimisticPending ? "Saving" : isMatched ? "Matched" : "Expected"}
                                 tone={isOptimisticPending ? "warning" : isMatched ? "success" : "default"}
@@ -3439,7 +3439,7 @@ const displayBankActiveList = useMemo(() => {
                             </div>
                           </td>
                           <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2`}>
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1.5">
                               {pendingById[String(e.id)] || isOptimisticPending ? <TinySpinner /> : null}
 
                               {isOptimisticPending ? null : expectedTab === "matched" ? (
@@ -3700,13 +3700,13 @@ const displayBankActiveList = useMemo(() => {
                 />
               ) : bankPanelShowRows ? (
                 <>
-                  <table className="w-full min-w-[760px] table-fixed border-collapse">
+                  <table className="w-full min-w-[700px] table-fixed border-collapse">
                   <colgroup>
-                    <col style={{ width: 40 }} />
-                    <col style={{ width: 104 }} />
+                    <col style={{ width: 36 }} />
+                    <col style={{ width: 96 }} />
                     <col style={{ width: 300 }} />
-                    <col style={{ width: 128 }} />
-                    <col style={{ width: 188 }} />
+                    <col style={{ width: 112 }} />
+                    <col style={{ width: 156 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
@@ -3845,7 +3845,7 @@ const displayBankActiveList = useMemo(() => {
                           </td>
 
                           <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2`}>
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1.5">
                               {pendingById[String(t.id)] ? <TinySpinner /> : null}
 
                               {bulkCreateResultByBankTxnId[String(t.id)] ? (
