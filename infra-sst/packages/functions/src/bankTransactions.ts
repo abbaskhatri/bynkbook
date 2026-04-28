@@ -71,6 +71,164 @@ function absBig(n: bigint) {
   return n < 0n ? -n : n;
 }
 
+const POSSIBLE_DUPLICATE_ENTRY_CODE = "POSSIBLE_DUPLICATE_ENTRY";
+const POSSIBLE_DUPLICATE_ENTRY_MESSAGE =
+  "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
+const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
+
+function dateOnlyUtc(ymd: string) {
+  return new Date(`${ymd}T00:00:00Z`);
+}
+
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function isOpeningEntryLike(entry: any) {
+  const payee = String(entry?.payee ?? "").trim().toLowerCase();
+  const memo = String(entry?.memo ?? "").trim().toLowerCase();
+  return (
+    payee === "opening balance" ||
+    payee === "opening balance (estimated)" ||
+    payee.startsWith("opening balance") ||
+    memo.includes("opening balance")
+  );
+}
+
+function isDuplicatePreflightEligibleEntry(entry: any) {
+  const type = String(entry?.type ?? "").trim().toUpperCase();
+  const status = String(entry?.status ?? "").trim().toUpperCase();
+  const kind = String(entry?.entry_kind ?? "").trim().toUpperCase();
+
+  if (entry?.deleted_at) return false;
+  if (entry?.is_adjustment === true) return false;
+  if (entry?.transfer_id) return false;
+  if (type === "ADJUSTMENT" || type === "TRANSFER") return false;
+  if (status === "VOID" || status === "VOIDED" || status === "DELETED") return false;
+  if (kind === "OPENING" || kind === "TRANSFER") return false;
+  if (isOpeningEntryLike(entry)) return false;
+
+  return true;
+}
+
+function duplicateTokens(value: any) {
+  const stop = new Set([
+    "ach",
+    "bank",
+    "card",
+    "check",
+    "co",
+    "debit",
+    "deposit",
+    "online",
+    "payment",
+    "pos",
+    "purchase",
+    "transaction",
+    "txn",
+    "visa",
+    "withdrawal",
+  ]);
+
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !stop.has(token));
+}
+
+function normalizedDuplicateText(value: any) {
+  return duplicateTokens(value).join(" ");
+}
+
+function hasSimilarPayee(bankDescription: any, entry: any) {
+  const bankTokens = duplicateTokens(bankDescription);
+  if (bankTokens.length === 0) return false;
+
+  const entryTokens = duplicateTokens(`${entry?.payee ?? ""} ${entry?.memo ?? ""}`);
+  if (entryTokens.length === 0) return false;
+
+  const entryTokenSet = new Set(entryTokens);
+  if (bankTokens.some((token) => token.length >= 4 && entryTokenSet.has(token))) return true;
+
+  const bankText = normalizedDuplicateText(bankDescription);
+  const entryText = normalizedDuplicateText(`${entry?.payee ?? ""} ${entry?.memo ?? ""}`);
+  if (!bankText || !entryText) return false;
+
+  return bankTokens.some((token) => token.length >= 4 && entryText.includes(token)) ||
+    entryTokens.some((token) => token.length >= 4 && bankText.includes(token));
+}
+
+function duplicateCandidatePayload(entry: any) {
+  return {
+    entry_id: entry.id,
+    date: isoToYmd(entry.date),
+    payee: entry.payee ?? null,
+    memo: entry.memo ?? null,
+    amount_cents: entry.amount_cents,
+    status: entry.status ?? null,
+  };
+}
+
+async function findPossibleCreateEntryDuplicates(args: {
+  prisma: any;
+  businessId: string;
+  accountId: string;
+  bankTransactionId: string;
+  bankTxn: any;
+  entryAmountCents: bigint;
+  entryDateYmd: string;
+}) {
+  const { prisma, businessId, accountId, bankTransactionId, bankTxn, entryAmountCents, entryDateYmd } = args;
+  const entryDate = dateOnlyUtc(entryDateYmd);
+  if (Number.isNaN(entryDate.getTime())) return [];
+
+  const bankAbs = absBig(BigInt(bankTxn.amount_cents));
+  const amountCandidates = Array.from(new Set([entryAmountCents, bankAbs, -bankAbs].map((v) => v.toString()))).map((v) => BigInt(v));
+
+  const rows = await prisma.entry.findMany({
+    where: {
+      business_id: businessId,
+      account_id: accountId,
+      deleted_at: null,
+      date: {
+        gte: addUtcDays(entryDate, -CREATE_ENTRY_DUPLICATE_WINDOW_DAYS),
+        lte: addUtcDays(entryDate, CREATE_ENTRY_DUPLICATE_WINDOW_DAYS),
+      },
+      amount_cents: { in: amountCandidates },
+    } as any,
+    select: {
+      id: true,
+      date: true,
+      payee: true,
+      memo: true,
+      amount_cents: true,
+      type: true,
+      status: true,
+      entry_kind: true,
+      deleted_at: true,
+      is_adjustment: true,
+      transfer_id: true,
+      sourceBankTransactionId: true,
+    } as any,
+    orderBy: [{ date: "desc" as any }, { created_at: "desc" as any }],
+    take: 10,
+  });
+
+  return rows
+    .filter((entry: any) => String(entry?.sourceBankTransactionId ?? "") !== bankTransactionId)
+    .filter(isDuplicatePreflightEligibleEntry)
+    .filter((entry: any) => hasSimilarPayee(bankTxn.name, entry))
+    .slice(0, 5)
+    .map(duplicateCandidatePayload);
+}
+
 function isoToYmd(iso: any): string {
   try {
     return new Date(String(iso)).toISOString().slice(0, 10);
@@ -492,6 +650,27 @@ export async function handler(event: any) {
             continue;
           }
 
+          const possibleDuplicateCandidates = await findPossibleCreateEntryDuplicates({
+            prisma,
+            businessId,
+            accountId,
+            bankTransactionId: bankId,
+            bankTxn,
+            entryAmountCents,
+            entryDateYmd,
+          });
+
+          if (possibleDuplicateCandidates.length > 0) {
+            results.push({
+              bank_transaction_id: bankId,
+              status: "SKIPPED",
+              code: POSSIBLE_DUPLICATE_ENTRY_CODE,
+              error: POSSIBLE_DUPLICATE_ENTRY_MESSAGE,
+              possible_duplicate_candidates: possibleDuplicateCandidates,
+            });
+            continue;
+          }
+
           const entryId = randomUUID();
           let createdMatchGroupId: string | null = null;
 
@@ -822,6 +1001,25 @@ export async function handler(event: any) {
           entry_id: existing.id,
           match_group_id: createdMatchGroupId,
           auto_matched: !!createdMatchGroupId,
+        });
+      }
+
+      const possibleDuplicateCandidates = await findPossibleCreateEntryDuplicates({
+        prisma,
+        businessId,
+        accountId,
+        bankTransactionId,
+        bankTxn,
+        entryAmountCents,
+        entryDateYmd,
+      });
+
+      if (possibleDuplicateCandidates.length > 0) {
+        return json(409, {
+          ok: false,
+          code: POSSIBLE_DUPLICATE_ENTRY_CODE,
+          error: POSSIBLE_DUPLICATE_ENTRY_MESSAGE,
+          possible_duplicate_candidates: possibleDuplicateCandidates,
         });
       }
 

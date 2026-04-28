@@ -14,6 +14,36 @@ function event(queryStringParameters: Record<string, string>, businessId = "biz-
   };
 }
 
+function postCreateEntryEvent(bankTransactionId: string, body: Record<string, any> = {}, businessId = "biz-1", accountId = "acct-1") {
+  return {
+    pathParameters: { businessId, accountId, bankTransactionId },
+    queryStringParameters: {},
+    body: JSON.stringify(body),
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "actor" } } },
+      http: {
+        method: "POST",
+        path: `/v1/businesses/${businessId}/accounts/${accountId}/bank-transactions/${bankTransactionId}/create-entry`,
+      },
+    },
+  };
+}
+
+function postCreateEntriesBatchEvent(body: Record<string, any> = {}, businessId = "biz-1", accountId = "acct-1") {
+  return {
+    pathParameters: { businessId, accountId },
+    queryStringParameters: {},
+    body: JSON.stringify(body),
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "actor" } } },
+      http: {
+        method: "POST",
+        path: `/v1/businesses/${businessId}/accounts/${accountId}/bank-transactions/create-entries-batch`,
+      },
+    },
+  };
+}
+
 function project(row: any, select: any) {
   if (!select) return { ...row };
   return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, row[key]]));
@@ -39,9 +69,50 @@ function tx(id: string, posted: string, created: string, overrides: Record<strin
   };
 }
 
+function entry(id: string, date: string, amountCents: bigint, overrides: Record<string, any> = {}) {
+  return {
+    id,
+    business_id: "biz-1",
+    account_id: "acct-1",
+    date: new Date(`${date}T00:00:00.000Z`),
+    payee: id,
+    memo: "",
+    amount_cents: amountCents,
+    type: amountCents >= 0n ? "INCOME" : "EXPENSE",
+    method: "OTHER",
+    status: "EXPECTED",
+    entry_kind: "GENERAL",
+    deleted_at: null,
+    is_adjustment: false,
+    transfer_id: null,
+    sourceBankTransactionId: null,
+    created_at: new Date(`${date}T12:00:00.000Z`),
+    updated_at: new Date(`${date}T12:00:00.000Z`),
+    ...overrides,
+  };
+}
+
 function matchesScalar(value: any, expected: any) {
   if (expected instanceof Date && value instanceof Date) return value.getTime() === expected.getTime();
   return value === expected;
+}
+
+function matchesObjectFilter(value: any, expected: any): boolean {
+  if (expected?.in && !expected.in.some((v: any) => matchesScalar(value, v))) return false;
+  if (expected?.notIn && expected.notIn.some((v: any) => matchesScalar(value, v))) return false;
+  if ("not" in expected && matchesScalar(value, expected.not)) return false;
+
+  if (value instanceof Date) {
+    if (expected.gte && value.getTime() < expected.gte.getTime()) return false;
+    if (expected.lte && value.getTime() > expected.lte.getTime()) return false;
+    if (expected.lt && value.getTime() >= expected.lt.getTime()) return false;
+  } else {
+    if (expected.gte != null && !(value >= expected.gte)) return false;
+    if (expected.lte != null && !(value <= expected.lte)) return false;
+    if (expected.lt != null && !(value < expected.lt)) return false;
+  }
+
+  return true;
 }
 
 function rowMatchesWhere(row: any, where: any): boolean {
@@ -58,22 +129,8 @@ function rowMatchesWhere(row: any, where: any): boolean {
       continue;
     }
 
-    if (key === "id" && expected && typeof expected === "object") {
-      const idsIn = (expected as any).in as string[] | undefined;
-      const idsNotIn = (expected as any).notIn as string[] | undefined;
-      const idLt = (expected as any).lt as string | undefined;
-      if (idsIn && !idsIn.includes(row.id)) return false;
-      if (idsNotIn && idsNotIn.includes(row.id)) return false;
-      if (idLt && !(row.id < idLt)) return false;
-      continue;
-    }
-
-    if ((key === "posted_date" || key === "created_at") && expected && typeof expected === "object" && !(expected instanceof Date)) {
-      const value = row[key] as Date;
-      const exp = expected as any;
-      if (exp.gte && value.getTime() < exp.gte.getTime()) return false;
-      if (exp.lte && value.getTime() > exp.lte.getTime()) return false;
-      if (exp.lt && value.getTime() >= exp.lt.getTime()) return false;
+    if (expected && typeof expected === "object" && !(expected instanceof Date)) {
+      if (!matchesObjectFilter(row[key], expected)) return false;
       continue;
     }
 
@@ -85,10 +142,22 @@ function rowMatchesWhere(row: any, where: any): boolean {
 
 async function loadHandler(options: {
   rows: any[];
+  entries?: any[];
   matchGroupBankIds?: string[];
   bankMatchIds?: string[];
+  activeGroupIds?: string[];
+  bankTransactionsInActiveGroups?: string[];
 }) {
   vi.resetModules();
+
+  const entries = [...(options.entries ?? [])];
+  const matchGroups: any[] = (options.activeGroupIds ?? []).map((id) => ({
+    id,
+    business_id: "biz-1",
+    account_id: "acct-1",
+    status: "ACTIVE",
+  }));
+  const bankTransactionsInActiveGroups = new Set(options.bankTransactionsInActiveGroups ?? []);
 
   const prisma = {
     userBusinessRole: {
@@ -105,13 +174,52 @@ async function loadHandler(options: {
       findMany: vi.fn(async (args: any) =>
         (options.matchGroupBankIds ?? []).map((id) => project({ bank_transaction_id: id }, args?.select))
       ),
+      findFirst: vi.fn(async (args: any) => {
+        const bankId = String(args?.where?.bank_transaction_id ?? "");
+        return bankTransactionsInActiveGroups.has(bankId) ? project({ match_group_id: "group-active" }, args?.select) : null;
+      }),
+      create: vi.fn(async (args: any) => project(args?.data ?? {}, args?.select)),
     },
     bankMatch: {
       findMany: vi.fn(async (args: any) =>
         (options.bankMatchIds ?? []).map((id) => project({ bank_transaction_id: id }, args?.select))
       ),
     },
+    matchGroup: {
+      findMany: vi.fn(async (args: any) =>
+        matchGroups
+          .filter((row) => rowMatchesWhere(row, args?.where))
+          .map((row) => project(row, args?.select))
+      ),
+      create: vi.fn(async (args: any) => {
+        matchGroups.push(args?.data);
+        return project(args?.data ?? {}, args?.select);
+      }),
+    },
+    matchGroupEntry: {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async (args: any) => project(args?.data ?? {}, args?.select)),
+    },
+    entry: {
+      findFirst: vi.fn(async (args: any) => {
+        const found = entries.find((row) => rowMatchesWhere(row, args?.where));
+        return found ? project(found, args?.select) : null;
+      }),
+      findMany: vi.fn(async (args: any) => {
+        const filtered = entries.filter((row) => rowMatchesWhere(row, args?.where));
+        return filtered.map((row) => project(row, args?.select));
+      }),
+      create: vi.fn(async (args: any) => {
+        const row = { ...(args?.data ?? {}) };
+        entries.push(row);
+        return project(row, args?.select);
+      }),
+    },
     bankTransaction: {
+      findFirst: vi.fn(async (args: any) => {
+        const found = options.rows.find((row) => rowMatchesWhere(row, args?.where));
+        return found ? project(found, args?.select) : null;
+      }),
       findMany: vi.fn(async (args: any) => {
         const filtered = options.rows
           .filter((row) => rowMatchesWhere(row, args?.where))
@@ -127,10 +235,26 @@ async function loadHandler(options: {
         return filtered.map((row) => project(row, args?.select));
       }),
     },
+    $transaction: vi.fn(async (arg: any) => {
+      if (typeof arg === "function") return arg(prisma);
+      return Promise.all(arg);
+    }),
   };
 
   vi.doMock("./lib/db", () => ({
     getPrisma: vi.fn(async () => prisma),
+  }));
+  vi.doMock("./lib/authz", () => ({
+    authorizeWrite: vi.fn(async () => ({ allowed: true })),
+  }));
+  vi.doMock("./lib/closedPeriods", () => ({
+    assertNotClosedPeriod: vi.fn(async () => ({ ok: true })),
+  }));
+  vi.doMock("./lib/activityLog", () => ({
+    logActivity: vi.fn(async () => undefined),
+  }));
+  vi.doMock("./lib/categoryMemoryWriteback", () => ({
+    writeCategoryMemoryFeedback: vi.fn(async () => undefined),
   }));
 
   const mod = await import("./bankTransactions");
@@ -249,5 +373,138 @@ describe("bank transactions list status and pagination", () => {
         }),
       })
     );
+  });
+});
+
+describe("bank transaction create-entry duplicate preflight", () => {
+  test("blocks when same account/date/amount/similar payee manual entry exists", async () => {
+    const rows = [tx("bank-dup", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
+    const manual = entry("entry-dup", "2026-04-26", -1250n, { payee: "Coffee House", memo: "Manual expected entry" });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(postCreateEntryEvent("bank-dup", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("POSSIBLE_DUPLICATE_ENTRY");
+    expect(body.possible_duplicate_candidates).toEqual([
+      expect.objectContaining({ entry_id: "entry-dup", payee: "Coffee House" }),
+    ]);
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("allows create-entry-and-match when no similar entry exists", async () => {
+    const rows = [tx("bank-safe", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
+    const unrelated = entry("entry-rent", "2026-04-26", -1250n, { payee: "Office rent", memo: "April rent" });
+    const { handler, prisma } = await loadHandler({ rows, entries: [unrelated], activeGroupIds: ["group-active"] });
+
+    const res = await handler(postCreateEntryEvent("bank-safe", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(body.auto_matched).toBe(true);
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+    expect(prisma.matchGroup.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("bulk create skips duplicate candidates and reports them", async () => {
+    const rows = [
+      tx("bank-dup", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n }),
+      tx("bank-safe", "2026-04-27", "2026-04-27T12:00:00.000Z", { name: "Hardware Store", amount_cents: -4500n }),
+    ];
+    const manual = entry("entry-dup", "2026-04-25", -1250n, { payee: "Coffee House", memo: "Expected coffee" });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(
+      postCreateEntriesBatchEvent({
+        items: [
+          { bank_transaction_id: "bank-dup", autoMatch: true },
+          { bank_transaction_id: "bank-safe", autoMatch: true },
+        ],
+      })
+    );
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.results).toEqual([
+      expect.objectContaining({
+        bank_transaction_id: "bank-dup",
+        status: "SKIPPED",
+        code: "POSSIBLE_DUPLICATE_ENTRY",
+      }),
+      expect.objectContaining({
+        bank_transaction_id: "bank-safe",
+        status: "CREATED",
+      }),
+    ]);
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("matched/manual candidate can still block duplicate creation", async () => {
+    const rows = [tx("bank-matched-manual", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "ACME SUPPLIES", amount_cents: -3300n })];
+    const matchedManual = entry("entry-matched-manual", "2026-04-28", -3300n, {
+      payee: "Acme Supplies",
+      memo: "Already matched manually",
+    });
+    const { handler, prisma } = await loadHandler({ rows, entries: [matchedManual], activeGroupIds: ["group-active"] });
+
+    const res = await handler(postCreateEntryEvent("bank-matched-manual", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("POSSIBLE_DUPLICATE_ENTRY");
+    expect(body.possible_duplicate_candidates[0]).toEqual(expect.objectContaining({ entry_id: "entry-matched-manual" }));
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+  });
+
+  test("deleted and voided entries do not block duplicate creation", async () => {
+    const rows = [tx("bank-deleted-safe", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "ACME SUPPLIES", amount_cents: -3300n })];
+    const deleted = entry("entry-deleted", "2026-04-26", -3300n, {
+      payee: "Acme Supplies",
+      deleted_at: new Date("2026-04-27T00:00:00.000Z"),
+    });
+    const voided = entry("entry-voided", "2026-04-26", -3300n, {
+      payee: "Acme Supplies",
+      status: "VOIDED",
+    });
+    const { handler, prisma } = await loadHandler({ rows, entries: [deleted, voided] });
+
+    const res = await handler(postCreateEntryEvent("bank-deleted-safe", { autoMatch: false }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(body.auto_matched).toBe(false);
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("business/account scoping is preserved for duplicate candidates", async () => {
+    const rows = [tx("bank-scoped-safe", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "ACME SUPPLIES", amount_cents: -3300n })];
+    const otherBusiness = entry("entry-other-business", "2026-04-26", -3300n, {
+      business_id: "biz-2",
+      payee: "Acme Supplies",
+    });
+    const otherAccount = entry("entry-other-account", "2026-04-26", -3300n, {
+      account_id: "acct-2",
+      payee: "Acme Supplies",
+    });
+    const { handler, prisma } = await loadHandler({ rows, entries: [otherBusiness, otherAccount] });
+
+    const res = await handler(postCreateEntryEvent("bank-scoped-safe", { autoMatch: false }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(prisma.entry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          business_id: "biz-1",
+          account_id: "acct-1",
+        }),
+      })
+    );
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
   });
 });

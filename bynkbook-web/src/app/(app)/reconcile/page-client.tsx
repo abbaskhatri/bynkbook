@@ -459,6 +459,27 @@ export default function ReconcilePageClient() {
     return { msg: String(msg), isClosed: false };
   }
 
+  const possibleDuplicateEntryMessage =
+    "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
+
+  function possibleDuplicateCreateEntryMessage(e: any) {
+    const directCode = e?.code || e?.payload?.code || e?.data?.code || e?.response?.data?.code;
+    if (directCode === "POSSIBLE_DUPLICATE_ENTRY") return possibleDuplicateEntryMessage;
+
+    const msg = String(e?.message ?? "");
+    const jsonStart = msg.indexOf("{");
+    if (jsonStart >= 0) {
+      try {
+        const payload = JSON.parse(msg.slice(jsonStart));
+        if (payload?.code === "POSSIBLE_DUPLICATE_ENTRY") return possibleDuplicateEntryMessage;
+      } catch {
+        // Fall through to the string check below.
+      }
+    }
+
+    return msg.includes("POSSIBLE_DUPLICATE_ENTRY") ? possibleDuplicateEntryMessage : null;
+  }
+
   // -------------------------
   // Phase 6A: Permission guardrails (deny-by-default)
   // -------------------------
@@ -2878,6 +2899,13 @@ const displayBankActiveList = useMemo(() => {
                             return next;
                           });
 
+                          const duplicateMessage = possibleDuplicateCreateEntryMessage(e);
+                          if (duplicateMessage) {
+                            clearMutErr();
+                            setCreateEntryErr(duplicateMessage);
+                            return;
+                          }
+
                           applyMutationError(e, "Can’t create entry");
                           setCreateEntryErr(null);
                         } finally {
@@ -3212,6 +3240,7 @@ const displayBankActiveList = useMemo(() => {
                       if (!canWriteReconcileEffective) return;
 
                       clearMutErr();
+                      setCreateEntryErr(null);
 
                       const ids = Array.from(selectedBankTxnIds);
                       for (const id of ids) markPending(String(id));
@@ -3239,6 +3268,11 @@ const displayBankActiveList = useMemo(() => {
                         );
 
                         const list = Array.isArray(res?.results) ? res.results : [];
+                        const hasPossibleDuplicate = list.some(
+                          (r: any) => String(r?.code ?? "") === "POSSIBLE_DUPLICATE_ENTRY"
+                        );
+                        setCreateEntryErr(hasPossibleDuplicate ? possibleDuplicateEntryMessage : null);
+
                         setBulkCreateResultByBankTxnId((m) => {
                           const next = { ...m };
                           for (const r of list) {
