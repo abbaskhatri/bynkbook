@@ -136,7 +136,8 @@ function formatUsdFromCents(cents: bigint) {
 
 function ymdToTime(ymd: string): number {
   try {
-    return new Date(`${ymd}T00:00:00Z`).getTime();
+    const n = new Date(`${ymd}T00:00:00Z`).getTime();
+    return Number.isFinite(n) ? n : 0;
   } catch {
     return 0;
   }
@@ -333,6 +334,39 @@ function mergeBankTransactions(...lists: any[][]): any[] {
     }
   }
   return Array.from(m.values());
+}
+
+function compareEntryDateAsc(a: any, b: any) {
+  const da = ymdToTime(String(a?.date ?? ""));
+  const db = ymdToTime(String(b?.date ?? ""));
+  if (da !== db) return da - db;
+  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+}
+
+function compareEntryDateDesc(a: any, b: any) {
+  const da = ymdToTime(String(a?.date ?? ""));
+  const db = ymdToTime(String(b?.date ?? ""));
+  if (da !== db) return db - da;
+  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+}
+
+function bankPostedTime(t: any) {
+  const n = new Date(t?.posted_date).getTime();
+  return Number.isFinite(n) ? n : 0;
+}
+
+function compareBankDateAsc(a: any, b: any) {
+  const da = bankPostedTime(a);
+  const db = bankPostedTime(b);
+  if (da !== db) return da - db;
+  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+}
+
+function compareBankDateDesc(a: any, b: any) {
+  const da = bankPostedTime(a);
+  const db = bankPostedTime(b);
+  if (da !== db) return db - da;
+  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
 }
 
 export default function ReconcilePageClient() {
@@ -1504,25 +1538,27 @@ const isReconcileExemptEntry = (e: any) => {
 
   const allEntriesSorted = useMemo(() => {
     const arr = [...allEntries];
-    arr.sort((a: any, b: any) => {
-      const da = new Date(`${a.date}T00:00:00Z`).getTime();
-      const db = new Date(`${b.date}T00:00:00Z`).getTime();
-      if (da !== db) return da - db;
-      return String(a.id).localeCompare(String(b.id));
-    });
+    arr.sort(compareEntryDateAsc);
     return arr;
   }, [allEntries]);
 
+  const allEntriesNewestFirst = useMemo(() => {
+    const arr = [...allEntriesSorted];
+    arr.sort(compareEntryDateDesc);
+    return arr;
+  }, [allEntriesSorted]);
+
   const bankTxSorted = useMemo(() => {
     const arr = [...bankTx];
-    arr.sort((a: any, b: any) => {
-      const da = new Date(a.posted_date).getTime();
-      const db = new Date(b.posted_date).getTime();
-      if (da !== db) return da - db;
-      return String(a.id).localeCompare(String(b.id));
-    });
+    arr.sort(compareBankDateAsc);
     return arr;
   }, [bankTx]);
+
+  const bankTxNewestFirst = useMemo(() => {
+    const arr = [...bankTxSorted];
+    arr.sort(compareBankDateDesc);
+    return arr;
+  }, [bankTxSorted]);
 
   const entryByIdFast = useMemo(() => {
     const m = new Map<string, any>();
@@ -2277,16 +2313,9 @@ const isReconcileExemptEntry = (e: any) => {
   // Tabs: Expected Entries (Phase 2: cap rendered rows for instant tab switches)
   const entriesExpectedList = useMemo(() => {
     const out: any[] = [];
+    const orderedEntries = [...optimisticPendingEntryDrafts, ...allEntriesSorted].sort(compareEntryDateAsc);
 
-    for (const e of optimisticPendingEntryDrafts) {
-      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
-      if (!matchesRowSearch(hay)) continue;
-
-      out.push(e);
-      if (out.length >= expectedVisibleN) return out;
-    }
-
-    for (const e of allEntriesSorted) {
+    for (const e of orderedEntries) {
       if (matchedEntryIdSet.has(e.id)) continue;
       if (isAdjustedEntry(e)) continue;
       if (isReconcileExemptEntry(e)) continue;
@@ -2302,7 +2331,7 @@ const isReconcileExemptEntry = (e: any) => {
 
   const entriesMatchedList = useMemo(() => {
     const out: any[] = [];
-    for (const e of allEntriesSorted) {
+    for (const e of allEntriesNewestFirst) {
       if (!matchedEntryIdSet.has(e.id)) continue;
       if (isReconcileExemptEntry(e)) continue;
 
@@ -2313,7 +2342,7 @@ const isReconcileExemptEntry = (e: any) => {
       if (out.length >= matchedVisibleN) break;
     }
     return out;
-  }, [allEntriesSorted, matchedEntryIdSet, searchQ, matchedVisibleN, accountsQ.data, selectedAccountId]);
+  }, [allEntriesNewestFirst, matchedEntryIdSet, searchQ, matchedVisibleN, accountsQ.data, selectedAccountId]);
 
   // Counts (uncapped) for tab labels — computed cheaply in one pass
   const { expectedCount, matchedCount } = useMemo(() => {
@@ -2365,7 +2394,7 @@ const isReconcileExemptEntry = (e: any) => {
 
   const bankMatchedList = useMemo(() => {
     const out: any[] = [];
-    for (const t of bankTxSorted) {
+    for (const t of bankTxNewestFirst) {
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
       if (!matchesRowSearch(hay)) continue;
 
@@ -2377,7 +2406,7 @@ const isReconcileExemptEntry = (e: any) => {
       if (out.length >= bankMatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankMatchedVisibleN]);
+  }, [bankTxNewestFirst, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankMatchedVisibleN]);
 
   // Counts (uncapped) for tab labels
   const { bankUnmatchedCount, bankMatchedCount } = useMemo(() => {

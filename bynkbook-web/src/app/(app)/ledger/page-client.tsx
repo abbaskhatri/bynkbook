@@ -373,11 +373,22 @@ function statusTone(
 
   if (s === "DELETED") return "danger";
   if (s === "MATCHED") return "success";
+  if (s === "CLEARED") return "success";
   if (s === "PARTIAL") return "warning";
   if (s === "EXPECTED") return "default";
 
   return "default";
 }
+
+function statusLabel(status: string) {
+  const s = String(status || "").trim();
+  if (!s) return "Expected";
+  return s
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function isOpeningLikePayee(payee: string | null | undefined): boolean {
   const x = String(payee ?? "").trim().toLowerCase();
   return x === "opening balance" || x === "opening balance (estimated)" || x.startsWith("opening balance");
@@ -1257,13 +1268,13 @@ export default function LedgerPageClient() {
     return ids;
   }, [anomaliesQ.data]);
 
-  // MatchGroups (ACTIVE) drive ledger reconciliation status (Expected / Partial / Matched)
+  // MatchGroups (ACTIVE) drive the separate bank-match indicator, not the ledger entry status.
   const matchGroupsQ = useQuery({
     queryKey: ["matchGroups", selectedBusinessId, selectedAccountId],
     enabled: !!selectedBusinessId && !!selectedAccountId,
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId) return { items: [] as any[] };
-      // status=active is sufficient for ledger status pills
+      // status=active is sufficient for the ledger bank-match indicator.
       return listMatchGroups({ businessId: selectedBusinessId, accountId: selectedAccountId, status: "active" } as any);
     },
     staleTime: 15_000,
@@ -1609,39 +1620,34 @@ export default function LedgerPageClient() {
 
         status: (() => {
           if (isDeleted) return "Deleted";
-
-          const t = String(e.type ?? "").toUpperCase();
-
-          // Opening balances and adjustments are always considered legitimate/resolved in ledger UX
-          if (t === "ADJUSTMENT") return "Matched";
-          if (isOpeningBalanceEntry) return "Matched";
-
-          // Cash-account entries do not require reconciliation
-          if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") return "Matched";
-
-          const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
-          const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
-
-          if (matchedAbs >= entryAbs && entryAbs > 0n) return "Matched";
-          if (matchedAbs > 0n && matchedAbs < entryAbs) return "Partial";
-          return "Expected";
+          return statusLabel(e.status);
         })(),
 
         rawStatus: (() => {
           if (isDeleted) return "DELETED";
+          return String(e.status ?? "EXPECTED").trim().toUpperCase() || "EXPECTED";
+        })(),
 
-          const t = String(e.type ?? "").toUpperCase();
+        reconciliationStatus: (() => {
+          if (isDeleted) return null;
 
-          if (t === "ADJUSTMENT") return "MATCHED";
-          if (isOpeningBalanceEntry) return "MATCHED";
-          if (String(selectedAccount?.type ?? "").toUpperCase() === "CASH") return "MATCHED";
+          const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
+          const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
+
+          if (matchedAbs >= entryAbs && entryAbs > 0n) return "Matched to bank";
+          if (matchedAbs > 0n && matchedAbs < entryAbs) return "Partially matched";
+          return null;
+        })(),
+
+        rawReconciliationStatus: (() => {
+          if (isDeleted) return "";
 
           const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
           const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
 
           if (matchedAbs >= entryAbs && entryAbs > 0n) return "MATCHED";
           if (matchedAbs > 0n && matchedAbs < entryAbs) return "PARTIAL";
-          return "EXPECTED";
+          return "";
         })(),
 
         hasAdjustment: hasAdjustmentByEntryId.get(String(e.id)) ?? false,
@@ -1656,7 +1662,7 @@ export default function LedgerPageClient() {
         isOpeningBalanceEntry,
       };
     });
-  }, [entriesWithOpening, openingBalanceCents, closedThroughDate]);
+  }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedAbsByEntryId, hasAdjustmentByEntryId]);
 
   // Header "Uncategorized" chip count (Stage A attention indicator; instant, no backend calls).
   // NOTE: Visibility only; Category Review page is the workflow destination.
@@ -3308,7 +3314,7 @@ export default function LedgerPageClient() {
     <col key="c6" style={{ width: "120px" }} />,  // category (restore width so Actions stays visible)
     <col key="c7" style={{ width: "110px" }} />,  // amount (tighter)
     <col key="c8" style={{ width: "110px" }} />,  // balance (tighter)
-    <col key="c9" style={{ width: "96px" }} />,   // status (tighter)
+    <col key="c9" style={{ width: "148px" }} />,  // status + bank match indicator
     <col key="c10" style={{ width: "20px" }} />,  // dup icon (tight ~60%)
     <col key="c11" style={{ width: "20px" }} />,  // cat icon (tight ~60%)
     <col key="c12" style={{ width: "96px" }} />,  // actions (tighter)
@@ -4555,8 +4561,14 @@ export default function LedgerPageClient() {
 
           {/* Status */}
           <td className={td + " " + center}>
-            <div className="inline-flex items-center justify-center gap-2">
+            <div className="inline-flex flex-wrap items-center justify-center gap-1">
               <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
+              {r.reconciliationStatus ? (
+                <StatusChip
+                  label={r.reconciliationStatus}
+                  tone={statusTone(r.rawReconciliationStatus)}
+                />
+              ) : null}
               {r.hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
             </div>
           </td>
