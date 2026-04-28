@@ -96,6 +96,25 @@ function categorySuggestionSourceLabel(raw: unknown) {
   return "Suggestion";
 }
 
+function categorySuggestionCategoryName(suggestion: any, categoryNameById: Record<string, string>) {
+  const categoryId = String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
+  return (
+    String(suggestion?.category_name ?? suggestion?.categoryName ?? "").trim() ||
+    categoryNameById[categoryId] ||
+    ""
+  );
+}
+
+function categorySuggestionReason(suggestion: any) {
+  return String(suggestion?.reason ?? "").trim();
+}
+
+function categorySuggestionMetaText(suggestion: any) {
+  const confidence = categorySuggestionConfidence(suggestion?.confidence);
+  const sourceLabel = categorySuggestionSourceLabel(suggestion?.source);
+  return `${confidence}% • ${sourceLabel}`;
+}
+
 function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<string, string>) {
   const categoryId = String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
   const categoryName =
@@ -1135,6 +1154,15 @@ export default function CategoryReviewPageClient() {
                         const typeUpper = String(e.type ?? "").toUpperCase();
                         const payeeLower = String(e.payee ?? "").trim().toLowerCase();
                         const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
+                        const rowSuggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+                        const topSuggestion = rowSuggestions[0] ?? null;
+                        const topSuggestedCategoryId = String(
+                          topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
+                        ).trim();
+                        const topSuggestedCategoryName = categorySuggestionCategoryName(topSuggestion, categoryNameById);
+                        const hasTopSuggestion = !e.category_id && !!topSuggestion && !!topSuggestedCategoryId;
+                        const topSuggestionIsBulkSafe =
+                          hasTopSuggestion && isBulkSafeCategorySuggestion(topSuggestion, 0);
 
                         return (
                           <tr key={id} className={`border-b border-slate-100 align-top ${isSelected ? "bg-accent" : ""}`}>
@@ -1170,83 +1198,95 @@ export default function CategoryReviewPageClient() {
 
                             <td className="px-2 py-2 border-b border-slate-100">
                               <div className="flex items-start justify-start gap-1.5 flex-wrap">
-                                <select
-                                  className="h-6 w-full min-w-[160px] max-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-[11px]"
-                                  value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
-                                  disabled={isOpening || !!pendingIds[id]}
-                                  onChange={async (ev) => {
-                                    if (isOpening) return;
-                                    if (!selectedBusinessId || !selectedAccountId) return;
+                                <div className="flex min-w-[160px] max-w-[220px] flex-col gap-1">
+                                  <select
+                                    className={`h-6 w-full rounded-md border bg-white px-2 text-[11px] ${
+                                      hasTopSuggestion ? "border-amber-300 ring-1 ring-amber-100" : "border-slate-200"
+                                    }`}
+                                    value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
+                                    disabled={isOpening || !!pendingIds[id]}
+                                    onChange={async (ev) => {
+                                      if (isOpening) return;
+                                      if (!selectedBusinessId || !selectedAccountId) return;
 
-                                    const v = ev.target.value;
-                                    const nextCategoryId = v ? v : null;
-                                    if (pendingIds[id]) return;
+                                      const v = ev.target.value;
+                                      const nextCategoryId = v ? v : null;
+                                      if (pendingIds[id]) return;
 
-                                    if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
-                                      setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
-                                      return;
-                                    }
+                                      if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
+                                        setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
+                                        return;
+                                      }
 
-                                    clearMutErr();
+                                      clearMutErr();
 
-                                    const hadAi = !!aiAppliedById[id];
-                                    const undoSnap = undoByEntryId[id] ?? null;
+                                      const hadAi = !!aiAppliedById[id];
+                                      const undoSnap = undoByEntryId[id] ?? null;
 
-                                    if (hadAi) {
-                                      setAiAppliedById((m) => {
-                                        const next = { ...m };
-                                        delete next[id];
-                                        return next;
-                                      });
-                                    }
-                                    if (undoSnap) {
-                                      setUndoByEntryId((m) => {
-                                        const next = { ...m };
-                                        delete next[id];
-                                        return next;
-                                      });
-                                      clearUndoTimer(id);
-                                    }
-
-                                    try {
-                                      const topSuggestion = (Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [])[0] ?? null;
-                                      const suggestedCategoryId = String(
-                                        topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
-                                      ).trim();
-
-                                      await applyCategoryToEntry(
-                                        id,
-                                        nextCategoryId,
-                                        suggestedCategoryId || null
-                                      );
-                                    } catch {
-                                      if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                      if (hadAi) {
+                                        setAiAppliedById((m) => {
+                                          const next = { ...m };
+                                          delete next[id];
+                                          return next;
+                                        });
+                                      }
                                       if (undoSnap) {
-                                        setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
-                                        const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
-                                        if (remaining > 0) {
-                                          clearUndoTimer(id);
-                                          undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
-                                            setUndoByEntryId((m) => {
-                                              if (!m[id]) return m;
-                                              const next = { ...m };
-                                              delete next[id];
-                                              return next;
-                                            });
+                                        setUndoByEntryId((m) => {
+                                          const next = { ...m };
+                                          delete next[id];
+                                          return next;
+                                        });
+                                        clearUndoTimer(id);
+                                      }
+
+                                      try {
+                                        await applyCategoryToEntry(
+                                          id,
+                                          nextCategoryId,
+                                          topSuggestedCategoryId || null
+                                        );
+                                      } catch {
+                                        if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                        if (undoSnap) {
+                                          setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
+                                          const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
+                                          if (remaining > 0) {
                                             clearUndoTimer(id);
-                                          }, remaining);
+                                            undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
+                                              setUndoByEntryId((m) => {
+                                                if (!m[id]) return m;
+                                                const next = { ...m };
+                                                delete next[id];
+                                                return next;
+                                              });
+                                              clearUndoTimer(id);
+                                            }, remaining);
+                                          }
                                         }
                                       }
-                                    }
-                                  }}
-                                >
-                                  <option value="">Uncategorized</option>
-                                  {categories.map((c) => (
-                                    <option key={String(c.id)} value={String(c.id)}>
-                                      {c.name}
-                                    </option>
-                                  ))}
-                                </select>
+                                    }}
+                                  >
+                                    <option value="">Uncategorized</option>
+                                    {hasTopSuggestion ? (
+                                      <option value={topSuggestedCategoryId}>
+                                        {topSuggestedCategoryName || "Suggested category"} (suggested)
+                                      </option>
+                                    ) : null}
+                                    {categories
+                                      .filter((c) => !hasTopSuggestion || String(c.id) !== topSuggestedCategoryId)
+                                      .map((c) => (
+                                        <option key={String(c.id)} value={String(c.id)}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                  </select>
+
+                                  {hasTopSuggestion ? (
+                                    <div className="truncate text-[10px] text-slate-500">
+                                      Suggested: {topSuggestedCategoryName || "category"}
+                                    </div>
+                                  ) : null}
+                                </div>
 
                                 {pendingIds[id] ? (
                                   <span className="inline-flex items-center" title="Applying…">
@@ -1307,7 +1347,7 @@ export default function CategoryReviewPageClient() {
                                 {!e.category_id ? (
                                   <div className="flex min-w-0 items-center gap-1 overflow-hidden flex-wrap">
                                     {(() => {
-                                      const list = (sugByEntryId[String(e.id)] ?? []).slice(0, 3);
+                                      const list = rowSuggestions.slice(0, 3);
                                       const top = list.slice(0, 2);
                                       const more = Math.max(0, list.length - top.length);
 
@@ -1315,17 +1355,77 @@ export default function CategoryReviewPageClient() {
                                         <>
                                           {top.map((s: any, idx: number) => {
                                             const catId = String(s?.category_id ?? s?.categoryId ?? "");
-                                            const name = String(
-                                              s?.category_name ??
-                                              s?.categoryName ??
-                                              categoryNameById[String(s?.category_id ?? s?.categoryId ?? "")] ??
-                                              "—"
-                                            );
+                                            const name = categorySuggestionCategoryName(s, categoryNameById) || "—";
                                             const conf = categorySuggestionConfidence(s?.confidence);
                                             const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
                                             const sourceLabel = categorySuggestionSourceLabel(s?.source);
-                                            const reasonText = String(s?.reason ?? "").trim();
+                                            const reasonText = categorySuggestionReason(s);
                                             const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, idx === 0);
+                                            const isPrimaryReviewOnly = idx === 0 && !topSuggestionIsBulkSafe;
+
+                                            if (idx === 0) {
+                                              return (
+                                                <div
+                                                  key={`${id}:${catId || name}:${idx}`}
+                                                  className={`flex min-w-[190px] max-w-[280px] flex-col gap-1 rounded-md border px-2 py-1.5 ${
+                                                    isPrimaryReviewOnly
+                                                      ? "border-amber-200 bg-amber-50"
+                                                      : "border-primary/20 bg-primary/5"
+                                                  }`}
+                                                >
+                                                  <div className="flex min-w-0 items-center gap-1">
+                                                    <button
+                                                      type="button"
+                                                      className={`h-6 min-w-0 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center gap-1 disabled:opacity-60 ${buttonTone}`}
+                                                      title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
+                                                      disabled={!!pendingIds[id]}
+                                                      onClick={async () => {
+                                                        if (!catId) return;
+                                                        if (!selectedBusinessId || !selectedAccountId) return;
+                                                        if (pendingIds[id]) return;
+
+                                                        clearMutErr();
+                                                        const prevCategoryId = e.category_id ? String(e.category_id) : null;
+
+                                                        try {
+                                                          await applyCategoryToEntry(id, catId, catId);
+                                                          const isAiSuggestion = String(s?.source ?? "").trim().toUpperCase() === "AI";
+                                                          setAiAppliedById((m) => {
+                                                            const next = { ...m };
+                                                            if (isAiSuggestion) next[id] = true;
+                                                            else delete next[id];
+                                                            return next;
+                                                          });
+                                                          setUndoWindow(id, prevCategoryId, catId);
+                                                        } catch {}
+                                                      }}
+                                                    >
+                                                      <span className="truncate">Use {name}</span>
+                                                    </button>
+
+                                                    <button
+                                                      type="button"
+                                                      className="h-6 px-1.5 rounded-md border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
+                                                      disabled={!!pendingIds[id]}
+                                                      onClick={() => runWhy(id, s)}
+                                                    >
+                                                      Why?
+                                                    </button>
+                                                  </div>
+
+                                                  <div className="text-[10px] font-medium text-slate-600">
+                                                    {categorySuggestionMetaText(s)}
+                                                    {isPrimaryReviewOnly ? " • Needs review" : ""}
+                                                  </div>
+
+                                                  {reasonText ? (
+                                                    <div className="line-clamp-2 text-[10px] leading-snug text-slate-600">
+                                                      {reasonText}
+                                                    </div>
+                                                  ) : null}
+                                                </div>
+                                              );
+                                            }
 
                                             return (
                                               <div key={`${id}:${catId || name}:${idx}`} className="flex items-center gap-1">
@@ -1370,17 +1470,6 @@ export default function CategoryReviewPageClient() {
                                               </div>
                                             );
                                           })}
-
-                                          {top[0] ? (
-                                            <div className="min-w-0 basis-full break-words text-[10px] text-slate-500">
-                                              {categorySuggestionTierLabel(top[0]?.confidence_tier)}
-                                              {" • "}
-                                              {categorySuggestionSourceLabel(top[0]?.source)}
-                                              {String(top[0]?.reason ?? "").trim()
-                                                ? ` • ${String(top[0]?.reason ?? "").trim()}`
-                                                : ""}
-                                            </div>
-                                          ) : null}
 
                                           {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
                                           {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" /> : null}
@@ -1554,9 +1643,16 @@ export default function CategoryReviewPageClient() {
                 </div>
               </div>
 
-              <div className="text-[11px] text-slate-600">
-                Suggested categories are grouped for review. Entries without a strong top suggestion stay unassigned for manual review.
-              </div>
+              {autoFixReviewNeededCount > 0 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                  {autoFixReviewNeededCount} need{autoFixReviewNeededCount === 1 ? "s" : ""} review.
+                  Suggestions below are not strong enough for Auto Fix but can be applied manually from the row suggestion action.
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-600">
+                  Strong suggestions are ready for Auto Fix. Review the grouped categories before applying.
+                </div>
+              )}
 
               <div className="h-[320px] overflow-auto rounded-lg border border-slate-200">
                 {autoFixGroups.length === 0 ? (
@@ -1604,6 +1700,9 @@ export default function CategoryReviewPageClient() {
                                 const topTierLabel = categorySuggestionTierLabel(top?.confidence_tier);
                                 const topSourceLabel = categorySuggestionSourceLabel(top?.source);
                                 const topConfidence = categorySuggestionConfidence(top?.confidence);
+                                const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+                                const topCategoryName = categorySuggestionCategoryName(top, categoryNameById);
+                                const topIsBulkSafe = isBulkSafeCategorySuggestion(top, 0);
 
                                 return (
                                   <div
@@ -1635,7 +1734,9 @@ export default function CategoryReviewPageClient() {
 
                                     <div>
                                       <select
-                                        className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-[11px]"
+                                        className={`h-7 w-full rounded-md border bg-white px-2 text-[11px] ${
+                                          topCategoryId ? "border-amber-300 ring-1 ring-amber-100" : "border-slate-200"
+                                        }`}
                                         value={row.selectedCategoryId}
                                         onChange={(ev) => {
                                           const nextValue = String(ev.target.value ?? "");
@@ -1646,11 +1747,19 @@ export default function CategoryReviewPageClient() {
                                         }}
                                       >
                                         <option value="">Choose category…</option>
-                                        {categories.map((c) => (
-                                          <option key={c.id} value={c.id}>
-                                            {c.name}
+                                        {topCategoryId ? (
+                                          <option value={topCategoryId}>
+                                            {topCategoryName || "Suggested category"} (
+                                            {topIsBulkSafe ? "Auto Fix ready" : "needs review"})
                                           </option>
-                                        ))}
+                                        ) : null}
+                                        {categories
+                                          .filter((c) => !topCategoryId || String(c.id) !== topCategoryId)
+                                          .map((c) => (
+                                            <option key={c.id} value={c.id}>
+                                              {c.name}
+                                            </option>
+                                          ))}
                                       </select>
                                     </div>
                                   </div>
