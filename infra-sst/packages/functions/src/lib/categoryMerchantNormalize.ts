@@ -112,6 +112,7 @@ export function tokenizeMerchantText(payee: any, memo?: any): string[] {
     "deposit",
     "withdrawal",
     "check",
+    "test",
   ]);
 
   return Array.from(

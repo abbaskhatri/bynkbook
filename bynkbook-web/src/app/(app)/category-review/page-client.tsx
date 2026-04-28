@@ -10,7 +10,7 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { updateEntry, type Entry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
-import { applyCategoryBatch, aiSuggestCategory, aiExplainEntry } from "@/lib/api/ai";
+import { applyCategoryBatch, aiSuggestCategory } from "@/lib/api/ai";
 import {
   categorySuggestionConfidenceValue,
   isBulkSafeCategorySuggestion,
@@ -94,6 +94,30 @@ function categorySuggestionSourceLabel(raw: unknown) {
   if (source === "HEURISTIC") return "Pattern match";
   if (source === "AI") return "AI suggestion";
   return "Suggestion";
+}
+
+function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<string, string>) {
+  const categoryId = String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
+  const categoryName =
+    String(suggestion?.category_name ?? suggestion?.categoryName ?? "").trim() ||
+    categoryNameById[categoryId] ||
+    "this category";
+  const confidence = categorySuggestionConfidence(suggestion?.confidence);
+  const tierLabel = categorySuggestionTierLabel(suggestion?.confidence_tier ?? suggestion?.confidenceTier);
+  const sourceLabel = categorySuggestionSourceLabel(suggestion?.source);
+  const reasonText = String(suggestion?.reason ?? "").trim();
+  const merchantNormalized = String(suggestion?.merchant_normalized ?? suggestion?.merchantNormalized ?? "").trim();
+
+  const lines = [
+    `Suggested category: ${categoryName}`,
+    `Confidence: ${confidence}% (${tierLabel})`,
+    `Source: ${sourceLabel}`,
+  ];
+
+  if (reasonText) lines.push(`Rationale: ${reasonText}`);
+  if (merchantNormalized) lines.push(`Matched merchant key: ${merchantNormalized}`);
+
+  return lines.join("\n");
 }
 
 function categorySuggestionButtonClass(rawTier: unknown, isPrimary: boolean) {
@@ -241,9 +265,7 @@ export default function CategoryReviewPageClient() {
     appErrorMessageOrNull(accountsQ.error) ||
     null;
 
-  const whyOpenRef = useRef<string | null>(null);
   const [whyEntryId, setWhyEntryId] = useState<string | null>(null);
-  const [whyBusy, setWhyBusy] = useState(false);
   const [whyText, setWhyText] = useState<string | null>(null);
   const [whyErr, setWhyErr] = useState<string | null>(null);
 
@@ -529,7 +551,6 @@ export default function CategoryReviewPageClient() {
   const tableUpdating =
     (entriesQ.isFetching && !!(entriesQ.data ?? []).length) ||
     sugUpdating ||
-    whyBusy ||
     applyBusy ||
     Object.keys(pendingIds).length > 0;
 
@@ -650,24 +671,10 @@ export default function CategoryReviewPageClient() {
     }
   }
 
-  async function runWhy(entryId: string) {
-    if (!selectedBusinessId) return;
-
+  function runWhy(entryId: string, suggestion: any) {
     setWhyEntryId(entryId);
-    setWhyBusy(true);
     setWhyErr(null);
-    setWhyText(null);
-
-    try {
-      const res: any = await aiExplainEntry({ businessId: selectedBusinessId, entryId });
-      if (!res?.ok) throw new Error(res?.error || "Explain failed");
-      setWhyText(String(res.answer ?? ""));
-    } catch (e: any) {
-      const msg = String(e?.message ?? "Explain failed");
-      setWhyErr(msg.includes("429") ? "AI daily limit reached for this business. Try again tomorrow." : "AI is unavailable right now.");
-    } finally {
-      setWhyBusy(false);
-    }
+    setWhyText(categorySuggestionWhyText(suggestion, categoryNameById));
   }
 
   async function runApplySelectedConfirmed() {
@@ -821,10 +828,6 @@ export default function CategoryReviewPageClient() {
 
       if (topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
     }
-
-    const categoryNameById = new Map<string, string>(
-      categories.map((c) => [String(c.id), String(c.name)])
-    );
 
     const groupCounts = new Map<string, number>();
     for (const e of visibleRows) {
@@ -1359,8 +1362,8 @@ export default function CategoryReviewPageClient() {
                                                 <button
                                                   type="button"
                                                   className="h-5 px-1.5 rounded-full border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
-                                                  disabled={!!pendingIds[id] || whyBusy}
-                                                  onClick={() => void runWhy(id)}
+                                                  disabled={!!pendingIds[id]}
+                                                  onClick={() => runWhy(id, s)}
                                                 >
                                                   Why?
                                                 </button>
@@ -1405,7 +1408,7 @@ export default function CategoryReviewPageClient() {
                                 {whyEntryId === id ? (
                                   <div className="mt-1 w-full rounded-md border border-slate-200 bg-white p-2">
                                     <div className="flex items-center justify-between gap-2">
-                                      <div className="text-[11px] font-semibold text-slate-700">AI explanation</div>
+                                      <div className="text-[11px] font-semibold text-slate-700">Suggestion rationale</div>
                                       <button
                                         type="button"
                                         className="text-[11px] text-slate-500 hover:text-slate-900"
@@ -1419,13 +1422,7 @@ export default function CategoryReviewPageClient() {
                                       </button>
                                     </div>
 
-                                    {whyBusy && !whyText ? (
-                                      <div className="mt-2 space-y-2">
-                                        <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
-                                        <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
-                                        <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
-                                      </div>
-                                    ) : whyErr ? (
+                                    {whyErr ? (
                                       <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
                                         {whyErr}
                                       </div>

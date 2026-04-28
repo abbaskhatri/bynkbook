@@ -60,6 +60,26 @@ type CategoryEvidence = {
   reason: string;
 };
 
+const LOW_SIGNAL_TOKENS = new Set([
+  "test",
+  "sample",
+  "demo",
+  "qa",
+]);
+
+const FUEL_CATEGORY_NAMES = new Set(["fuel"]);
+
+const FUEL_KEYWORD_TOKENS = new Set([
+  "bp",
+  "chevron",
+  "exxon",
+  "fuel",
+  "gas",
+  "gasoline",
+  "quiktrip",
+  "shell",
+]);
+
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.round(n)));
@@ -121,6 +141,19 @@ function hasAnyToken(tokens: Set<string>, values: string[]) {
     if (tokens.has(v)) return true;
   }
   return false;
+}
+
+function isLowSignalToken(token: string) {
+  return LOW_SIGNAL_TOKENS.has(String(token ?? "").trim().toLowerCase());
+}
+
+function meaningfulIntersectionSize(a: Set<string>, b: Set<string>) {
+  let inter = 0;
+  for (const token of a) {
+    if (isLowSignalToken(token)) continue;
+    if (b.has(token)) inter += 1;
+  }
+  return inter;
 }
 
 function hasTaxSignal(tokens: Set<string>) {
@@ -190,6 +223,52 @@ export function confidenceTierFromScore(score: number) {
   return "REVIEW_BUCKET" as const;
 }
 
+function normalizedCategoryName(value: unknown) {
+  return normalizeFreeText(value).replace(/\s+/g, " ").trim();
+}
+
+function findFuelCategory(categories: CandidateCategory[]) {
+  return (categories ?? []).find((category) => FUEL_CATEGORY_NAMES.has(normalizedCategoryName(category.name))) ?? null;
+}
+
+function hasFuelKeywordSignal(tokens: Set<string>, normalizedContext: string) {
+  if (
+    normalizedContext.includes("fuel stop") ||
+    normalizedContext.includes("gas station")
+  ) {
+    return true;
+  }
+
+  for (const token of tokens) {
+    if (FUEL_KEYWORD_TOKENS.has(token)) return true;
+  }
+
+  return false;
+}
+
+export function buildKeywordCategorySuggestions(args: {
+  item: HeuristicInputItem;
+  categories: CandidateCategory[];
+  limit: number;
+}) {
+  const limit = clampSuggestionLimit(args.limit);
+  const suggestions: HeuristicSuggestion[] = [];
+  const itemContextTokens = new Set(tokenizeMerchantText(args.item.payee_or_name ?? "", args.item.memo ?? ""));
+  const normalizedContext = normalizeFreeText(`${args.item.payee_or_name ?? ""} ${args.item.memo ?? ""}`);
+  const fuelCategory = findFuelCategory(args.categories);
+
+  if (fuelCategory && hasFuelKeywordSignal(itemContextTokens, normalizedContext)) {
+    suggestions.push({
+      category_id: fuelCategory.id,
+      category_name: fuelCategory.name,
+      confidence: 84,
+      reason: "Matched fuel or gas merchant keywords",
+    });
+  }
+
+  return suggestions.slice(0, limit);
+}
+
 function suggestionConfidenceValue(raw: unknown) {
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -249,6 +328,7 @@ export function buildHeuristicSuggestions(args: {
   for (const token of itemTokens) itemContextTokens.add(token);
   if (itemMerchant) {
     for (const token of itemMerchant.split(" ").map((x) => x.trim()).filter(Boolean)) {
+      if (isLowSignalToken(token)) continue;
       itemContextTokens.add(token);
     }
   }
@@ -295,6 +375,7 @@ export function buildHeuristicSuggestions(args: {
       String(args.item.vendor_id) === String(row.vendor_id);
 
     const tokenSim = itemContextTokens.size && rowTokens.size ? jaccard(itemContextTokens, rowTokens) : 0;
+    const meaningfulOverlap = meaningfulIntersectionSize(itemContextTokens, rowTokens);
 
     const sameHighSignalFamily =
       (itemHasTaxSignal && rowHasTaxSignal) || (itemHasPayrollSignal && rowHasPayrollSignal);
@@ -323,7 +404,7 @@ export function buildHeuristicSuggestions(args: {
       rowScore += 8;
       rowReason = "Strong keyword match in account history";
       existing.strongKeywordHits += 1;
-    } else if (!exactMerchant && tokenSim >= 0.35) {
+    } else if (!exactMerchant && meaningfulOverlap > 0 && tokenSim >= 0.35) {
       rowScore += 3.5;
       if (!sameHighSignalFamily && !sameVendor) {
         rowReason = "Keyword overlap with account history";
@@ -333,7 +414,7 @@ export function buildHeuristicSuggestions(args: {
 
     if (rowScore > 0) {
       rowScore += 1.25 * supportWeight;
-    } else if (tokenSim >= 0.2) {
+    } else if (meaningfulOverlap > 0 && tokenSim >= 0.2) {
       rowScore += 0.5 * supportWeight;
     }
 

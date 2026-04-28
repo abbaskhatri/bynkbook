@@ -8,6 +8,7 @@ import {
   type CandidateCategory,
 } from "./lib/categoryMemory";
 import {
+  buildKeywordCategorySuggestions,
   buildHeuristicSuggestions,
   clampSuggestionLimit,
   confidenceTierFromScore,
@@ -768,8 +769,23 @@ export async function computeCategorySuggestionsForItems(args: {
       limit: limitPerItem,
     });
 
+    const keywordSuggestions = buildKeywordCategorySuggestions({
+      item: {
+        id: it.id,
+        merchant_normalized: it.merchant_normalized,
+        payee_or_name: String(it.payee_or_name ?? ""),
+        memo: String(it.memo ?? ""),
+        vendor_id: it.vendor_id ?? null,
+        direction: it.direction,
+        amount_cents: amountToBigInt(it.amount_cents),
+        tokens: tokenizeMerchantText(it.payee_or_name, it.memo),
+      },
+      categories,
+      limit: limitPerItem,
+    });
+
     const mappedHeuristics = mapHeuristicToSuggestions({
-      heuristics: heuristicSuggestions,
+      heuristics: [...keywordSuggestions, ...heuristicSuggestions],
       merchant_normalized: it.merchant_normalized,
       limit: limitPerItem,
     });
