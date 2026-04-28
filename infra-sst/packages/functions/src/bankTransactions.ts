@@ -49,6 +49,14 @@ function parseLimit(q: any) {
   return Math.min(Math.max(Math.floor(n), 1), 500);
 }
 
+type BankTransactionStatusFilter = "all" | "matched" | "unmatched";
+
+function parseStatusParam(q: any): BankTransactionStatusFilter | null {
+  const raw = (q?.status ?? "all").toString().trim().toLowerCase();
+  if (raw === "all" || raw === "matched" || raw === "unmatched") return raw;
+  return null;
+}
+
 function parseDateParam(s?: string | null): Date | null {
   if (!s) return null;
   const t = s.toString().trim();
@@ -71,8 +79,89 @@ function isoToYmd(iso: any): string {
   }
 }
 
+type BankTransactionCursor = {
+  postedDate: Date;
+  createdAt: Date;
+  id: string;
+};
+
+function parseCursorParam(s?: string | null): BankTransactionCursor | null {
+  const raw = (s ?? "").toString().trim();
+  if (!raw) return null;
+
+  try {
+    const decoded = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    const postedDate = new Date(String(decoded?.posted_date ?? ""));
+    const createdAt = new Date(String(decoded?.created_at ?? ""));
+    const id = String(decoded?.id ?? "").trim();
+
+    if (Number.isNaN(postedDate.getTime())) return null;
+    if (Number.isNaN(createdAt.getTime())) return null;
+    if (!id) return null;
+
+    return { postedDate, createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeCursor(row: any): string {
+  const payload = {
+    posted_date: new Date(row.posted_date).toISOString(),
+    created_at: new Date(row.created_at).toISOString(),
+    id: String(row.id),
+  };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function cursorWhere(cursor: BankTransactionCursor) {
+  return {
+    OR: [
+      { posted_date: { lt: cursor.postedDate } },
+      {
+        posted_date: cursor.postedDate,
+        created_at: { lt: cursor.createdAt },
+      },
+      {
+        posted_date: cursor.postedDate,
+        created_at: cursor.createdAt,
+        id: { lt: cursor.id },
+      },
+    ],
+  };
+}
+
+async function activeMatchedBankTransactionIds(prisma: any, businessId: string, accountId: string) {
+  const [groupBanks, legacyMatches] = await Promise.all([
+    prisma.matchGroupBank.findMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        matchGroup: { status: "ACTIVE" },
+      },
+      select: { bank_transaction_id: true },
+    }),
+    prisma.bankMatch.findMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        voided_at: null,
+      },
+      select: { bank_transaction_id: true },
+    }),
+  ]);
+
+  return Array.from(
+    new Set(
+      [...groupBanks, ...legacyMatches]
+        .map((row: any) => String(row?.bank_transaction_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 /**
- * GET /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions?from=&to=&limit=
+ * GET /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions?from=&to=&status=&limit=&cursor=
  * - scoped by businessId + accountId
  * - excludes is_removed=true
  * - ordered by posted_date desc
@@ -857,8 +946,14 @@ export async function handler(event: any) {
   // -------------------------
   const q = event?.queryStringParameters ?? {};
   const limit = parseLimit(q);
+  const status = parseStatusParam(q);
+  if (!status) return json(400, { ok: false, error: "Invalid status" });
+
   const from = parseDateParam(q?.from ?? null);
   const to = parseDateParam(q?.to ?? null);
+  const rawCursor = (q?.cursor ?? "").toString().trim();
+  const cursor = rawCursor ? parseCursorParam(rawCursor) : null;
+  if (rawCursor && !cursor) return json(400, { ok: false, error: "Invalid cursor" });
 
   const where: any = {
     business_id: businessId,
@@ -871,10 +966,25 @@ export async function handler(event: any) {
     if (to) where.posted_date.lte = to;
   }
 
+  if (cursor) {
+    where.AND = [...(where.AND ?? []), cursorWhere(cursor)];
+  }
+
+  if (status !== "all") {
+    const matchedIds = await activeMatchedBankTransactionIds(prisma, businessId, accountId);
+
+    if (status === "matched") {
+      if (matchedIds.length === 0) return json(200, { ok: true, items: [], nextCursor: null });
+      where.id = { in: matchedIds };
+    } else {
+      where.id = { notIn: matchedIds };
+    }
+  }
+
   const rows = await prisma.bankTransaction.findMany({
     where,
-    orderBy: [{ posted_date: "desc" }, { created_at: "desc" }],
-    take: limit,
+    orderBy: [{ posted_date: "desc" }, { created_at: "desc" }, { id: "desc" }],
+    take: limit + 1,
     select: {
       id: true,
       posted_date: true,
@@ -890,5 +1000,9 @@ export async function handler(event: any) {
     },
   });
 
-  return json(200, { ok: true, items: rows });
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : null;
+
+  return json(200, { ok: true, items, nextCursor });
 }

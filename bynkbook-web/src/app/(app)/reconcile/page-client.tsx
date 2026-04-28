@@ -34,7 +34,7 @@ import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
-import { listBankTransactions, createEntryFromBankTransaction } from "@/lib/api/bankTransactions";
+import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, createMatchBatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
 import { voidMatchGroup } from "@/lib/api/match-groups";
 import { createMatchGroupsBatch } from "@/lib/api/match-groups";
@@ -318,6 +318,17 @@ function matchGroupSignature(items: any[]): string {
 function entriesSignature(items: any[]): string {
   const arr = Array.isArray(items) ? items : [];
   return String(arr.length);
+}
+
+function mergeBankTransactions(...lists: any[][]): any[] {
+  const m = new Map<string, any>();
+  for (const list of lists) {
+    for (const row of list ?? []) {
+      const id = String(row?.id ?? "").trim();
+      if (id) m.set(id, row);
+    }
+  }
+  return Array.from(m.values());
 }
 
 export default function ReconcilePageClient() {
@@ -634,12 +645,20 @@ export default function ReconcilePageClient() {
 
   // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
   const PAGE_CHUNK = 200;
+  const BANK_TRANSACTION_PAGE_LIMIT = 500;
+  const BANK_TRANSACTION_STATUSES: BankTransactionStatusFilter[] = ["unmatched", "matched"];
 
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
   const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
 
   const [bankUnmatchedVisibleN, setBankUnmatchedVisibleN] = useState(PAGE_CHUNK);
   const [bankMatchedVisibleN, setBankMatchedVisibleN] = useState(PAGE_CHUNK);
+  const [bankNextCursorByStatus, setBankNextCursorByStatus] = useState<Record<BankTransactionStatusFilter, string | null>>({
+    all: null,
+    unmatched: null,
+    matched: null,
+  });
+  const [bankLoadingMore, setBankLoadingMore] = useState(false);
 
   // B2: Bulk create entries from selected bank txns (unmatched tab)
   const [selectedBankTxnIds, setSelectedBankTxnIds] = useState<Set<string>>(new Set());
@@ -884,15 +903,25 @@ export default function ReconcilePageClient() {
       const bankPromise = (async () => {
         if (myEpoch === refreshEpochRef.current) setBankTxLoading(true);
         try {
-          const res = await listBankTransactions({
-            businessId: selectedBusinessId,
-            accountId: selectedAccountId,
-            from: from || undefined,
-            to: to || undefined,
-            limit: 500,
-          });
+          const results = await Promise.all(
+            BANK_TRANSACTION_STATUSES.map((status) =>
+              listBankTransactions({
+                businessId: selectedBusinessId,
+                accountId: selectedAccountId,
+                from: from || undefined,
+                to: to || undefined,
+                status,
+                limit: BANK_TRANSACTION_PAGE_LIMIT,
+              })
+            )
+          );
 
-          const next = res?.items ?? [];
+          const byStatus: Record<BankTransactionStatusFilter, any[]> = {
+            all: [],
+            unmatched: results[0]?.items ?? [],
+            matched: results[1]?.items ?? [],
+          };
+          const next = mergeBankTransactions(byStatus.unmatched, byStatus.matched);
           bankItems = next;
 
           if (myEpoch === refreshEpochRef.current) {
@@ -900,10 +929,21 @@ export default function ReconcilePageClient() {
               if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
               return next;
             });
+            setBankNextCursorByStatus((prev) => {
+              if (opts?.preserveOnEmpty && next.length === 0 && bankTxLenRef.current > 0) return prev;
+              return {
+                all: null,
+                unmatched: results[0]?.nextCursor ?? null,
+                matched: results[1]?.nextCursor ?? null,
+              };
+            });
           }
         } catch {
           if (myEpoch === refreshEpochRef.current) {
             setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
+            if (!opts?.preserveOnEmpty) {
+              setBankNextCursorByStatus({ all: null, unmatched: null, matched: null });
+            }
           }
         } finally {
           if (myEpoch === refreshEpochRef.current) {
@@ -969,6 +1009,36 @@ export default function ReconcilePageClient() {
         // Fire-and-forget (do not cascade waits / storms)
         void refreshBankAndMatches(queued);
       }
+    }
+  }
+
+  async function loadMoreBankTransactions() {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    const status: BankTransactionStatusFilter = bankTab === "matched" ? "matched" : "unmatched";
+    const cursor = bankNextCursorByStatus[status];
+    if (!cursor) return;
+
+    setBankLoadingMore(true);
+    try {
+      const res = await listBankTransactions({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        from: from || undefined,
+        to: to || undefined,
+        status,
+        limit: BANK_TRANSACTION_PAGE_LIMIT,
+        cursor,
+      });
+
+      const nextItems = res?.items ?? [];
+      setBankTx((prev) => mergeBankTransactions(prev, nextItems));
+      setBankNextCursorByStatus((prev) => ({
+        ...prev,
+        [status]: res?.nextCursor ?? null,
+      }));
+    } finally {
+      setBankLoadingMore(false);
     }
   }
 
@@ -1473,6 +1543,15 @@ const isReconcileExemptEntry = (e: any) => {
     return (matches ?? []).filter((x: any) => isActiveMatch(x));
   }, [matches, isActiveMatch]);
 
+  const activeLegacyMatchByBankTxnId = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const x of activeMatches ?? []) {
+      const id = String(x?.bank_transaction_id ?? "");
+      if (id) m.set(id, x);
+    }
+    return m;
+  }, [activeMatches]);
+
   // (removed legacy matches-based revert marker; MatchGroups-based version is below)
 
   // MatchGroups (FULL match only): entry is matched iff it appears in an ACTIVE group
@@ -1497,12 +1576,14 @@ const isReconcileExemptEntry = (e: any) => {
     for (const t of bankTxSorted ?? []) {
       const id = String(t.id);
       if (!id) continue;
-      if (!activeGroupByBankTxnId.has(id)) continue;
+      const legacyMatch = activeLegacyMatchByBankTxnId.get(id);
+      if (!activeGroupByBankTxnId.has(id) && !legacyMatch) continue;
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      if (bankAbs > 0n) m.set(id, bankAbs);
+      const legacyAbs = legacyMatch ? absBig(toBigIntSafe(legacyMatch?.matched_amount_cents)) : 0n;
+      if (bankAbs > 0n) m.set(id, legacyAbs > 0n ? legacyAbs : bankAbs);
     }
     return m;
-  }, [bankTxSorted, activeGroupByBankTxnId]);
+  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
 
   const remainingAbsByBankTxnId = useMemo(() => {
     const m = new Map<string, bigint>();
@@ -1510,11 +1591,11 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id);
       if (!id) continue;
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const isMatched = activeGroupByBankTxnId.has(id);
+      const isMatched = activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id);
       m.set(id, isMatched ? 0n : bankAbs);
     }
     return m;
-  }, [bankTxSorted, activeGroupByBankTxnId]);
+  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
 
     function buildBankAiCandidates(bank: any) {
     const bankAmt = toBigIntSafe(bank?.amount_cents);
@@ -2217,13 +2298,13 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id ?? "");
       if (!id) continue;
       if (optimisticHiddenBankTxnIds.has(id)) continue;
-      if (activeGroupByBankTxnId.has(id)) continue;
+      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) continue;
 
       out.push(t);
       if (out.length >= bankUnmatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, searchQ, bankUnmatchedVisibleN]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankUnmatchedVisibleN]);
 
   useEffect(() => {
     setSelectedBankTxnIds(new Set());
@@ -2237,13 +2318,13 @@ const isReconcileExemptEntry = (e: any) => {
 
       const id = String(t.id ?? "");
       if (!id) continue;
-      if (!activeGroupByBankTxnId.has(id)) continue;
+      if (!activeGroupByBankTxnId.has(id) && !activeLegacyMatchByBankTxnId.has(id)) continue;
 
       out.push(t);
       if (out.length >= bankMatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, activeGroupByBankTxnId, searchQ, bankMatchedVisibleN]);
+  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankMatchedVisibleN]);
 
   // Counts (uncapped) for tab labels
   const { bankUnmatchedCount, bankMatchedCount } = useMemo(() => {
@@ -2256,11 +2337,11 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id ?? "");
       if (!id) continue;
 
-      if (activeGroupByBankTxnId.has(id)) m++;
+      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) m++;
       else if (!optimisticHiddenBankTxnIds.has(id)) u++;
     }
     return { bankUnmatchedCount: u, bankMatchedCount: m };
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, searchQ]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ]);
 
   const entriesTruthReady =
     !entriesQ.isLoading &&
@@ -2335,6 +2416,8 @@ const displayBankActiveList = useMemo(() => {
     ? displayBankUnmatchedList
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
+
+  const activeBankNextCursor = bankNextCursorByStatus[bankTab] ?? null;
 
   const bankPanelHasRows = displayBankActiveList.length > 0;
   const bankPanelHasSettledSnapshot = !!bankTruthSnapshot && (bankTruthHydrated || matchGroupsTruthHydrated);
@@ -3599,7 +3682,9 @@ const displayBankActiveList = useMemo(() => {
                         }
                       })();
 
-                      const isMatched = activeGroupByBankTxnId.has(String(t.id));
+                      const isMatched =
+                        activeGroupByBankTxnId.has(String(t.id)) ||
+                        activeLegacyMatchByBankTxnId.has(String(t.id));
                       const rowTone = isMatched ? " bg-primary/10" : "";
 
                       const deEmphasis = bankTab === "matched" ? " text-slate-600" : "";
@@ -3839,6 +3924,17 @@ const displayBankActiveList = useMemo(() => {
                       onClick={() => setBankMatchedVisibleN((n) => n + PAGE_CHUNK)}
                     >
                       Load more
+                    </button>
+                  </div>
+                ) : activeBankNextCursor ? (
+                  <div className="p-2 flex justify-center">
+                    <button
+                      type="button"
+                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={bankLoadingMore}
+                      onClick={() => void loadMoreBankTransactions()}
+                    >
+                      {bankLoadingMore ? "Loading…" : "Load more bank transactions"}
                     </button>
                   </div>
                 ) : null}
