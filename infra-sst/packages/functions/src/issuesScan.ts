@@ -82,6 +82,102 @@ function normalizePayee(raw: string) {
   return out;
 }
 
+function duplicateTokens(value: any) {
+  const stop = new Set([
+    "ach",
+    "bank",
+    "card",
+    "check",
+    "co",
+    "debit",
+    "deposit",
+    "online",
+    "payment",
+    "pos",
+    "purchase",
+    "transaction",
+    "txn",
+    "visa",
+    "withdrawal",
+  ]);
+
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !stop.has(token));
+}
+
+function normalizedDuplicateText(value: any) {
+  return duplicateTokens(value).join(" ");
+}
+
+function hasSimilarDuplicateText(a: any, b: any) {
+  const aTokens = duplicateTokens(a);
+  const bTokens = duplicateTokens(b);
+  if (aTokens.length === 0 || bTokens.length === 0) return false;
+
+  const bSet = new Set(bTokens);
+  if (aTokens.some((token) => token.length >= 4 && bSet.has(token))) return true;
+
+  const aText = normalizedDuplicateText(a);
+  const bText = normalizedDuplicateText(b);
+  if (!aText || !bText) return false;
+
+  return aTokens.some((token) => token.length >= 4 && bText.includes(token)) ||
+    bTokens.some((token) => token.length >= 4 && aText.includes(token));
+}
+
+function absBig(n: bigint) {
+  return n < 0n ? -n : n;
+}
+
+function isOpeningEntryLike(entry: any) {
+  const type = String(entry?.type ?? "").trim().toUpperCase();
+  const payee = String(entry?.payee ?? "").trim().toLowerCase();
+  const memo = String(entry?.memo ?? "").trim().toLowerCase();
+  return (
+    type === "OPENING" ||
+    payee === "opening balance" ||
+    payee === "opening balance (estimated)" ||
+    payee.startsWith("opening balance") ||
+    memo.includes("opening balance")
+  );
+}
+
+function isDuplicateScanEligibleEntry(entry: any) {
+  const type = String(entry?.type ?? "").trim().toUpperCase();
+  const status = String(entry?.status ?? "").trim().toUpperCase();
+  const kind = String(entry?.entry_kind ?? "").trim().toUpperCase();
+
+  if (entry?.deleted_at) return false;
+  if (entry?.is_adjustment === true) return false;
+  if (entry?.transfer_id) return false;
+  if (type === "ADJUSTMENT" || type === "TRANSFER") return false;
+  if (status === "VOID" || status === "VOIDED" || status === "DELETED") return false;
+  if (kind === "OPENING" || kind === "TRANSFER") return false;
+  if (isOpeningEntryLike(entry)) return false;
+
+  return true;
+}
+
+function sourceBankTxnId(entry: any) {
+  return String(entry?.sourceBankTransactionId ?? entry?.source_bank_transaction_id ?? "").trim();
+}
+
+function dateToYmd(date: any) {
+  try {
+    if (date instanceof Date) return date.toISOString().slice(0, 10);
+    return new Date(date).toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
 function todayYmd() {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
@@ -140,6 +236,11 @@ export async function handler(event: any) {
       amount_cents: true,
       method: true,
       type: true,
+      status: true,
+      entry_kind: true,
+      transfer_id: true,
+      is_adjustment: true,
+      sourceBankTransactionId: true,
       category_id: true,
       account: {
         select: {
@@ -162,6 +263,97 @@ export async function handler(event: any) {
   };
 
   const detected: Detected[] = [];
+
+  const entryIds = entries.map((e: any) => String(e.id)).filter(Boolean);
+  const matchGroupEntries = entryIds.length
+    ? await prisma.matchGroupEntry.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        entry_id: { in: entryIds },
+        matchGroup: { status: "ACTIVE" },
+      },
+      select: { entry_id: true, match_group_id: true },
+    })
+    : [];
+
+  const activeMatchGroupIdsByEntryId = new Map<string, Set<string>>();
+  const activeMatchGroupIds = new Set<string>();
+  for (const row of matchGroupEntries ?? []) {
+    const entryId = String((row as any)?.entry_id ?? "");
+    const groupId = String((row as any)?.match_group_id ?? "");
+    if (!entryId || !groupId) continue;
+
+    activeMatchGroupIds.add(groupId);
+    const set = activeMatchGroupIdsByEntryId.get(entryId) ?? new Set<string>();
+    set.add(groupId);
+    activeMatchGroupIdsByEntryId.set(entryId, set);
+  }
+
+  const matchGroupBanks = activeMatchGroupIds.size
+    ? await prisma.matchGroupBank.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        match_group_id: { in: Array.from(activeMatchGroupIds) },
+      },
+      select: { match_group_id: true, bank_transaction_id: true },
+    })
+    : [];
+
+  const bankIds = new Set<string>();
+  const bankIdsByMatchGroupId = new Map<string, Set<string>>();
+  for (const row of matchGroupBanks ?? []) {
+    const groupId = String((row as any)?.match_group_id ?? "");
+    const bankId = String((row as any)?.bank_transaction_id ?? "");
+    if (!groupId || !bankId) continue;
+
+    bankIds.add(bankId);
+    const set = bankIdsByMatchGroupId.get(groupId) ?? new Set<string>();
+    set.add(bankId);
+    bankIdsByMatchGroupId.set(groupId, set);
+  }
+
+  for (const e of entries as any[]) {
+    const bankId = sourceBankTxnId(e);
+    if (bankId) bankIds.add(bankId);
+  }
+
+  const bankRows = bankIds.size
+    ? await prisma.bankTransaction.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        id: { in: Array.from(bankIds) },
+        is_removed: false,
+      },
+      select: { id: true, posted_date: true, name: true, amount_cents: true, is_removed: true },
+    })
+    : [];
+
+  const bankById = new Map<string, any>();
+  for (const bank of bankRows ?? []) {
+    const id = String((bank as any)?.id ?? "");
+    if (id) bankById.set(id, bank);
+  }
+
+  function entryBankDescriptions(entry: any) {
+    const out: string[] = [];
+
+    const directBank = bankById.get(sourceBankTxnId(entry));
+    if (directBank?.name) out.push(String(directBank.name));
+
+    const groupIds = activeMatchGroupIdsByEntryId.get(String(entry?.id ?? "")) ?? new Set<string>();
+    for (const groupId of groupIds) {
+      const bankIdsForGroup = bankIdsByMatchGroupId.get(groupId) ?? new Set<string>();
+      for (const bankId of bankIdsForGroup) {
+        const bank = bankById.get(bankId);
+        if (bank?.name) out.push(String(bank.name));
+      }
+    }
+
+    return Array.from(new Set(out.map((s) => s.trim()).filter(Boolean)));
+  }
 
   // Missing category (optional)
   // Business rules:
@@ -237,16 +429,7 @@ export async function handler(event: any) {
   const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean }>>();
 
   for (const e of entries) {
-    const typeUpper = String((e as any).type ?? "").toUpperCase();
-    const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
-
-    if (
-      typeUpper === "OPENING" ||
-      typeUpper === "ADJUSTMENT" ||
-      payeeLower.startsWith("opening balance")
-    ) {
-      continue;
-    }
+    if (!isDuplicateScanEligibleEntry(e)) continue;
 
     const methodUpper = (e.method || "").toString().toUpperCase();
     const isCheck = methodUpper === "CHECK";
@@ -278,7 +461,7 @@ export async function handler(event: any) {
     else groups.set(key, [{ id: e.id, day, ymd, isCheck }]);
   }
 
-    for (const [key, items] of groups.entries()) {
+  for (const [key, items] of groups.entries()) {
     if (items.length <= 1) continue;
 
     const isCheckGroup = key.startsWith("CHECK|");
@@ -345,6 +528,129 @@ export async function handler(event: any) {
           details,
         });
       }
+    }
+  }
+
+  type FlexibleCandidate = {
+    id: string;
+    day: number;
+    ymd: string;
+    amount: bigint;
+    amountAbs: bigint;
+    sign: -1 | 0 | 1;
+    text: string;
+    isCheck: boolean;
+    isMatched: boolean;
+    isBankGenerated: boolean;
+  };
+
+  const flexibleCandidates: FlexibleCandidate[] = [];
+  for (const e of entries as any[]) {
+    if (!isDuplicateScanEligibleEntry(e)) continue;
+
+    const ymd = dateToYmd(e.date);
+    const day = ymdToDay(ymd);
+    if (!Number.isFinite(day)) continue;
+
+    const amount = BigInt(e.amount_cents);
+    const bankDescriptions = entryBankDescriptions(e);
+    const text = [
+      e.payee ?? "",
+      e.memo ?? "",
+      ...bankDescriptions,
+    ].join(" ");
+
+    flexibleCandidates.push({
+      id: String(e.id),
+      day,
+      ymd,
+      amount,
+      amountAbs: absBig(amount),
+      sign: amount < 0n ? -1 : amount > 0n ? 1 : 0,
+      text,
+      isCheck: String(e.method ?? "").toUpperCase() === "CHECK",
+      isMatched: activeMatchGroupIdsByEntryId.has(String(e.id)),
+      isBankGenerated: !!sourceBankTxnId(e),
+    });
+  }
+
+  flexibleCandidates.sort((a, b) => (a.day !== b.day ? a.day - b.day : a.id.localeCompare(b.id)));
+
+  const flexParent = new Array<number>(flexibleCandidates.length);
+  for (let i = 0; i < flexParent.length; i++) flexParent[i] = i;
+
+  const flexFind = (x: number): number => {
+    while (flexParent[x] !== x) {
+      flexParent[x] = flexParent[flexParent[x]];
+      x = flexParent[x];
+    }
+    return x;
+  };
+
+  const flexUnion = (a: number, b: number) => {
+    const ra = flexFind(a);
+    const rb = flexFind(b);
+    if (ra !== rb) flexParent[rb] = ra;
+  };
+
+  for (let i = 0; i < flexibleCandidates.length; i++) {
+    const a = flexibleCandidates[i];
+    for (let j = i + 1; j < flexibleCandidates.length; j++) {
+      const b = flexibleCandidates[j];
+      const windowDays = a.isCheck && b.isCheck ? 30 : 3;
+      if (b.day - a.day > windowDays) break;
+
+      const sameSignedAmount = a.amount === b.amount;
+      const sameCompatibleAbs = a.amountAbs === b.amountAbs && a.sign !== 0 && a.sign === b.sign;
+      if (!sameSignedAmount && !sameCompatibleAbs) continue;
+
+      const hasBankOrMatchEvidence =
+        a.isMatched || b.isMatched || a.isBankGenerated || b.isBankGenerated;
+      if (!hasBankOrMatchEvidence) continue;
+
+      const hasManualLookingSide =
+        (!a.isMatched && !a.isBankGenerated) || (!b.isMatched && !b.isBankGenerated);
+      if (!hasManualLookingSide) continue;
+
+      if (!hasSimilarDuplicateText(a.text, b.text)) continue;
+
+      flexUnion(i, j);
+    }
+  }
+
+  const flexComps = new Map<number, number[]>();
+  for (let i = 0; i < flexibleCandidates.length; i++) {
+    const r = flexFind(i);
+    const arr = flexComps.get(r);
+    if (arr) arr.push(i);
+    else flexComps.set(r, [i]);
+  }
+
+  for (const idxs of flexComps.values()) {
+    if (idxs.length < 2) continue;
+
+    const rows = idxs.map((ix) => flexibleCandidates[ix]);
+    const hasMatched = rows.some((row) => row.isMatched);
+    const hasBankGenerated = rows.some((row) => row.isBankGenerated);
+    const minDay = Math.min(...rows.map((row) => row.day));
+    const amountAbs = rows[0]?.amountAbs?.toString() ?? "0";
+    const tokenSig = duplicateTokens(rows.map((row) => row.text).join(" "))
+      .slice(0, 3)
+      .join("-");
+    const groupKey = `MATCHED_DUP|${amountAbs}|${minDay}|${tokenSig || "bank"}`;
+    const details = hasMatched || hasBankGenerated
+      ? "Potential duplicate: one entry is matched to a bank transaction. Review match/revert before deleting anything."
+      : "Potential duplicate (within 3 days)";
+
+    for (const row of rows) {
+      detected.push({
+        entry_id: row.id,
+        issue_type: "DUPLICATE",
+        severity: "WARNING",
+        status: "OPEN",
+        group_key: groupKey,
+        details,
+      });
     }
   }
 

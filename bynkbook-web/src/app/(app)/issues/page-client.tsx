@@ -1010,6 +1010,9 @@ export default function IssuesPageClient() {
                     const statusLabel = head.status === "RESOLVED" ? "Resolved" : "Open";
 
                     const isExpanded = !!expandedGroups[g.groupKey];
+                    const actionLabel = String(head.details ?? "").toLowerCase().includes("matched")
+                      ? "Review match"
+                      : "Review";
 
                     return (
                       <tr key={`group|${g.groupKey}`} className="h-[24px] border-b border-slate-200">
@@ -1071,7 +1074,7 @@ export default function IssuesPageClient() {
                                 setFixDialog({ id: head.id, kind: "DUPLICATE" });
                               }}
                             >
-                              Fix
+                              {actionLabel}
                             </Button>
                           </div>
                         </td>
@@ -1086,6 +1089,9 @@ export default function IssuesPageClient() {
                   const severityLabel = "Warning";
                   const statusLabel = r.status === "RESOLVED" ? "Resolved" : "Open";
                   const rowKey = row.rowKey;
+                  const actionLabel = isDup && String(r.details ?? "").toLowerCase().includes("matched")
+                    ? "Review match"
+                    : "Review";
 
                   return (
                     <tr key={rowKey} className="h-[24px] border-b border-slate-200">
@@ -1143,7 +1149,7 @@ export default function IssuesPageClient() {
                               setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" });
                             }}
                           >
-                            Fix
+                            {actionLabel}
                           </Button>
                         </div>
                       </td>

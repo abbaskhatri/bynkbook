@@ -154,10 +154,20 @@ export function FixIssueDialog(props: {
 
   const title =
     kind === "DUPLICATE"
-      ? "Potential duplicate"
+      ? "Review potential duplicate"
       : kind === "STALE_CHECK"
         ? "Stale check"
         : "Missing category";
+
+  const duplicateIssueDetails = useMemo(() => {
+    if (kind !== "DUPLICATE") return "";
+    return issues
+      .filter((x) => x.issue_type === "DUPLICATE" && relevant.issueIds.includes(x.id))
+      .map((x) => String(x.details ?? ""))
+      .find(Boolean) ?? "";
+  }, [kind, issues, relevant.issueIds]);
+
+  const duplicateMentionsMatch = duplicateIssueDetails.toLowerCase().includes("matched");
 
   async function doResolve(action: "LEGITIMIZE" | "ACK_STALE" | "FIX_MISSING_CATEGORY") {
     if (!kind || !entryId) return;
@@ -300,7 +310,7 @@ export function FixIssueDialog(props: {
                   }}
                   disabled={busy || relevant.entryIds.length < 2}
                 >
-                  {busy ? "Merging…" : "Merge"}
+                  {busy ? "Merging…" : "Merge after review"}
                 </Button>
               </>
             ) : null}
@@ -391,7 +401,9 @@ export function FixIssueDialog(props: {
         {kind === "DUPLICATE" ? (
           <div className="space-y-2">
             <div className="text-xs text-slate-600">
-              Merge will soft-delete the duplicate entry. Survivor amount stays unchanged.
+              {duplicateMentionsMatch
+                ? "Review the bank match before cleanup. Use Reconcile match/revert if the bank-created entry is the one that should be removed."
+                : "Review the entries before cleanup. Survivor amount stays unchanged if you choose to merge."}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -414,7 +426,7 @@ export function FixIssueDialog(props: {
               </div>
 
               <div className="text-xs">
-                <div className="text-[11px] text-slate-600 mb-1">Duplicate (will be deleted)</div>
+                <div className="text-[11px] text-slate-600 mb-1">Entry to merge after review</div>
                 <Select value={mergeDuplicateId} onValueChange={setMergeDuplicateId}>
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-red-200 bg-red-50">
                     <span className="truncate" title={mergeDuplicateId ? entryLabel(mergeDuplicateId) : ""}>
