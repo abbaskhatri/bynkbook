@@ -130,6 +130,7 @@ export const ACTION_POLICY_KEY: Record<string, string> = {
   "reconcile.matchGroup.create": "reconcile",
   "reconcile.matchGroup.batchCreate": "reconcile",
   "reconcile.matchGroup.void": "reconcile",
+  "reconcile.matchGroup.revertGenerated": "reconcile",
   "reconcile.adjustment.mark": "reconcile",
   "reconcile.adjustment.unmark": "reconcile",
 
@@ -162,6 +163,7 @@ export const ACTION_WAVE: Record<string, number> = {
   "reconcile.matchGroup.create": 2,
   "reconcile.matchGroup.batchCreate": 2,
   "reconcile.matchGroup.void": 2,
+  "reconcile.matchGroup.revertGenerated": 2,
   "reconcile.adjustment.mark": 2,
   "reconcile.adjustment.unmark": 2,
 
