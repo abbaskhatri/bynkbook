@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 
 const baseConn = {
   business_id: "biz-1",
@@ -40,6 +41,7 @@ async function loadSyncTransactions(options: {
         accounts: [{ account_id: "plaid-acct-1", balances: { current: 100 } }],
       },
     })),
+    linkTokenCreate: vi.fn(async () => ({ data: { link_token: "link-token" } })),
     transactionsSync: vi.fn(async () => ({
       data: {
         added: [],
@@ -49,6 +51,7 @@ async function loadSyncTransactions(options: {
         has_more: false,
       },
     })),
+    webhookVerificationKeyGet: vi.fn(async () => ({ data: { key: testPublicJwk } })),
     ...options.plaid,
   };
 
@@ -93,12 +96,81 @@ async function loadSyncTransactions(options: {
   }));
 
   const mod = await import("./plaidService");
-  return { syncTransactions: mod.syncTransactions, plaid, prisma };
+  return { mod, syncTransactions: mod.syncTransactions, plaid, prisma };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
+  delete process.env.PLAID_WEBHOOK_URL;
+});
+
+const { publicKey: testPublicKey, privateKey: testPrivateKey } = generateKeyPairSync("ec", {
+  namedCurve: "P-256",
+});
+const testPublicJwk = {
+  ...(testPublicKey.export({ format: "jwk" }) as Record<string, any>),
+  kid: "test-kid",
+  alg: "ES256",
+  use: "sig",
+};
+
+function signedPlaidHeaders(rawBody: string) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "ES256", kid: "test-kid" })).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      iat: now,
+      request_body_sha256: createHash("sha256").update(rawBody).digest("hex"),
+    })
+  ).toString("base64url");
+  const signature = sign("sha256", Buffer.from(`${header}.${payload}`), {
+    key: testPrivateKey,
+    dsaEncoding: "ieee-p1363",
+  }).toString("base64url");
+  return { "plaid-verification": `${header}.${payload}.${signature}` };
+}
+
+async function callVerifiedWebhook(body: any) {
+  const { mod, prisma } = await loadSyncTransactions({});
+  const rawBody = JSON.stringify(body);
+  const res = await mod.handleWebhook({
+    body,
+    rawBody,
+    headers: signedPlaidHeaders(rawBody),
+  });
+  return { res, prisma };
+}
+
+describe("createLinkToken", () => {
+  test("includes configured webhook URL for existing-account link tokens", async () => {
+    process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
+    const { mod, plaid } = await loadSyncTransactions({});
+
+    const res = await mod.createLinkToken({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+
+    expect(res.statusCode).toBe(200);
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhook: "https://example.com/v1/plaid/webhook",
+        transactions: { days_requested: 730 },
+      })
+    );
+  });
+
+  test("includes configured webhook URL for business/new-account link tokens", async () => {
+    process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
+    const { mod, plaid } = await loadSyncTransactions({});
+
+    const res = await mod.createLinkTokenBusiness({ businessId: "biz-1", userId: "user-1" });
+
+    expect(res.statusCode).toBe(200);
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhook: "https://example.com/v1/plaid/webhook",
+      })
+    );
+  });
 });
 
 describe("syncTransactions", () => {
@@ -206,12 +278,97 @@ describe("syncTransactions", () => {
     const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
     const failureUpdate = connectionUpdateCalls.at(-1)![0];
     expect(failureUpdate.data).toMatchObject({
-      status: "ERROR",
+      status: "ENV_MISMATCH_RECONNECT_REQUIRED",
       error_code: "INVALID_ACCESS_TOKEN",
     });
     expect(failureUpdate.data).not.toHaveProperty("has_new_transactions");
     expect(failureUpdate.data.error_message).toContain("access_token [redacted]");
     expect(failureUpdate.data.error_message).not.toContain("access-sandbox-secret123");
     expect(failureUpdate.data.error_message).not.toContain("topsecret");
+  });
+});
+
+describe("handleWebhook", () => {
+  test("TRANSACTIONS webhook marks matching item as having new transactions", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-1",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(prisma.bankConnection.updateMany).toHaveBeenCalledWith({
+      where: { plaid_item_id: "item-1" },
+      data: expect.objectContaining({ has_new_transactions: true }),
+    });
+  });
+
+  test("ITEM ERROR webhook marks reconnect-required and stores sanitized error fields", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ITEM",
+      webhook_code: "ERROR",
+      item_id: "item-1",
+      error: {
+        error_code: "ITEM_LOGIN_REQUIRED",
+        error_message: "access_token access-sandbox-secret123 requires secret topsecret",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const update = (prisma.bankConnection.updateMany as any).mock.calls[0][0];
+    expect(update.where).toEqual({ plaid_item_id: "item-1" });
+    expect(update.data).toMatchObject({
+      status: "REAUTH_REQUIRED",
+      error_code: "ITEM_LOGIN_REQUIRED",
+    });
+    expect(update.data).not.toHaveProperty("has_new_transactions");
+    expect(update.data.error_message).toContain("access_token [redacted]");
+    expect(update.data.error_message).not.toContain("access-sandbox-secret123");
+    expect(update.data.error_message).not.toContain("topsecret");
+  });
+
+  test("USER_PERMISSION_REVOKED marks reconnect-required without clearing transaction flags", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ITEM",
+      webhook_code: "USER_PERMISSION_REVOKED",
+      item_id: "item-1",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const update = (prisma.bankConnection.updateMany as any).mock.calls[0][0];
+    expect(update.data).toMatchObject({
+      status: "REAUTH_REQUIRED",
+      error_code: "USER_PERMISSION_REVOKED",
+    });
+    expect(update.data).not.toHaveProperty("has_new_transactions");
+  });
+
+  test("PENDING_EXPIRATION marks reconnect-required before the item expires", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ITEM",
+      webhook_code: "PENDING_EXPIRATION",
+      item_id: "item-1",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const update = (prisma.bankConnection.updateMany as any).mock.calls[0][0];
+    expect(update.data).toMatchObject({
+      status: "REAUTH_REQUIRED",
+      error_code: "PENDING_EXPIRATION",
+    });
+    expect(update.data).not.toHaveProperty("has_new_transactions");
+  });
+
+  test("unknown valid webhook is ignored without mutating bank connections", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ASSETS",
+      webhook_code: "PRODUCT_READY",
+      item_id: "item-1",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ ok: true, ignored: true });
+    expect(prisma.bankConnection.updateMany).not.toHaveBeenCalled();
   });
 });

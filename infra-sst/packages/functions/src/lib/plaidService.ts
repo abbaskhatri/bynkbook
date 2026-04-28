@@ -22,14 +22,57 @@ function compactSafePlaidValue(value: any, fallback: string) {
     .slice(0, 240);
 }
 
-function plaidErrorCode(error: any) {
+export function plaidErrorCode(error: any) {
   const data = error?.response?.data ?? {};
   return compactSafePlaidValue(data?.error_code ?? data?.error_type ?? error?.code, "PLAID_SYNC_FAILED").slice(0, 80);
 }
 
-function plaidErrorMessage(error: any) {
+export function plaidErrorMessage(error: any) {
   const data = error?.response?.data ?? {};
   return compactSafePlaidValue(data?.error_message ?? data?.display_message ?? error?.message, "Plaid sync failed");
+}
+
+function plaidWebhookUrl() {
+  const url = String(process.env.PLAID_WEBHOOK_URL ?? "").trim();
+  return url || undefined;
+}
+
+function reconnectStatusForPlaidFailure(code: string, message: string) {
+  const text = `${code} ${message}`.toUpperCase();
+  if (text.includes("WRONG PLAID ENVIRONMENT") || text.includes("INVALID_ACCESS_TOKEN")) {
+    return "ENV_MISMATCH_RECONNECT_REQUIRED";
+  }
+  if (
+    text.includes("ITEM_LOGIN_REQUIRED") ||
+    text.includes("LOGIN_REQUIRED") ||
+    text.includes("PENDING_EXPIRATION") ||
+    text.includes("USER_PERMISSION_REVOKED") ||
+    text.includes("PERMISSION")
+  ) {
+    return "REAUTH_REQUIRED";
+  }
+  return "ERROR";
+}
+
+export async function recordPlaidConnectionFailure(params: {
+  prisma: any;
+  businessId: string;
+  accountId: string;
+  error: any;
+}) {
+  const code = plaidErrorCode(params.error);
+  const message = plaidErrorMessage(params.error);
+  const status = reconnectStatusForPlaidFailure(code, message);
+  await params.prisma.bankConnection.updateMany({
+    where: { business_id: params.businessId, account_id: params.accountId },
+    data: {
+      status,
+      error_code: code,
+      error_message: message,
+      updated_at: new Date(),
+    },
+  });
+  return { code, message, status };
 }
 
 type PlaidWebhookRequest = {
@@ -165,6 +208,7 @@ export async function createLinkTokenBusiness(params: {
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
+    webhook: plaidWebhookUrl(),
   });
 
   return json(200, { ok: true, link_token: res.data.link_token });
@@ -192,6 +236,7 @@ export async function createLinkToken(params: {
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
+    webhook: plaidWebhookUrl(),
 
     // Production-grade: request up to 24 months instead of Plaid's default (~90 days)
     transactions: { days_requested: 730 },
@@ -387,6 +432,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
     "LOGIN_REQUIRED",
     "ITEM_LOGIN_REQUIRED",
     "ITEM_ERROR",
+    "ENV_MISMATCH_RECONNECT_REQUIRED",
     "INACTIVE",
     "EXPIRED",
   ]);
@@ -496,17 +542,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
 
   const recordSyncFailure = async (error: any) => {
-    const code = plaidErrorCode(error);
-    const message = plaidErrorMessage(error);
-    await prisma.bankConnection.updateMany({
-      where: { business_id: businessId, account_id: accountId },
-      data: {
-        status: "ERROR",
-        error_code: code,
-        error_message: message,
-        updated_at: new Date(),
-      },
-    });
+    const { code } = await recordPlaidConnectionFailure({ prisma, businessId, accountId, error });
     return json(502, { ok: false, error: "Plaid sync failed", errorCode: code });
   };
 
@@ -889,14 +925,48 @@ export async function handleWebhook(request: PlaidWebhookRequest) {
 
   if (!itemId) return json(400, { ok: false, error: "Missing item_id" });
 
-  // Only care about TRANSACTIONS updates for Phase 4B
-  if (webhookType !== "TRANSACTIONS") return json(200, { ok: true, ignored: true });
+  const typeNorm = webhookType.toUpperCase();
+  const codeNorm = webhookCode.toUpperCase();
 
-  // Set flag on all connections with this item_id (safe)
-  await prisma.bankConnection.updateMany({
-    where: { plaid_item_id: itemId },
-    data: { has_new_transactions: true, updated_at: new Date() },
-  });
+  if (typeNorm === "TRANSACTIONS") {
+    await prisma.bankConnection.updateMany({
+      where: { plaid_item_id: itemId },
+      data: { has_new_transactions: true, updated_at: new Date() },
+    });
 
-  return json(200, { ok: true, webhookType, webhookCode });
+    return json(200, { ok: true, webhookType, webhookCode });
+  }
+
+  if (typeNorm === "ITEM") {
+    const rawError = body?.error ?? {};
+    const code = compactSafePlaidValue(rawError?.error_code ?? webhookCode, webhookCode || "PLAID_ITEM_WEBHOOK").slice(0, 80);
+    const message = compactSafePlaidValue(
+      rawError?.error_message ?? rawError?.display_message ?? webhookCode,
+      webhookCode || "Plaid item webhook"
+    );
+    const status =
+      codeNorm === "ERROR"
+        ? reconnectStatusForPlaidFailure(code, message)
+        : codeNorm === "PENDING_EXPIRATION" || codeNorm === "USER_PERMISSION_REVOKED"
+          ? "REAUTH_REQUIRED"
+          : null;
+
+    if (status) {
+      await prisma.bankConnection.updateMany({
+        where: { plaid_item_id: itemId },
+        data: {
+          status,
+          error_code: code,
+          error_message: message,
+          updated_at: new Date(),
+        },
+      });
+
+      return json(200, { ok: true, webhookType, webhookCode, updated: true });
+    }
+
+    return json(200, { ok: true, webhookType, webhookCode, ignored: true });
+  }
+
+  return json(200, { ok: true, webhookType, webhookCode, ignored: true });
 }

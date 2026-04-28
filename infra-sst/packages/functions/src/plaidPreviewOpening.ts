@@ -1,4 +1,4 @@
-import { getClaims } from "./lib/plaidService";
+import { getClaims, recordPlaidConnectionFailure } from "./lib/plaidService";
 import { getPrisma } from "./lib/db";
 import { decryptAccessToken } from "./lib/plaidCrypto";
 import { getPlaidClient } from "./lib/plaidClient";
@@ -13,6 +13,7 @@ function isOpeningLike(payee: any) {
 }
 
 export async function handler(event: any) {
+  let failureScope: { prisma?: any; businessId?: string; accountId?: string } = {};
   try {
   const claims = getClaims(event);
   const sub = claims.sub as string | undefined;
@@ -20,6 +21,8 @@ export async function handler(event: any) {
 
   const businessId = String(event?.pathParameters?.businessId ?? "").trim();
   const accountId = String(event?.pathParameters?.accountId ?? "").trim();
+  failureScope.businessId = businessId;
+  failureScope.accountId = accountId;
   if (!businessId || !accountId) return json(400, { ok: false, error: "Missing ids" });
 
   let body: any = {};
@@ -29,6 +32,7 @@ export async function handler(event: any) {
   if (!effectiveStartDate) return json(400, { ok: false, error: "Missing effectiveStartDate" });
 
   const prisma = await getPrisma();
+  failureScope.prisma = prisma;
   const mem = await prisma.userBusinessRole.findFirst({ where: { business_id: businessId, user_id: sub }, select: { role: true } });
   if (!mem) return json(403, { ok: false, error: "Forbidden" });
 
@@ -117,20 +121,28 @@ export async function handler(event: any) {
       String(e?.response?.data?.error_code ?? "") ||
       String(e?.message ?? "Preview failed");
 
-const detail = e?.response?.data ?? null;
-const errMsg = String(detail?.error_message ?? msg);
+const failure =
+  failureScope.prisma && failureScope.businessId && failureScope.accountId
+    ? await recordPlaidConnectionFailure({
+        prisma: failureScope.prisma,
+        businessId: failureScope.businessId,
+        accountId: failureScope.accountId,
+        error: e,
+      })
+    : { code: "PLAID_PREVIEW_FAILED", message: msg, status: "ERROR" };
+const errMsg = failure.message;
 
 // Special-case: wrong Plaid environment (dev sandbox vs prod token)
-if (errMsg.includes("wrong Plaid environment")) {
+if (failure.status === "ENV_MISMATCH_RECONNECT_REQUIRED") {
   return json(200, {
     ok: true,
     balanceAvailable: false,
     envMismatch: true,
     error: errMsg,
-    detail,
+    errorCode: failure.code,
   });
 }
 
-return json(500, { ok: false, error: errMsg, detail });
+return json(500, { ok: false, error: errMsg, errorCode: failure.code });
   }
 }

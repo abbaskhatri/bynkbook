@@ -82,6 +82,9 @@ export default $config({
     : ["http://localhost:3000"],
       },
     });
+    const plaidWebhookUrl = isProd
+      ? requiredEnv("BYNKBOOK_PROD_PLAID_WEBHOOK_URL")
+      : (process.env.BYNKBOOK_DEV_PLAID_WEBHOOK_URL?.trim() || `${api.url}/v1/plaid/webhook`);
 
     const authorizer = api.addAuthorizer({
       name: `${resourcePrefix}-cognito-jwt`,
@@ -239,6 +242,7 @@ const plaidHandler = {
     PLAID_CLIENT_ID_SECRET_ID: plaidClientIdSecretId,
     PLAID_SECRET_SECRET_ID: plaidSecretSecretId,
     PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
+    PLAID_WEBHOOK_URL: plaidWebhookUrl,
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -382,6 +386,7 @@ const plaidWebhookHandler = {
     PLAID_CLIENT_ID_SECRET_ID: plaidClientIdSecretId,
     PLAID_SECRET_SECRET_ID: plaidSecretSecretId,
     PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
+    PLAID_WEBHOOK_URL: plaidWebhookUrl,
   },
   permissions: [
     ...(bizHandler as any).permissions,
