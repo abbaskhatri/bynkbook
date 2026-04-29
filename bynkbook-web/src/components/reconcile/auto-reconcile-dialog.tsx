@@ -129,8 +129,8 @@ function badge(text: string, tone: "default" | "success" | "danger" = "default",
     tone === "success"
       ? "border-primary/20 bg-primary/10 text-primary"
       : tone === "danger"
-        ? "border-red-200 bg-red-50 text-red-700"
-        : "border-slate-200 bg-white text-slate-700";
+        ? "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg"
+        : "border-bb-border bg-bb-surface-card text-bb-text";
 
   return (
     <span
@@ -512,7 +512,7 @@ export function AutoReconcileDialog(props: {
       size="lg"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-bb-text-muted">
             {applySummary ? applySummary : counts.total === 0 ? "No suggestions found." : `${counts.total} suggestions`}
           </div>
 
@@ -550,28 +550,28 @@ export function AutoReconcileDialog(props: {
       }
     >
       <div className="flex flex-col max-h-[70vh]">
-        <div className="px-3 py-2 flex items-center gap-3 text-xs text-slate-600 border-b border-slate-200">
+        <div className="px-3 py-2 flex items-center gap-3 text-xs text-bb-text-muted border-b border-bb-border">
           <span>
-            1-to-1: <span className="font-medium text-slate-900">{counts.one}</span>
+            1-to-1: <span className="font-medium text-bb-text">{counts.one}</span>
           </span>
           <span>
-            Split: <span className="font-medium text-slate-900">{counts.split}</span>
+            Split: <span className="font-medium text-bb-text">{counts.split}</span>
           </span>
           <span>
-            Combine: <span className="font-medium text-slate-900">{(counts as any).combine ?? 0}</span>
+            Combine: <span className="font-medium text-bb-text">{(counts as any).combine ?? 0}</span>
           </span>
-          <span className="ml-auto text-[11px] text-slate-500">
+          <span className="ml-auto text-[11px] text-bb-text-muted">
             Deterministic suggestions (no AI). Review before applying.
           </span>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {suggestions.length === 0 ? (
-            <div className="p-3 text-sm text-slate-600">
+            <div className="p-3 text-sm text-bb-text-muted">
               No deterministic suggestions found for the current unmatched bank transactions and expected entries.
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-bb-border-muted">
               {suggestions.map((s) => {
                 const checked = selected.has(s.id);
                 const bankDate = String(s.bank.posted_date ?? "").slice(0, 10);
@@ -609,20 +609,20 @@ export function AutoReconcileDialog(props: {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <div className="text-sm font-medium text-slate-900 truncate">{bankName || "Bank transaction"}</div>
-                        <div className="text-xs text-slate-500 tabular-nums">{bankDate}</div>
+                        <div className="text-sm font-medium text-bb-text truncate">{bankName || "Bank transaction"}</div>
+                        <div className="text-xs text-bb-text-muted tabular-nums">{bankDate}</div>
                         <div
                           className={`ml-auto text-xs tabular-nums font-semibold ${
-                            bankAmtFmt.isNeg ? "text-red-600" : "text-slate-900"
+                            bankAmtFmt.isNeg ? "text-bb-amount-negative" : "text-bb-text"
                           }`}
                         >
                           {bankAmtFmt.text}
                         </div>
                       </div>
 
-                      <div className="mt-1 text-xs text-slate-600">
+                      <div className="mt-1 text-xs text-bb-text-muted">
                         Suggested:{" "}
-                        <span className="font-medium text-slate-900">
+                        <span className="font-medium text-bb-text">
                           {s.kind === "COMBINE"
                             ? `${(s as any).bankTxnIds?.length ?? 1} bank txns`
                             : s.kind === "ONE_TO_ONE"
@@ -630,7 +630,7 @@ export function AutoReconcileDialog(props: {
                               : `${s.entryIds.length} entries`}
                         </span>
                         {" · "}
-                        <span className="text-slate-700">
+                        <span className="text-bb-text">
                           {s.kind === "COMBINE"
                             ? ((s as any).bankTxnIds ?? [s.bankTxnId])
                                 .map((id: any) => {
@@ -650,8 +650,8 @@ export function AutoReconcileDialog(props: {
                       </div>
 
                       {why ? (
-                        <div className="mt-1 text-[11px] text-slate-500">
-                          Why: <span className="text-slate-600">{why}</span>
+                        <div className="mt-1 text-[11px] text-bb-text-muted">
+                          Why: <span className="text-bb-text-muted">{why}</span>
                         </div>
                       ) : null}
 
@@ -670,7 +670,7 @@ export function AutoReconcileDialog(props: {
         </div>
 
         {confirmStep ? (
-          <div className="px-3 py-2 border-t border-slate-200 text-xs text-slate-600">
+          <div className="px-3 py-2 border-t border-bb-border text-xs text-bb-text-muted">
             Confirm apply will create matches for the selected suggestions. Nothing is applied silently.
           </div>
         ) : null}

@@ -61,13 +61,13 @@ import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Pl
 import { AutoReconcileDialog } from "@/components/reconcile/auto-reconcile-dialog";
 
 function TinySpinner() {
-  return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />;
+  return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
 }
 
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-bb-surface-card/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-bb-border bg-bb-surface-card px-3 py-1 text-xs font-medium text-bb-text shadow-sm">
         <RefreshCw className="h-3.5 w-3.5 animate-spin" />
         <span>{label}</span>
       </div>
@@ -99,7 +99,7 @@ function EnvBadge({ label, tooltip }: { label: "DEV" | "PROD"; tooltip: string }
   const cls =
     label === "PROD"
       ? "bg-primary/10 text-primary border-primary/20"
-      : "bg-amber-50 text-amber-800 border-amber-200";
+      : "bg-bb-status-warning-bg text-bb-status-warning-fg border-bb-status-warning-border";
 
   return (
     <span
@@ -308,10 +308,10 @@ function MatchSignalChip({ label, tone = "default", title }: { label: string; to
     tone === "success"
       ? "border-primary/20 bg-primary/10 text-primary"
       : tone === "warning"
-        ? "border-amber-200 bg-amber-50 text-amber-800"
+        ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
         : tone === "danger"
-          ? "border-red-200 bg-red-50 text-red-700"
-          : "border-slate-200 bg-white text-slate-700";
+          ? "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg"
+          : "border-bb-border bg-bb-surface-card text-bb-text";
 
   return (
     <span
@@ -416,31 +416,31 @@ function MatchSideCard({
 }) {
   const amount = toBigIntSafe(amountCents);
   return (
-    <div className="min-w-0 rounded-md border border-slate-200 bg-white p-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-slate-900" title={title}>
+    <div className="min-w-0 rounded-md border border-bb-border bg-bb-surface-card p-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-bb-text" title={title}>
         {compactText(title)}
       </div>
       <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
         <div className="min-w-0">
-          <div className="text-slate-500">Date</div>
-          <div className="truncate text-slate-800">{compactText(date)}</div>
+          <div className="text-bb-text-muted">Date</div>
+          <div className="truncate text-bb-text">{compactText(date)}</div>
         </div>
         <div className="text-right">
-          <div className="text-slate-500">Amount</div>
-          <div className={`tabular-nums font-semibold ${amount < 0n ? "text-red-700" : "text-slate-900"}`}>
+          <div className="text-bb-text-muted">Amount</div>
+          <div className={`tabular-nums font-semibold ${amount < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
             {formatUsdFromCents(amount)}
           </div>
         </div>
         <div className="min-w-0">
-          <div className="text-slate-500">Account</div>
-          <div className="truncate text-slate-800" title={account}>
+          <div className="text-bb-text-muted">Account</div>
+          <div className="truncate text-bb-text" title={account}>
             {compactText(account)}
           </div>
         </div>
         <div className="min-w-0 text-right">
-          <div className="text-slate-500">Category/status</div>
-          <div className="truncate text-slate-800" title={categoryOrStatus}>
+          <div className="text-bb-text-muted">Category/status</div>
+          <div className="truncate text-bb-text" title={categoryOrStatus}>
             {compactText(categoryOrStatus)}
           </div>
         </div>
@@ -477,11 +477,11 @@ function MatchPairPreview({
   const bankTotal = banks.reduce((sum, t) => sum + absBig(toBigIntSafe(t?.amount_cents)), 0n);
 
   return (
-    <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2.5">
+    <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-xs font-semibold text-slate-900">Review the match pair</div>
-          <div className="text-[11px] text-slate-500">Confirm exactly which ledger and bank records will be linked.</div>
+          <div className="text-xs font-semibold text-bb-text">Review the match pair</div>
+          <div className="text-[11px] text-bb-text-muted">Confirm exactly which ledger and bank records will be linked.</div>
         </div>
         <div className="flex flex-wrap justify-end gap-1.5">
           {chips.map((chip) => (
@@ -506,7 +506,7 @@ function MatchPairPreview({
           categoryOrStatus={entries.length > 1 ? "Selected" : entryCategoryLabel(firstEntry)}
         />
 
-        <div className="hidden items-center justify-center text-[11px] font-semibold text-slate-400 md:flex">to</div>
+        <div className="hidden items-center justify-center text-[11px] font-semibold text-bb-text-subtle md:flex">to</div>
 
         <MatchSideCard
           label={banks.length > 1 ? "Bank transactions" : "Bank transaction"}
@@ -2800,14 +2800,14 @@ const displayBankActiveList = useMemo(() => {
   );
 
   const disabledBtn =
-    "h-7 px-2 text-xs rounded-md border border-slate-200 bg-white opacity-50 cursor-not-allowed inline-flex items-center gap-1";
+    "h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card opacity-50 cursor-not-allowed inline-flex items-center gap-1";
 
   const headerRight = (
     <div className="flex items-center gap-2">
       <EnvBadge label={envLabel} tooltip={envTooltip} />
       <button
         type="button"
-        className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+        className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
         onClick={() => setOpenSnapshots(true)}
         title="Snapshots"
       >
@@ -2817,7 +2817,7 @@ const displayBankActiveList = useMemo(() => {
       <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
         <button
           type="button"
-          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+          className={`h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
             }`}
           onClick={() => {
             if (!canWriteReconcileEffective) return;
@@ -2835,7 +2835,7 @@ const displayBankActiveList = useMemo(() => {
       >
         <button
           type="button"
-          className={`h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+          className={`h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
             }`}
           disabled={!canWriteReconcileEffective || bankUnmatchedList.length === 0 || entriesExpectedList.length === 0}
           title={
@@ -2858,7 +2858,7 @@ const displayBankActiveList = useMemo(() => {
 
       <button
         type="button"
-        className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+        className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
         onClick={() => setOpenHistoryHub(true)}
         title="History"
       >
@@ -2867,7 +2867,7 @@ const displayBankActiveList = useMemo(() => {
 
       <button
         type="button"
-        className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+        className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
         onClick={() => {
           setIssuesSearch("");
           setOpenIssuesHub(true);
@@ -2914,47 +2914,47 @@ const displayBankActiveList = useMemo(() => {
 
   const differenceBar = (
     <div className="px-3 py-2">
-      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-x-6 gap-y-2 text-xs">
           <div className="leading-tight">
-            <div className="text-slate-500">Remaining to reconcile</div>
-            <div className="font-semibold text-slate-900 tabular-nums inline-flex items-center gap-2">
+            <div className="text-bb-text-muted">Remaining to reconcile</div>
+            <div className="font-semibold text-bb-text tabular-nums inline-flex items-center gap-2">
               {formatUsdFromCents(bankStateSummary.remainingAbsTotal)}
               {refreshBusy ? <TinySpinner /> : null}
             </div>
           </div>
 
           <div className="leading-tight">
-            <div className="text-slate-500">Bank status</div>
-            <div className="font-semibold text-slate-900">
+            <div className="text-bb-text-muted">Bank status</div>
+            <div className="font-semibold text-bb-text">
               U {bankStateSummary.unmatchedN} • P {bankStateSummary.partialN} • M {bankStateSummary.matchedN}
             </div>
           </div>
 
           <div className="leading-tight">
-            <div className="text-slate-500">Entries</div>
-            <div className="font-semibold text-slate-900 inline-flex items-center gap-2">
+            <div className="text-bb-text-muted">Entries</div>
+            <div className="font-semibold text-bb-text inline-flex items-center gap-2">
               Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}
               {entriesSummarySettling ? <TinySpinner /> : null}
             </div>
           </div>
 
           <div className="leading-tight">
-            <div className="text-slate-500">Reverts</div>
-            <div className="font-semibold text-slate-900">{revertsInScope}</div>
+            <div className="text-bb-text-muted">Reverts</div>
+            <div className="font-semibold text-bb-text">{revertsInScope}</div>
           </div>
 
           {plaid?.connected ? (
             <div className="leading-tight">
-              <div className="text-slate-500">Current balance</div>
-              <div className="font-semibold text-slate-900 tabular-nums">{balanceText}</div>
+              <div className="text-bb-text-muted">Current balance</div>
+              <div className="font-semibold text-bb-text tabular-nums">{balanceText}</div>
             </div>
           ) : null}
 
           {plaid?.connected && plaid?.lastSyncAt ? (
             <div className="leading-tight">
-              <div className="text-slate-500">Last sync</div>
-              <div className="font-semibold text-slate-900">{new Date(plaid.lastSyncAt).toLocaleString()}</div>
+              <div className="text-bb-text-muted">Last sync</div>
+              <div className="font-semibold text-bb-text">{new Date(plaid.lastSyncAt).toLocaleString()}</div>
             </div>
           ) : null}
         </div>
@@ -2962,19 +2962,19 @@ const displayBankActiveList = useMemo(() => {
     </div>
   );
 
-  const thClass = "px-1.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-slate-600 text-left";
-  const tdClass = "px-1.5 py-0.5 align-middle text-xs text-slate-800";
-  const trClass = "h-[24px] border-b border-slate-100";
-  const stickyActionHeaderClass = "sticky right-0 z-20 bg-slate-50 border-l border-slate-200 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
-  const stickyActionCellClass = "sticky right-0 z-[5] border-l border-slate-200 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
+  const thClass = "px-1.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-bb-text-muted text-left";
+  const tdClass = "px-1.5 py-0.5 align-middle text-xs text-bb-text";
+  const trClass = "h-[24px] border-b border-bb-border-muted";
+  const stickyActionHeaderClass = "sticky right-0 z-20 bg-bb-table-header border-l border-bb-border shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
+  const stickyActionCellClass = "sticky right-0 z-[5] border-l border-bb-border shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
   const reconcileTextClampClass = "block min-w-0 max-w-[22rem] overflow-hidden text-ellipsis whitespace-nowrap xl:max-w-[30rem] xl:whitespace-normal xl:[display:-webkit-box] xl:[-webkit-line-clamp:2] xl:[-webkit-box-orient:vertical]";
 
   function EmptyState({ label }: { label: string }) {
     return (
       <div className="h-full min-h-[240px] flex items-center justify-center">
-        <div className="text-center text-xs text-slate-500">
-          <div className="mx-auto mb-2 h-10 w-10 rounded-full border border-slate-200 bg-white flex items-center justify-center">
-            <GitMerge className="h-4 w-4 text-slate-400" />
+        <div className="text-center text-xs text-bb-text-muted">
+          <div className="mx-auto mb-2 h-10 w-10 rounded-full border border-bb-border bg-bb-surface-card flex items-center justify-center">
+            <GitMerge className="h-4 w-4 text-bb-text-subtle" />
           </div>
           {label}
         </div>
@@ -2984,7 +2984,7 @@ const displayBankActiveList = useMemo(() => {
 
   const connectedPill = (
     <span
-      className={`inline-flex items-center px-2 h-5 rounded-full border text-[11px] font-medium whitespace-nowrap leading-none ${plaid?.connected ? "bg-slate-50 text-slate-700 border-slate-200" : "bg-white text-slate-500 border-slate-200"
+      className={`inline-flex items-center px-2 h-5 rounded-full border text-[11px] font-medium whitespace-nowrap leading-none ${plaid?.connected ? "bg-bb-table-header text-bb-text border-bb-border" : "bg-bb-surface-card text-bb-text-muted border-bb-border"
         }`}
     >
       {plaidLoading ? "Loading…" : plaid?.connected ? "Connected" : "Not connected"}
@@ -3000,12 +3000,12 @@ const displayBankActiveList = useMemo(() => {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<GitMerge className="h-4 w-4" />} title="Reconcile" afterTitle={accountCapsule} right={headerRight} />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         <div className="px-3 py-2">
           <FilterBar left={filterLeft} right={null} />
@@ -3054,12 +3054,12 @@ const displayBankActiveList = useMemo(() => {
           </div>
         ) : null}
 
-        <div className="h-px bg-slate-200" />
+        <div className="h-px bg-bb-border" />
 
         {differenceBar}
         {createEntryErr ? (
           <div className="px-3 pb-2">
-            <div className="text-xs text-red-700">{createEntryErr}</div>
+            <div className="text-xs text-bb-status-danger-fg">{createEntryErr}</div>
           </div>
         ) : null}
 
@@ -3077,7 +3077,7 @@ const displayBankActiveList = useMemo(() => {
             <DialogFooter
               left={
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600 whitespace-nowrap">Auto-match</span>
+                  <span className="text-xs text-bb-text-muted whitespace-nowrap">Auto-match</span>
                   <PillToggle
                     checked={createEntryAutoMatch}
                     onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
@@ -3225,24 +3225,24 @@ const displayBankActiveList = useMemo(() => {
             return (
               <div className="flex flex-col max-h-[55vh]">
                 <div className="flex-1 overflow-y-auto overflow-x-hidden">
-                  <div className="text-xs text-slate-600">
+                  <div className="text-xs text-bb-text-muted">
                     This will create an entry from the selected bank transaction. Review method, category, and memo before creating.
                   </div>
 
-                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-slate-500">Date</div>
-                      <div className="font-semibold text-slate-900">{dateStr}</div>
+                      <div className="text-bb-text-muted">Date</div>
+                      <div className="font-semibold text-bb-text">{dateStr}</div>
                     </div>
                     <div className="flex items-center justify-between gap-2 mt-1">
-                      <div className="text-slate-500">Description</div>
-                      <div className="font-semibold text-slate-900 truncate max-w-[260px]" title={desc}>
+                      <div className="text-bb-text-muted">Description</div>
+                      <div className="font-semibold text-bb-text truncate max-w-[260px]" title={desc}>
                         {desc}
                       </div>
                     </div>
                     <div className="flex items-center justify-between gap-2 mt-1">
-                      <div className="text-slate-500">Amount</div>
-                      <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-900"}`}>
+                      <div className="text-bb-text-muted">Amount</div>
+                      <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
                         {formatUsdFromCents(amt)}
                       </div>
                     </div>
@@ -3250,10 +3250,10 @@ const displayBankActiveList = useMemo(() => {
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Method</div>
+                      <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Method</div>
                       <select
                         className={[
-                          "h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white",
+                          "h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card",
                           ringFocus,
                         ].join(" ")}
                         value={createEntryMethod}
@@ -3272,15 +3272,15 @@ const displayBankActiveList = useMemo(() => {
                     </div>
 
                     <div>
-                      <div className="text-[11px] font-semibold text-slate-600 mb-1">Category</div>
+                      <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Category</div>
 
                       {/* Phase F1: suggestion-only category chips (top 3) */}
                       <div className="mb-2">
                         {createEntrySugLoading ? (
                           <div className="flex flex-wrap gap-2">
-                            <div className="h-6 w-24 rounded-full bg-slate-100 animate-pulse" />
-                            <div className="h-6 w-28 rounded-full bg-slate-100 animate-pulse" />
-                            <div className="h-6 w-20 rounded-full bg-slate-100 animate-pulse" />
+                            <div className="h-6 w-24 rounded-full bg-bb-border-muted animate-pulse" />
+                            <div className="h-6 w-28 rounded-full bg-bb-border-muted animate-pulse" />
+                            <div className="h-6 w-20 rounded-full bg-bb-border-muted animate-pulse" />
                           </div>
                         ) : createEntrySuggestions.length ? (
                           <div className="flex flex-col gap-2">
@@ -3305,7 +3305,7 @@ const displayBankActiveList = useMemo(() => {
                                         ? "border-primary/20 bg-primary/10 text-primary"
                                         : idx === 0
                                           ? "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
-                                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                                          : "border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover",
                                       ringFocus,
                                     ].join(" ")}
                                     onClick={() => {
@@ -3319,7 +3319,7 @@ const displayBankActiveList = useMemo(() => {
                                     <span
                                       className={[
                                         "inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-semibold",
-                                        selected ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600",
+                                        selected ? "bg-primary/10 text-primary" : "bg-bb-border-muted text-bb-text-muted",
                                       ].join(" ")}
                                     >
                                       {conf}%
@@ -3329,7 +3329,7 @@ const displayBankActiveList = useMemo(() => {
                               })}
                             </div>
 
-                            <div className="text-[11px] text-slate-500">
+                            <div className="text-[11px] text-bb-text-muted">
                               {categorySuggestionTierLabel(createEntrySuggestions?.[0]?.confidence_tier)}
                               {" • "}
                               {categorySuggestionSourceLabel(createEntrySuggestions?.[0]?.source)}
@@ -3338,7 +3338,7 @@ const displayBankActiveList = useMemo(() => {
                             </div>
 
                             <div
-                              className="text-[11px] text-slate-500 truncate"
+                              className="text-[11px] text-bb-text-muted truncate"
                               title={String(createEntrySuggestions?.[0]?.reason ?? "Review this entry before saving")}
                             >
                               {String(createEntrySuggestions?.[0]?.reason ?? "").trim()
@@ -3347,16 +3347,16 @@ const displayBankActiveList = useMemo(() => {
                             </div>
                           </div>
                         ) : createEntrySugErr ? (
-                          <div className="text-[11px] text-slate-500">Suggestions unavailable</div>
+                          <div className="text-[11px] text-bb-text-muted">Suggestions unavailable</div>
                         ) : (
-                          <div className="text-[11px] text-slate-500">No strong suggestion yet. You can still choose a category below.</div>
+                          <div className="text-[11px] text-bb-text-muted">No strong suggestion yet. You can still choose a category below.</div>
                         )}
                       </div>
 
                       <div className="relative overflow-visible">
                         <input
                           className={[
-                            "h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white",
+                            "h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card",
                             ringFocus,
                           ].join(" ")}
                           placeholder={categoriesLoading ? "Loading categories…" : "Search categories…"}
@@ -3370,12 +3370,12 @@ const displayBankActiveList = useMemo(() => {
 
                         {/* Dropdown */}
                         {categoryQuery.trim() ? (
-                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-sm">
+                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-bb-border bg-bb-surface-card shadow-sm">
                             {(() => {
                               const q = categoryQuery.trim().toLowerCase();
                               const base = categories ?? [];
                               if (base.length === 0) {
-                                return <div className="px-2 py-2 text-xs text-slate-500">No categories loaded</div>;
+                                return <div className="px-2 py-2 text-xs text-bb-text-muted">No categories loaded</div>;
                               }
 
                               const filtered = base
@@ -3387,7 +3387,7 @@ const displayBankActiveList = useMemo(() => {
                                 .slice(0, 20);
 
                               if (filtered.length === 0) {
-                                return <div className="px-2 py-2 text-xs text-slate-500">No matches</div>;
+                                return <div className="px-2 py-2 text-xs text-bb-text-muted">No matches</div>;
                               }
 
                               return filtered.map((c: any) => {
@@ -3397,14 +3397,14 @@ const displayBankActiveList = useMemo(() => {
                                   <button
                                     key={id}
                                     type="button"
-                                    className="w-full text-left px-2 py-2 hover:bg-slate-50 text-xs"
+                                    className="w-full text-left px-2 py-2 hover:bg-bb-table-row-hover text-xs"
                                     onClick={() => {
                                       setCreateEntryCategoryId(id);
                                       setCreateEntryCategoryName(name);
                                       setCategoryQuery(""); // close dropdown
                                     }}
                                   >
-                                    <div className="font-medium text-slate-900 truncate">{name}</div>
+                                    <div className="font-medium text-bb-text truncate">{name}</div>
                                   </button>
                                 );
                               });
@@ -3414,7 +3414,7 @@ const displayBankActiveList = useMemo(() => {
                       </div>
 
                       {createEntryCategoryName ? (
-                        <div className="mt-1 text-[11px] text-slate-600">
+                        <div className="mt-1 text-[11px] text-bb-text-muted">
                           Selected: <span className="font-medium">{createEntryCategoryName}</span>{" "}
                           <button
                             type="button"
@@ -3433,10 +3433,10 @@ const displayBankActiveList = useMemo(() => {
                   </div>
 
                   <div className="mt-3">
-                    <div className="text-[11px] font-semibold text-slate-600 mb-1">Memo</div>
+                    <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Memo</div>
                     <textarea
                       className={[
-                        "min-h-[70px] w-full px-2 py-1 text-xs rounded-md border border-slate-200 bg-white",
+                        "min-h-[70px] w-full px-2 py-1 text-xs rounded-md border border-bb-border bg-bb-surface-card",
                         ringFocus,
                       ].join(" ")}
                       value={createEntryMemo}
@@ -3455,14 +3455,14 @@ const displayBankActiveList = useMemo(() => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
         {/* Expected Entries */}
-        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-white">
+        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-bb-surface-card">
           <div className="px-3 py-2">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <div className="text-sm font-semibold text-slate-900">Expected Entries</div>
-                <div className="text-xs text-slate-500">Ledger entries awaiting reconciliation</div>
+                <div className="text-sm font-semibold text-bb-text">Expected Entries</div>
+                <div className="text-xs text-bb-text-muted">Ledger entries awaiting reconciliation</div>
               </div>
-              <div className="text-[11px] text-slate-500 min-h-[16px]">
+              <div className="text-[11px] text-bb-text-muted min-h-[16px]">
                 {entriesTruthSettling || entriesUpdating ? (
                   <span className="inline-flex items-center gap-1.5">
                     <TinySpinner />
@@ -3477,7 +3477,7 @@ const displayBankActiveList = useMemo(() => {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "expected" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "expected" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setExpectedTab("expected")}
               >
@@ -3485,7 +3485,7 @@ const displayBankActiveList = useMemo(() => {
               </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "matched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "matched" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setExpectedTab("matched")}
               >
@@ -3494,14 +3494,14 @@ const displayBankActiveList = useMemo(() => {
             </div>
 
             {bankTab === "unmatched" && selectedBankTxnIds.size > 0 ? (
-              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-900">
+                  <span className="text-xs font-semibold text-bb-text">
                     {selectedBankTxnIds.size} selected
                   </span>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-600 whitespace-nowrap">Auto-match</span>
+                    <span className="text-xs text-bb-text-muted whitespace-nowrap">Auto-match</span>
                     <PillToggle
                       checked={bulkCreateAutoMatch}
                       onCheckedChange={(next) => setBulkCreateAutoMatch(next)}
@@ -3610,7 +3610,7 @@ const displayBankActiveList = useMemo(() => {
             ) : null}
           </div>
 
-          <div className="h-px bg-slate-200" />
+          <div className="h-px bg-bb-border" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
             <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
@@ -3631,7 +3631,7 @@ const displayBankActiveList = useMemo(() => {
                     <col style={{ width: 104 }} />
                   </colgroup>
 
-                  <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-[28px]">
                       <th className={`${thClass} pl-8.5`}>DATE</th>
                       <th className={thClass}>PAYEE</th>
@@ -3652,10 +3652,10 @@ const displayBankActiveList = useMemo(() => {
                       const g = !isOptimisticPending ? (activeGroupByEntryId.get(String(e.id)) ?? null) : null;
                       const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
 
-                      const rowTone = isMatched ? " bg-primary/10" : isOptimisticPending ? " bg-amber-50/70" : "";
-                      const actionCellBg = isMatched ? "bg-primary/10" : isOptimisticPending ? "bg-amber-50" : "bg-white";
+                      const rowTone = isMatched ? " bg-primary/10" : isOptimisticPending ? " bg-bb-status-warning-bg" : "";
+                      const actionCellBg = isMatched ? "bg-primary/10" : isOptimisticPending ? "bg-bb-status-warning-bg" : "bg-bb-surface-card";
 
-                      const deEmphasis = expectedTab === "matched" ? " text-slate-600" : "";
+                      const deEmphasis = expectedTab === "matched" ? " text-bb-text-muted" : "";
 
                       const openAuditForEntry = () => {
                         const ev0 = (reconAuditAll ?? []).find((ev: any) =>
@@ -3677,7 +3677,7 @@ const displayBankActiveList = useMemo(() => {
                           className={
                             trClass +
                             rowTone +
-                            (expectedTab === "matched" ? " opacity-[0.96] cursor-pointer hover:bg-slate-50" : "")
+                            (expectedTab === "matched" ? " opacity-[0.96] cursor-pointer hover:bg-bb-table-row-hover" : "")
                           }
                           onClick={expectedTab === "matched" ? openAuditForEntry : undefined}
                           title={expectedTab === "matched" ? "View audit detail" : undefined}
@@ -3686,7 +3686,7 @@ const displayBankActiveList = useMemo(() => {
                           <td className={`${tdClass} font-medium min-w-0${deEmphasis}`} title={payee}>
                             <span className={reconcileTextClampClass}>{payee}</span>
                           </td>
-                          <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
+                          <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-right pr-2${deEmphasis}`}>
                             <div className="inline-flex items-center justify-end gap-1.5">
                               <StatusChip
@@ -3703,7 +3703,7 @@ const displayBankActiveList = useMemo(() => {
                               {isOptimisticPending ? null : expectedTab === "matched" ? (
                                 <button
                                   type="button"
-                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
+                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                   onClick={(ev) => {
                                     ev.stopPropagation();
                                     openAuditForEntry();
@@ -3711,14 +3711,14 @@ const displayBankActiveList = useMemo(() => {
                                   title="Revert (view audit)"
                                   aria-label="Revert (view audit)"
                                 >
-                                  <Undo2 className="h-4 w-4 text-slate-700" />
+                                  <Undo2 className="h-4 w-4 text-bb-text" />
                                 </button>
                               ) : (
                                 <>
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
                                       title={canWriteReconcileEffective ? "Review match suggestions for this ledger entry" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match entry"
@@ -3734,14 +3734,14 @@ const displayBankActiveList = useMemo(() => {
                                         void runAiSuggestForEntry(e);
                                       }}
                                     >
-                                      <GitMerge className="h-4 w-4 text-slate-700" />
+                                      <GitMerge className="h-4 w-4 text-bb-text" />
                                     </button>
                                   </HintWrap>
                                   
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
                                         }`}
                                       disabled={!canWriteReconcileEffective}
                                       onClick={() => {
@@ -3754,7 +3754,7 @@ const displayBankActiveList = useMemo(() => {
                                       title={canWriteReconcileEffective ? "Mark adjustment (ledger-only)" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Mark adjustment"
                                     >
-                                      <Wrench className="h-4 w-4 text-slate-700" />
+                                      <Wrench className="h-4 w-4 text-bb-text" />
                                     </button>
                                   </HintWrap>
                                 </>
@@ -3772,7 +3772,7 @@ const displayBankActiveList = useMemo(() => {
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
-                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      className="h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                       onClick={() => setExpectedVisibleN((n) => n + PAGE_CHUNK)}
                     >
                       Load more
@@ -3782,7 +3782,7 @@ const displayBankActiveList = useMemo(() => {
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
-                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      className="h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                       onClick={() => setMatchedVisibleN((n) => n + PAGE_CHUNK)}
                     >
                       Load more
@@ -3796,27 +3796,27 @@ const displayBankActiveList = useMemo(() => {
         </div>
 
         {/* Bank Transactions */}
-        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-white">
+        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-bb-surface-card">
           <div className="px-3 py-[7px]">
             <div className="flex items-start justify-between gap-2 min-w-0">
               <div className="min-w-0">
                 <div className="flex items-baseline gap-2">
-                  <div className="text-sm font-semibold text-slate-900">Bank Transactions</div>
+                  <div className="text-sm font-semibold text-bb-text">Bank Transactions</div>
                   {connectedPill}
                 </div>
 
-                <div className="mt-0 text-xs text-slate-500 min-w-0 truncate whitespace-nowrap">
+                <div className="mt-0 text-xs text-bb-text-muted min-w-0 truncate whitespace-nowrap">
                   {plaid?.connected ? (
                     <>
-                      {plaid?.institutionName ? <span className="text-slate-700">{plaid.institutionName}</span> : <span>—</span>}
-                      <span className="text-slate-400"> • </span>
+                      {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
+                      <span className="text-bb-text-subtle"> • </span>
                       <span className="tabular-nums">Balance: {balanceText}</span>
-                      {plaid?.lastSyncAt ? <span className="text-slate-400"> • </span> : null}
+                      {plaid?.lastSyncAt ? <span className="text-bb-text-subtle"> • </span> : null}
                       {plaid?.lastSyncAt ? <span>Last sync: {new Date(plaid.lastSyncAt).toLocaleString()}</span> : null}
-                      {syncMsg ? <span className="text-slate-400"> • </span> : null}
+                      {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
                       {syncMsg ? <span className="truncate">{syncMsg}</span> : null}
-                      {pendingMsg ? <span className="text-slate-400"> • </span> : null}
-                      {pendingMsg ? <span className="text-amber-700 truncate">{pendingMsg}</span> : null}
+                      {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {pendingMsg ? <span className="text-bb-status-warning-fg truncate">{pendingMsg}</span> : null}
                     </>
                   ) : (
                     "Imported from bank or CSV"
@@ -3829,7 +3829,7 @@ const displayBankActiveList = useMemo(() => {
                   <>
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       onClick={() => setOpenUpload(true)}
                     >
                       <Download className="h-3.5 w-3.5" /> Upload CSV
@@ -3840,7 +3840,7 @@ const displayBankActiveList = useMemo(() => {
                       accountId={selectedAccountId ?? ""}
                       effectiveStartDate="2025-11-01"
                       disabledClassName={disabledBtn}
-                      buttonClassName="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+                      buttonClassName="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       onConnected={async () => {
                         if (!selectedBusinessId || !selectedAccountId) return;
 
@@ -3865,7 +3865,7 @@ const displayBankActiveList = useMemo(() => {
                   <>
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       onClick={() => setOpenUpload(true)}
                     >
                       <Download className="h-3.5 w-3.5" /> Upload CSV
@@ -3873,7 +3873,7 @@ const displayBankActiveList = useMemo(() => {
 
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white inline-flex items-center gap-1 hover:bg-slate-50"
+                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       disabled={plaidSyncing}
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId) return;
@@ -3916,14 +3916,14 @@ const displayBankActiveList = useMemo(() => {
           <div className="px-3 pb-2">
             <div className="flex items-center gap-2">
               {bankPanelShowStatusWhileRows ? (
-                <span className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+                <span className="text-[11px] text-bb-text-muted inline-flex items-center gap-1.5">
                   <TinySpinner />
                   <span>{plaidSyncing ? "Syncing bank data…" : "Saving changes…"}</span>
                 </span>
               ) : null}
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${bankTab === "unmatched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${bankTab === "unmatched" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setBankTab("unmatched")}
               >
@@ -3931,7 +3931,7 @@ const displayBankActiveList = useMemo(() => {
               </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${bankTab === "matched" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${bankTab === "matched" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setBankTab("matched")}
               >
@@ -3940,7 +3940,7 @@ const displayBankActiveList = useMemo(() => {
             </div>
           </div>
 
-          <div className="h-px bg-slate-200" />
+          <div className="h-px bg-bb-border" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
             <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
@@ -3967,7 +3967,7 @@ const displayBankActiveList = useMemo(() => {
                     <col style={{ width: 156 }} />
                   </colgroup>
 
-                  <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-[28px]">
                       <th className={thClass}>
                         {bankTab === "unmatched" ? (
@@ -4016,9 +4016,9 @@ const displayBankActiveList = useMemo(() => {
                         activeGroupByBankTxnId.has(String(t.id)) ||
                         activeLegacyMatchByBankTxnId.has(String(t.id));
                       const rowTone = isMatched ? " bg-primary/10" : "";
-                      const actionCellBg = isMatched ? "bg-primary/10" : "bg-white";
+                      const actionCellBg = isMatched ? "bg-primary/10" : "bg-bb-surface-card";
 
-                      const deEmphasis = bankTab === "matched" ? " text-slate-600" : "";
+                      const deEmphasis = bankTab === "matched" ? " text-bb-text-muted" : "";
 
                       const openAuditForBankTxn = () => {
                         const ev0 = (reconAuditAll ?? []).find((e: any) =>
@@ -4042,7 +4042,7 @@ const displayBankActiveList = useMemo(() => {
                           className={
                             trClass +
                             rowTone +
-                            (bankTab === "matched" ? " opacity-[0.96] cursor-pointer hover:bg-slate-50" : "")
+                            (bankTab === "matched" ? " opacity-[0.96] cursor-pointer hover:bg-bb-table-row-hover" : "")
                           }
                           onClick={bankTab === "matched" && isMatched ? openAuditForBankTxn : undefined}
                           title={bankTab === "matched" ? "View audit detail" : undefined}
@@ -4077,7 +4077,7 @@ const displayBankActiveList = useMemo(() => {
                               {hasVoidByBankTxnId.has(String(t.id)) ? (
                                 <button
                                   type="button"
-                                  className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md hover:bg-slate-50"
+                                  className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-md hover:bg-bb-table-row-hover"
                                   title="Reverted previously (view history)"
                                   aria-label="Reverted previously (view history)"
                                   onClick={(ev) => {
@@ -4087,7 +4087,7 @@ const displayBankActiveList = useMemo(() => {
                                     setOpenReconciliationHistory(true);
                                   }}
                                 >
-                                  <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+                                  <RotateCcw className="h-3.5 w-3.5 text-bb-text-muted" />
                                 </button>
                               ) : null}
 
@@ -4098,7 +4098,7 @@ const displayBankActiveList = useMemo(() => {
                               ) : null}
                             </div>
                           </td>
-                          <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}${deEmphasis}`}>
+                          <td className={`${tdClass} text-right pr-4 tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}${deEmphasis}`}>
                             {formatUsdFromCents(amt)}
                           </td>
 
@@ -4108,7 +4108,7 @@ const displayBankActiveList = useMemo(() => {
 
                               {bulkCreateResultByBankTxnId[String(t.id)] ? (
                                 <span
-                                  className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-700"
+                                  className="text-[11px] px-2 py-0.5 rounded-full border border-bb-border text-bb-text"
                                   title={String(bulkCreateResultByBankTxnId[String(t.id)]?.error ?? "")}
                                 >
                                   {String(bulkCreateResultByBankTxnId[String(t.id)]?.status ?? "")}
@@ -4118,7 +4118,7 @@ const displayBankActiveList = useMemo(() => {
                               {bankTab === "matched" ? (
                                 <button
                                   type="button"
-                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
+                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                   onClick={(ev) => {
                                     ev.stopPropagation();
                                     openAuditForBankTxn();
@@ -4126,14 +4126,14 @@ const displayBankActiveList = useMemo(() => {
                                   title="Revert (view audit)"
                                   aria-label="Revert (view audit)"
                                 >
-                                  <Undo2 className="h-4 w-4 text-slate-700" />
+                                  <Undo2 className="h-4 w-4 text-bb-text" />
                                 </button>
                               ) : (
                                 <>
                                   <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"}`}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective}
                                       title={canWriteReconcileEffective ? "Review match suggestions for this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match bank transaction"
@@ -4149,7 +4149,7 @@ const displayBankActiveList = useMemo(() => {
                                         void runAiSuggestForBank(t);
                                       }}
                                     >
-                                      <GitMerge className="h-4 w-4 text-slate-700" />
+                                      <GitMerge className="h-4 w-4 text-bb-text" />
                                     </button>
                                   </HintWrap>
                                 </>
@@ -4158,7 +4158,7 @@ const displayBankActiveList = useMemo(() => {
                               <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
                                 <button
                                   type="button"
-                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-slate-50" : "opacity-50 cursor-not-allowed"
+                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
                                     }`}
                                   disabled={
                                     !canWriteReconcileEffective ||
@@ -4199,7 +4199,7 @@ const displayBankActiveList = useMemo(() => {
                                   {createEntryBusyByBankId[String(t.id)] ? (
                                     <TinySpinner />
                                   ) : (
-                                    <Plus className="h-4 w-4 text-slate-700" />
+                                    <Plus className="h-4 w-4 text-bb-text" />
                                   )}
                                 </button>
                               </HintWrap>
@@ -4215,7 +4215,7 @@ const displayBankActiveList = useMemo(() => {
                                   return (
                                     <button
                                       type="button"
-                                      className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
+                                      className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                       onClick={(ev) => {
                                         ev.stopPropagation();
                                         openAuditForBankTxn();
@@ -4223,7 +4223,7 @@ const displayBankActiveList = useMemo(() => {
                                       title="Revert (view audit)"
                                       aria-label="Revert (view audit)"
                                     >
-                                      <Undo2 className="h-4 w-4 text-slate-700" />
+                                      <Undo2 className="h-4 w-4 text-bb-text" />
                                     </button>
                                   );
                                 })()
@@ -4241,7 +4241,7 @@ const displayBankActiveList = useMemo(() => {
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
-                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      className="h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                       onClick={() => setBankUnmatchedVisibleN((n) => n + PAGE_CHUNK)}
                     >
                       Load more
@@ -4251,7 +4251,7 @@ const displayBankActiveList = useMemo(() => {
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
-                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      className="h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                       onClick={() => setBankMatchedVisibleN((n) => n + PAGE_CHUNK)}
                     >
                       Load more
@@ -4261,7 +4261,7 @@ const displayBankActiveList = useMemo(() => {
                   <div className="p-2 flex justify-center">
                     <button
                       type="button"
-                      className="h-7 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed"
                       disabled={bankLoadingMore}
                       onClick={() => void loadMoreBankTransactions()}
                     >
@@ -4301,10 +4301,10 @@ const displayBankActiveList = useMemo(() => {
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Left: list */}
-          <div className="rounded-md border border-slate-200 overflow-hidden">
-            <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-              <div className="text-xs font-semibold text-slate-700">Snapshot history</div>
-              <div className="text-[11px] text-slate-500">Most recent first</div>
+          <div className="rounded-md border border-bb-border overflow-hidden">
+            <div className="px-3 py-2 border-b border-bb-border bg-bb-surface-soft">
+              <div className="text-xs font-semibold text-bb-text">Snapshot history</div>
+              <div className="text-[11px] text-bb-text-muted">Most recent first</div>
             </div>
 
             <div className="max-h-[60vh] overflow-y-auto">
@@ -4313,9 +4313,9 @@ const displayBankActiveList = useMemo(() => {
                   <Skeleton className="h-24 w-full" />
                 </div>
               ) : snapshotsError ? (
-                <div className="p-3 text-xs text-red-700">{snapshotsError}</div>
+                <div className="p-3 text-xs text-bb-status-danger-fg">{snapshotsError}</div>
               ) : snapshots.length === 0 ? (
-                <div className="p-3 text-xs text-slate-500">No snapshots yet for this account.</div>
+                <div className="p-3 text-xs text-bb-text-muted">No snapshots yet for this account.</div>
               ) : (
                 <div className="flex flex-col">
                   {snapshots.map((s) => {
@@ -4324,21 +4324,21 @@ const displayBankActiveList = useMemo(() => {
                       <button
                         key={s.id}
                         type="button"
-                        className={`w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-slate-50 ${selected ? "bg-accent" : "bg-white"
+                        className={`w-full text-left px-3 py-2 border-b border-bb-border-muted hover:bg-bb-table-row-hover ${selected ? "bg-bb-table-row-selected" : "bg-bb-surface-card"
                           }`}
                         onClick={() => setSelectedSnapshotId(s.id)}
                         title="View snapshot"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="text-xs font-semibold text-slate-900 truncate">{s.month}</div>
-                            <div className="text-[11px] text-slate-500 truncate">
+                            <div className="text-xs font-semibold text-bb-text truncate">{s.month}</div>
+                            <div className="text-[11px] text-bb-text-muted truncate">
                               Created {new Date(s.created_at).toLocaleString()}
                             </div>
                           </div>
                           <div className="shrink-0 text-right">
-                            <div className="text-[11px] text-slate-500">Remaining</div>
-                            <div className="text-xs font-semibold text-slate-900 tabular-nums">
+                            <div className="text-[11px] text-bb-text-muted">Remaining</div>
+                            <div className="text-xs font-semibold text-bb-text tabular-nums">
                               {formatUsdFromCents(toBigIntSafe(s.remaining_abs_cents))}
                             </div>
                           </div>
@@ -4353,10 +4353,10 @@ const displayBankActiveList = useMemo(() => {
 
           {/* Right: create + details */}
           <div className="flex flex-col gap-3">
-            <div className="rounded-md border border-slate-200 overflow-hidden">
-              <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-                <div className="text-xs font-semibold text-slate-700">Create snapshot</div>
-                <div className="text-[11px] text-slate-500">
+            <div className="rounded-md border border-bb-border overflow-hidden">
+              <div className="px-3 py-2 border-b border-bb-border bg-bb-surface-soft">
+                <div className="text-xs font-semibold text-bb-text">Create snapshot</div>
+                <div className="text-[11px] text-bb-text-muted">
                   Snapshots reflect reconciliation state as of creation time for bank transactions posted in the selected month.
                 </div>
               </div>
@@ -4448,14 +4448,14 @@ const displayBankActiveList = useMemo(() => {
 
                 {/* Neutral info banner when snapshot exists */}
                 {monthAlreadyExists || snapshotExistsInfo ? (
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-2">
-                    <div className="text-xs text-slate-700">
+                  <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-2">
+                    <div className="text-xs text-bb-text">
                       Snapshot already exists for <span className="font-semibold">{snapshotMonth}</span>.
                     </div>
 
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                       title="View snapshot"
                       onClick={() => {
                         const id = (snapshotExistsInfo?.snapshotId || existingSnapshotForMonth?.id || "").trim();
@@ -4469,45 +4469,45 @@ const displayBankActiveList = useMemo(() => {
                   </div>
                 ) : null}
 
-                {snapshotCreateError ? <div className="mt-2 text-xs text-red-700">{snapshotCreateError}</div> : null}
+                {snapshotCreateError ? <div className="mt-2 text-xs text-bb-status-danger-fg">{snapshotCreateError}</div> : null}
               </div>
             </div>
 
-            <div className="rounded-md border border-slate-200 overflow-hidden flex-1">
-              <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-                <div className="text-xs font-semibold text-slate-700">Snapshot details</div>
-                <div className="text-[11px] text-slate-500">Downloads are restricted to write roles.</div>
+            <div className="rounded-md border border-bb-border overflow-hidden flex-1">
+              <div className="px-3 py-2 border-b border-bb-border bg-bb-surface-soft">
+                <div className="text-xs font-semibold text-bb-text">Snapshot details</div>
+                <div className="text-[11px] text-bb-text-muted">Downloads are restricted to write roles.</div>
               </div>
 
               <div className="p-3">
                 {snapshotLoading ? (
                   <Skeleton className="h-24 w-full" />
                 ) : snapshotError ? (
-                  <div className="text-xs text-red-700">{snapshotError}</div>
+                  <div className="text-xs text-bb-status-danger-fg">{snapshotError}</div>
                 ) : !snapshot ? (
-                  <div className="text-xs text-slate-500">Select a snapshot from the left.</div>
+                  <div className="text-xs text-bb-text-muted">Select a snapshot from the left.</div>
                 ) : (
                   <div className="flex flex-col gap-3">
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div>
-                        <div className="text-slate-500">Month</div>
-                        <div className="font-semibold text-slate-900">{snapshot.month}</div>
+                        <div className="text-bb-text-muted">Month</div>
+                        <div className="font-semibold text-bb-text">{snapshot.month}</div>
                       </div>
                       <div>
-                        <div className="text-slate-500">Remaining</div>
-                        <div className="font-semibold text-slate-900 tabular-nums">
+                        <div className="text-bb-text-muted">Remaining</div>
+                        <div className="font-semibold text-bb-text tabular-nums">
                           {formatUsdFromCents(toBigIntSafe(snapshot.remaining_abs_cents))}
                         </div>
                       </div>
                       <div>
-                        <div className="text-slate-500">Bank status</div>
-                        <div className="text-slate-800">
+                        <div className="text-bb-text-muted">Bank status</div>
+                        <div className="text-bb-text">
                           U {snapshot.bank_unmatched_count} • P {snapshot.bank_partial_count} • M {snapshot.bank_matched_count}
                         </div>
                       </div>
                       <div>
-                        <div className="text-slate-500">Entries</div>
-                        <div className="text-slate-800">
+                        <div className="text-bb-text-muted">Entries</div>
+                        <div className="text-bb-text">
                           Expected {snapshot.entries_expected_count} • Matched {snapshot.entries_matched_count}
                         </div>
                       </div>
@@ -4740,11 +4740,11 @@ const displayBankActiveList = useMemo(() => {
       >
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-slate-600 mb-2">Select ledger entries that sum exactly to the bank transaction amount.</div>
+            <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount.</div>
 
             <div className="mb-2">
               <input
-                className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
+                className="h-7 w-full px-2 text-xs border border-bb-border rounded-md"
                 placeholder="Search entries…"
                 value={matchSearch}
                 onChange={(e) => setMatchSearch(e.target.value)}
@@ -4801,35 +4801,35 @@ const displayBankActiveList = useMemo(() => {
               const deltaAbs = bankAbs - selectedAbs;
 
               return (
-                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-slate-900">Combined Match Summary</div>
-                    <div className="text-xs text-slate-500 tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
+                    <div className="text-xs font-semibold text-bb-text">Combined Match Summary</div>
+                    <div className="text-xs text-bb-text-muted tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
                   </div>
 
                   <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Bank transaction</span>
-                      <span className={`tabular-nums ${bankAmt < 0n ? "text-red-700" : "text-slate-900"}`}>{formatUsdFromCents(bankAmt)}</span>
+                      <span className="text-bb-text-muted">Bank transaction</span>
+                      <span className={`tabular-nums ${bankAmt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(bankAmt)}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Selected entries</span>
-                      <span className="tabular-nums text-slate-900">{formatUsdFromCents(selectedAbs)}</span>
+                      <span className="text-bb-text-muted">Selected entries</span>
+                      <span className="tabular-nums text-bb-text">{formatUsdFromCents(selectedAbs)}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Remaining Δ</span>
-                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-amber-700"}`}>
+                      <span className="text-bb-text-muted">Remaining Δ</span>
+                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-bb-status-warning-fg"}`}>
                         {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="mt-1 text-[11px] text-slate-500">Select multiple entries until Remaining Δ is exactly 0. No manual amount input.</div>
+                  <div className="mt-1 text-[11px] text-bb-text-muted">Select multiple entries until Remaining Δ is exactly 0. No manual amount input.</div>
                 </div>
               );
             })()}
 
-            {matchError ? <div className="text-xs text-red-700 mb-2">{matchError}</div> : null}
+            {matchError ? <div className="text-xs text-bb-status-danger-fg mb-2">{matchError}</div> : null}
 
             {/* Match suggestions (AI rerank when available; deterministic fallback otherwise) */}
             {(() => {
@@ -4858,11 +4858,11 @@ const displayBankActiveList = useMemo(() => {
 
               if (matchSuggestLoading) {
                 return (
-                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2">
                     <div className="text-[11px] font-semibold text-primary mb-2">Finding match suggestions</div>
                     <div className="space-y-2">
-                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
-                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
+                      <div className="h-10 w-full rounded bg-bb-border animate-pulse" />
+                      <div className="h-10 w-full rounded bg-bb-border animate-pulse" />
                     </div>
                   </div>
                 );
@@ -4881,9 +4881,9 @@ const displayBankActiveList = useMemo(() => {
 
               if (rows.length === 0) {
                 return (
-                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2">
                     <div className="text-[11px] font-semibold text-primary">Match suggestions</div>
-                    <div className="mt-1 text-[11px] text-slate-500">
+                    <div className="mt-1 text-[11px] text-bb-text-muted">
                       No eligible suggestions found for this bank transaction.
                     </div>
                   </div>
@@ -4891,18 +4891,18 @@ const displayBankActiveList = useMemo(() => {
               }
 
               return (
-                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[11px] font-semibold text-primary">
                       {hasAiSuggestions ? "AI reranked suggestions" : "Match suggestions"}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-bb-text-muted">
                       {hasAiSuggestions ? "AI rerank" : "Rule-ranked candidates"} • full-match only
                     </div>
                   </div>
 
                   {matchSuggestError ? (
-                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+                    <div className="mt-2 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] text-bb-status-warning-fg">
                       {matchSuggestError}
                     </div>
                   ) : null}
@@ -4920,7 +4920,7 @@ const displayBankActiveList = useMemo(() => {
                         <button
                           key={e.id}
                           type="button"
-                          className={`w-full text-left min-h-[46px] px-2.5 py-1.5 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-3`}
+                          className={`w-full text-left min-h-[46px] px-2.5 py-1.5 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"} flex items-center justify-between gap-3`}
                           onClick={() => {
                             setMatchSelectedEntryIds(() => {
                               const s = new Set<string>();
@@ -4931,12 +4931,12 @@ const displayBankActiveList = useMemo(() => {
                           title={fullReason}
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">
-                              <span className={idx === 0 ? "text-primary" : "text-slate-500"}>{rankLabel}</span>
-                              <span className="text-slate-400"> • </span>
+                            <span className="truncate text-xs font-medium text-bb-text">
+                              <span className={idx === 0 ? "text-primary" : "text-bb-text-muted"}>{rankLabel}</span>
+                              <span className="text-bb-text-subtle"> • </span>
                               {e.payee}
                             </span>
-                            <span className="truncate max-w-[420px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
+                            <span className="truncate max-w-[420px] text-[11px] text-bb-text-muted" title={fullReason}>{reason}</span>
                           </span>
                           <span className="shrink-0 flex items-center gap-2">
                             {ai ? (
@@ -4944,7 +4944,7 @@ const displayBankActiveList = useMemo(() => {
                                 {pctConfidence(ai.confidence)}
                               </span>
                             ) : null}
-                            <span className={`text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
+                            <span className={`text-xs tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
                               {formatUsdFromCents(amt)}
                             </span>
                           </span>
@@ -4956,7 +4956,7 @@ const displayBankActiveList = useMemo(() => {
               );
             })()}
 
-            <div className="rounded-md border border-slate-200 overflow-hidden">
+            <div className="rounded-md border border-bb-border overflow-hidden">
               <div className="max-h-[44vh] overflow-y-auto overflow-x-auto">
                 <table className="w-full min-w-[520px] table-fixed border-collapse">
                   <colgroup>
@@ -4964,11 +4964,11 @@ const displayBankActiveList = useMemo(() => {
                     <col />
                     <col style={{ width: 140 }} />
                   </colgroup>
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-[28px]">
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left">DATE</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left">PAYEE</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-right">AMOUNT</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left">DATE</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left">PAYEE</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-right">AMOUNT</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5002,7 +5002,7 @@ const displayBankActiveList = useMemo(() => {
                           return (
                             <tr
                               key={e.id}
-                              className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-slate-50"}`}
+                              className={`h-[30px] border-b border-bb-border-muted cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-bb-table-row-hover"}`}
                               onClick={() => {
                                 setMatchSelectedEntryIds((prev) => {
                                   const next = new Set(prev);
@@ -5012,9 +5012,9 @@ const displayBankActiveList = useMemo(() => {
                                 });
                               }}
                             >
-                              <td className="px-2 text-xs text-slate-800">{e.date}</td>
-                              <td className="px-2 text-xs text-slate-800 font-medium truncate">{e.payee}</td>
-                              <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
+                              <td className="px-2 text-xs text-bb-text">{e.date}</td>
+                              <td className="px-2 text-xs text-bb-text font-medium truncate">{e.payee}</td>
+                              <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(amt)}</td>
                             </tr>
                           );
                         });
@@ -5108,15 +5108,15 @@ const displayBankActiveList = useMemo(() => {
       >
         <div className="flex flex-col max-h-[55vh]">
           <div className="flex-1 overflow-y-auto">
-            <div className="text-xs text-slate-600 mb-2">
+            <div className="text-xs text-bb-text-muted mb-2">
               Marking an entry as an adjustment is ledger-only and reversible later.
             </div>
 
             <div className="mb-2">
-              <label className="text-xs text-slate-600">Reason (required)</label>
+              <label className="text-xs text-bb-text-muted">Reason (required)</label>
               <textarea
                 className={[
-                  "mt-1 w-full min-h-[90px] p-2 text-xs border border-slate-200 rounded-md bg-white",
+                  "mt-1 w-full min-h-[90px] p-2 text-xs border border-bb-border rounded-md bg-bb-surface-card",
                   ringFocus,
                 ].join(" ")}
                 value={adjustReason}
@@ -5124,7 +5124,7 @@ const displayBankActiveList = useMemo(() => {
               />
             </div>
 
-            {adjustError ? <div className="text-xs text-red-700 mb-2">{adjustError}</div> : null}
+            {adjustError ? <div className="text-xs text-bb-status-danger-fg mb-2">{adjustError}</div> : null}
           </div>
         </div>
       </AppDialog>
@@ -5294,13 +5294,13 @@ const displayBankActiveList = useMemo(() => {
       >
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-slate-600 mb-2">
+            <div className="text-xs text-bb-text-muted mb-2">
               Select bank transactions that sum exactly to the ledger entry amount.
             </div>
 
             <div className="mb-2">
               <input
-                className="h-7 w-full px-2 text-xs border border-slate-200 rounded-md"
+                className="h-7 w-full px-2 text-xs border border-bb-border rounded-md"
                 placeholder="Search bank transactions…"
                 value={entryMatchSearch}
                 onChange={(e) => setEntryMatchSearch(e.target.value)}
@@ -5344,7 +5344,7 @@ const displayBankActiveList = useMemo(() => {
               );
             })()}
 
-            {entryMatchError ? <div className="text-xs text-red-700 mb-2">{entryMatchError}</div> : null}
+            {entryMatchError ? <div className="text-xs text-bb-status-danger-fg mb-2">{entryMatchError}</div> : null}
 
             {/* Match suggestions (AI rerank when available; deterministic fallback otherwise) */}
             {(() => {
@@ -5375,11 +5375,11 @@ const displayBankActiveList = useMemo(() => {
 
               if (entrySuggestLoading) {
                 return (
-                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2">
                     <div className="text-[11px] font-semibold text-primary mb-2">Finding match suggestions</div>
                     <div className="space-y-2">
-                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
-                      <div className="h-10 w-full rounded bg-slate-200 animate-pulse" />
+                      <div className="h-10 w-full rounded bg-bb-border animate-pulse" />
+                      <div className="h-10 w-full rounded bg-bb-border animate-pulse" />
                     </div>
                   </div>
                 );
@@ -5398,9 +5398,9 @@ const displayBankActiveList = useMemo(() => {
 
               if (rows.length === 0) {
                 return (
-                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2">
                     <div className="text-[11px] font-semibold text-primary">Match suggestions</div>
-                    <div className="mt-1 text-[11px] text-slate-500">
+                    <div className="mt-1 text-[11px] text-bb-text-muted">
                       No eligible suggestions found for this entry.
                     </div>
                   </div>
@@ -5408,18 +5408,18 @@ const displayBankActiveList = useMemo(() => {
               }
 
               return (
-                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2">
+                <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[11px] font-semibold text-primary">
                       {hasAiSuggestions ? "AI reranked suggestions" : "Match suggestions"}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-bb-text-muted">
                       {hasAiSuggestions ? "AI rerank" : "Rule-ranked candidates"} • full-match only
                     </div>
                   </div>
 
                   {entrySuggestError ? (
-                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+                    <div className="mt-2 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] text-bb-status-warning-fg">
                       {entrySuggestError}
                     </div>
                   ) : null}
@@ -5437,7 +5437,7 @@ const displayBankActiveList = useMemo(() => {
                         <button
                           key={t.id}
                           type="button"
-                          className={`w-full text-left min-h-[46px] px-2.5 py-1.5 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-slate-200 bg-white hover:bg-slate-50"} flex items-center justify-between gap-3`}
+                          className={`w-full text-left min-h-[46px] px-2.5 py-1.5 rounded-md border ${selected ? "border-primary/20 bg-primary/10" : "border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"} flex items-center justify-between gap-3`}
                           onClick={() => {
                             setEntryMatchSelectedBankTxnIds(() => {
                               const s = new Set<string>();
@@ -5448,12 +5448,12 @@ const displayBankActiveList = useMemo(() => {
                           title={fullReason}
                         >
                           <span className="min-w-0 flex flex-col">
-                            <span className="truncate text-xs font-medium text-slate-800">
-                              <span className={idx === 0 ? "text-primary" : "text-slate-500"}>{rankLabel}</span>
-                              <span className="text-slate-400"> • </span>
+                            <span className="truncate text-xs font-medium text-bb-text">
+                              <span className={idx === 0 ? "text-primary" : "text-bb-text-muted"}>{rankLabel}</span>
+                              <span className="text-bb-text-subtle"> • </span>
                               {t.name}
                             </span>
-                            <span className="truncate max-w-[420px] text-[11px] text-slate-500" title={fullReason}>{reason}</span>
+                            <span className="truncate max-w-[420px] text-[11px] text-bb-text-muted" title={fullReason}>{reason}</span>
                           </span>
                           <span className="shrink-0 flex items-center gap-2">
                             {ai ? (
@@ -5461,7 +5461,7 @@ const displayBankActiveList = useMemo(() => {
                                 {pctConfidence(ai.confidence)}
                               </span>
                             ) : null}
-                            <span className={`text-xs tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>
+                            <span className={`text-xs tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
                               {formatUsdFromCents(amt)}
                             </span>
                           </span>
@@ -5491,30 +5491,30 @@ const displayBankActiveList = useMemo(() => {
               const deltaAbs = entryAbs - selectedAbs;
 
               return (
-                <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-slate-900">Combine Match Summary</div>
-                    <div className="text-xs text-slate-500 tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
+                    <div className="text-xs font-semibold text-bb-text">Combine Match Summary</div>
+                    <div className="text-xs text-bb-text-muted tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
                   </div>
 
                   <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Entry</span>
-                      <span className={`tabular-nums ${entryAmt < 0n ? "text-red-700" : "text-slate-900"}`}>{formatUsdFromCents(entryAmt)}</span>
+                      <span className="text-bb-text-muted">Entry</span>
+                      <span className={`tabular-nums ${entryAmt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(entryAmt)}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Selected bank txns</span>
-                      <span className="tabular-nums text-slate-900">{formatUsdFromCents(selectedAbs)}</span>
+                      <span className="text-bb-text-muted">Selected bank txns</span>
+                      <span className="tabular-nums text-bb-text">{formatUsdFromCents(selectedAbs)}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Remaining Δ</span>
-                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-amber-700"}`}>
+                      <span className="text-bb-text-muted">Remaining Δ</span>
+                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-bb-status-warning-fg"}`}>
                         {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
                       </span>
                     </div>
                   </div>
 
-                  <div className="mt-1 text-[11px] text-slate-500">Select multiple bank transactions until Remaining Δ is exactly 0. No manual amount input.</div>
+                  <div className="mt-1 text-[11px] text-bb-text-muted">Select multiple bank transactions until Remaining Δ is exactly 0. No manual amount input.</div>
                 </div>
               );
             })()}
@@ -5523,7 +5523,7 @@ const displayBankActiveList = useMemo(() => {
 
             {/* (removed stray pasted code) */}
 
-            <div className="rounded-md border border-slate-200 overflow-hidden">
+            <div className="rounded-md border border-bb-border overflow-hidden">
               <div className="max-h-[44vh] overflow-y-auto overflow-x-auto">
                 <table className="w-full min-w-[520px] table-fixed border-collapse">
                   <colgroup>
@@ -5531,11 +5531,11 @@ const displayBankActiveList = useMemo(() => {
                     <col />
                     <col style={{ width: 140 }} />
                   </colgroup>
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-[28px]">
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left">DATE</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left">DESCRIPTION</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-right">AMOUNT</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left">DATE</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left">DESCRIPTION</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-right">AMOUNT</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5579,7 +5579,7 @@ const displayBankActiveList = useMemo(() => {
                           return (
                             <tr
                               key={t.id}
-                              className={`h-[30px] border-b border-slate-100 cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-slate-50"}`}
+                              className={`h-[30px] border-b border-bb-border-muted cursor-pointer ${selected ? "bg-primary/10" : "hover:bg-bb-table-row-hover"}`}
                               onClick={() => {
                                 setEntryMatchSelectedBankTxnIds((prev) => {
                                   const next = new Set(prev);
@@ -5590,9 +5590,9 @@ const displayBankActiveList = useMemo(() => {
                                 });
                               }}
                             >
-                              <td className="px-2 text-xs text-slate-800">{dateStr}</td>
-                              <td className="px-2 text-xs text-slate-800 font-medium truncate">{t.name}</td>
-                              <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-red-700" : "text-slate-800"}`}>{formatUsdFromCents(amt)}</td>
+                              <td className="px-2 text-xs text-bb-text">{dateStr}</td>
+                              <td className="px-2 text-xs text-bb-text font-medium truncate">{t.name}</td>
+                              <td className={`px-2 text-xs text-right tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(amt)}</td>
                             </tr>
                           );
                         });
@@ -5619,7 +5619,7 @@ const displayBankActiveList = useMemo(() => {
             <div className="flex items-center gap-2 min-w-0">
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "all" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "all" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setReconHistoryFilter("all")}
               >
@@ -5627,7 +5627,7 @@ const displayBankActiveList = useMemo(() => {
               </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "match" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "match" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setReconHistoryFilter("match")}
               >
@@ -5635,7 +5635,7 @@ const displayBankActiveList = useMemo(() => {
               </button>
               <button
                 type="button"
-                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "void" ? "border-slate-200 bg-white text-slate-900" : "border-transparent text-slate-500 hover:bg-slate-50"
+                className={`h-7 px-3 text-xs rounded-md border ${reconHistoryFilter === "void" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
                 onClick={() => setReconHistoryFilter("void")}
               >
@@ -5643,7 +5643,7 @@ const displayBankActiveList = useMemo(() => {
               </button>
 
               <input
-                className={["h-7 w-[200px] px-2 text-xs border border-slate-200 rounded-md bg-white", ringFocus].join(" ")}
+                className={["h-7 w-[200px] px-2 text-xs border border-bb-border rounded-md bg-bb-surface-card", ringFocus].join(" ")}
                 placeholder="Search history…"
                 value={reconHistorySearch}
                 onChange={(e) => setReconHistorySearch(e.target.value)}
@@ -5652,13 +5652,13 @@ const displayBankActiveList = useMemo(() => {
             </div>
 
             {reconHistoryBankTxnFilterId ? (
-              <div className="text-xs text-slate-600 flex items-center gap-2">
+              <div className="text-xs text-bb-text-muted flex items-center gap-2">
                 <span className="whitespace-nowrap">
                   Filtered: <span className="font-medium">{shortId(reconHistoryBankTxnFilterId)}</span>
                 </span>
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                   onClick={() => setReconHistoryBankTxnFilterId(null)}
                   title="Clear filter"
                 >
@@ -5670,7 +5670,7 @@ const displayBankActiveList = useMemo(() => {
             )}
           </div>
 
-          <div className="h-px bg-slate-200" />
+          <div className="h-px bg-bb-border" />
 
           <div className="mt-2 max-h-[64vh] overflow-y-auto overflow-x-auto">
             {matchesLoading ? (
@@ -5680,7 +5680,7 @@ const displayBankActiveList = useMemo(() => {
             ) : reconAuditVisible.length === 0 ? (
               <EmptyState label="No reconciliation history in this period" />
             ) : (
-              <div className="mt-2 min-w-[1190px] rounded-xl border border-slate-200 bg-white overflow-hidden">
+              <div className="mt-2 min-w-[1190px] rounded-xl border border-bb-border bg-bb-surface-card overflow-hidden">
                 <table className="w-full min-w-[1190px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 190 }} />
@@ -5691,14 +5691,14 @@ const displayBankActiveList = useMemo(() => {
                     <col style={{ width: 170 }} />
                   </colgroup>
 
-                  <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-[30px]">
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">WHEN</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">ACTION</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">BANK TRANSACTION</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">ENTRY</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-right whitespace-nowrap">AMOUNT</th>
-                      <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">BY</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">WHEN</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">ACTION</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">BANK TRANSACTION</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">ENTRY</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-right whitespace-nowrap">AMOUNT</th>
+                      <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">BY</th>
                     </tr>
                   </thead>
 
@@ -5749,13 +5749,13 @@ const displayBankActiveList = useMemo(() => {
                           ? `${shortId(ev.entryIds[0])} (not in current view)${(ev.entryIds?.length ?? 0) > 1 ? ` (+${(ev.entryIds.length - 1)} more)` : ""}`
                           : "—";
 
-                      const rowTone = ev.kind === "MATCH_GROUP_VOIDED" ? " text-slate-600" : "";
+                      const rowTone = ev.kind === "MATCH_GROUP_VOIDED" ? " text-bb-text-muted" : "";
                       const chipTone = ev.kind === "MATCH_GROUP_CREATED" ? "success" : "default";
 
                       return (
                         <tr
                           key={`${ev.kind}-${ev.at}-${idx}`}
-                          className={`h-[30px] border-b border-slate-100 cursor-pointer hover:bg-slate-50${rowTone}`}
+                          className={`h-[30px] border-b border-bb-border-muted cursor-pointer hover:bg-bb-table-row-hover${rowTone}`}
                           onClick={() => {
                             setSelectedReconAudit(ev);
                             setRevertError(null);
@@ -5763,22 +5763,22 @@ const displayBankActiveList = useMemo(() => {
                           }}
                           title="View audit detail"
                         >
-                          <td className="px-2 text-xs text-slate-800" title={whenFull}>
+                          <td className="px-2 text-xs text-bb-text" title={whenFull}>
                             {whenCompact}
                           </td>
                           <td className="px-2 text-xs">
                             <StatusChip label={ev.kind === "MATCH_GROUP_CREATED" ? "Matched" : "Reverted"} tone={chipTone as any} />
                           </td>
-                          <td className="px-2 text-xs text-slate-800 font-medium truncate" title={bankLabel}>
+                          <td className="px-2 text-xs text-bb-text font-medium truncate" title={bankLabel}>
                             {bankLabel}
                           </td>
-                          <td className="px-2 text-xs text-slate-800 font-medium truncate" title={entryLabel}>
+                          <td className="px-2 text-xs text-bb-text font-medium truncate" title={entryLabel}>
                             {entryLabel}
                           </td>
-                          <td className="px-2 text-xs text-right tabular-nums text-slate-800">
+                          <td className="px-2 text-xs text-right tabular-nums text-bb-text">
                             {formatUsdFromCents(matchedAbs)}
                           </td>
-                          <td className="px-2 text-xs text-slate-700">
+                          <td className="px-2 text-xs text-bb-text">
                             {auditUserLabel(ev.by)}
                           </td>
                         </tr>
@@ -5790,7 +5790,7 @@ const displayBankActiveList = useMemo(() => {
             )}
           </div>
 
-          <div className="mt-2 text-[11px] text-slate-500">
+          <div className="mt-2 text-[11px] text-bb-text-muted">
             Showing newest 500 events.
           </div>
         </div>
@@ -5871,7 +5871,7 @@ const displayBankActiveList = useMemo(() => {
             const alreadyVoided = !!groupId && !isActiveGroup;
 
             return (
-              <div className="mb-2 text-[11px] text-slate-500">
+              <div className="mb-2 text-[11px] text-bb-text-muted">
                 {bankTxnId
                   ? alreadyVoided
                     ? "This match is already voided. Preview can still remove generated entries if they are safe."
@@ -5881,12 +5881,12 @@ const displayBankActiveList = useMemo(() => {
             );
           })()}
 
-          {revertError ? <div className="mb-2 text-xs text-red-700">{revertError}</div> : null}
+          {revertError ? <div className="mb-2 text-xs text-bb-status-danger-fg">{revertError}</div> : null}
 
           <div className="max-h-[60vh] overflow-y-auto">
             {(() => {
               const ev = selectedReconAudit as any | null;
-              if (!ev) return <div className="text-xs text-slate-500">No audit event selected.</div>;
+              if (!ev) return <div className="text-xs text-bb-text-muted">No audit event selected.</div>;
 
               const groupId = ev?.groupId ? String(ev.groupId) : null;
               const bankTxnIds = Array.isArray(ev?.bankTxnIds) ? ev.bankTxnIds.map((x: any) => String(x)) : [];
@@ -5930,16 +5930,16 @@ const displayBankActiveList = useMemo(() => {
 
               const Row = ({ label, value, mono }: { label: string; value: any; mono?: boolean }) => (
                 <div className="grid grid-cols-[140px_1fr] gap-2 py-1">
-                  <div className="text-[11px] font-semibold text-slate-500">{label}</div>
-                  <div className={`${mono ? "font-mono" : ""} text-xs text-slate-900 break-all`}>{value}</div>
+                  <div className="text-[11px] font-semibold text-bb-text-muted">{label}</div>
+                  <div className={`${mono ? "font-mono" : ""} text-xs text-bb-text break-all`}>{value}</div>
                 </div>
               );
 
               return (
                 <div className="space-y-3">
                   <div>
-                    <div className="text-[11px] font-semibold text-slate-600 mb-1">IDs</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <div className="text-[11px] font-semibold text-bb-text-muted mb-1">IDs</div>
+                    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
                       <Row label="Match group ID" value={groupId ?? "—"} mono />
                       <Row
                         label="Bank txns"
@@ -5963,16 +5963,16 @@ const displayBankActiveList = useMemo(() => {
                   </div>
 
                   <div>
-                    <div className="text-[11px] font-semibold text-slate-600 mb-1">Context</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Context</div>
+                    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
                       <Row label="Bank txn" value={bankSummary} />
                       <Row label="Entry" value={entrySummary} />
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-[11px] font-semibold text-slate-600 mb-1">Match</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Match</div>
+                    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
                       <Row label="Action clicked" value={ev.kind === "MATCH_GROUP_CREATED" ? "Matched" : "Reverted"} />
                       <Row label="Matched amount" value={formatUsdFromCents(matchedAbs)} />
                       <Row label="Match type" value={matchType} mono />
@@ -5980,8 +5980,8 @@ const displayBankActiveList = useMemo(() => {
                   </div>
 
                   <div>
-                    <div className="text-[11px] font-semibold text-slate-600 mb-1">Lifecycle</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Lifecycle</div>
+                    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
                       <Row label="Created" value={fmt(createdAt)} />
                       <Row label="Created by" value={auditUserLabel(createdBy)} />
                       <Row label="Voided" value={fmt(voidedAt)} />
@@ -6084,41 +6084,41 @@ const displayBankActiveList = useMemo(() => {
           </div>
         }
       >
-        <div className="space-y-3 text-sm text-slate-700">
+        <div className="space-y-3 text-sm text-bb-text">
           {revertPreviewLoading ? (
-            <div className="flex items-center gap-2 text-xs text-slate-600">
+            <div className="flex items-center gap-2 text-xs text-bb-text-muted">
               <TinySpinner />
               <span>Checking generated entries and closed periods…</span>
             </div>
           ) : revertPreview ? (
             <>
-              <div className="font-medium text-slate-900">
+              <div className="font-medium text-bb-text">
                 {revertPreview.already_reverted ? "Already reverted" : "Review revert actions"}
               </div>
-              <div className="text-xs text-slate-600">
+              <div className="text-xs text-bb-text-muted">
                 This will unmatch the bank transaction and remove only generated ledger entries that are safe to soft-delete.
                 Manual ledger entries will be preserved.
               </div>
 
               {revertPreview.blocked ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
                   {revertPreview.closed_period_blocked
                     ? "This action is blocked by a closed period. Reopen the period to modify."
                     : `This action is blocked: ${revertPreview.block_reasons.join(", ")}`}
                 </div>
               ) : null}
 
-              <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-                <div className="text-[11px] font-semibold text-slate-500">Bank transaction</div>
-                <div className="mt-1 text-xs text-slate-900">
+              <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
+                <div className="text-[11px] font-semibold text-bb-text-muted">Bank transaction</div>
+                <div className="mt-1 text-xs text-bb-text">
                   {revertPreview.bank_transaction
                     ? `${isoToYmd(String(revertPreview.bank_transaction.posted_date ?? ""))} • ${String(revertPreview.bank_transaction.name ?? "—")} • ${formatUsdFromCents(toBigIntSafe(revertPreview.bank_transaction.amount_cents))}`
                     : "Not found in scope"}
                 </div>
               </div>
 
-              <div className="rounded-md border border-slate-200 bg-white overflow-hidden">
-                <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600">
+              <div className="rounded-md border border-bb-border bg-bb-surface-card overflow-hidden">
+                <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-bb-border-muted bg-bb-table-header px-3 py-2 text-[11px] font-semibold text-bb-text-muted">
                   <span>Ledger entry</span>
                   <span>Action</span>
                 </div>
@@ -6130,18 +6130,18 @@ const displayBankActiveList = useMemo(() => {
                         ? "Blocked by closed period"
                         : "Preserve";
                     const actionTone = entry.will_soft_delete
-                      ? "text-red-700"
+                      ? "text-bb-status-danger-fg"
                       : entry.closed_period_blocks_action
-                        ? "text-amber-800"
-                        : "text-slate-600";
+                        ? "text-bb-status-warning-fg"
+                        : "text-bb-text-muted";
 
                     return (
-                      <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0">
+                      <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-2 border-b border-bb-border-muted px-3 py-2 last:border-b-0">
                         <div className="min-w-0">
-                          <div className="truncate text-xs font-medium text-slate-900">
+                          <div className="truncate text-xs font-medium text-bb-text">
                             {entry.date ?? "—"} • {entry.payee || "—"} • {formatUsdFromCents(toBigIntSafe(entry.amount_cents))}
                           </div>
-                          <div className="mt-0.5 text-[11px] text-slate-500">
+                          <div className="mt-0.5 text-[11px] text-bb-text-muted">
                             {entry.will_soft_delete
                               ? "Generated from this bank transaction."
                               : entry.preserve_reasons.join(", ")}
@@ -6156,18 +6156,18 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               </div>
 
-              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+              <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs text-bb-text">
                 {(revertPreview.generated_entries_to_soft_delete ?? []).length > 0
                   ? "Destructive confirmation required: generated entries are soft-deleted, not hard-deleted."
                   : "No generated ledger entry will be deleted. The match group will be voided when active."}
               </div>
             </>
           ) : (
-            <div className="text-xs text-slate-600">No revert preview loaded.</div>
+            <div className="text-xs text-bb-text-muted">No revert preview loaded.</div>
           )}
 
           {revertError ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
               {revertError}
             </div>
           ) : null}
@@ -6187,7 +6187,7 @@ const displayBankActiveList = useMemo(() => {
 
             <button
               type="button"
-              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
+              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
               onClick={() => {
                 setOpenIssuesHub(false);
                 setIssuesKind("notInView");
@@ -6196,14 +6196,14 @@ const displayBankActiveList = useMemo(() => {
               }}
               title="Active matches referencing items not loaded by current filters"
             >
-              <AlertCircle className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Not in view</span>
-              <span className="text-[11px] text-slate-500">{issuesCounts.notInView}</span>
+              <AlertCircle className="h-6 w-6 text-bb-text" />
+              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Not in view</span>
+              <span className="text-[11px] text-bb-text-muted">{issuesCounts.notInView}</span>
             </button>
 
             <button
               type="button"
-              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-1", ringFocus].join(" ")}
+              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-1", ringFocus].join(" ")}
               onClick={() => {
                 setOpenIssuesHub(false);
                 setIssuesKind("voidHeavy");
@@ -6212,16 +6212,16 @@ const displayBankActiveList = useMemo(() => {
               }}
               title={`Bank transactions with ${VOID_HEAVY_THRESHOLD}+ reverts`}
             >
-              <RotateCcw className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Reverts</span>
-              <span className="text-[11px] text-slate-500">{VOID_HEAVY_THRESHOLD}+</span>
-              <span className="text-[11px] text-slate-500">{issuesCounts.voidHeavy}</span>
+              <RotateCcw className="h-6 w-6 text-bb-text" />
+              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Reverts</span>
+              <span className="text-[11px] text-bb-text-muted">{VOID_HEAVY_THRESHOLD}+</span>
+              <span className="text-[11px] text-bb-text-muted">{issuesCounts.voidHeavy}</span>
             </button>
 
             {null /* Full-match MatchGroups: conflicts are not expected (one-active-group-per-item). */}
           </div>
 
-          <div className="mt-2 text-[11px] text-slate-500">
+          <div className="mt-2 text-[11px] text-bb-text-muted">
             Read-only diagnostics derived from current view.
           </div>
         </div>
@@ -6252,11 +6252,11 @@ const displayBankActiveList = useMemo(() => {
           return (
             <div className="p-3">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-bb-text-muted">
                   {visible.length} shown
                 </div>
                 <input
-                  className={["h-7 w-[240px] px-2 text-xs border border-slate-200 rounded-md bg-white", ringFocus].join(" ")}
+                  className={["h-7 w-[240px] px-2 text-xs border border-bb-border rounded-md bg-bb-surface-card", ringFocus].join(" ")}
                   placeholder="Search issues…"
                   value={issuesSearch}
                   onChange={(e) => setIssuesSearch(e.target.value)}
@@ -6267,7 +6267,7 @@ const displayBankActiveList = useMemo(() => {
               {visible.length === 0 ? (
                 <EmptyState label="No issues found" />
               ) : (
-                <div className="min-w-[820px] rounded-xl border border-slate-200 bg-white overflow-hidden">
+                <div className="min-w-[820px] rounded-xl border border-bb-border bg-bb-surface-card overflow-hidden">
                   <div className="max-h-[64vh] overflow-y-auto overflow-x-auto">
                     <table className="w-full min-w-[820px] table-fixed border-collapse">
                       <colgroup>
@@ -6276,12 +6276,12 @@ const displayBankActiveList = useMemo(() => {
                         <col style={{ width: 420 }} />
                         <col style={{ width: 140 }} />
                       </colgroup>
-                      <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+                      <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
                         <tr className="h-[30px]">
-                          <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">TYPE</th>
-                          <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">ITEM</th>
-                          <th className="px-2 text-xs font-semibold text-slate-600 text-left whitespace-nowrap">DETAIL</th>
-                          <th className="px-2 text-xs font-semibold text-slate-600 text-right whitespace-nowrap">OPEN</th>
+                          <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">TYPE</th>
+                          <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">ITEM</th>
+                          <th className="px-2 text-xs font-semibold text-bb-text-muted text-left whitespace-nowrap">DETAIL</th>
+                          <th className="px-2 text-xs font-semibold text-bb-text-muted text-right whitespace-nowrap">OPEN</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -6315,24 +6315,24 @@ const displayBankActiveList = useMemo(() => {
                           return (
                             <tr
                               key={`${r.kind}-${r.bankTxnId ?? ""}-${r.entryId ?? ""}-${idx}`}
-                              className="h-[30px] border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                              className="h-[30px] border-b border-bb-border-muted hover:bg-bb-table-row-hover cursor-pointer"
                               onClick={handleRowClick}
                               title="Open related history"
                             >
                               <td className="px-2 text-xs">
                                 <StatusChip label={typeLabel} tone="default" />
                               </td>
-                              <td className="px-2 text-xs text-slate-900 font-medium truncate" title={r.title}>
+                              <td className="px-2 text-xs text-bb-text font-medium truncate" title={r.title}>
                                 {r.title}
                               </td>
-                              <td className="px-2 text-xs text-slate-600 truncate" title={r.detail}>
+                              <td className="px-2 text-xs text-bb-text-muted truncate" title={r.detail}>
                                 {r.detail}
                               </td>
                               <td className="px-2 text-xs text-right">
                                 {r.bankTxnId ? (
                                   <button
                                     type="button"
-                                    className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                                    className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                                     onClick={(ev) => {
                                       ev.stopPropagation();
                                       openHistoryFor(r.bankTxnId ?? null);
@@ -6341,7 +6341,7 @@ const displayBankActiveList = useMemo(() => {
                                     History
                                   </button>
                                 ) : (
-                                  <span className="text-xs text-slate-400">—</span>
+                                  <span className="text-xs text-bb-text-subtle">—</span>
                                 )}
                               </td>
                             </tr>
@@ -6365,11 +6365,11 @@ const displayBankActiveList = useMemo(() => {
         size="sm"
       >
         <div className="p-3">
-          <div className="text-xs text-slate-700 leading-relaxed">{issuesInfoMsg}</div>
+          <div className="text-xs text-bb-text leading-relaxed">{issuesInfoMsg}</div>
           <div className="mt-3 flex justify-end">
             <button
               type="button"
-              className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+              className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
               onClick={() => setOpenIssuesInfo(false)}
             >
               OK
@@ -6390,7 +6390,7 @@ const displayBankActiveList = useMemo(() => {
             <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}>
               <button
                 type="button"
-                className={["h-20 w-full rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2", ringFocus].join(" ")}
+                className={["h-20 w-full rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2", ringFocus].join(" ")}
                 disabled={
                   !canWriteReconcileEffective ||
                   (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
@@ -6407,9 +6407,9 @@ const displayBankActiveList = useMemo(() => {
                   exportBankCsv();
                 }}
               >
-                <Download className="h-6 w-6 text-slate-700" />
-                <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Bank txns</span>
-                <span className="text-[11px] text-slate-500">
+                <Download className="h-6 w-6 text-bb-text" />
+                <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Bank txns</span>
+                <span className="text-[11px] text-bb-text-muted">
                   {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length}
                 </span>
               </button>
@@ -6419,18 +6419,18 @@ const displayBankActiveList = useMemo(() => {
 
             <button
               type="button"
-              className={["h-20 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2 sm:col-span-2", ringFocus].join(" ")}
+              className={["h-20 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2 sm:col-span-2", ringFocus].join(" ")}
               disabled={reconAuditVisible.length === 0}
               title={reconAuditVisible.length === 0 ? "No audit events to export" : "Export audit events (CSV) — respects current filters"}
               onClick={() => exportAuditEventsCsv()}
             >
-              <ClipboardList className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Audit events</span>
-              <span className="text-[11px] text-slate-500">{reconAuditVisible.length}</span>
+              <ClipboardList className="h-6 w-6 text-bb-text" />
+              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Audit events</span>
+              <span className="text-[11px] text-bb-text-muted">{reconAuditVisible.length}</span>
             </button>
           </div>
 
-          <div className="mt-2 text-[11px] text-slate-500">
+          <div className="mt-2 text-[11px] text-bb-text-muted">
             CSV exports reflect current account scope and active filters.
           </div>
         </div>
@@ -6447,26 +6447,26 @@ const displayBankActiveList = useMemo(() => {
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
+              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
               onClick={() => {
                 setOpenHistoryHub(false);
                 setOpenStatementHistory(true);
               }}
             >
-              <FileText className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Statement history</span>
+              <FileText className="h-6 w-6 text-bb-text" />
+              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Statement history</span>
             </button>
 
             <button
               type="button"
-              className={["h-24 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
+              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
               onClick={() => {
                 setOpenHistoryHub(false);
                 setOpenReconciliationHistory(true);
               }}
             >
-              <ClipboardList className="h-6 w-6 text-slate-700" />
-              <span className="text-xs font-semibold text-slate-900 whitespace-nowrap">Reconciliation</span>
+              <ClipboardList className="h-6 w-6 text-bb-text" />
+              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Reconciliation</span>
             </button>
           </div>
         </div>
