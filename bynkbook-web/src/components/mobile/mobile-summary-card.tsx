@@ -11,10 +11,10 @@ type MobileSummaryCardProps = {
 };
 
 const toneClasses = {
-  neutral: "mobile-token-card text-foreground",
-  positive: "mobile-token-card mobile-token-card--success text-foreground",
-  warning: "mobile-token-card mobile-token-card--warning text-foreground",
-  danger: "mobile-token-card mobile-token-card--danger text-foreground",
+  neutral: "mobile-token-card text-card-foreground",
+  positive: "mobile-token-card mobile-token-card--success text-card-foreground",
+  warning: "mobile-token-card mobile-token-card--warning text-card-foreground",
+  danger: "mobile-token-card mobile-token-card--danger text-card-foreground",
 };
 
 export function MobileSummaryCard({

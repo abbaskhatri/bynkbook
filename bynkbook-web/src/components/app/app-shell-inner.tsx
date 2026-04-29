@@ -40,7 +40,7 @@ import GlobalSearch from "@/components/app/global-search";
 import BrandLogo from "@/components/app/BrandLogo";
 
 function navVariant(active: boolean) {
-  return active ? "default" : "outline";
+  return active ? "default" : "ghost";
 }
 
 const NAV_ICON_CLASS = "h-5 w-5";
@@ -540,7 +540,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                       key={item.path}
                       asChild
                       variant={navVariant(active)}
-                      className="w-full justify-center transition-colors duration-200"
+                      className={[
+                        "w-full justify-center border transition-colors duration-200",
+                        active
+                          ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg hover:bg-bb-nav-active-bg/90"
+                          : "border-transparent bg-transparent text-bb-sidebar-fg/80 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg",
+                      ].join(" ")}
                       size="sm"
                       title={
                         item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
@@ -573,7 +578,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     key={item.path}
                     asChild
                     variant={navVariant(active)}
-                    className="w-full justify-start transition-colors duration-200"
+                    className={[
+                      "w-full justify-start border transition-colors duration-200",
+                      active
+                        ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg hover:bg-bb-nav-active-bg/90"
+                        : "border-transparent bg-transparent text-bb-sidebar-fg/80 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg",
+                    ].join(" ")}
                     size="sm"
                   >
                     <Link
@@ -582,7 +592,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                       className="flex w-full items-center gap-2 transition-all duration-200"
                       onClick={onNavigate}
                     >
-                      <span className="shrink-0 text-foreground/70">{item.icon}</span>
+                      <span className="shrink-0 text-current">{item.icon}</span>
                       <span className="truncate">{item.label}</span>
                       {item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0 ? (
                         <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-bb-status-warning-bg px-1.5 text-[11px] font-semibold text-bb-status-warning-fg border border-bb-status-warning-border">
@@ -692,7 +702,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           <Button
             variant="outline"
             size="sm"
-            className={collapsed ? "w-full justify-center h-9" : "w-full justify-between h-9"}
+            className={
+              collapsed
+                ? "w-full justify-center h-9 border-bb-border bg-transparent text-bb-sidebar-fg hover:bg-bb-surface-elevated"
+                : "w-full justify-between h-9 border-bb-border bg-transparent text-bb-sidebar-fg hover:bg-bb-surface-elevated"
+            }
             onClick={toggleCollapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >

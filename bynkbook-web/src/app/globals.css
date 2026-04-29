@@ -294,16 +294,16 @@
   --bb-status-default-bg: rgba(148, 163, 184, 0.12);
   --bb-status-default-fg: #cbd5e1;
   --bb-status-default-border: rgba(148, 163, 184, 0.22);
-  --bb-status-success-bg: rgba(16, 185, 129, 0.14);
+  --bb-status-success-bg: #12372d;
   --bb-status-success-fg: #6ee7b7;
   --bb-status-success-border: rgba(16, 185, 129, 0.32);
-  --bb-status-warning-bg: rgba(245, 158, 11, 0.14);
+  --bb-status-warning-bg: #3a2a12;
   --bb-status-warning-fg: #fbbf24;
   --bb-status-warning-border: rgba(245, 158, 11, 0.34);
-  --bb-status-danger-bg: rgba(244, 63, 94, 0.14);
+  --bb-status-danger-bg: #3a1824;
   --bb-status-danger-fg: #fb7185;
   --bb-status-danger-border: rgba(244, 63, 94, 0.34);
-  --bb-status-info-bg: rgba(56, 189, 248, 0.14);
+  --bb-status-info-bg: #0f2f3f;
   --bb-status-info-fg: #7dd3fc;
   --bb-status-info-border: rgba(56, 189, 248, 0.32);
 
@@ -343,9 +343,9 @@
 }
 
 .mobile-token-card {
-  background: var(--card);
-  border-color: var(--border);
-  color: var(--foreground);
+  background: var(--bb-surface-card);
+  border-color: var(--bb-border);
+  color: var(--card-foreground);
 }
 
 .mobile-token-card--success {
@@ -367,13 +367,14 @@
 .dark .mobile-token-card--success,
 .dark .mobile-token-card--warning,
 .dark .mobile-token-card--danger {
-  background: var(--muted);
-  border-color: var(--border);
+  background: var(--bb-surface-card);
+  border-color: var(--bb-border);
+  color: var(--card-foreground);
 }
 
 .mobile-token-card-control {
-  background: var(--background);
-  border-color: var(--border);
+  background: var(--bb-surface-soft);
+  border-color: var(--bb-border);
 }
 
 /* BynkBook: use full width workspace */

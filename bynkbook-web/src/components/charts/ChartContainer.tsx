@@ -119,7 +119,7 @@ export function ChartContainer({
     }, []);
 
     return (
-        <Card className={`rounded-[10px] border border-bb-border shadow-sm ${motionFast}`}>
+        <Card className={`rounded-[10px] border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm ${motionFast}`}>
             <CardHeader className="py-1">
                 <div className="flex items-start justify-between gap-3">
                     <div>
@@ -148,11 +148,11 @@ export function ChartContainer({
                 ) : noResponsive ? (
                     // Non-chart layouts should not be wrapped in ResponsiveContainer.
                     // Use minHeight so content can size naturally without getting clipped.
-                    <div style={{ minHeight: h, minWidth: 0 }}>
+                    <div className="text-card-foreground" style={{ minHeight: h, minWidth: 0 }}>
                         {children}
                     </div>
                 ) : (
-                    <div style={{ height: h, minWidth: 0, minHeight: 0 }}>
+                    <div className="text-card-foreground" style={{ height: h, minWidth: 0, minHeight: 0 }}>
                         {responsiveReady ? (
                             <ResponsiveContainer width="99%" height="99%">
                                 {children as any}
