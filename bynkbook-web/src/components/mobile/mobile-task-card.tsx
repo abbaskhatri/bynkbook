@@ -15,9 +15,9 @@ type MobileTaskCardProps = {
 };
 
 const toneClasses = {
-  neutral: "border-slate-200 bg-white",
-  warning: "border-amber-200 bg-amber-50/70",
-  danger: "border-rose-200 bg-rose-50/70",
+  neutral: "mobile-token-card",
+  warning: "mobile-token-card mobile-token-card--warning",
+  danger: "mobile-token-card mobile-token-card--danger",
 };
 
 export function MobileTaskCard({
@@ -34,28 +34,28 @@ export function MobileTaskCard({
       className={cn(
         "flex min-h-[76px] items-center gap-3 rounded-md border p-4 shadow-sm",
         toneClasses[tone],
-        disabled ? "opacity-60" : "transition-colors hover:bg-slate-50"
+        disabled ? "opacity-60" : "transition-colors hover:bg-muted/50"
       )}
     >
       {icon ? (
-        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600">
+        <div className="mobile-token-card-control inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-muted-foreground">
           {icon}
         </div>
       ) : null}
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <div className="truncate text-sm font-semibold text-slate-950">{title}</div>
+          <div className="truncate text-sm font-semibold text-foreground">{title}</div>
           {metric ? (
-            <span className="ml-auto shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+            <span className="mobile-token-card-control ml-auto shrink-0 rounded-md border px-2 py-1 text-xs font-semibold text-foreground">
               {metric}
             </span>
           ) : null}
         </div>
-        <div className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{description}</div>
+        <div className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">{description}</div>
       </div>
 
-      {disabled ? null : <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />}
+      {disabled ? null : <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />}
     </div>
   );
 
