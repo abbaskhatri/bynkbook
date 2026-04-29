@@ -186,7 +186,7 @@ export default function MobileReviewPageClient() {
   const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
   const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
   const invoiceHref = hrefWith({ path: "/mobile/invoice", businessId, accountId });
-  const vendorsHref = hrefWith({ path: "/vendors", businessId });
+  const vendorsHref = hrefWith({ path: "/mobile/vendors", businessId, accountId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
   const homeHref = hrefWith({ path: "/mobile", businessId, accountId });
 

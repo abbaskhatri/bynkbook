@@ -55,9 +55,9 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
     },
     {
       label: "Vendors",
-      href: withBusiness("/vendors", businessId),
+      href: withBusiness("/mobile/vendors", businessId, accountId),
       icon: <Users className="h-5 w-5" />,
-      active: false,
+      active: pathname === "/mobile/vendors",
       disabled: !businessId,
     },
     {
