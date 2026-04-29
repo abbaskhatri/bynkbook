@@ -3281,7 +3281,7 @@ export default function LedgerPageClient() {
   // ================================
   // SECTION: Column contract (UI-only adjustments)
   // - Keep shell no-horizontal-scroll by shrinking fixed widths
-  // - Make Payee breathe more
+  // - Keep Payee readable but bounded
   // - Tighten DUP/CAT columns and remove header text
   // ================================
   const th =
@@ -3292,19 +3292,19 @@ export default function LedgerPageClient() {
   const center = "text-center";
 
   const cols = [
-    <col key="c0" style={{ width: "28px" }} />,
-    <col key="c1" style={{ width: "88px" }} />,   // date (tighter)
-    <col key="c2" style={{ width: "56px" }} />,   // ref (tighter)
-    <col key="c3" style={{ width: "auto", minWidth: "200px" }} />, // payee flex (bigger min)
-    <col key="c4" style={{ width: "96px" }} />,   // type (tighter)
-    <col key="c5" style={{ width: "104px" }} />,  // method (tighter)
-    <col key="c6" style={{ width: "120px" }} />,  // category (restore width so Actions stays visible)
-    <col key="c7" style={{ width: "110px" }} />,  // amount (tighter)
-    <col key="c8" style={{ width: "110px" }} />,  // balance (tighter)
-    <col key="c9" style={{ width: "148px" }} />,  // status
-    <col key="c10" style={{ width: "20px" }} />,  // dup icon (tight ~60%)
-    <col key="c11" style={{ width: "20px" }} />,  // cat icon (tight ~60%)
-    <col key="c12" style={{ width: "96px" }} />,  // actions (tighter)
+    <col key="c0" style={{ width: "24px" }} />,
+    <col key="c1" style={{ width: "78px" }} />,   // date
+    <col key="c2" style={{ width: "44px" }} />,   // ref
+    <col key="c3" style={{ width: "auto", minWidth: "170px" }} />, // payee flex
+    <col key="c4" style={{ width: "74px" }} />,   // type
+    <col key="c5" style={{ width: "78px" }} />,   // method
+    <col key="c6" style={{ width: "100px" }} />,  // category
+    <col key="c7" style={{ width: "88px" }} />,   // amount
+    <col key="c8" style={{ width: "88px" }} />,   // balance
+    <col key="c9" style={{ width: "110px" }} />,  // status
+    <col key="c10" style={{ width: "16px" }} />,  // dup icon
+    <col key="c11" style={{ width: "16px" }} />,  // cat icon
+    <col key="c12" style={{ width: "76px" }} />,  // actions
   ];
 
   const headerRow = useMemo(() => (
@@ -3338,7 +3338,7 @@ export default function LedgerPageClient() {
     <tr>
       <td className={td + " " + center + " relative"}>
         {/* Borrow the empty checkbox column space so Date doesn't crush Ref */}
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[116px] z-10">
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[100px] z-10">
           <AppDatePicker value={draftDate} onChange={setDraftDate} ariaLabel="Entry date" />
         </div>
       </td>
@@ -3980,7 +3980,7 @@ export default function LedgerPageClient() {
           {/* Date */}
           <td className={td + " whitespace-nowrap " + deletedText}>
             {isEditing && editDraft ? (
-              <div className="w-[140px]">
+              <div className="w-[100px]">
                 <AppDatePicker
                   value={editDraft.date}
                   onChange={(next) => setEditDraft({ ...editDraft, date: next })}
@@ -4023,7 +4023,7 @@ export default function LedgerPageClient() {
               <div className="flex items-center gap-1 min-w-0">
                 {null}
                 <span
-                  className={"font-medium " + deletedText + " min-w-0 whitespace-normal break-words leading-tight"}
+                  className={"block min-w-0 max-w-full truncate font-medium leading-tight " + deletedText}
                   title={r.payee}
                 >
                   {r.payee}
@@ -4055,7 +4055,7 @@ export default function LedgerPageClient() {
 
                 {/* Single-line vendor indicator (persisted) */}
                 {!deletedRow && (r.vendorName || linkedVendorByEntryId[r.id]) ? (
-                  <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-primary/10 px-2 text-[11px] text-primary max-w-[180px] shrink-0">
+                  <span className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 px-1.5 text-[11px] text-primary max-w-[96px] shrink-0">
                     {/* vendor icon */}
                     <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />
 
@@ -4548,7 +4548,7 @@ export default function LedgerPageClient() {
 
           {/* Status */}
           <td className={td + " " + center}>
-            <div className="inline-flex flex-wrap items-center justify-center gap-1">
+            <div className="inline-flex max-w-full items-center justify-center">
               <StatusChip label={r.status} tone={statusTone(r.rawStatus)} />
             </div>
           </td>
@@ -4608,7 +4608,7 @@ export default function LedgerPageClient() {
 
           {/* Actions */}
           <td className={td + " text-right pr-1"}>
-            <div className="relative inline-flex items-center justify-end gap-1 w-[88px]" data-rowmenu={r.id}>
+            <div className="relative inline-flex items-center justify-end gap-1 w-[68px]" data-rowmenu={r.id}>
               {deletedRow ? (
                 <>
                   <Button

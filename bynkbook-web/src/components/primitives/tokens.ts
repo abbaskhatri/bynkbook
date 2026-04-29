@@ -36,3 +36,16 @@ export const selectTriggerClass =
 export const iconButtonH7 =
   "h-7 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card " +
   ringFocus;
+
+export const tabButtonBase =
+  "h-7 px-3 rounded-md border text-xs font-medium transition";
+
+export const tabButtonActive =
+  "border-bb-border bg-bb-surface-elevated text-bb-text shadow-sm";
+
+export const tabButtonInactive =
+  "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover hover:text-bb-text";
+
+export function tabButtonClass(active: boolean) {
+  return [tabButtonBase, active ? tabButtonActive : tabButtonInactive, ringFocus].join(" ");
+}

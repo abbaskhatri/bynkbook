@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
-import { inputH7 } from "@/components/primitives/tokens";
+import { inputH7, tabButtonClass } from "@/components/primitives/tokens";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -334,9 +334,7 @@ export default function PlanningPageClient() {
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key as TabKey)}
-                className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                  tab === t.key ? "bg-primary text-primary-foreground" : "text-bb-text-muted hover:bg-bb-table-row-hover"
-                }`}
+                className={tabButtonClass(tab === t.key)}
               >
                 {t.label}
               </button>

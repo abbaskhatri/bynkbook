@@ -169,6 +169,10 @@
   --bb-table-row-selected: var(--bb-slate-100);
   --bb-table-sticky: var(--bb-white);
 
+  --bb-scrollbar-track: var(--bb-surface-soft);
+  --bb-scrollbar-thumb: var(--bb-slate-300);
+  --bb-scrollbar-thumb-hover: var(--bb-slate-400);
+
   --bb-sidebar-bg: var(--bb-white);
   --bb-sidebar-fg: var(--bb-slate-900);
   --bb-nav-active-bg: var(--primary);
@@ -282,6 +286,10 @@
   --bb-table-row-selected: rgba(5, 150, 105, 0.16);
   --bb-table-sticky: #111827;
 
+  --bb-scrollbar-track: #0b1120;
+  --bb-scrollbar-thumb: rgba(148, 163, 184, 0.46);
+  --bb-scrollbar-thumb-hover: rgba(203, 213, 225, 0.62);
+
   --bb-sidebar-bg: #0f172a;
   --bb-sidebar-fg: #f8fafc;
   --bb-nav-active-bg: var(--bb-emerald-600);
@@ -336,9 +344,34 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-color: var(--bb-scrollbar-thumb) var(--bb-scrollbar-track);
+    scrollbar-width: thin;
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  *::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--bb-scrollbar-track);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--bb-scrollbar-thumb);
+    border: 3px solid var(--bb-scrollbar-track);
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--bb-scrollbar-thumb-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: var(--bb-scrollbar-track);
   }
 }
 

@@ -48,7 +48,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow } from "@/components/ui/table";
 import { Check, Monitor, Moon, Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off, Sun } from "lucide-react";
-import { inputH7, ringFocus, selectTriggerClass } from "@/components/primitives/tokens";
+import { inputH7, ringFocus, selectTriggerClass, tabButtonClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
 import { PillToggle } from "@/components/primitives/PillToggle";
 import { useThemePreference, type ThemePreference } from "@/lib/theme";
@@ -1149,8 +1149,7 @@ export default function SettingsPageClient() {
                   params.set("tab", t.key);
                   router.replace(`?${params.toString()}`);
                 }}
-                className={`h-7 px-3 rounded-md text-xs font-medium transition
-                  ${tab === t.key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}
+                className={tabButtonClass(tab === t.key)}
               >
                 {t.label}
               </button>
@@ -1329,8 +1328,7 @@ export default function SettingsPageClient() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "members" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
-                    }`}
+                  className={tabButtonClass(teamSubTab === "members")}
                   onClick={() => setTeamSubTab("members")}
                 >
                   Team Members
@@ -1338,8 +1336,7 @@ export default function SettingsPageClient() {
 
                 <button
                   type="button"
-                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "roles" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
-                    }`}
+                  className={tabButtonClass(teamSubTab === "roles")}
                   onClick={() => setTeamSubTab("roles")}
                 >
                   Roles & Permissions
