@@ -566,11 +566,11 @@ function AutoInput(props: {
         onBlur={() => setTimeout(() => setOpen(false), 120)}
       />
       {open && (filtered.length > 0 || canCreate) ? (
-        <div className="absolute left-0 top-full mt-1 w-full z-50 rounded-md border bg-white shadow-md p-0 max-h-56 overflow-auto">
+        <div className="absolute left-0 top-full mt-1 w-full z-50 rounded-md border bg-bb-surface-card shadow-md p-0 max-h-56 overflow-auto">
           {canCreate ? (
             <button
               type="button"
-              className="w-full text-left px-2 py-1 text-xs hover:bg-slate-50"
+              className="w-full text-left px-2 py-1 text-xs hover:bg-bb-table-row-hover"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 const name = normalizeCategoryName(currentValue);
@@ -578,8 +578,8 @@ function AutoInput(props: {
                 setOpen(false);
               }}
             >
-              <span className="text-slate-700">Create</span>{" "}
-              <span className="font-medium text-slate-900">“{normalizeCategoryName(currentValue)}”</span>
+              <span className="text-bb-text">Create</span>{" "}
+              <span className="font-medium text-bb-text">“{normalizeCategoryName(currentValue)}”</span>
             </button>
           ) : null}
 
@@ -589,8 +589,8 @@ function AutoInput(props: {
               type="button"
               className={
                 "w-full text-left text-xs px-2 py-1.5 " +
-                (idx === active ? "bg-slate-100" : "bg-white") +
-                " hover:bg-slate-100"
+                (idx === active ? "bg-bb-table-row-hover" : "bg-bb-surface-card") +
+                " hover:bg-bb-table-row-hover"
               }
               onMouseDown={(ev) => {
                 ev.preventDefault();
@@ -653,7 +653,7 @@ function HoverTooltip(props: { text: string; children: any }) {
               pointerEvents: "none",
               maxWidth: 420,
             }}
-            className="rounded-md bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg whitespace-pre-line break-words w-max"
+            className="rounded-md bg-bb-text px-2 py-1 text-[11px] text-bb-text-inverse shadow-lg whitespace-pre-line break-words w-max"
           >
             {text}
           </div>,
@@ -708,14 +708,14 @@ function VendorSuggestPill(props: {
   if (!best) return null;
 
   return (
-    <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+    <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-bb-table-row-hover px-2 py-0.5 text-[11px] text-bb-text">
       {/* vendor icon */}
       <span className="inline-flex items-center justify-center">
-        <Info className="h-3.5 w-3.5 text-slate-600" />
+        <Info className="h-3.5 w-3.5 text-bb-text-muted" />
       </span>
 
       {/* vendor name */}
-      <span className="font-medium text-slate-900">{best.name}</span>
+      <span className="font-medium text-bb-text">{best.name}</span>
 
       {/* actions */}
       <button
@@ -771,11 +771,11 @@ function VendorSuggestPill(props: {
 
       <button
         type="button"
-        className="inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-slate-200"
+        className="inline-flex h-5 w-5 items-center justify-center rounded-full hover:bg-bb-border"
         title="Dismiss"
         onClick={onDismiss}
       >
-        <X className="h-3.5 w-3.5 text-slate-600" />
+        <X className="h-3.5 w-3.5 text-bb-text-muted" />
       </button>
     </div>
   );
@@ -871,8 +871,8 @@ function uiMethodLabel(m: UiMethod): string {
 
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-bb-surface-card/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-bb-border bg-bb-surface-card px-3 py-1 text-xs font-medium text-bb-text shadow-sm">
         <RefreshCw className="h-3.5 w-3.5 animate-spin" />
         <span>{label}</span>
       </div>
@@ -2014,7 +2014,7 @@ export default function LedgerPageClient() {
 
   // Selection
   const checkboxClass =
-    "h-4 w-4 rounded border border-slate-300 bg-white checked:bg-slate-900 checked:border-slate-900";
+    "h-4 w-4 rounded border border-bb-input-border bg-bb-surface-card checked:bg-primary checked:border-primary";
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
 
   // Only rows that actually have checkboxes (matches your row render condition)
@@ -3285,7 +3285,7 @@ export default function LedgerPageClient() {
   // - Tighten DUP/CAT columns and remove header text
   // ================================
   const th =
-    "px-1.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-slate-600";
+    "px-1.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-bb-text-muted";
   const td = "px-1.5 py-0.5 align-middle text-xs";
   const trunc = "truncate overflow-hidden whitespace-nowrap";
   const num = "text-right tabular-nums tracking-tight";
@@ -3308,7 +3308,7 @@ export default function LedgerPageClient() {
   ];
 
   const headerRow = useMemo(() => (
-    <tr className="h-[28px] border-b border-slate-200 bg-slate-50">
+    <tr className="h-[28px] border-b border-bb-border bg-bb-table-header">
       <th className={th + " " + center}>
         <input
           type="checkbox"
@@ -3405,7 +3405,7 @@ export default function LedgerPageClient() {
       {/* Method */}
       <td className={td}>
         {String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? (
-          <div className={inputH7 + " flex items-center px-2 text-slate-700"}>Cash</div>
+          <div className={inputH7 + " flex items-center px-2 text-bb-text"}>Cash</div>
         ) : (
           <Select
             open={methodOpen}
@@ -3509,7 +3509,7 @@ export default function LedgerPageClient() {
       </td>
 
       {/* Balance */}
-      <td className={td + " " + num + " text-slate-400"}>—</td>
+      <td className={td + " " + num + " text-bb-text-subtle"}>—</td>
 
       {/* Status */}
       <td className={td + " " + center}></td>
@@ -3612,7 +3612,7 @@ export default function LedgerPageClient() {
             </SelectContent>
           </Select>
 
-          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 shrink-0">
+          <div className="flex items-center gap-1.5 pl-2 border-l border-bb-border shrink-0">
             {/* Advanced toggle */}
             <button
               type="button"
@@ -3620,7 +3620,7 @@ export default function LedgerPageClient() {
                 "h-7 px-1.5 text-xs font-medium rounded-md shrink-0 inline-flex items-center border",
                 showAdvancedFilters
                   ? "bg-primary/10 text-primary border-primary/20"
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900",
+                  : "bg-bb-surface-card text-bb-text border-bb-border hover:bg-bb-table-row-hover hover:text-bb-text",
               ].join(" ")}
               onClick={() => setShowAdvancedFilters((v) => !v)}
               title={showAdvancedFilters ? "Hide advanced filters" : "Show advanced filters"}
@@ -3654,8 +3654,8 @@ export default function LedgerPageClient() {
             {/* Bulk actions (compact, after Reset) */}
             {selectedCount > 0 ? (
               <div className="ml-2 flex items-center gap-2 shrink-0">
-                <span className="text-xs text-slate-600 whitespace-nowrap">
-                  Selected: <span className="font-medium text-slate-900">{selectedCount}</span>
+                <span className="text-xs text-bb-text-muted whitespace-nowrap">
+                  Selected: <span className="font-medium text-bb-text">{selectedCount}</span>
                 </span>
 
                 <Button
@@ -3677,16 +3677,16 @@ export default function LedgerPageClient() {
                   Clear
                 </Button>
 
-                {bulkMsg ? <div className="text-xs text-slate-600 whitespace-nowrap">{bulkMsg}</div> : null}
+                {bulkMsg ? <div className="text-xs text-bb-text-muted whitespace-nowrap">{bulkMsg}</div> : null}
               </div>
             ) : null}
 
             {/* Divider after Reset area (like old app) */}
-            <div className="h-6 w-px bg-slate-200 mx-1 shrink-0" />
+            <div className="h-6 w-px bg-bb-border mx-1 shrink-0" />
 
             {/* Scan label + Scan button (grouped; Scan immediately after time) */}
-            <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">
-              Scan: <span className="font-medium text-slate-900">{formatScanLabel(lastScanAt)}</span>
+            <span className="text-xs text-bb-text-muted whitespace-nowrap shrink-0">
+              Scan: <span className="font-medium text-bb-text">{formatScanLabel(lastScanAt)}</span>
             </span>
 
             <Button
@@ -3701,7 +3701,7 @@ export default function LedgerPageClient() {
             </Button>
 
             {/* Deleted toggle (last) */}
-            <span className="text-xs text-slate-600 whitespace-nowrap shrink-0">Deleted</span>
+            <span className="text-xs text-bb-text-muted whitespace-nowrap shrink-0">Deleted</span>
             <PillToggle
               checked={showDeleted}
               onCheckedChange={(next) => {
@@ -3712,7 +3712,7 @@ export default function LedgerPageClient() {
             />
 
             {err ? (
-              <div className="text-sm text-red-600 whitespace-nowrap shrink-0" role="alert">
+              <div className="text-sm text-bb-status-danger-fg whitespace-nowrap shrink-0" role="alert">
                 {err}
               </div>
             ) : null}
@@ -3723,12 +3723,12 @@ export default function LedgerPageClient() {
       {/* Expanded advanced area (inside same box) */}
       {showAdvancedFilters ? (
         <>
-          <div className="my-2 h-px bg-slate-200" />
+          <div className="my-2 h-px bg-bb-border" />
 
           <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
             {/* Date range */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600">From</span>
+              <span className="text-xs text-bb-text-muted">From</span>
               <div className="w-[150px]">
                 <AppDatePicker
                   value={filterFrom}
@@ -3739,7 +3739,7 @@ export default function LedgerPageClient() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600">To</span>
+              <span className="text-xs text-bb-text-muted">To</span>
               <div className="w-[150px]">
                 <AppDatePicker
                   value={filterTo}
@@ -3749,11 +3749,11 @@ export default function LedgerPageClient() {
               </div>
             </div>
 
-            <div className="h-6 w-px bg-slate-200 mx-1" />
+            <div className="h-6 w-px bg-bb-border mx-1" />
 
             {/* Amount filters */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600">Min</span>
+              <span className="text-xs text-bb-text-muted">Min</span>
               <input
                 className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
                 inputMode="decimal"
@@ -3765,7 +3765,7 @@ export default function LedgerPageClient() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600">Max</span>
+              <span className="text-xs text-bb-text-muted">Max</span>
               <input
                 className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
                 inputMode="decimal"
@@ -3777,7 +3777,7 @@ export default function LedgerPageClient() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600">Exact</span>
+              <span className="text-xs text-bb-text-muted">Exact</span>
               <input
                 className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
                 inputMode="decimal"
@@ -3916,11 +3916,11 @@ export default function LedgerPageClient() {
   // Phase 1: skeleton-first table body (prevents blank panes while loading)
   const skeletonBodyRows = useMemo(() => {
     const tdSk = "px-1.5 py-0.5 align-middle";
-    const sk = (w: string) => <div className={`h-3 ${w} rounded bg-slate-200 animate-pulse`} />;
+    const sk = (w: string) => <div className={`h-3 ${w} rounded bg-bb-border animate-pulse`} />;
 
     return Array.from({ length: 12 }).map((_, i) => (
-      <tr key={`sk-${i}`} className="h-[24px] border-b border-slate-200">
-        <td className={tdSk}><div className="h-4 w-4 rounded bg-slate-200 animate-pulse" /></td>
+      <tr key={`sk-${i}`} className="h-[24px] border-b border-bb-border">
+        <td className={tdSk}><div className="h-4 w-4 rounded bg-bb-border animate-pulse" /></td>
         <td className={tdSk}>{sk("w-20")}</td>
         <td className={tdSk}>{sk("w-12")}</td>
         <td className={tdSk}>{sk("w-[260px]")}</td>
@@ -3946,17 +3946,17 @@ export default function LedgerPageClient() {
 
       const rowTone =
         deletedRow
-          ? "!bg-slate-50 text-slate-400 "
+          ? "!bg-bb-table-header text-bb-text-subtle "
           : r.isClosedPeriod
-            ? "!bg-emerald-50 hover:!bg-emerald-50 "
+            ? "!bg-bb-status-success-bg hover:!bg-bb-status-success-bg "
             : r.hasDup
-              ? "!bg-yellow-50 hover:!bg-yellow-100 "
+              ? "!bg-bb-status-warning-bg hover:!bg-bb-status-warning-bg "
               : r.hasStale
-                ? "!bg-blue-50 hover:!bg-blue-100 "
-                : "hover:bg-slate-50 ";
+                ? "!bg-bb-status-info-bg hover:!bg-bb-status-info-bg "
+                : "hover:bg-bb-table-row-hover ";
 
       const rowClass =
-        "min-h-[24px] border-b border-slate-200 bg-white " + rowTone;
+        "min-h-[24px] border-b border-bb-border bg-bb-surface-card " + rowTone;
 
       const onEditKeyDown = (e: any) => {
         if (e.key === "Escape") cancelEdit();
@@ -3993,7 +3993,7 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Ref */}
-          <td className={td + " " + trunc + " text-slate-500 " + deletedText}>
+          <td className={td + " " + trunc + " text-bb-text-muted " + deletedText}>
             {isEditing && editDraft ? (
               <input
                 ref={editRefRef}
@@ -4044,7 +4044,7 @@ export default function LedgerPageClient() {
 
                     return (
                       <span
-                        className="inline-flex h-6 items-center rounded-full border border-sky-200 bg-sky-50 px-2 text-[11px] font-semibold text-sky-800 shrink-0"
+                        className="inline-flex h-6 items-center rounded-full border border-bb-status-info-border bg-bb-status-info-bg px-2 text-[11px] font-semibold text-bb-status-info-fg shrink-0"
                         title={du === 1 ? "Deposits in 1 day" : `Deposits in ${du} days`}
                       >
                         {label}
@@ -4114,9 +4114,9 @@ export default function LedgerPageClient() {
                     if (!hit) return null;
 
                     return (
-                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
-                        <BookOpen className="h-3.5 w-3.5 text-slate-600" />
-                        <span className="font-medium text-slate-900">{hit.name}</span>
+                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-bb-table-row-hover px-2 py-0.5 text-[11px] text-bb-text">
+                        <BookOpen className="h-3.5 w-3.5 text-bb-text-muted" />
+                        <span className="font-medium text-bb-text">{hit.name}</span>
 
                         <button
                           type="button"
@@ -4159,17 +4159,17 @@ export default function LedgerPageClient() {
                       const absAmt = t ? BigInt(String(t.amount_abs_cents ?? "0")) : 0n;
 
                       let label = "Unapplied";
-                      let cls = "bg-slate-100 text-slate-700";
+                      let cls = "bg-bb-table-row-hover text-bb-text";
 
                       if (applied > 0n && unapplied === 0n && absAmt > 0n) {
                         label = "Applied";
                         cls = "bg-primary/10 text-primary";
                       } else if (applied > 0n && unapplied > 0n) {
                         label = "Partial";
-                        cls = "bg-amber-50 text-amber-700";
+                        cls = "bg-bb-status-warning-bg text-bb-status-warning-fg";
                       } else if (applied === 0n && unapplied > 0n && absAmt > 0n) {
                         label = "Unapplied credit";
-                        cls = "bg-slate-100 text-slate-700";
+                        cls = "bg-bb-table-row-hover text-bb-text";
                       }
 
                       return (
@@ -4181,7 +4181,7 @@ export default function LedgerPageClient() {
 
                     <button
                       type="button"
-                      className="inline-flex h-6 items-center rounded-full bg-slate-900 px-2 text-[11px] text-white shrink-0"
+                      className="inline-flex h-6 items-center rounded-full bg-bb-text px-2 text-[11px] text-bb-text-inverse shrink-0"
                       title="Apply this vendor payment"
                       onClick={() => {
                         if (!selectedBusinessId || !selectedAccountId || !r.vendorId) return;
@@ -4212,13 +4212,13 @@ export default function LedgerPageClient() {
 
                 {pendingById[r.id] ? (
                   <span className="inline-flex items-center" title="Saving…">
-                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                    <Loader2 className="h-3 w-3 text-bb-text-subtle animate-spin" />
                   </span>
                 ) : null}
 
                 {null}
 
-                {editedIds[r.id] ? <Pencil className="h-3 w-3 text-slate-400 shrink-0" /> : null}
+                {editedIds[r.id] ? <Pencil className="h-3 w-3 text-bb-text-subtle shrink-0" /> : null}
               </div>
             )}
           </td>
@@ -4251,7 +4251,7 @@ export default function LedgerPageClient() {
           <td className={td + " " + trunc + " " + deletedText}>
             {isEditing && editDraft ? (
               String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? (
-                <div className={inputH7 + " flex items-center px-2 text-slate-700"}>Cash</div>
+                <div className={inputH7 + " flex items-center px-2 text-bb-text"}>Cash</div>
               ) : (
                 <Select
                   open={editMethodOpen}
@@ -4309,7 +4309,7 @@ export default function LedgerPageClient() {
                 <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
-                    className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-[11px]"
+                    className="h-6 px-2 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 text-[11px]"
                     onClick={cancelQuickCat}
                     disabled={quickCatBusy}
                     title="Cancel"
@@ -4354,7 +4354,7 @@ export default function LedgerPageClient() {
                 {undoByEntryId[r.id] && Date.now() < (undoByEntryId[r.id]?.expiresAt ?? 0) ? (
                   <button
                     type="button"
-                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60 shrink-0"
+                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-bb-surface-card text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60 shrink-0"
                     title="Undo"
                     disabled={!!pendingById[r.id]}
                     onClick={async (ev) => {
@@ -4426,7 +4426,7 @@ export default function LedgerPageClient() {
                       if (ledgerSugLoading && !tried) {
                         return (
                           <span className="inline-flex items-center">
-                            <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" />
+                            <span className="h-4 w-16 rounded-full bg-bb-table-row-hover animate-pulse" />
                           </span>
                         );
                       }
@@ -4435,7 +4435,7 @@ export default function LedgerPageClient() {
                         return (
                           <button
                             type="button"
-                            className="h-5 px-2 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] inline-flex items-center shrink-0 hover:bg-slate-100"
+                            className="h-5 px-2 rounded-full border border-bb-border bg-bb-table-header text-bb-text-muted text-[10px] inline-flex items-center shrink-0 hover:bg-bb-table-row-hover"
                             title={ledgerSugNotice}
                             onClick={(ev) => {
                               ev.stopPropagation();
@@ -4453,7 +4453,7 @@ export default function LedgerPageClient() {
                       return (
                         <button
                           type="button"
-                          className="h-5 px-2 rounded-full border border-slate-200 bg-slate-50 text-slate-500 text-[10px] inline-flex items-center shrink-0 hover:bg-slate-100"
+                          className="h-5 px-2 rounded-full border border-bb-border bg-bb-table-header text-bb-text-muted text-[10px] inline-flex items-center shrink-0 hover:bg-bb-table-row-hover"
                           title="Choose category"
                           onClick={(ev) => {
                             ev.stopPropagation();
@@ -4513,7 +4513,7 @@ export default function LedgerPageClient() {
             )}
 
             {quickCatEntryId === r.id && quickCatErr ? (
-              <div className="mt-1 text-[11px] text-red-700">{quickCatErr}</div>
+              <div className="mt-1 text-[11px] text-bb-status-danger-fg">{quickCatErr}</div>
             ) : null}
           </td>
 
@@ -4525,7 +4525,7 @@ export default function LedgerPageClient() {
               num +
               " font-semibold " +
               deletedText +
-              (r.amountNeg ? " text-red-700" : "")
+              (r.amountNeg ? " text-bb-amount-negative" : "")
             }
           >
             {isEditing && editDraft ? (
@@ -4542,7 +4542,7 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Balance */}
-          <td className={td + " " + num + " " + deletedText + (r.balanceNeg ? " text-red-700" : "")}>
+          <td className={td + " " + num + " " + deletedText + (r.balanceNeg ? " text-bb-amount-negative" : "")}>
             {r.balanceStr}
           </td>
 
@@ -4571,7 +4571,7 @@ export default function LedgerPageClient() {
                   }}
                   title="Fix issue"
                 >
-                  <AlertTriangle className={"h-4 w-4 " + (r.hasDup ? "text-amber-500" : "text-sky-600")} />
+                  <AlertTriangle className={"h-4 w-4 " + (r.hasDup ? "text-bb-status-warning-fg" : "text-bb-status-info-fg")} />
                 </button>
               </HoverTooltip>
             ) : null}
@@ -4636,7 +4636,7 @@ export default function LedgerPageClient() {
                       setDeleteDialog({ id: r.id, mode: "hard" });
                     }}
                   >
-                    <Trash2 className="h-4 w-4 text-red-600" />
+                    <Trash2 className="h-4 w-4 text-bb-status-danger-fg" />
                   </Button>
                 </>
               ) : isEditing ? (
@@ -4662,10 +4662,10 @@ export default function LedgerPageClient() {
                       </Button>
 
                       {menuOpen ? (
-                        <div className="absolute right-0 top-full mt-1 w-44 rounded-md border bg-white shadow-md z-50 p-1">
+                        <div className="absolute right-0 top-full mt-1 w-44 rounded-md border bg-bb-surface-card shadow-md z-50 p-1">
                           <button
                             type="button"
-                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2"
+                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2"
                             onMouseDown={(ev) => {
                               ev.preventDefault();
                               setMenuOpenId(null);
@@ -4697,7 +4697,7 @@ export default function LedgerPageClient() {
 
                           <button
                             type="button"
-                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2"
+                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2"
                             onMouseDown={async (ev) => {
                               ev.preventDefault();
                               setMenuOpenId(null);
@@ -4729,7 +4729,7 @@ export default function LedgerPageClient() {
 
                           <button
                             type="button"
-                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 disabled:opacity-50"
+                            className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2 disabled:opacity-50"
                             disabled={(r.rawType || "").toString().toUpperCase() === "TRANSFER"}
                             onMouseDown={(ev) => {
                               ev.preventDefault();
@@ -4762,7 +4762,7 @@ export default function LedgerPageClient() {
                           {r.entryKind === "VENDOR_PAYMENT" && r.vendorId ? (
                             <button
                               type="button"
-                              className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 inline-flex items-center gap-2 text-red-700"
+                              className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2 text-bb-status-danger-fg"
                               onMouseDown={async (ev) => {
                                 ev.preventDefault();
                                 setMenuOpenId(null);
@@ -5133,7 +5133,7 @@ export default function LedgerPageClient() {
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
       {/* Unified header + filters container (old app style) */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<BookOpen className="h-4 w-4" />}
@@ -5144,7 +5144,7 @@ export default function LedgerPageClient() {
                 {uncategorizedCount > 0 ? (
                   <button
                     type="button"
-                    className="h-7 px-2 text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-800 inline-flex items-center gap-1"
+                    className="h-7 px-2 text-xs rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg inline-flex items-center gap-1"
                     title="Review uncategorized entries"
                     onClick={() => {
                       if (!selectedBusinessId || !selectedAccountId) return;
@@ -5159,7 +5159,7 @@ export default function LedgerPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover inline-flex items-center gap-1.5"
                   onClick={() => setExportDialogOpen(true)}
                   disabled={!selectedBusinessId || !selectedAccountId}
                 >
@@ -5169,7 +5169,7 @@ export default function LedgerPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover inline-flex items-center gap-1.5"
                   onClick={() => setPrintDialogOpen(true)}
                   disabled={!selectedBusinessId || !selectedAccountId}
                 >
@@ -5179,7 +5179,7 @@ export default function LedgerPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                   onClick={() => {
                     setOpenUpload(true);
                   }}
@@ -5191,7 +5191,7 @@ export default function LedgerPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
                   disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
                   title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
                   onClick={() => setClosePeriodOpen(true)}
@@ -5203,7 +5203,7 @@ export default function LedgerPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         <FilterBar left={filterLeft} right={filterRight} />
       </div>
@@ -5261,7 +5261,7 @@ export default function LedgerPageClient() {
           body={entriesQ.isLoading ? skeletonBodyRows : bodyRows}
           footer={
             <tr>
-              <td colSpan={13} className="p-0 border-t border-slate-200 bg-slate-50">
+              <td colSpan={13} className="p-0 border-t border-bb-border bg-bb-table-header">
                 <TotalsFooter
                   rowsPerPage={rowsPerPage}
                   setRowsPerPage={setRowsPerPage}
@@ -5274,7 +5274,7 @@ export default function LedgerPageClient() {
                     entriesQ.isLoading ? (
                       "…"
                     ) : (
-                      <span className="text-slate-900 font-semibold">
+                      <span className="text-bb-text font-semibold">
                         {formatUsdFromCents(footerTotals.income)}
                       </span>
                     )
@@ -5283,7 +5283,7 @@ export default function LedgerPageClient() {
                     entriesQ.isLoading ? (
                       "…"
                     ) : (
-                      <span className={footerTotals.expense < ZERO ? "text-red-700 font-semibold" : "text-red-700 font-semibold"}>
+                      <span className={footerTotals.expense < ZERO ? "text-bb-amount-negative font-semibold" : "text-bb-amount-negative font-semibold"}>
                         {formatUsdFromCents(footerTotals.expense)}
                       </span>
                     )
@@ -5292,7 +5292,7 @@ export default function LedgerPageClient() {
                     entriesQ.isLoading ? (
                       "…"
                     ) : (
-                      <span className={footerTotals.net < ZERO ? "text-red-700 font-semibold" : "text-slate-900 font-semibold"}>
+                      <span className={footerTotals.net < ZERO ? "text-bb-amount-negative font-semibold" : "text-bb-text font-semibold"}>
                         {formatUsdFromCents(footerTotals.net)}
                       </span>
                     )
@@ -5303,7 +5303,7 @@ export default function LedgerPageClient() {
                     ) : footerTotals.balanceStr === "—" ? (
                       "—"
                     ) : (
-                      <span className={footerTotals.balanceCents < ZERO ? "text-red-700 font-semibold" : "text-slate-900 font-semibold"}>
+                      <span className={footerTotals.balanceCents < ZERO ? "text-bb-amount-negative font-semibold" : "text-bb-text font-semibold"}>
                         {footerTotals.balanceStr}
                       </span>
                     )
@@ -5410,7 +5410,7 @@ export default function LedgerPageClient() {
           </div>
         }
       >
-        <div className="text-sm text-slate-700 space-y-2">
+        <div className="text-sm text-bb-text space-y-2">
           {paymentDeleteDialog?.isApplied ? (
             <div>
               This payment is <span className="font-semibold">applied to bills</span>. It cannot be deleted normally.
@@ -5495,7 +5495,7 @@ export default function LedgerPageClient() {
           </div>
         }
       >
-        <div className="text-sm text-slate-700">
+        <div className="text-sm text-bb-text">
           {deleteDialog?.mode === "hard"
             ? "This will permanently delete the entry. This action is irreversible."
             : "This will move the entry to Deleted. You can restore it later (reversible)."}
@@ -5509,7 +5509,7 @@ export default function LedgerPageClient() {
         size="md"
         footer={
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-600">
+            <div className="text-xs text-bb-text-muted">
               Vendor: <span className="font-medium">{ledgerApplyVendor?.name ?? "—"}</span>
             </div>
 
@@ -5559,57 +5559,57 @@ export default function LedgerPageClient() {
         }
       >
         <div className="space-y-3">
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <div className="text-[11px] text-slate-600">Payment details</div>
+          <div className="rounded-lg border border-bb-border bg-bb-surface-card p-3">
+            <div className="text-[11px] text-bb-text-muted">Payment details</div>
             <div className="mt-1 grid grid-cols-4 gap-2 text-xs">
-              <div><span className="text-slate-600">Date:</span> <span className="font-medium">{ledgerApplyEntry?.date ?? "—"}</span></div>
-              <div><span className="text-slate-600">Payee:</span> <span className="font-medium">{ledgerApplyEntry?.payee ?? "—"}</span></div>
-              <div><span className="text-slate-600">Method:</span> <span className="font-medium">{ledgerApplyEntry?.method ?? "—"}</span></div>
+              <div><span className="text-bb-text-muted">Date:</span> <span className="font-medium">{ledgerApplyEntry?.date ?? "—"}</span></div>
+              <div><span className="text-bb-text-muted">Payee:</span> <span className="font-medium">{ledgerApplyEntry?.payee ?? "—"}</span></div>
+              <div><span className="text-bb-text-muted">Method:</span> <span className="font-medium">{ledgerApplyEntry?.method ?? "—"}</span></div>
               <div className="text-right">
-                <span className="text-slate-600">Amount:</span>{" "}
+                <span className="text-bb-text-muted">Amount:</span>{" "}
                 <span className="font-semibold tabular-nums">{ledgerApplyEntry ? formatUsdFromCents(ledgerApplyEntry.amountCentsAbs) : "—"}</span>
               </div>
             </div>
             {ledgerApplyEntry?.memo ? (
-              <div className="mt-2 text-xs text-slate-600 truncate" title={ledgerApplyEntry.memo}>
-                <span className="text-slate-600">Memo:</span> {ledgerApplyEntry.memo}
+              <div className="mt-2 text-xs text-bb-text-muted truncate" title={ledgerApplyEntry.memo}>
+                <span className="text-bb-text-muted">Memo:</span> {ledgerApplyEntry.memo}
               </div>
             ) : null}
           </div>
 
-          <div className="rounded-lg border border-slate-200 overflow-hidden">
-            <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-              <div className="text-xs font-semibold text-slate-900">Allocate to open bills</div>
-              <div className="text-[11px] text-slate-600">Enter amounts per bill (USD).</div>
+          <div className="rounded-lg border border-bb-border overflow-hidden">
+            <div className="px-3 py-2 border-b border-bb-border bg-bb-table-header">
+              <div className="text-xs font-semibold text-bb-text">Allocate to open bills</div>
+              <div className="text-[11px] text-bb-text-muted">Enter amounts per bill (USD).</div>
             </div>
 
             <div className="max-h-[420px] overflow-auto">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-white border-b border-slate-200">
+                <thead className="sticky top-0 bg-bb-surface-card border-b border-bb-border">
                   <tr className="h-9">
-                    <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
-                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
-                    <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Apply</th>
+                    <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Invoice</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Outstanding</th>
+                    <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Apply</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ledgerApplyLoading ? (
-                    <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>Loading…</td></tr>
+                    <tr><td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={3}>Loading…</td></tr>
                   ) : ledgerBills.length === 0 ? (
-                    <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>No open bills.</td></tr>
+                    <tr><td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={3}>No open bills.</td></tr>
                   ) : (
                     ledgerBills.map((b: any) => (
-                      <tr key={b.id} className="h-9 border-b border-slate-100">
+                      <tr key={b.id} className="h-9 border-b border-bb-border-muted">
                         <td className="px-3 text-sm tabular-nums">
                           {String(b.invoice_date ?? "").slice(0, 10)}{" "}
-                          <span className="text-xs text-slate-500">({b.memo ?? "—"})</span>
+                          <span className="text-xs text-bb-text-muted">({b.memo ?? "—"})</span>
                         </td>
                         <td className="px-3 text-right text-sm tabular-nums font-semibold">
                           {formatUsdFromCents(toBigIntSafe(b.outstanding_cents))}
                         </td>
                         <td className="px-3 text-right">
                           <input
-                            className="h-7 w-[120px] text-right text-xs rounded-md border border-slate-200 bg-white px-2 tabular-nums"
+                            className="h-7 w-[120px] text-right text-xs rounded-md border border-bb-border bg-bb-surface-card px-2 tabular-nums"
                             placeholder="0.00"
                             value={ledgerAlloc[String(b.id)] ?? ""}
                             onChange={(e) => setLedgerAlloc((m) => ({ ...m, [String(b.id)]: e.target.value }))}
@@ -5634,22 +5634,22 @@ export default function LedgerPageClient() {
         <div className="space-y-3">
           {aiExplainBusy && !aiExplainLast ? (
             <div className="space-y-2">
-              <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
-              <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
-              <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+              <div className="h-4 w-2/3 rounded bg-bb-border animate-pulse" />
+              <div className="h-4 w-full rounded bg-bb-border animate-pulse" />
+              <div className="h-4 w-5/6 rounded bg-bb-border animate-pulse" />
             </div>
           ) : aiExplainErr ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-sm text-bb-status-warning-fg">
               {aiExplainErr}
             </div>
           ) : (
-            <div className="text-sm text-slate-700 whitespace-pre-wrap">{aiExplainLast ?? ""}</div>
+            <div className="text-sm text-bb-text whitespace-pre-wrap">{aiExplainLast ?? ""}</div>
           )}
 
-          {aiExplainBusy && aiExplainLast ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
+          {aiExplainBusy && aiExplainLast ? <div className="text-[11px] text-bb-text-muted">Updating…</div> : null}
 
           {!aiExplainBusy && !aiExplainErr ? (
-            <div className="text-[11px] text-slate-500">AI guidance only. Review before saving changes.</div>
+            <div className="text-[11px] text-bb-text-muted">AI guidance only. Review before saving changes.</div>
           ) : null}
         </div>
       </AppDialog>
@@ -5662,7 +5662,7 @@ export default function LedgerPageClient() {
         size="sm"
         footer={
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-bb-text-muted">
               Export filtered ledger rows for the selected date range.
             </div>
             <div className="flex items-center gap-2">
@@ -5687,9 +5687,9 @@ export default function LedgerPageClient() {
         }
       >
         <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <div className="text-sm font-semibold text-slate-900">Choose timeframe</div>
-            <div className="mt-1 text-xs text-slate-600">
+          <div className="rounded-xl border border-bb-border bg-bb-surface-soft/70 p-4">
+            <div className="text-sm font-semibold text-bb-text">Choose timeframe</div>
+            <div className="mt-1 text-xs text-bb-text-muted">
               Current selection: {activeLedgerRangeLabel}
             </div>
 
@@ -5718,7 +5718,7 @@ export default function LedgerPageClient() {
                       "h-9 rounded-lg border px-3 text-xs font-medium transition-colors duration-200",
                       active
                         ? "border-primary/30 bg-primary/10 text-primary"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                        : "border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover",
                     ].join(" ")}
                     onClick={() => applyLedgerPreset(preset)}
                   >
@@ -5731,11 +5731,11 @@ export default function LedgerPageClient() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">From</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-bb-text-muted">From</div>
               <AppDatePicker value={ledgerRangeFrom} onChange={onLedgerFromChange} placeholder="From date" />
             </div>
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">To</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-bb-text-muted">To</div>
               <AppDatePicker value={ledgerRangeTo} onChange={onLedgerToChange} placeholder="To date" />
             </div>
           </div>
@@ -5749,7 +5749,7 @@ export default function LedgerPageClient() {
         size="sm"
         footer={
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-bb-text-muted">
               Prints a branded ledger report for the selected date range.
             </div>
             <div className="flex items-center gap-2">
@@ -5774,9 +5774,9 @@ export default function LedgerPageClient() {
         }
       >
         <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <div className="text-sm font-semibold text-slate-900">Choose timeframe</div>
-            <div className="mt-1 text-xs text-slate-600">
+          <div className="rounded-xl border border-bb-border bg-bb-surface-soft/70 p-4">
+            <div className="text-sm font-semibold text-bb-text">Choose timeframe</div>
+            <div className="mt-1 text-xs text-bb-text-muted">
               Print header will include the BynkBook logo, business, account, selected date range, and generated timestamp.
             </div>
 
@@ -5805,7 +5805,7 @@ export default function LedgerPageClient() {
                       "h-9 rounded-lg border px-3 text-xs font-medium transition-colors duration-200",
                       active
                         ? "border-primary/30 bg-primary/10 text-primary"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                        : "border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover",
                     ].join(" ")}
                     onClick={() => applyLedgerPreset(preset)}
                   >
@@ -5818,11 +5818,11 @@ export default function LedgerPageClient() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">From</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-bb-text-muted">From</div>
               <AppDatePicker value={ledgerRangeFrom} onChange={onLedgerFromChange} placeholder="From date" />
             </div>
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">To</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-bb-text-muted">To</div>
               <AppDatePicker value={ledgerRangeTo} onChange={onLedgerToChange} placeholder="To date" />
             </div>
           </div>

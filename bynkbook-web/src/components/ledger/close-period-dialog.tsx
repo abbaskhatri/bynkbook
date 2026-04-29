@@ -154,8 +154,8 @@ export function ClosePeriodDialog(props: {
       size="md"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-slate-600">
-            Account: <span className="font-medium text-slate-900">{accountName ?? "Selected account"}</span>
+          <div className="text-xs text-bb-text-muted">
+            Account: <span className="font-medium text-bb-text">{accountName ?? "Selected account"}</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -192,7 +192,7 @@ export function ClosePeriodDialog(props: {
                 setConfirmOverride(false);
               }}
               className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                mode === t.k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                mode === t.k ? "bg-bb-text text-bb-text-inverse" : "text-bb-text-muted hover:bg-bb-table-row-hover"
               }`}
             >
               {t.label}
@@ -204,7 +204,7 @@ export function ClosePeriodDialog(props: {
         <div className="flex flex-wrap items-end gap-2">
           {mode === "MONTH" ? (
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Month</div>
+              <div className="text-[11px] text-bb-text-muted">Month</div>
 
               <div className="w-[170px]">
                 <AppDatePicker
@@ -218,14 +218,14 @@ export function ClosePeriodDialog(props: {
           ) : mode === "WEEK" ? (
             <>
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Week start</div>
+                <div className="text-[11px] text-bb-text-muted">Week start</div>
                 <div className="w-[170px]">
                   <AppDatePicker value={weekStart} onChange={(next) => setWeekStart(next)} allowClear={false} />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Week end</div>
+                <div className="text-[11px] text-bb-text-muted">Week end</div>
                 <div className="w-[170px]">
                   <AppDatePicker value={effective.to} onChange={() => {}} disabled allowClear={false} />
                 </div>
@@ -234,14 +234,14 @@ export function ClosePeriodDialog(props: {
           ) : (
             <>
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">From</div>
+                <div className="text-[11px] text-bb-text-muted">From</div>
                 <div className="w-[170px]">
                   <AppDatePicker value={from} onChange={(next) => setFrom(next)} allowClear={false} />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">To</div>
+                <div className="text-[11px] text-bb-text-muted">To</div>
                 <div className="w-[170px]">
                   <AppDatePicker value={to} onChange={(next) => setTo(next)} allowClear={false} />
                 </div>
@@ -253,37 +253,37 @@ export function ClosePeriodDialog(props: {
             {loading ? "Loading…" : "Preview"}
           </Button>
 
-          {err ? <div className="text-xs text-red-600">{err}</div> : null}
+          {err ? <div className="text-xs text-bb-status-danger-fg">{err}</div> : null}
         </div>
 
         {/* Stats */}
-        <div className="rounded-md border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-            <div className="text-xs font-semibold text-slate-700">Reconciliation</div>
-            <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-amber-700") : "text-slate-500"}`}>
+        <div className="rounded-md border border-bb-border overflow-hidden">
+          <div className="bg-bb-table-header px-3 h-9 flex items-center justify-between">
+            <div className="text-xs font-semibold text-bb-text">Reconciliation</div>
+            <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-bb-status-warning-fg") : "text-bb-text-muted"}`}>
               {preview ? (isClean ? "Clean (recommended)" : "Not clean") : "Run preview"}
             </div>
           </div>
 
           <div className="px-3 py-3">
             {!preview ? (
-              <div className="text-sm text-slate-600">Preview to see totals and recommendation.</div>
+              <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
             ) : (
               <div className="grid grid-cols-4 gap-3">
-                <div className="rounded-md border border-slate-200 p-3">
-                  <div className="text-[11px] text-slate-600">Total</div>
+                <div className="rounded-md border border-bb-border p-3">
+                  <div className="text-[11px] text-bb-text-muted">Total</div>
                   <div className="text-sm font-semibold">{stats.entries_total}</div>
                 </div>
-                <div className="rounded-md border border-slate-200 p-3">
-                  <div className="text-[11px] text-slate-600">Reconciled</div>
+                <div className="rounded-md border border-bb-border p-3">
+                  <div className="text-[11px] text-bb-text-muted">Reconciled</div>
                   <div className="text-sm font-semibold">{stats.entries_reconciled}</div>
                 </div>
-                <div className="rounded-md border border-slate-200 p-3">
-                  <div className="text-[11px] text-slate-600">Unreconciled</div>
+                <div className="rounded-md border border-bb-border p-3">
+                  <div className="text-[11px] text-bb-text-muted">Unreconciled</div>
                   <div className="text-sm font-semibold">{stats.entries_unreconciled}</div>
                 </div>
-                <div className="rounded-md border border-slate-200 p-3">
-                  <div className="text-[11px] text-slate-600">Open issues</div>
+                <div className="rounded-md border border-bb-border p-3">
+                  <div className="text-[11px] text-bb-text-muted">Open issues</div>
                   <div className="text-sm font-semibold">{stats.issues_open}</div>
                 </div>
               </div>
@@ -294,9 +294,9 @@ export function ClosePeriodDialog(props: {
         {/* Months affected + override */}
         {preview ? (
           <div className="space-y-2">
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-bb-text">
               Months affected:{" "}
-              <span className="font-medium text-slate-900">{monthsAffected.length ? monthsAffected.join(", ") : "—"}</span>
+              <span className="font-medium text-bb-text">{monthsAffected.length ? monthsAffected.join(", ") : "—"}</span>
             </div>
 
             {!isClean ? (
@@ -308,14 +308,14 @@ export function ClosePeriodDialog(props: {
                     setOverride(e.target.checked);
                     setConfirmOverride(false);
                   }}
-                  className="h-4 w-4 rounded border border-slate-300"
+                  className="h-4 w-4 rounded border border-bb-input-border"
                 />
                 <span className="text-sm">Override and close anyway</span>
               </label>
             ) : null}
 
             {!isClean && override ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-sm text-bb-status-warning-fg">
                 This period is not clean. {confirmOverride ? "Click Close again to proceed." : "Click Close to confirm override."}
               </div>
             ) : null}

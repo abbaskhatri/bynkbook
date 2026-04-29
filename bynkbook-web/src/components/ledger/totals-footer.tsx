@@ -45,7 +45,7 @@ export function TotalsFooter(props: {
   const navBtnClass = iconButtonH7;
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+    <div className="flex items-center justify-between px-3 py-2 text-xs text-bb-text-muted">
       {/* Left: rows + paging */}
       <div className="flex items-center gap-2">
         <span>Rows:</span>
@@ -98,12 +98,12 @@ export function TotalsFooter(props: {
       <div className="flex items-center gap-6 text-xs tabular-nums">
         <div>
           <span className="mr-1">Income:</span>
-          <span className="font-semibold text-slate-900">{incomeText}</span>
+          <span className="font-semibold text-bb-text">{incomeText}</span>
         </div>
 
         <div>
           <span className="mr-1">Expense:</span>
-          <span className="font-semibold text-red-700">{expenseText}</span>
+          <span className="font-semibold text-bb-amount-negative">{expenseText}</span>
         </div>
 
         <div>
