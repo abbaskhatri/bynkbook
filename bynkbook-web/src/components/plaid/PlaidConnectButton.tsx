@@ -8,7 +8,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 function TinySpinner() {
-  return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />;
+  return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
 }
 
 /**
@@ -243,7 +243,7 @@ export function PlaidConnectButton(props: Props) {
         <Sparkles className="h-3.5 w-3.5" /> {busy ? "Opening…" : (props.label ?? "Connect Plaid")}
       </button>
 
-      {errorMsg ? <div className="mt-1 text-[11px] text-red-700">{errorMsg}</div> : null}
+      {errorMsg ? <div className="mt-1 text-[11px] text-bb-status-danger-fg">{errorMsg}</div> : null}
 
       <AppDialog
         open={openConsent}
@@ -252,7 +252,7 @@ export function PlaidConnectButton(props: Props) {
         size="md"
       >
         <div className="p-3 max-h-[70vh] overflow-y-auto overflow-x-hidden">
-          <div className="text-xs text-slate-700 leading-relaxed break-words">
+          <div className="text-xs text-bb-text leading-relaxed break-words">
             BynkBook uses Plaid to connect securely to your bank. We do not store your bank password.
           </div>
 
@@ -260,16 +260,16 @@ export function PlaidConnectButton(props: Props) {
             Bank-level encryption • Read-only access • No password stored
           </div>
 
-          <div className="mt-3 text-xs text-slate-700">
+          <div className="mt-3 text-xs text-bb-text">
             We access:
-            <ul className="list-disc ml-5 mt-1 text-slate-600">
+            <ul className="list-disc ml-5 mt-1 text-bb-text-muted">
               <li>Account name, type, and last 4 digits</li>
               <li>Transaction history (dates, amounts, merchant names)</li>
               <li>Current account balance</li>
             </ul>
           </div>
 
-          <label className="mt-4 flex items-start gap-2 text-xs text-slate-700 min-w-0">
+          <label className="mt-4 flex items-start gap-2 text-xs text-bb-text min-w-0">
             <input
               type="checkbox"
               className="h-4 w-4 mt-0.5 shrink-0"
@@ -281,10 +281,10 @@ export function PlaidConnectButton(props: Props) {
             </span>
           </label>
 
-          <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
+          <div className="mt-4 flex items-center justify-between border-t border-bb-border pt-3">
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+              className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft"
               onClick={() => setOpenConsent(false)}
             >
               Cancel
@@ -326,7 +326,7 @@ export function PlaidConnectButton(props: Props) {
         size="md"
       >
         <div className="p-3 overflow-hidden max-h-[70vh]">
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-bb-text-muted">
             Select exactly one bank account to link to this BynkBook account.
           </div>
 
@@ -334,7 +334,7 @@ export function PlaidConnectButton(props: Props) {
             {pendingAccounts.map((a) => {
               const label = `${a.name ?? "Account"}${a.mask ? ` • ****${a.mask}` : ""}${a.subtype ? ` • ${a.subtype}` : a.type ? ` • ${a.type}` : ""}`;
               return (
-                <label key={a.id} className="flex items-center gap-2 text-xs text-slate-800">
+                <label key={a.id} className="flex items-center gap-2 text-xs text-bb-text">
                   <input
                     type="radio"
                     name="plaid-account"
@@ -349,9 +349,9 @@ export function PlaidConnectButton(props: Props) {
           </div>
 
           <div className="mt-4">
-            <div className="text-[11px] font-semibold text-slate-600 mb-1">History to fetch</div>
+            <div className="text-[11px] font-semibold text-bb-text-muted mb-1">History to fetch</div>
             <select
-              className="h-8 w-full px-2 text-xs rounded-md border border-slate-200 bg-white focus:outline-none focus:border-ring"
+              className="h-8 w-full px-2 text-xs rounded-md border border-bb-input-border bg-bb-input-bg text-bb-text focus:outline-none focus:border-ring"
               value={historyPreset}
               onChange={(e) => setHistoryPreset(e.target.value as any)}
             >
@@ -364,7 +364,7 @@ export function PlaidConnectButton(props: Props) {
 
             {historyPreset === "custom" ? (
               <div className="mt-2">
-                <div className="text-[11px] text-slate-600 mb-1">Start date (end date is today)</div>
+                <div className="text-[11px] text-bb-text-muted mb-1">Start date (end date is today)</div>
 
                 <AppDatePicker
                   value={customStart}
@@ -381,15 +381,15 @@ export function PlaidConnectButton(props: Props) {
               </div>
             ) : null}
 
-            <div className="mt-2 text-[11px] text-slate-500">
+            <div className="mt-2 text-[11px] text-bb-text-muted">
               Opening balance will be labeled <span className="font-semibold">estimated</span> unless a statement opening is known.
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
+          <div className="mt-4 flex items-center justify-between border-t border-bb-border pt-3">
             <button
               type="button"
-              className="h-8 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+              className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft"
               onClick={() => setOpenSelect(false)}
               disabled={busy}
             >
@@ -531,20 +531,20 @@ export function PlaidConnectButton(props: Props) {
         size="md"
       >
         <div className="p-3 max-h-[70vh] overflow-y-auto">
-          <div className="text-xs text-slate-700">
+          <div className="text-xs text-bb-text">
             We found existing activity or a manual opening for this account. Choose how to handle the opening balance.
           </div>
 
-          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+          <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
             <div className="flex justify-between">
-              <span className="text-slate-500">Plaid suggested opening</span>
-              <span className="font-semibold text-slate-900">
+              <span className="text-bb-text-muted">Plaid suggested opening</span>
+              <span className="font-semibold text-bb-text">
                 {String(openingPreview?.suggestedOpeningCents ?? "—")}
               </span>
             </div>
             <div className="flex justify-between mt-1">
-              <span className="text-slate-500">Start date</span>
-              <span className="font-semibold text-slate-900">{String(openingPreview?.effectiveStartDate ?? "")}</span>
+              <span className="text-bb-text-muted">Start date</span>
+              <span className="font-semibold text-bb-text">{String(openingPreview?.effectiveStartDate ?? "")}</span>
             </div>
           </div>
 
@@ -585,14 +585,14 @@ export function PlaidConnectButton(props: Props) {
               }}
             >
               <div className="font-semibold">A) Use Plaid suggested opening</div>
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[11px] text-bb-text-muted">
                 Updates the single canonical opening entry and updates account opening fields.
               </div>
             </button>
 
             <button
               type="button"
-              className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-left"
+              className="h-9 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft disabled:opacity-50 text-left"
               disabled={openingChoiceBusy}
               onClick={async () => {
                 setOpeningChoiceBusy(true);
@@ -626,14 +626,14 @@ export function PlaidConnectButton(props: Props) {
               }}
             >
               <div className="font-semibold">B) Keep manual opening</div>
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-bb-text-muted">
                 Imports Plaid transactions but does not create/overwrite the opening entry or account opening fields. Stores Plaid suggestion for reference.
               </div>
             </button>
 
             <button
               type="button"
-              className="h-9 px-3 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-left"
+              className="h-9 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft disabled:opacity-50 text-left"
               disabled={openingChoiceBusy}
               onClick={async () => {
                 setOpeningChoiceBusy(true);
@@ -649,7 +649,7 @@ export function PlaidConnectButton(props: Props) {
               }}
             >
               <div className="font-semibold">C) Cancel connect</div>
-              <div className="text-[11px] text-slate-500">Disconnects and makes no changes.</div>
+              <div className="text-[11px] text-bb-text-muted">Disconnects and makes no changes.</div>
             </button>
           </div>
 
@@ -668,23 +668,23 @@ export function PlaidConnectButton(props: Props) {
         size="sm"
       >
         <div className="p-3 overflow-hidden max-h-[70vh]">
-          <div className="text-xs text-slate-700 flex items-center gap-2">
+          <div className="text-xs text-bb-text flex items-center gap-2">
             <TinySpinner /> Syncing transactions…
           </div>
 
-          <div className="mt-2 text-[11px] text-slate-500">
+          <div className="mt-2 text-[11px] text-bb-text-muted">
             This may take a moment on first connection.
           </div>
 
           {syncInfo ? (
-            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+            <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
               <div className="flex justify-between">
-                <span className="text-slate-500">New</span>
-                <span className="font-semibold text-slate-900">{syncInfo.newCount}</span>
+                <span className="text-bb-text-muted">New</span>
+                <span className="font-semibold text-bb-text">{syncInfo.newCount}</span>
               </div>
               <div className="flex justify-between mt-1">
-                <span className="text-slate-500">Pending</span>
-                <span className="font-semibold text-slate-900">{syncInfo.pendingCount}</span>
+                <span className="text-bb-text-muted">Pending</span>
+                <span className="font-semibold text-bb-text">{syncInfo.pendingCount}</span>
               </div>
             </div>
           ) : null}

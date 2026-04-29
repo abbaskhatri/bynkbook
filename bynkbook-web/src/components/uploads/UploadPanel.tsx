@@ -163,7 +163,7 @@ function VendorPicker(props: {
     <div className="space-y-1">
       <div className="flex items-center gap-2">
         <input
-          className="h-8 flex-1 px-2 text-xs border border-slate-200 rounded-md"
+          className="h-8 flex-1 px-2 text-xs border border-bb-input-border bg-bb-input-bg text-bb-text placeholder:text-bb-input-placeholder rounded-md"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder="Search vendor…"
@@ -171,7 +171,7 @@ function VendorPicker(props: {
         {value ? (
           <button
             type="button"
-            className="h-8 px-2 text-xs border border-slate-200 rounded-md"
+            className="h-8 px-2 text-xs border border-bb-border bg-bb-surface-card text-bb-text rounded-md"
             onClick={() => onChange(null)}
             title="Clear vendor"
           >
@@ -181,25 +181,25 @@ function VendorPicker(props: {
       </div>
 
       {value ? (
-        <div className="text-xs text-slate-700">
+        <div className="text-xs text-bb-text">
           Selected: <span className="font-medium">{value.name}</span>
         </div>
       ) : null}
 
       {loading ? (
         <div className="space-y-1 py-1">
-          <div className="h-3 w-32 rounded bg-slate-200 animate-pulse" />
+          <div className="h-3 w-32 rounded bg-bb-surface-elevated animate-pulse" />
         </div>
       ) : null}
-      {err ? <div className="text-[11px] text-red-600">{err}</div> : null}
+      {err ? <div className="text-[11px] text-bb-status-danger-fg">{err}</div> : null}
 
       {!value && results.length > 0 ? (
-        <div className="border border-slate-200 rounded-md overflow-hidden">
+        <div className="border border-bb-border rounded-md overflow-hidden">
           {results.slice(0, 6).map((r) => (
             <button
               key={r.id}
               type="button"
-              className="w-full text-left px-2 py-1.5 text-xs hover:bg-slate-50"
+              className="w-full text-left px-2 py-1.5 text-xs hover:bg-bb-surface-soft"
               onClick={() => onChange(r)}
             >
               {r.name}
@@ -363,7 +363,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
       size="xl"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-bb-text-muted">
             {controller.hasActiveUploads ? "Uploading…" : controller.items.length ? "Ready" : "No files selected"}
           </div>
 
@@ -403,13 +403,13 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
       }
     >
       <div className="space-y-3">
-        <div className="text-sm text-slate-700">{uploadHelperText[type]}</div>
+        <div className="text-sm text-bb-text">{uploadHelperText[type]}</div>
 
         {/* Dev-only toggle for overlay close behavior */}
 
         {/* Drop zone */}
         <div
-          className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+          className="rounded-lg border border-bb-border bg-bb-surface-soft p-4"
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -418,11 +418,11 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
         >
           <div className="flex items-start gap-3">
             <div className="mt-0.5">
-              <UploadCloud className="h-5 w-5 text-slate-500" />
+              <UploadCloud className="h-5 w-5 text-bb-text-muted" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-slate-900">Drag and drop files here</div>
-              <div className="text-xs text-slate-600 mt-0.5">
+              <div className="text-sm font-semibold text-bb-text">Drag and drop files here</div>
+              <div className="text-xs text-bb-text-muted mt-0.5">
                 {fileHint} {effectiveAllowMultiple ? "Bulk upload supported." : "Single file only."}
               </div>
 
@@ -431,7 +431,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                   Choose file{effectiveAllowMultiple ? "s" : ""}
                 </Button>
 
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-bb-text-muted">
                   Accepted: <span className="font-medium">{accept}</span>
                 </div>
               </div>
@@ -451,27 +451,27 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
         {/* Details (bank statement only) */}
         {showBankFields ? (
-          <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
-            <div className="text-xs font-semibold text-slate-900">Details</div>
+          <div className="rounded-lg border border-bb-border bg-bb-surface-card p-3 space-y-3">
+            <div className="text-xs font-semibold text-bb-text">Details</div>
 
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <div className="text-xs text-slate-600">Statement from</div>
+                <div className="text-xs text-bb-text-muted">Statement from</div>
                 <AppDatePicker value={statementFrom} onChange={(next) => setStatementFrom(next)} allowClear />
               </div>
 
               <div className="space-y-1">
-                <div className="text-xs text-slate-600">Statement to</div>
+                <div className="text-xs text-bb-text-muted">Statement to</div>
                 <AppDatePicker value={statementTo} onChange={(next) => setStatementTo(next)} allowClear />
               </div>
 
-              <div className="col-span-2 text-xs text-slate-500">This stores the file + metadata.</div>
+              <div className="col-span-2 text-xs text-bb-text-muted">This stores the file + metadata.</div>
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-slate-600">Notes (optional)</div>
+              <div className="text-xs text-bb-text-muted">Notes (optional)</div>
               <textarea
-                className="w-full min-h-[64px] px-2 py-1 text-xs border border-slate-200 rounded-md"
+                className="w-full min-h-[64px] px-2 py-1 text-xs border border-bb-input-border bg-bb-input-bg text-bb-text placeholder:text-bb-input-placeholder rounded-md"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Add internal notes…"
@@ -482,11 +482,11 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
         {/* Summary */}
         {showSummary && !controller.hasActiveUploads ? (
-          <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-            <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
+          <div className="rounded-lg border border-bb-border bg-bb-surface-card overflow-hidden">
+            <div className="px-3 py-2 border-b border-bb-border flex items-center justify-between gap-2">
               <div>
-                <div className="text-sm font-semibold text-slate-900">Upload summary</div>
-                <div className="text-xs text-slate-600">
+                <div className="text-sm font-semibold text-bb-text">Upload summary</div>
+                <div className="text-xs text-bb-text-muted">
                   {type === "INVOICE"
                     ? "Invoices are extracted automatically. Bills are created automatically when parsing succeeds."
                     : type === "RECEIPT"
@@ -531,13 +531,13 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                     <col style={{ width: 80 }} />
                   </colgroup>
                 )}
-                <thead className="bg-slate-50 text-slate-700">
+                <thead className="bg-bb-surface-soft text-bb-text">
                   {type === "INVOICE" ? (
-                    <tr className="border-b border-slate-200">
+                    <tr className="border-b border-bb-border">
                       <th className="px-3 py-2 text-center font-semibold">
                         <input
                           type="checkbox"
-                          className="h-4 w-4 rounded border border-slate-300"
+                          className="h-4 w-4 rounded border border-bb-input-border"
                           checked={
                             controller.items
                               .filter((it) => {
@@ -603,7 +603,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                       <th className="px-3 py-2 text-right font-semibold">File</th>
                     </tr>
                   ) : type === "RECEIPT" ? (
-                    <tr className="border-b border-slate-200">
+                    <tr className="border-b border-bb-border">
                       <th className="px-3 py-2 text-center font-semibold"></th>
                       <th className="px-3 py-2 text-left font-semibold">File</th>
                       <th className="px-3 py-2 text-left font-semibold">Vendor</th>
@@ -613,7 +613,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                       <th className="px-3 py-2 text-right font-semibold">File</th>
                     </tr>
                   ) : (
-                    <tr className="border-b border-slate-200">
+                    <tr className="border-b border-bb-border">
                       <th className="px-3 py-2 text-left font-semibold">File</th>
                       <th className="px-3 py-2 text-left font-semibold">Status</th>
                       <th className="px-3 py-2 text-right font-semibold">File</th>
@@ -621,7 +621,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                   )}
                 </thead>
 
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-bb-border-muted">
                   {controller.items.map((it) => {
                     const parsed = it.parsed || null;
 
@@ -681,7 +681,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                             return (
                               <input
                                 type="checkbox"
-                                className="h-4 w-4 rounded border border-slate-300"
+                                className="h-4 w-4 rounded border border-bb-input-border"
                                 checked={!!selectedForEntry[it.uploadId!]}
                                 disabled={!eligible}
                                 onChange={(e) => {
@@ -696,19 +696,19 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
                         {type === "INVOICE" ? (
                           <>
-                            <td className="px-3 py-2 text-slate-700">
-                              <div className="truncate font-medium text-slate-900" title={String(vendor || "")}>{vendor || "—"}</div>
-                              <div className="truncate text-[11px] text-slate-500" title={it.file.name}>
+                            <td className="px-3 py-2 text-bb-text">
+                              <div className="truncate font-medium text-bb-text" title={String(vendor || "")}>{vendor || "—"}</div>
+                              <div className="truncate text-[11px] text-bb-text-muted" title={it.file.name}>
                                 ({it.file.name})
                               </div>
                             </td>
 
-                            <td className="px-3 py-2 text-slate-700">
+                            <td className="px-3 py-2 text-bb-text">
                               <div className="truncate" title={String(invoiceNo || "")}>{invoiceNo || "—"}</div>
                             </td>
-                            <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
+                            <td className="px-3 py-2 text-bb-text">{docDate || "—"}</td>
 
-                            <td className="px-3 py-2 text-slate-700">
+                            <td className="px-3 py-2 text-bb-text">
                               {it.uploadId ? (
                                 <div className="w-[170px]">
                                   <AppDatePicker
@@ -726,11 +726,11 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                               )}
                             </td>
 
-                            <td className="px-3 py-2 text-slate-700">{dueDate || "—"}</td>
-                            <td className="px-3 py-2 text-right text-slate-900">
+                            <td className="px-3 py-2 text-bb-text">{dueDate || "—"}</td>
+                            <td className="px-3 py-2 text-right text-bb-text">
                               <div>{total || "—"}</div>
                               {duplicateCode === "DUPLICATE_UPLOAD" && duplicateMeta ? (
-                                <div className="mt-1 text-[11px] text-slate-500">
+                                <div className="mt-1 text-[11px] text-bb-text-muted">
                                   Duplicate of {String(duplicateMeta.original_filename || "existing upload")}
                                 </div>
                               ) : null}
@@ -740,20 +740,20 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 <span
                                   className={
                                     status === "PARSING"
-                                      ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                      ? "inline-flex items-center rounded-full bg-bb-surface-soft text-bb-text px-2 py-0.5"
                                       : status === "PARSED"
                                         ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
                                         : status === "NEEDS_REVIEW"
-                                          ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
+                                          ? "inline-flex items-center rounded-full bg-bb-status-warning-bg text-bb-status-warning-fg px-2 py-0.5"
                                           : status === "FAILED"
                                             ? (
                                                 ((it.completedMeta as any)?.error_code ??
                                                   (it.completedMeta as any)?.meta?.error_code ??
                                                   "") === "DUPLICATE_UPLOAD"
-                                                  ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
-                                                  : "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
+                                                  ? "inline-flex items-center rounded-full bg-bb-surface-soft text-bb-text px-2 py-0.5"
+                                                  : "inline-flex items-center rounded-full bg-bb-status-danger-bg text-bb-status-danger-fg px-2 py-0.5"
                                               )
-                                            : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                            : "inline-flex items-center rounded-full bg-bb-surface-soft text-bb-text px-2 py-0.5"
                                   }
                                 >
                                   {statusLabel}
@@ -769,7 +769,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
                                     if (duplicateCode === "DUPLICATE_UPLOAD") {
                                       return (
-                                        <span className="ml-2 text-[11px] text-slate-600">
+                                        <span className="ml-2 text-[11px] text-bb-text-muted">
                                           Existing upload reused
                                         </span>
                                       );
@@ -778,19 +778,19 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                     if (!it.uploadId) return null;
 
                                     return entryCreateStatus[it.uploadId]?.state === "creating" ? (
-                                      <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
+                                      <span className="ml-2 text-[11px] text-bb-text-muted">Creating…</span>
                                     ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
                                       <span className="ml-2 text-[11px] text-primary">Created</span>
                                     ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
-                                      <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
+                                      <span className="ml-2 text-[11px] text-bb-text-muted">Already exists</span>
                                     ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
-                                      <span className="ml-2 text-[11px] text-red-700">Failed</span>
+                                      <span className="ml-2 text-[11px] text-bb-status-danger-fg">Failed</span>
                                     ) : null;
                                   })()}
                                 </span>
 
                                 {uploadReason(it) ? (
-                                  <div className="mt-1 truncate text-[11px] leading-4 text-slate-500" title={uploadReason(it)}>
+                                  <div className="mt-1 truncate text-[11px] leading-4 text-bb-text-muted" title={uploadReason(it)}>
                                     {uploadReason(it)}
                                   </div>
                                 ) : null}
@@ -799,33 +799,33 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                           </>
                         ) : type === "RECEIPT" ? (
                           <>
-                            <td className="px-3 py-2 text-slate-700">
-                              <div className="truncate font-medium text-slate-900" title={String(it.file?.name || "")}>{it.file?.name || "—"}</div>
+                            <td className="px-3 py-2 text-bb-text">
+                              <div className="truncate font-medium text-bb-text" title={String(it.file?.name || "")}>{it.file?.name || "—"}</div>
                             </td>
 
-                            <td className="px-3 py-2 text-slate-700">
+                            <td className="px-3 py-2 text-bb-text">
                               <div className="truncate" title={String(vendor || "")}>{vendor || "—"}</div>
                             </td>
-                            <td className="px-3 py-2 text-slate-700">{docDate || "—"}</td>
-                            <td className="px-3 py-2 text-right text-slate-900">{total || "—"}</td>
+                            <td className="px-3 py-2 text-bb-text">{docDate || "—"}</td>
+                            <td className="px-3 py-2 text-right text-bb-text">{total || "—"}</td>
 
                             <td className="px-3 py-2">
                               <span
                                 className={
                                   it.status !== "COMPLETED"
-                                    ? "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                    ? "inline-flex items-center rounded-full bg-bb-surface-soft text-bb-text px-2 py-0.5"
                                     : status === "PARSED"
                                       ? "inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5"
                                       : status === "NEEDS_REVIEW"
-                                        ? "inline-flex items-center rounded-full bg-amber-50 text-amber-700 px-2 py-0.5"
+                                        ? "inline-flex items-center rounded-full bg-bb-status-warning-bg text-bb-status-warning-fg px-2 py-0.5"
                                         : status === "FAILED"
-                                          ? "inline-flex items-center rounded-full bg-red-50 text-red-700 px-2 py-0.5"
-                                          : "inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5"
+                                          ? "inline-flex items-center rounded-full bg-bb-status-danger-bg text-bb-status-danger-fg px-2 py-0.5"
+                                          : "inline-flex items-center rounded-full bg-bb-surface-soft text-bb-text px-2 py-0.5"
                                 }
                               >
                                 {it.status !== "COMPLETED" ? (
                                   <>
-                                    <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />
+                                    <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />
                                     Still retrieving…
                                   </>
                                 ) : (
@@ -834,13 +834,13 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
                                 {it.uploadId ? (
                                   entryCreateStatus[it.uploadId]?.state === "creating" ? (
-                                    <span className="ml-2 text-[11px] text-slate-600">Creating…</span>
+                                    <span className="ml-2 text-[11px] text-bb-text-muted">Creating…</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
                                     <span className="ml-2 text-[11px] text-primary">Created</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
-                                    <span className="ml-2 text-[11px] text-slate-600">Already exists</span>
+                                    <span className="ml-2 text-[11px] text-bb-text-muted">Already exists</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
-                                    <span className="ml-2 text-[11px] text-red-700">Failed</span>
+                                    <span className="ml-2 text-[11px] text-bb-status-danger-fg">Failed</span>
                                   ) : null
                                 ) : null}
                               </span>
@@ -849,7 +849,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         ) : (
                           <>
                             <td className="px-3 py-2">
-                              <span className="inline-flex items-center rounded-full bg-slate-50 text-slate-700 px-2 py-0.5">
+                              <span className="inline-flex items-center rounded-full bg-bb-surface-soft text-bb-text px-2 py-0.5">
                                 {it.status}
                               </span>
                             </td>
@@ -900,7 +900,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                   }
                                 }}
                               >
-                                <Trash2 className="h-4 w-4 mx-auto text-slate-500" />
+                                <Trash2 className="h-4 w-4 mx-auto text-bb-text-muted" />
                               </Button>
                             </div>
                           ) : null}
@@ -914,8 +914,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
             {/* Actions (selected rows) */}
             {type === "RECEIPT" && ctx?.businessId ? (
-              <div className="px-3 py-2 border-t border-slate-200 flex items-center justify-between">
-                <div className="text-xs text-slate-600">
+              <div className="px-3 py-2 border-t border-bb-border flex items-center justify-between">
+                <div className="text-xs text-bb-text-muted">
                   {controller.items.filter((it) => it.uploadId && selectedForEntry[it.uploadId]).length} selected
                 </div>
 
@@ -995,9 +995,9 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
         {/* File list */}
         {!showSummary ? (
-          <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-            <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
-              <div className="text-xs font-semibold text-slate-900">Files ({controller.items.length})</div>
+          <div className="rounded-lg border border-bb-border bg-bb-surface-card overflow-hidden">
+            <div className="px-3 py-2 border-b border-bb-border flex items-center justify-between">
+              <div className="text-xs font-semibold text-bb-text">Files ({controller.items.length})</div>
 
               {effectiveAllowMultiple ? (
                 <Button type="button" variant="outline" className="h-7 px-2 text-xs" onClick={pickFiles}>
@@ -1007,15 +1007,15 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
             </div>
 
             {controller.items.length === 0 ? (
-              <div className="p-4 text-xs text-slate-600">No files selected yet.</div>
+              <div className="p-4 text-xs text-bb-text-muted">No files selected yet.</div>
             ) : (
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-bb-border-muted">
                 {controller.items.map((it) => (
                   <div key={it.id} className="p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-xs font-semibold text-slate-900 truncate">{it.file.name}</div>
-                        <div className="text-[11px] text-slate-500">
+                        <div className="text-xs font-semibold text-bb-text truncate">{it.file.name}</div>
+                        <div className="text-[11px] text-bb-text-muted">
                           {Math.round(it.file.size / 1024)} KB • {it.file.type || "unknown type"}
                         </div>
                       </div>
@@ -1027,17 +1027,17 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                             {it.completedMeta ? "Uploaded" : "Ready"}
                           </div>
                         ) : it.status === "FAILED" ? (
-                          <div className="inline-flex items-center gap-1 text-xs text-red-700">
+                          <div className="inline-flex items-center gap-1 text-xs text-bb-status-danger-fg">
                             <AlertTriangle className="h-4 w-4" /> Failed
                           </div>
                         ) : it.status === "CANCELED" ? (
-                          <div className="inline-flex items-center gap-1 text-xs text-slate-600">
+                          <div className="inline-flex items-center gap-1 text-xs text-bb-text-muted">
                             <X className="h-4 w-4" /> Canceled
                           </div>
                         ) : it.status === "UPLOADING" ? (
-                          <div className="text-xs text-slate-700">Uploading…</div>
+                          <div className="text-xs text-bb-text">Uploading…</div>
                         ) : (
-                          <div className="text-xs text-slate-700">Queued</div>
+                          <div className="text-xs text-bb-text">Queued</div>
                         )}
 
                         {it.status === "UPLOADING" ? (
@@ -1050,17 +1050,17 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                           </Button>
                         ) : (
                           <Button type="button" variant="outline" className="h-7 w-8 p-0" onClick={() => controller.remove(it.id)} title="Remove">
-                            <Trash2 className="h-4 w-4 mx-auto text-slate-500" />
+                            <Trash2 className="h-4 w-4 mx-auto text-bb-text-muted" />
                           </Button>
                         )}
                       </div>
                     </div>
 
                     <div className="mt-2">
-                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-2 rounded-full bg-bb-surface-elevated overflow-hidden">
                         <div className="h-full bg-primary" style={{ width: `${it.progress}%` }} />
                       </div>
-                      <div className="mt-1 text-[11px] text-slate-500">{it.progress}%</div>
+                      <div className="mt-1 text-[11px] text-bb-text-muted">{it.progress}%</div>
                     </div>
                   </div>
                 ))}

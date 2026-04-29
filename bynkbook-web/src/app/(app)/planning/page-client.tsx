@@ -290,7 +290,7 @@ export default function PlanningPageClient() {
   return (
     <div className="flex flex-col gap-2 max-w-6xl">
       {/* Header shell (match Reports) */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={tab === "budgets" ? <PieChart className="h-4 w-4" /> : <Target className="h-4 w-4" />}
@@ -321,7 +321,7 @@ export default function PlanningPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         {/* Tabs row */}
         <div className="px-3 py-2">
@@ -335,7 +335,7 @@ export default function PlanningPageClient() {
                 type="button"
                 onClick={() => setTab(t.key as TabKey)}
                 className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                  tab === t.key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                  tab === t.key ? "bg-primary text-primary-foreground" : "text-bb-text-muted hover:bg-bb-table-row-hover"
                 }`}
               >
                 {t.label}
@@ -344,24 +344,24 @@ export default function PlanningPageClient() {
           </div>
         </div>
 
-        <div className="h-px bg-slate-200" />
+        <div className="h-px bg-bb-border" />
 
         {/* Context row */}
         <div className="px-3 py-2 flex items-center justify-between">
           {tab === "budgets" ? (
             <div className="flex items-center gap-2">
-              <div className="text-xs text-slate-600">Month</div>
+              <div className="text-xs text-bb-text-muted">Month</div>
               <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, -1))} title="Previous month">
                 <ChevronLeft className="h-5 w-5" />
               </Button>
-              <div className="text-xs text-slate-700 tabular-nums">{month}</div>
+              <div className="text-xs text-bb-text tabular-nums">{month}</div>
               <Button type="button" variant="outline" className="h-7 w-7 px-0" onClick={() => setMonth((m) => ymAdd(m, 1))} title="Next month">
                 <ChevronRight className="h-4 w-4" />
               </Button>
-              <div className="ml-2 text-[11px] text-slate-500">Expense budgets only</div>
+              <div className="ml-2 text-[11px] text-bb-text-muted">Expense budgets only</div>
             </div>
           ) : (
-            <div className="text-xs text-slate-500">Goals summary</div>
+            <div className="text-xs text-bb-text-muted">Goals summary</div>
           )}
         </div>
 
@@ -396,10 +396,10 @@ export default function PlanningPageClient() {
             { label: "Paused", value: String(goalsKpi.paused) },
             { label: "Archived", value: String(goalsKpi.archived) },
           ].map((x) => (
-            <Card key={x.label} className="border-slate-200 bg-white">
+            <Card key={x.label} className="border-bb-border bg-bb-surface-card">
               <CardContent className="py-2.5 text-center">
                 <div className="text-xl font-semibold leading-none">{x.value}</div>
-                <div className="mt-0.5 text-xs text-slate-600">{x.label}</div>
+                <div className="mt-0.5 text-xs text-bb-text-muted">{x.label}</div>
               </CardContent>
             </Card>
           ))}
@@ -408,8 +408,8 @@ export default function PlanningPageClient() {
 
       {/* Content */}
       {tab === "budgets" ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          {budgetsErr ? <div className="px-3 py-2 text-xs text-red-700 border-b border-slate-200">{budgetsErr}</div> : null}
+        <div className="overflow-hidden rounded-xl border border-bb-border bg-bb-surface-card shadow-sm">
+          {budgetsErr ? <div className="px-3 py-2 text-xs text-bb-status-danger-fg border-b border-bb-border">{budgetsErr}</div> : null}
 
           <LedgerTableShell
               colgroup={
@@ -422,23 +422,23 @@ export default function PlanningPageClient() {
               }
               header={
                 <tr className="h-9">
-                  <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Category</th>
-                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Budgeted</th>
-                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actual</th>
-                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Remaining</th>
+                  <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Category</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Budgeted</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Actual</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Remaining</th>
                 </tr>
               }
               addRow={null}
               body={
                 budgetsLoading ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-3 text-sm text-slate-600">
+                    <td colSpan={4} className="px-3 py-3 text-sm text-bb-text-muted">
                       Loading…
                     </td>
                   </tr>
                 ) : budgetRows.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-3 text-sm text-slate-600">
+                    <td colSpan={4} className="px-3 py-3 text-sm text-bb-text-muted">
                       No categories available for budgets. Budgets use active categories—create or unarchive categories to budget by category.
                     </td>
                   </tr>
@@ -451,7 +451,7 @@ export default function PlanningPageClient() {
                       const remaining = Math.max(0, budgetCents - actualCents);
 
                       return (
-                        <tr key={r.category_id} className="h-9 border-b border-slate-100">
+                        <tr key={r.category_id} className="h-9 border-b border-bb-border-muted">
                           <td className="px-3 text-sm truncate">{r.category_name}</td>
 
                           <td className="px-3 text-sm text-right tabular-nums">
@@ -465,7 +465,7 @@ export default function PlanningPageClient() {
                             />
                           </td>
 
-                          <td className="px-3 text-sm text-right tabular-nums text-slate-700">{formatUsdFromCents(r.actual_cents)}</td>
+                          <td className="px-3 text-sm text-right tabular-nums text-bb-text">{formatUsdFromCents(r.actual_cents)}</td>
 
                           <td className="px-3 text-sm text-right tabular-nums font-medium">{formatUsdFromCents(remaining)}</td>
                         </tr>
@@ -478,8 +478,8 @@ export default function PlanningPageClient() {
           />
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          {goalsErr ? <div className="px-3 py-2 text-xs text-red-700 border-b border-slate-200">{goalsErr}</div> : null}
+        <div className="overflow-hidden rounded-xl border border-bb-border bg-bb-surface-card shadow-sm">
+          {goalsErr ? <div className="px-3 py-2 text-xs text-bb-status-danger-fg border-b border-bb-border">{goalsErr}</div> : null}
 
           <LedgerTableShell
               colgroup={
@@ -493,18 +493,18 @@ export default function PlanningPageClient() {
               }
               header={
                 <tr className="h-9">
-                  <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Name</th>
-                  <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Category</th>
-                  <th className="px-3 text-center text-[11px] font-semibold text-slate-600">Months</th>
-                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Target</th>
-                  <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Progress</th>
+                  <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Name</th>
+                  <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Category</th>
+                  <th className="px-3 text-center text-[11px] font-semibold text-bb-text-muted">Months</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Target</th>
+                  <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Progress</th>
                 </tr>
               }
               addRow={null}
               body={
                 goalRows.length === 0 && !goalsLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-3 text-sm text-slate-600">
+                    <td colSpan={5} className="px-3 py-3 text-sm text-bb-text-muted">
                       No goals yet. Create an expense goal for a category to track progress month-by-month.
                     </td>
                   </tr>
@@ -513,10 +513,10 @@ export default function PlanningPageClient() {
                     {goalRows.map((g) => {
                       const months = g.month_end ? `${g.month_start} → ${g.month_end}` : g.month_start;
                       return (
-                        <tr key={g.id} className="h-9 border-b border-slate-100">
+                        <tr key={g.id} className="h-9 border-b border-bb-border-muted">
                           <td className="px-3 text-sm truncate font-medium">{g.name}</td>
-                          <td className="px-3 text-sm truncate text-slate-700">{g.category_name}</td>
-                          <td className="px-3 text-center text-xs text-slate-600">{months}</td>
+                          <td className="px-3 text-sm truncate text-bb-text">{g.category_name}</td>
+                          <td className="px-3 text-center text-xs text-bb-text-muted">{months}</td>
                           <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(g.target_cents)}</td>
                           <td className="px-3 text-sm text-right tabular-nums">{formatUsdFromCents(g.progress_cents)}</td>
                         </tr>
@@ -548,14 +548,14 @@ export default function PlanningPageClient() {
       >
         <div className="space-y-3">
           <div className="space-y-1">
-            <div className="text-[11px] text-slate-600">Name</div>
+            <div className="text-[11px] text-bb-text-muted">Name</div>
             <Input value={createName} onChange={(e) => setCreateName(e.target.value)} className="h-8" placeholder="e.g. Keep Marketing under $2,000" />
           </div>
 
           <div className="space-y-1">
-            <div className="text-[11px] text-slate-600">Category (required)</div>
+            <div className="text-[11px] text-bb-text-muted">Category (required)</div>
             <select
-              className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
+              className="h-8 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-sm text-bb-text"
               value={createCategoryId}
               onChange={(e) => setCreateCategoryId(e.target.value)}
             >
@@ -569,21 +569,21 @@ export default function PlanningPageClient() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Start month (YYYY-MM)</div>
+              <div className="text-[11px] text-bb-text-muted">Start month (YYYY-MM)</div>
               <Input value={createMonthStart} onChange={(e) => setCreateMonthStart(e.target.value)} className="h-8" />
             </div>
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">End month (optional)</div>
+              <div className="text-[11px] text-bb-text-muted">End month (optional)</div>
               <Input value={createMonthEnd} onChange={(e) => setCreateMonthEnd(e.target.value)} className="h-8" placeholder="YYYY-MM" />
             </div>
           </div>
 
           <div className="space-y-1">
-            <div className="text-[11px] text-slate-600">Target (USD)</div>
+            <div className="text-[11px] text-bb-text-muted">Target (USD)</div>
             <Input value={createTarget} onChange={(e) => setCreateTarget(e.target.value)} className="h-8" inputMode="decimal" />
           </div>
 
-          <div className="text-[11px] text-slate-500">Expense goals only (progress is based on EXPENSE entries).</div>
+          <div className="text-[11px] text-bb-text-muted">Expense goals only (progress is based on EXPENSE entries).</div>
         </div>
       </AppDialog>
     </div>

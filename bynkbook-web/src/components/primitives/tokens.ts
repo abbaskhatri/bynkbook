@@ -19,6 +19,7 @@ export const motionFast =
 // Canonical input height + focus style (Ledger standard)
 export const inputH7 =
   "h-7 w-full px-2 py-0 text-xs leading-tight bg-bb-input-bg border border-bb-input-border rounded-md " +
+  "text-bb-text placeholder:text-bb-input-placeholder " +
   ringFocus;
 
 // IMPORTANT:

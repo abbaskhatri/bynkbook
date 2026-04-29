@@ -172,16 +172,16 @@ export default function ClosedPeriodsPageClient() {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<Lock className="h-4 w-4" />} title="Closed periods" />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         <div className="px-3 py-2">
           <FilterBar
-            left={<div className="text-xs text-slate-600">Close periods are enforced on all mutations across the app.</div>}
+            left={<div className="text-xs text-bb-text-muted">Close periods are enforced on all mutations across the app.</div>}
             right={
               <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
                 Refresh
@@ -215,22 +215,22 @@ export default function ClosedPeriodsPageClient() {
 
         <CardContent className="space-y-3">
           {/* Current status */}
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="text-[11px] font-semibold text-slate-600">Closed through</div>
+          <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
+            <div className="text-[11px] font-semibold text-bb-text-muted">Closed through</div>
             <div className="mt-0.5 text-sm tabular-nums">
               {closedThroughDate ? (
                 <span className="font-medium">{closedThroughDate}</span>
               ) : (
-                <span className="text-slate-600">Not closed</span>
+                <span className="text-bb-text-muted">Not closed</span>
               )}
             </div>
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="mt-1 text-xs text-bb-text-muted">
               Any mutation with an effective date on or before this date is blocked.
             </div>
           </div>
 
           {/* Close-through control (Month / Week / Custom) */}
-          <div className="rounded-md border border-slate-200 px-3 py-3">
+          <div className="rounded-md border border-bb-border px-3 py-3">
             {(() => {
               type RangeMode = "MONTH" | "WEEK" | "CUSTOM";
 
@@ -328,7 +328,7 @@ export default function ClosedPeriodsPageClient() {
                 <div className="space-y-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                     <div className="flex flex-col gap-2">
-                      <div className="text-[11px] font-semibold text-slate-600">Close through</div>
+                      <div className="text-[11px] font-semibold text-bb-text-muted">Close through</div>
 
                       {/* Mode tabs */}
                       <div className="flex gap-2">
@@ -347,7 +347,7 @@ export default function ClosedPeriodsPageClient() {
                               setOverride(false);
                             }}
                             className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                              mode === t.k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                              mode === t.k ? "bg-primary text-primary-foreground" : "text-bb-text-muted hover:bg-bb-table-row-hover"
                             }`}
                           >
                             {t.label}
@@ -359,7 +359,7 @@ export default function ClosedPeriodsPageClient() {
                       <div className="flex flex-wrap items-end gap-2">
                         {mode === "MONTH" ? (
                           <div className="space-y-1">
-                            <div className="text-[11px] text-slate-600">Month</div>
+                            <div className="text-[11px] text-bb-text-muted">Month</div>
 
                             <div className="w-[170px]">
                               <AppDatePicker
@@ -377,7 +377,7 @@ export default function ClosedPeriodsPageClient() {
                         ) : mode === "WEEK" ? (
                           <>
                             <div className="space-y-1">
-                              <div className="text-[11px] text-slate-600">Week start</div>
+                              <div className="text-[11px] text-bb-text-muted">Week start</div>
                               <div className="w-[170px]">
                                 <AppDatePicker
                                   value={weekStart}
@@ -389,7 +389,7 @@ export default function ClosedPeriodsPageClient() {
                             </div>
 
                             <div className="space-y-1">
-                              <div className="text-[11px] text-slate-600">Week end</div>
+                              <div className="text-[11px] text-bb-text-muted">Week end</div>
                               <div className="w-[170px]">
                                 <AppDatePicker
                                   value={effective.to}
@@ -403,7 +403,7 @@ export default function ClosedPeriodsPageClient() {
                         ) : (
                           <>
                             <div className="space-y-1">
-                              <div className="text-[11px] text-slate-600">From</div>
+                              <div className="text-[11px] text-bb-text-muted">From</div>
                               <div className="w-[170px]">
                                 <AppDatePicker
                                   value={customFrom}
@@ -415,7 +415,7 @@ export default function ClosedPeriodsPageClient() {
                             </div>
 
                             <div className="space-y-1">
-                              <div className="text-[11px] text-slate-600">To</div>
+                              <div className="text-[11px] text-bb-text-muted">To</div>
                               <div className="w-[170px]">
                                 <AppDatePicker
                                   value={customTo}
@@ -433,7 +433,7 @@ export default function ClosedPeriodsPageClient() {
                         </Button>
                       </div>
 
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-bb-text-muted">
                         Effective range:{" "}
                         <span className="font-medium tabular-nums">{effective.from}</span>{" "}
                         → <span className="font-medium tabular-nums">{effective.to}</span>
@@ -441,46 +441,46 @@ export default function ClosedPeriodsPageClient() {
                       </div>
 
                       {effective.to > todayYmd ? (
-                        <div className="text-[11px] text-amber-700">
+                        <div className="text-[11px] text-bb-status-warning-fg">
                           <span className="font-semibold">Can’t close beyond today.</span> Choose an end date on or before today.
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-bb-text-muted">
                       {canReopen ? "You can reopen months (OWNER only)." : "Only OWNER can reopen months."}{" "}
                       {canClose ? "" : "Only OWNER/ADMIN can close periods."}
                     </div>
                   </div>
 
                   {/* Preview box */}
-                  <div className="rounded-md border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-                      <div className="text-xs font-semibold text-slate-700">Reconciliation</div>
-                      <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-amber-700") : "text-slate-500"}`}>
+                  <div className="rounded-md border border-bb-border overflow-hidden">
+                    <div className="bg-bb-surface-soft px-3 h-9 flex items-center justify-between">
+                      <div className="text-xs font-semibold text-bb-text">Reconciliation</div>
+                      <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-bb-status-warning-fg") : "text-bb-text-muted"}`}>
                         {preview ? (isClean ? "Clean (recommended)" : "Not clean") : "Preview to see totals"}
                       </div>
                     </div>
 
                     <div className="px-3 py-3">
                       {!preview ? (
-                        <div className="text-sm text-slate-600">Preview to see totals and recommendation.</div>
+                        <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
                       ) : (
                         <div className="grid grid-cols-4 gap-3">
-                          <div className="rounded-md border border-slate-200 p-3">
-                            <div className="text-[11px] text-slate-600">Total</div>
+                          <div className="rounded-md border border-bb-border p-3">
+                            <div className="text-[11px] text-bb-text-muted">Total</div>
                             <div className="text-sm font-semibold">{stats.entries_total}</div>
                           </div>
-                          <div className="rounded-md border border-slate-200 p-3">
-                            <div className="text-[11px] text-slate-600">Reconciled</div>
+                          <div className="rounded-md border border-bb-border p-3">
+                            <div className="text-[11px] text-bb-text-muted">Reconciled</div>
                             <div className="text-sm font-semibold">{stats.entries_reconciled}</div>
                           </div>
-                          <div className="rounded-md border border-slate-200 p-3">
-                            <div className="text-[11px] text-slate-600">Unreconciled</div>
+                          <div className="rounded-md border border-bb-border p-3">
+                            <div className="text-[11px] text-bb-text-muted">Unreconciled</div>
                             <div className="text-sm font-semibold">{stats.entries_unreconciled}</div>
                           </div>
-                          <div className="rounded-md border border-slate-200 p-3">
-                            <div className="text-[11px] text-slate-600">Open issues</div>
+                          <div className="rounded-md border border-bb-border p-3">
+                            <div className="text-[11px] text-bb-text-muted">Open issues</div>
                             <div className="text-sm font-semibold">{stats.issues_open}</div>
                           </div>
                         </div>
@@ -491,9 +491,9 @@ export default function ClosedPeriodsPageClient() {
                   {/* Months affected + override */}
                   {preview ? (
                     <div className="space-y-2">
-                      <div className="text-sm text-slate-700">
+                      <div className="text-sm text-bb-text">
                         Months affected:{" "}
-                        <span className="font-medium text-slate-900">{monthsAffected.length ? monthsAffected.join(", ") : "—"}</span>
+                        <span className="font-medium text-bb-text">{monthsAffected.length ? monthsAffected.join(", ") : "—"}</span>
                       </div>
 
                       {!isClean ? (
@@ -505,14 +505,14 @@ export default function ClosedPeriodsPageClient() {
                               setOverride(e.target.checked);
                               setConfirmOverride(false);
                             }}
-                            className="h-4 w-4 rounded border border-slate-300"
+                            className="h-4 w-4 rounded border border-bb-input-border"
                           />
                           <span className="text-sm">Override and close anyway</span>
                         </label>
                       ) : null}
 
                       {!isClean && override ? (
-                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-sm text-bb-status-warning-fg">
                           This period is not clean. {confirmOverride ? "Click Close again to proceed." : "Click Close to confirm override."}
                         </div>
                       ) : null}
@@ -543,22 +543,22 @@ export default function ClosedPeriodsPageClient() {
           {/* Confirm modal (no placeholders) */}
           {confirmCloseOpen ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-3">
-              <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-200">
+              <div className="w-full max-w-md rounded-xl border border-bb-border bg-bb-surface-card shadow-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-bb-border">
                   <div className="text-sm font-semibold">Confirm close period</div>
-                  <div className="mt-1 text-xs text-slate-600">
+                  <div className="mt-1 text-xs text-bb-text-muted">
                     You are about to close through{" "}
                     <span className="font-medium tabular-nums">{closeMonth ? monthEndYmd(closeMonth) : "—"}</span>.
                   </div>
                 </div>
 
                 <div className="px-4 py-3">
-                  <div className="text-xs text-slate-600">
+                  <div className="text-xs text-bb-text-muted">
                     This will block edits to any entries dated on or before that date. Reopening is restricted by role.
                   </div>
                 </div>
 
-                <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                <div className="px-4 py-3 border-t border-bb-border flex items-center justify-end gap-2">
                   <Button
                     variant="outline"
                     className="h-9 px-3"
@@ -578,22 +578,22 @@ export default function ClosedPeriodsPageClient() {
           {/* Confirm reopen (OWNER only; deterministic month) */}
           {confirmReopenOpen ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-3">
-              <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-200">
+              <div className="w-full max-w-md rounded-xl border border-bb-border bg-bb-surface-card shadow-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-bb-border">
                   <div className="text-sm font-semibold">Confirm reopen month</div>
-                  <div className="mt-1 text-xs text-slate-600">
+                  <div className="mt-1 text-xs text-bb-text-muted">
                     You are about to reopen{" "}
                     <span className="font-medium tabular-nums">{reopenMonth || "—"}</span>.
                   </div>
                 </div>
 
                 <div className="px-4 py-3">
-                  <div className="text-xs text-slate-600">
+                  <div className="text-xs text-bb-text-muted">
                     Reopening restores the ability to modify entries in that month. This action is restricted to OWNER.
                   </div>
                 </div>
 
-                <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                <div className="px-4 py-3 border-t border-bb-border flex items-center justify-end gap-2">
                   <Button
                     variant="outline"
                     className="h-9 px-3"
@@ -621,19 +621,19 @@ export default function ClosedPeriodsPageClient() {
           {/* Closed months table */}
           <div
             ref={reopenSectionRef}
-            className={reopenPulse ? "rounded-xl ring-2 ring-slate-300 ring-offset-2 ring-offset-white" : ""}
+            className={reopenPulse ? "rounded-xl ring-2 ring-primary/30 ring-offset-2 ring-offset-bb-app-bg" : ""}
           >
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-medium">Closed months</div>
             </div>
 
             {loading && rows.length === 0 ? (
-              <div className="text-sm text-slate-600">Loading…</div>
+              <div className="text-sm text-bb-text-muted">Loading…</div>
             ) : rows.length === 0 ? (
-              <div className="text-sm text-slate-600">No closed periods yet.</div>
+              <div className="text-sm text-bb-text-muted">No closed periods yet.</div>
             ) : (
-              <div className="rounded-md border border-slate-200 overflow-hidden">
-                <div className="grid grid-cols-[140px_1fr_220px] bg-slate-50 text-[11px] font-semibold text-slate-600 px-3 h-9 items-center border-b border-slate-200">
+              <div className="rounded-md border border-bb-border overflow-hidden">
+                <div className="grid grid-cols-[140px_1fr_220px] bg-bb-surface-soft text-[11px] font-semibold text-bb-text-muted px-3 h-9 items-center border-b border-bb-border">
                   <div>Month</div>
                   <div>Closed by</div>
                   <div className="text-right">Actions</div>
@@ -642,10 +642,10 @@ export default function ClosedPeriodsPageClient() {
                 {rows.map((r: any) => (
                   <div
                     key={r.month}
-                    className="grid grid-cols-[140px_1fr_220px] px-3 h-9 items-center border-b border-slate-100 text-sm"
+                    className="grid grid-cols-[140px_1fr_220px] px-3 h-9 items-center border-b border-bb-border-muted text-sm"
                   >
                     <div className="tabular-nums">{r.month}</div>
-                    <div className="truncate text-slate-600">
+                    <div className="truncate text-bb-text-muted">
                       {r.closed_by_user_id ? "Closed by team member" : "System"}
                     </div>
                     <div className="flex justify-end">
@@ -670,23 +670,23 @@ export default function ClosedPeriodsPageClient() {
 
           {/* Recent actions (ONLY if real events exist) */}
           {recentActions ? (
-            <div className="rounded-md border border-slate-200 overflow-hidden">
-              <div className="bg-slate-50 px-3 h-9 flex items-center text-[11px] font-semibold text-slate-600 border-b border-slate-200">
+            <div className="rounded-md border border-bb-border overflow-hidden">
+              <div className="bg-bb-surface-soft px-3 h-9 flex items-center text-[11px] font-semibold text-bb-text-muted border-b border-bb-border">
                 Recent period actions
               </div>
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-bb-border-muted">
                 {recentActions.map((a: any) => (
                   <div key={a.id ?? `${a.event_type}-${a.created_at}`} className="px-3 py-2 text-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-slate-700">
+                      <div className="text-bb-text">
                         <span className="font-medium">{a.event_type}</span>
                         {a?.payload_json?.through_date ? (
-                          <span className="text-slate-500"> — through {String(a.payload_json.through_date)}</span>
+                          <span className="text-bb-text-muted"> — through {String(a.payload_json.through_date)}</span>
                         ) : a?.payload_json?.month ? (
-                          <span className="text-slate-500"> — {String(a.payload_json.month)}</span>
+                          <span className="text-bb-text-muted"> — {String(a.payload_json.month)}</span>
                         ) : null}
                       </div>
-                      <div className="text-xs text-slate-500 tabular-nums">{String(a.created_at ?? "")}</div>
+                      <div className="text-xs text-bb-text-muted tabular-nums">{String(a.created_at ?? "")}</div>
                     </div>
                   </div>
                 ))}
