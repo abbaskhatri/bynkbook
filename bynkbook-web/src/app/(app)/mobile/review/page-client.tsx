@@ -8,6 +8,7 @@ import {
   Activity,
   AlertTriangle,
   Building2,
+  FileText,
   Landmark,
   ReceiptText,
   Tags,
@@ -184,6 +185,7 @@ export default function MobileReviewPageClient() {
   const uncategorizedHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
   const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
   const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
+  const invoiceHref = hrefWith({ path: "/mobile/invoice", businessId, accountId });
   const vendorsHref = hrefWith({ path: "/vendors", businessId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
   const homeHref = hrefWith({ path: "/mobile", businessId, accountId });
@@ -269,6 +271,13 @@ export default function MobileReviewPageClient() {
             description="Capture a receipt for review only. No ledger entry is created automatically."
             href={receiptHref}
             icon={<ReceiptText className="h-5 w-5" />}
+            disabled={!businessId}
+          />
+          <MobileTaskCard
+            title="Invoice upload"
+            description="Capture invoices for review only. No vendor or AP bill is created automatically."
+            href={invoiceHref}
+            icon={<FileText className="h-5 w-5" />}
             disabled={!businessId}
           />
 

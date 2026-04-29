@@ -8,6 +8,7 @@ import {
   Activity,
   AlertTriangle,
   Building2,
+  FileText,
   Landmark,
   ReceiptText,
   Sigma,
@@ -230,6 +231,7 @@ export default function MobilePageClient() {
   const categoryHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
   const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
   const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
+  const invoiceHref = hrefWith({ path: "/mobile/invoice", businessId, accountId });
   const vendorsHref = hrefWith({ path: "/vendors", businessId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
 
@@ -362,6 +364,13 @@ export default function MobilePageClient() {
             description="Take a photo or choose a receipt file for review-only upload."
             href={receiptHref}
             icon={<ReceiptText className="h-5 w-5" />}
+            disabled={!businessId}
+          />
+          <MobileTaskCard
+            title="Invoice Upload"
+            description="Capture invoice files for review only. No vendor or AP bill is created automatically."
+            href={invoiceHref}
+            icon={<FileText className="h-5 w-5" />}
             disabled={!businessId}
           />
           <MobileTaskCard
