@@ -341,5 +341,40 @@
     @apply bg-background text-foreground;
   }
 }
+
+.mobile-token-card {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.mobile-token-card--success {
+  background: var(--bb-status-success-bg);
+  border-color: var(--bb-status-success-border);
+}
+
+.mobile-token-card--warning {
+  background: var(--bb-status-warning-bg);
+  border-color: var(--bb-status-warning-border);
+}
+
+.mobile-token-card--danger {
+  background: var(--bb-status-danger-bg);
+  border-color: var(--bb-status-danger-border);
+}
+
+.dark .mobile-token-card,
+.dark .mobile-token-card--success,
+.dark .mobile-token-card--warning,
+.dark .mobile-token-card--danger {
+  background: var(--muted);
+  border-color: var(--border);
+}
+
+.mobile-token-card-control {
+  background: var(--background);
+  border-color: var(--border);
+}
+
 /* BynkBook: use full width workspace */
 .max-w-6xl { max-width: none !important; }

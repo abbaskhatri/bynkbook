@@ -918,7 +918,7 @@ export default function ReportsPageClient() {
                 type="button"
                 onClick={() => setTab(t.key as TabKey)}
                 className={`h-7 px-3 rounded-md text-xs font-medium transition ${tab === t.key
-                  ? "bg-bb-text text-bb-text-inverse shadow-sm"
+                  ? "bg-foreground text-background shadow-sm"
                   : "text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
               >
