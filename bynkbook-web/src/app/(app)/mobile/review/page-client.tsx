@@ -200,21 +200,21 @@ export default function MobileReviewPageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 Mobile review
               </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-slate-950">
+              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
                 Review Queue
               </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Building2 className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{business?.name ?? "Business"}</span>
                 </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Landmark className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{account?.name ?? "No active account"}</span>
                 </span>
@@ -223,7 +223,7 @@ export default function MobileReviewPageClient() {
             <Link
               href={homeHref}
               prefetch
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Home
             </Link>
@@ -235,7 +235,7 @@ export default function MobileReviewPageClient() {
         ) : null}
 
         <section className="space-y-3">
-          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Queues
           </div>
           {categoriesQ.isLoading ? (

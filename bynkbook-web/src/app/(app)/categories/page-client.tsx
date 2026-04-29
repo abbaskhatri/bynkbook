@@ -112,11 +112,11 @@ export default function CategoriesPageClient() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<Tags className="h-4 w-4" />} title="Categories" />
         </div>
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-border" />
       </div>
 
       <Card>
@@ -140,7 +140,7 @@ export default function CategoriesPageClient() {
 
         <CardContent className="space-y-3">
           {err ? (
-            <div className="text-sm text-red-600" role="alert">
+            <div className="text-sm text-bb-status-danger-fg" role="alert">
               {err}
             </div>
           ) : null}
@@ -157,17 +157,17 @@ export default function CategoriesPageClient() {
             </Button>
           </div>
 
-          <div className="rounded-lg border border-slate-200 overflow-x-auto overflow-y-hidden">
-            <div className="grid min-w-[620px] grid-cols-[minmax(0,1fr)_260px_132px] bg-slate-50 border-b border-slate-200">
-              <div className="px-3 py-2 text-[11px] font-semibold text-slate-600">Name</div>
-              <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 text-center">Rename</div>
-              <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 text-center">Archive</div>
+          <div className="rounded-lg border border-border overflow-x-auto overflow-y-hidden">
+            <div className="grid min-w-[620px] grid-cols-[minmax(0,1fr)_260px_132px] bg-muted/50 border-b border-border">
+              <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground">Name</div>
+              <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground text-center">Rename</div>
+              <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground text-center">Archive</div>
             </div>
 
             {loading ? (
-              <div className="px-3 py-3 text-sm text-slate-600">Loading…</div>
+              <div className="px-3 py-3 text-sm text-muted-foreground">Loading…</div>
             ) : rows.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-slate-600">No categories yet.</div>
+              <div className="px-3 py-3 text-sm text-muted-foreground">No categories yet.</div>
             ) : (
               rows.map((c) => {
                 const draft = editNameById[c.id] ?? c.name;
@@ -176,10 +176,10 @@ export default function CategoriesPageClient() {
                 return (
                   <div
                     key={c.id}
-                    className="grid min-w-[620px] grid-cols-[minmax(0,1fr)_260px_132px] items-center border-b border-slate-200 last:border-b-0"
+                    className="grid min-w-[620px] grid-cols-[minmax(0,1fr)_260px_132px] items-center border-b border-border last:border-b-0"
                   >
-                    <div className="px-3 py-2 text-sm text-slate-900 truncate">
-                      {c.name} {isArchived ? <span className="text-[11px] text-slate-500">(archived)</span> : null}
+                    <div className="px-3 py-2 text-sm text-foreground truncate">
+                      {c.name} {isArchived ? <span className="text-[11px] text-muted-foreground">(archived)</span> : null}
                     </div>
 
                     <div className="px-3 py-2 flex min-w-0 items-center gap-2 justify-center">

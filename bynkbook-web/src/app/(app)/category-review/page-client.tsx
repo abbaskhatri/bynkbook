@@ -50,8 +50,8 @@ function formatUsdAccountingFromCents(raw: unknown) {
 
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-background/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-foreground shadow-sm">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         <span>{label}</span>
       </div>
@@ -145,14 +145,14 @@ function categorySuggestionButtonClass(rawTier: unknown, isPrimary: boolean) {
   if (tier === "SAFE_DETERMINISTIC" || tier === "STRONG_SUGGESTION") {
     return isPrimary
       ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
-      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50";
+      : "border-border bg-card text-foreground hover:bg-muted/50";
   }
 
   if (tier === "REVIEW_BUCKET") {
-    return "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100";
+    return "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg hover:bg-bb-status-warning-bg";
   }
 
-  return "border-slate-200 bg-white text-slate-700 hover:bg-slate-50";
+  return "border-border bg-card text-foreground hover:bg-muted/50";
 }
 
 export default function CategoryReviewPageClient() {
@@ -873,7 +873,7 @@ export default function CategoryReviewPageClient() {
   return (
     <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Tags className="h-4 w-4" />}
@@ -883,28 +883,28 @@ export default function CategoryReviewPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-border" />
 
         <div className="px-3 py-2">
           <FilterBar
             left={
               <>
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">From</div>
+                  <div className="text-[11px] text-muted-foreground">From</div>
                   <div className="w-[160px]">
                     <AppDatePicker value={from} onChange={setFrom} ariaLabel="From date" />
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">To</div>
+                  <div className="text-[11px] text-muted-foreground">To</div>
                   <div className="w-[160px]">
                     <AppDatePicker value={to} onChange={setTo} ariaLabel="To date" />
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">Search</div>
+                  <div className="text-[11px] text-muted-foreground">Search</div>
                   <Input
                     className="h-7 w-[220px] text-xs"
                     placeholder="Payee or memo"
@@ -914,9 +914,9 @@ export default function CategoryReviewPageClient() {
                 </div>
 
                 <div className="ml-2 space-y-1">
-                  <div className="text-[11px] text-slate-600">&nbsp;</div>
-                  <div className="h-7 px-2 rounded-md border border-slate-200 bg-white flex items-center gap-2">
-                    <span className="text-xs text-slate-600 whitespace-nowrap">Uncategorized only</span>
+                  <div className="text-[11px] text-muted-foreground">&nbsp;</div>
+                  <div className="h-7 px-2 rounded-md border border-border bg-card flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Uncategorized only</span>
                     <PillToggle
                       checked={onlyUncategorized}
                       onCheckedChange={(next) => setOnlyUncategorized(next)}
@@ -1003,7 +1003,7 @@ export default function CategoryReviewPageClient() {
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
                 {visibleRows.length}
               </span>
-              {sugUpdating ? <span className="text-[11px] text-slate-500">Updating…</span> : null}
+              {sugUpdating ? <span className="text-[11px] text-muted-foreground">Updating…</span> : null}
             </CardTitle>
 
             <div className="flex items-center gap-2">
@@ -1057,7 +1057,7 @@ export default function CategoryReviewPageClient() {
               {selectedCount > 0 ? (
                 <>
                   <select
-                    className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs"
+                    className="h-7 rounded-md border border-border bg-card px-2 text-xs"
                     value={bulkCategoryId}
                     onChange={(e) => setBulkCategoryId(e.target.value)}
                   >
@@ -1102,7 +1102,7 @@ export default function CategoryReviewPageClient() {
 
         <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pb-2">
           {err ? (
-            <div className="text-sm text-red-600" role="alert">
+            <div className="text-sm text-bb-status-danger-fg" role="alert">
               {err}
             </div>
           ) : null}
@@ -1112,7 +1112,7 @@ export default function CategoryReviewPageClient() {
           ) : visibleRows.length === 0 ? (
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
-            <div className="relative min-h-0 flex-1 rounded-lg border border-slate-200 overflow-hidden bg-white">
+            <div className="relative min-h-0 flex-1 rounded-lg border border-border overflow-hidden bg-card">
               {tableUpdating ? <UpdatingOverlay /> : null}
               <div className={`min-h-0 h-full ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
                 <div className="h-full overflow-auto">
@@ -1125,9 +1125,9 @@ export default function CategoryReviewPageClient() {
                       <col style={{ width: 360 }} />
                     </colgroup>
 
-                    <thead className="sticky top-0 z-10 bg-white">
-                      <tr className="h-7 border-b border-slate-200 bg-slate-50">
-                        <th className="px-0 text-center align-middle border-b border-slate-200">
+                    <thead className="sticky top-0 z-10 bg-card">
+                      <tr className="h-7 border-b border-border bg-muted/50">
+                        <th className="px-0 text-center align-middle border-b border-border">
                           <div className="flex h-7 items-center justify-center">
                             <input
                               type="checkbox"
@@ -1137,10 +1137,10 @@ export default function CategoryReviewPageClient() {
                             />
                           </div>
                         </th>
-                        <th className="px-2 text-left text-[10px] font-semibold text-slate-600 border-b border-slate-200">Date</th>
-                        <th className="px-2 text-left text-[10px] font-semibold text-slate-600 border-b border-slate-200">Payee</th>
-                        <th className="px-2 text-right text-[10px] font-semibold text-slate-600 border-b border-slate-200">Amount</th>
-                        <th className="px-2 text-left text-[10px] font-semibold text-slate-600 border-b border-slate-200">Category</th>
+                        <th className="px-2 text-left text-[10px] font-semibold text-muted-foreground border-b border-border">Date</th>
+                        <th className="px-2 text-left text-[10px] font-semibold text-muted-foreground border-b border-border">Payee</th>
+                        <th className="px-2 text-right text-[10px] font-semibold text-muted-foreground border-b border-border">Amount</th>
+                        <th className="px-2 text-left text-[10px] font-semibold text-muted-foreground border-b border-border">Category</th>
                       </tr>
                     </thead>
 
@@ -1165,8 +1165,8 @@ export default function CategoryReviewPageClient() {
                           hasTopSuggestion && isBulkSafeCategorySuggestion(topSuggestion, 0);
 
                         return (
-                          <tr key={id} className={`border-b border-slate-100 align-top ${isSelected ? "bg-accent" : ""}`}>
-                            <td className="px-0 pt-2 text-center align-top border-b border-slate-100">
+                          <tr key={id} className={`border-b border-border/60 align-top ${isSelected ? "bg-accent" : ""}`}>
+                            <td className="px-0 pt-2 text-center align-top border-b border-border/60">
                               <div className="flex items-start justify-center">
                                 <input
                                   type="checkbox"
@@ -1177,31 +1177,31 @@ export default function CategoryReviewPageClient() {
                               </div>
                             </td>
 
-                            <td className="px-2 py-2 text-xs text-slate-700 whitespace-nowrap border-b border-slate-100">
+                            <td className="px-2 py-2 text-xs text-foreground whitespace-nowrap border-b border-border/60">
                               {dateYmd}
                             </td>
 
-                            <td className="px-2 py-2 border-b border-slate-100">
+                            <td className="px-2 py-2 border-b border-border/60">
                               <div className="flex flex-col min-w-0">
-                                <div className="text-xs text-slate-900 truncate font-medium">{payee}</div>
+                                <div className="text-xs text-foreground truncate font-medium">{payee}</div>
 
                               </div>
                             </td>
 
                             <td
-                              className={`px-2 py-2 text-xs text-right tabular-nums border-b border-slate-100 ${
-                                Number(e.amount_cents) < 0 ? "text-red-700" : "text-slate-900"
+                              className={`px-2 py-2 text-xs text-right tabular-nums border-b border-border/60 ${
+                                Number(e.amount_cents) < 0 ? "text-bb-amount-negative" : "text-bb-amount-neutral"
                               }`}
                             >
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>
 
-                            <td className="px-2 py-2 border-b border-slate-100">
+                            <td className="px-2 py-2 border-b border-border/60">
                               <div className="flex items-start justify-start gap-1.5 flex-wrap">
                                 <div className="flex min-w-[160px] max-w-[220px] flex-col gap-1">
                                   <select
-                                    className={`h-6 w-full rounded-md border bg-white px-2 text-[11px] ${
-                                      hasTopSuggestion ? "border-amber-300 ring-1 ring-amber-100" : "border-slate-200"
+                                    className={`h-6 w-full rounded-md border bg-card px-2 text-[11px] ${
+                                      hasTopSuggestion ? "border-bb-status-warning-border ring-1 ring-bb-status-warning-border/40" : "border-border"
                                     }`}
                                     value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
                                     disabled={isOpening || !!pendingIds[id]}
@@ -1282,7 +1282,7 @@ export default function CategoryReviewPageClient() {
                                   </select>
 
                                   {hasTopSuggestion ? (
-                                    <div className="truncate text-[10px] text-slate-500">
+                                    <div className="truncate text-[10px] text-muted-foreground">
                                       Suggested: {topSuggestedCategoryName || "category"}
                                     </div>
                                   ) : null}
@@ -1290,11 +1290,11 @@ export default function CategoryReviewPageClient() {
 
                                 {pendingIds[id] ? (
                                   <span className="inline-flex items-center" title="Applying…">
-                                    <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                    <Loader2 className="h-3 w-3 text-muted-foreground/80 animate-spin" />
                                   </span>
                                 ) : null}
 
-                                {failMsg ? <span className="text-[11px] text-red-600">Failed</span> : null}
+                                {failMsg ? <span className="text-[11px] text-bb-status-danger-fg">Failed</span> : null}
 
                                 {aiAppliedById[id] ? (
                                   <span className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center">
@@ -1305,7 +1305,7 @@ export default function CategoryReviewPageClient() {
                                 {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
                                   <button
                                     type="button"
-                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-white text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
+                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-card text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
                                     disabled={!!pendingIds[id]}
                                     onClick={async () => {
                                       if (pendingIds[id]) return;
@@ -1369,7 +1369,7 @@ export default function CategoryReviewPageClient() {
                                                   key={`${id}:${catId || name}:${idx}`}
                                                   className={`flex min-w-[190px] max-w-[280px] flex-col gap-1 rounded-md border px-2 py-1.5 ${
                                                     isPrimaryReviewOnly
-                                                      ? "border-amber-200 bg-amber-50"
+                                                      ? "border-bb-status-warning-border bg-bb-status-warning-bg"
                                                       : "border-primary/20 bg-primary/5"
                                                   }`}
                                                 >
@@ -1405,7 +1405,7 @@ export default function CategoryReviewPageClient() {
 
                                                     <button
                                                       type="button"
-                                                      className="h-6 px-1.5 rounded-md border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
+                                                      className="h-6 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
                                                       disabled={!!pendingIds[id]}
                                                       onClick={() => runWhy(id, s)}
                                                     >
@@ -1413,13 +1413,13 @@ export default function CategoryReviewPageClient() {
                                                     </button>
                                                   </div>
 
-                                                  <div className="text-[10px] font-medium text-slate-600">
+                                                  <div className="text-[10px] font-medium text-muted-foreground">
                                                     {categorySuggestionMetaText(s)}
                                                     {isPrimaryReviewOnly ? " • Needs review" : ""}
                                                   </div>
 
                                                   {reasonText ? (
-                                                    <div className="line-clamp-2 text-[10px] leading-snug text-slate-600">
+                                                    <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">
                                                       {reasonText}
                                                     </div>
                                                   ) : null}
@@ -1461,7 +1461,7 @@ export default function CategoryReviewPageClient() {
 
                                                 <button
                                                   type="button"
-                                                  className="h-5 px-1.5 rounded-full border border-slate-200 bg-white text-slate-600 text-[10px] inline-flex items-center hover:bg-slate-50 disabled:opacity-60"
+                                                  className="h-5 px-1.5 rounded-full border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
                                                   disabled={!!pendingIds[id]}
                                                   onClick={() => runWhy(id, s)}
                                                 >
@@ -1471,11 +1471,11 @@ export default function CategoryReviewPageClient() {
                                             );
                                           })}
 
-                                          {more > 0 ? <span className="text-[10px] text-slate-400">+{more}</span> : null}
-                                          {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-slate-100 animate-pulse" /> : null}
+                                          {more > 0 ? <span className="text-[10px] text-muted-foreground/80">+{more}</span> : null}
+                                          {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-muted animate-pulse" /> : null}
                                           {!sugLoading && suggestionsQ.error && !list.length ? (
                                             <div className="inline-flex items-center gap-2 min-w-0">
-                                              <span className="text-[10px] text-slate-500">Category suggestions unavailable</span>
+                                              <span className="text-[10px] text-muted-foreground">Category suggestions unavailable</span>
                                               <button
                                                 type="button"
                                                 className="text-[10px] text-primary hover:underline"
@@ -1486,7 +1486,7 @@ export default function CategoryReviewPageClient() {
                                             </div>
                                           ) : null}
                                           {!sugLoading && !suggestionsQ.error && !list.length ? (
-                                            <span className="text-[10px] text-slate-400">No category suggestions</span>
+                                            <span className="text-[10px] text-muted-foreground/80">No category suggestions</span>
                                           ) : null}
                                         </>
                                       );
@@ -1495,12 +1495,12 @@ export default function CategoryReviewPageClient() {
                                 ) : null}
 
                                 {whyEntryId === id ? (
-                                  <div className="mt-1 w-full rounded-md border border-slate-200 bg-white p-2">
+                                  <div className="mt-1 w-full rounded-md border border-border bg-card p-2">
                                     <div className="flex items-center justify-between gap-2">
-                                      <div className="text-[11px] font-semibold text-slate-700">Suggestion rationale</div>
+                                      <div className="text-[11px] font-semibold text-foreground">Suggestion rationale</div>
                                       <button
                                         type="button"
-                                        className="text-[11px] text-slate-500 hover:text-slate-900"
+                                        className="text-[11px] text-muted-foreground hover:text-foreground"
                                         onClick={() => {
                                           setWhyEntryId(null);
                                           setWhyText(null);
@@ -1512,11 +1512,11 @@ export default function CategoryReviewPageClient() {
                                     </div>
 
                                     {whyErr ? (
-                                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+                                      <div className="mt-2 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] text-bb-status-warning-fg">
                                         {whyErr}
                                       </div>
                                     ) : (
-                                      <div className="mt-2 text-[11px] text-slate-700 whitespace-pre-wrap">{whyText ?? ""}</div>
+                                      <div className="mt-2 text-[11px] text-foreground whitespace-pre-wrap">{whyText ?? ""}</div>
                                     )}
                                   </div>
                                 ) : null}
@@ -1619,79 +1619,79 @@ export default function CategoryReviewPageClient() {
             }
           >
             <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 sm:grid-cols-4">
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Selected</div>
-                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixRows.length}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected</div>
+                  <div className="mt-0.5 text-lg font-semibold text-foreground">{autoFixRows.length}</div>
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Ready</div>
-                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{selectedApplyItems.length}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ready</div>
+                  <div className="mt-0.5 text-lg font-semibold text-foreground">{selectedApplyItems.length}</div>
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Review needed</div>
-                  <div className="mt-0.5 text-lg font-semibold text-slate-900">{autoFixReviewNeededCount}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Review needed</div>
+                  <div className="mt-0.5 text-lg font-semibold text-foreground">{autoFixReviewNeededCount}</div>
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Total amount</div>
-                  <div className="mt-0.5 text-lg font-semibold text-slate-900">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Total amount</div>
+                  <div className="mt-0.5 text-lg font-semibold text-foreground">
                     {formatUsdAccountingFromCents(autoFixTotalAmountCents)}
                   </div>
                 </div>
               </div>
 
               {autoFixReviewNeededCount > 0 ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+                <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
                   {autoFixReviewNeededCount} need{autoFixReviewNeededCount === 1 ? "s" : ""} review.
                   Suggestions below are not strong enough for Auto Fix but can be applied manually from the row suggestion action.
                 </div>
               ) : (
-                <div className="text-[11px] text-slate-600">
+                <div className="text-[11px] text-muted-foreground">
                   Strong suggestions are ready for Auto Fix. Review the grouped categories before applying.
                 </div>
               )}
 
-              <div className="h-[320px] overflow-auto rounded-lg border border-slate-200">
+              <div className="h-[320px] overflow-auto rounded-lg border border-border">
                 {autoFixGroups.length === 0 ? (
-                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                  <div className="px-4 py-6 text-center text-sm text-muted-foreground">
                     No selected rows available for auto-fix.
                   </div>
                 ) : (
-                  <div className="min-w-[420px] divide-y divide-slate-200">
+                  <div className="min-w-[420px] divide-y divide-border">
                     {autoFixGroups.map((group) => {
                       const isExpanded = !!expandedAutoFixGroups[group.groupKey];
 
                       return (
-                        <div key={group.groupKey} className="bg-white">
+                        <div key={group.groupKey} className="bg-card">
                           <button
                             type="button"
-                            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-slate-50"
+                            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-muted/50"
                             onClick={() => toggleAutoFixGroup(group.groupKey)}
                           >
                             <div className="flex min-w-0 items-center gap-2">
-                              <div className="text-sm leading-none text-slate-400">
+                              <div className="text-sm leading-none text-muted-foreground/80">
                                 {isExpanded ? "⌄" : "›"}
                               </div>
 
-                              <div className="truncate text-sm font-semibold text-slate-900">
+                              <div className="truncate text-sm font-semibold text-foreground">
                                 {group.categoryName}
                               </div>
 
-                              <span className="inline-flex min-w-[24px] items-center justify-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                              <span className="inline-flex min-w-[24px] items-center justify-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground">
                                 {group.count}
                               </span>
                             </div>
 
-                            <div className="shrink-0 text-right text-sm font-semibold text-slate-900">
+                            <div className="shrink-0 text-right text-sm font-semibold text-foreground">
                               {formatUsdAccountingFromCents(group.totalAmountCents)}
                             </div>
                           </button>
 
                           {isExpanded ? (
-                            <div className="border-t border-slate-200 bg-slate-50/40">
+                            <div className="border-t border-border bg-muted/40">
                               {group.rows.map((row) => {
                                 const e = row.entry;
                                 const id = String(e.id);
@@ -1707,35 +1707,35 @@ export default function CategoryReviewPageClient() {
                                 return (
                                   <div
                                     key={id}
-                                    className="grid grid-cols-[minmax(0,1.5fr)_100px_170px] items-start gap-3 border-b border-slate-200 px-3 py-2.5 last:border-b-0"
+                                    className="grid grid-cols-[minmax(0,1.5fr)_100px_170px] items-start gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
                                   >
                                     <div className="min-w-0">
-                                      <div className="truncate text-xs font-medium text-slate-900">
+                                      <div className="truncate text-xs font-medium text-foreground">
                                         {String(e.payee ?? "—")}
                                       </div>
-                                      <div className="mt-0.5 text-[10px] text-slate-500">
+                                      <div className="mt-0.5 text-[10px] text-muted-foreground">
                                         {String(e.date ?? "").slice(0, 10)}
                                       </div>
                                       {top ? (
-                                        <div className="mt-1 text-[10px] text-slate-500">
+                                        <div className="mt-1 text-[10px] text-muted-foreground">
                                           {topTierLabel} • {topSourceLabel} • {topConfidence}%
                                         </div>
                                       ) : null}
                                       {topReason ? (
-                                        <div className="mt-1 text-[10px] text-slate-500">
+                                        <div className="mt-1 text-[10px] text-muted-foreground">
                                           {topReason}
                                         </div>
                                       ) : null}
                                     </div>
 
-                                    <div className="pt-0.5 text-right text-xs font-semibold text-slate-900">
+                                    <div className="pt-0.5 text-right text-xs font-semibold text-foreground">
                                       {formatUsdAccountingFromCents(e.amount_cents)}
                                     </div>
 
                                     <div>
                                       <select
-                                        className={`h-7 w-full rounded-md border bg-white px-2 text-[11px] ${
-                                          topCategoryId ? "border-amber-300 ring-1 ring-amber-100" : "border-slate-200"
+                                        className={`h-7 w-full rounded-md border bg-card px-2 text-[11px] ${
+                                          topCategoryId ? "border-bb-status-warning-border ring-1 ring-bb-status-warning-border/40" : "border-border"
                                         }`}
                                         value={row.selectedCategoryId}
                                         onChange={(ev) => {

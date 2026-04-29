@@ -146,21 +146,21 @@ export default function MobileUncategorizedPageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 Mobile review
               </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-slate-950">
+              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
                 Uncategorized
               </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Building2 className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{business?.name ?? "Business"}</span>
                 </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Landmark className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{account?.name ?? "No active account"}</span>
                 </span>
@@ -169,7 +169,7 @@ export default function MobileUncategorizedPageClient() {
             <Link
               href={reviewHref}
               prefetch
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Queue
             </Link>
@@ -180,18 +180,18 @@ export default function MobileUncategorizedPageClient() {
           <InlineBanner title="Uncategorized review is partially unavailable" message={bannerMessage} />
         ) : null}
 
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-slate-950">Read-only queue</div>
-              <div className="mt-1 text-sm text-slate-600">
+              <div className="text-sm font-semibold text-foreground">Read-only queue</div>
+              <div className="mt-1 text-sm text-muted-foreground">
                 Showing up to {visibleRows.length} of {uncategorizedRows.length} loaded uncategorized entries.
               </div>
             </div>
             <Link
               href={desktopHref}
               prefetch
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Desktop
             </Link>
@@ -206,11 +206,11 @@ export default function MobileUncategorizedPageClient() {
               <Skeleton className="h-[168px] w-full rounded-md" />
             </>
           ) : !accountId ? (
-            <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+            <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
               Select an active account to view uncategorized entries.
             </div>
           ) : visibleRows.length === 0 ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-950 shadow-sm">
+            <div className="rounded-md border border-bb-status-success-border bg-bb-status-success-bg p-4 text-sm text-bb-status-success-fg shadow-sm">
               No uncategorized entries found in the loaded mobile slice.
             </div>
           ) : (
@@ -231,21 +231,21 @@ export default function MobileUncategorizedPageClient() {
               return (
                 <article
                   key={entry.id}
-                  className="rounded-md border border-slate-200 bg-white p-4 shadow-sm"
+                  className="rounded-md border border-border bg-card p-4 shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+                      <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                         {entry.date || "No date"}
                       </div>
-                      <h2 className="mt-1 truncate text-base font-semibold text-slate-950">
+                      <h2 className="mt-1 truncate text-base font-semibold text-foreground">
                         {entry.payee || "Unknown payee"}
                       </h2>
-                      <div className="mt-1 text-xs text-slate-500">{typeLabel(entry.type)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{typeLabel(entry.type)}</div>
                     </div>
                     <div
                       className={`shrink-0 text-right text-base font-semibold tabular-nums ${
-                        String(entry.amount_cents).startsWith("-") ? "text-rose-700" : "text-slate-950"
+                        String(entry.amount_cents).startsWith("-") ? "text-bb-amount-negative" : "text-bb-amount-neutral"
                       }`}
                     >
                       {formatUsdFromCents(entry.amount_cents)}
@@ -253,33 +253,33 @@ export default function MobileUncategorizedPageClient() {
                   </div>
 
                   <div className="mt-4 grid gap-3">
-                    <div className="rounded-md border border-amber-200 bg-amber-50/70 p-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-800">
+                    <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg p-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-bb-status-warning-fg">
                         <Tags className="h-4 w-4" />
                         Current category
                       </div>
-                      <div className="mt-2 text-sm font-medium text-amber-950">Uncategorized</div>
+                      <div className="mt-2 text-sm font-medium text-bb-status-warning-fg">Uncategorized</div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    <div className="rounded-md border border-border bg-muted/50 p-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <Lightbulb className="h-4 w-4" />
                         Top suggestion
                       </div>
                       {suggestionName ? (
                         <>
-                          <div className="mt-2 text-sm font-medium text-slate-950">{suggestionName}</div>
+                          <div className="mt-2 text-sm font-medium text-foreground">{suggestionName}</div>
                           {suggestionMeta.length ? (
-                            <div className="mt-1 text-xs text-slate-600">{suggestionMeta.join(" · ")}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">{suggestionMeta.join(" · ")}</div>
                           ) : null}
                           {entry.suggested_category_reason ? (
-                            <div className="mt-2 text-sm leading-5 text-slate-600">
+                            <div className="mt-2 text-sm leading-5 text-muted-foreground">
                               {entry.suggested_category_reason}
                             </div>
                           ) : null}
                         </>
                       ) : (
-                        <div className="mt-2 text-sm text-slate-600">
+                        <div className="mt-2 text-sm text-muted-foreground">
                           No saved suggestion available on this entry.
                         </div>
                       )}

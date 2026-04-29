@@ -541,7 +541,7 @@ export default function IssuesPageClient() {
   // Selection + bulk (UI-only)
   // ================================
   const checkboxClass =
-    "h-4 w-4 rounded border border-slate-300 bg-white checked:bg-slate-900 checked:border-slate-900";
+    "h-4 w-4 rounded border border-input bg-card checked:bg-primary checked:border-primary";
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
 
   function clearSelection() {
@@ -805,7 +805,7 @@ export default function IssuesPageClient() {
   );
 
   const filterRight = scanBusy ? (
-    <div className="text-xs text-slate-500 pr-3 whitespace-nowrap" role="status" aria-live="polite">
+    <div className="text-xs text-muted-foreground pr-3 whitespace-nowrap" role="status" aria-live="polite">
       Updating issues…
     </div>
   ) : null;
@@ -823,7 +823,7 @@ export default function IssuesPageClient() {
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
       {/* Unified header + filters container (match Ledger) */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<AlertTriangle className="h-4 w-4" />}
@@ -831,8 +831,8 @@ export default function IssuesPageClient() {
             afterTitle={accountCapsuleEl}
             right={
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-600 whitespace-nowrap">
-                  Last scan: <span className="font-medium text-slate-900">{formatScanLabel(lastScanAt)}</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  Last scan: <span className="font-medium text-foreground">{formatScanLabel(lastScanAt)}</span>
                 </span>
 
                 <Button
@@ -850,7 +850,7 @@ export default function IssuesPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-border" />
 
         <FilterBar left={filterLeft} right={filterRight} />
 
@@ -897,25 +897,25 @@ export default function IssuesPageClient() {
           </div>
         ) : null}
 
-        <div className="h-px bg-slate-200" />
+        <div className="h-px bg-border" />
 
-        <div className="px-3 py-2 flex items-center gap-4 text-xs text-slate-600">
+        <div className="px-3 py-2 flex items-center gap-4 text-xs text-muted-foreground">
           <span>
-            Open: <span className="font-medium text-slate-900">{kpi.openTotal}</span>
+            Open: <span className="font-medium text-foreground">{kpi.openTotal}</span>
           </span>
           <span>
-            Duplicates: <span className="font-medium text-slate-900">{kpi.dup}</span>
+            Duplicates: <span className="font-medium text-foreground">{kpi.dup}</span>
           </span>
           <span>
-            Stale: <span className="font-medium text-slate-900">{kpi.stale}</span>
+            Stale: <span className="font-medium text-foreground">{kpi.stale}</span>
           </span>
 
-          {scanErr ? <span className="text-red-600 ml-2">{scanErr}</span> : null}
+          {scanErr ? <span className="text-bb-status-danger-fg ml-2">{scanErr}</span> : null}
         </div>
       </div>
 
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
-        <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-white">
+        <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card">
           <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
             <table className="w-full table-fixed border-collapse">
               <colgroup>
@@ -929,9 +929,9 @@ export default function IssuesPageClient() {
                 <col style={{ width: 120 }} />
               </colgroup>
 
-              <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
+              <thead className="sticky top-0 z-10 bg-muted/50 border-b border-border">
                 <tr className="h-[28px]">
-                  <th className="px-2 text-center text-xs font-medium text-slate-600">
+                  <th className="px-2 text-center text-xs font-medium text-muted-foreground">
                     <input
                       type="checkbox"
                       className={checkboxClass}
@@ -940,13 +940,13 @@ export default function IssuesPageClient() {
                       aria-label="Select all"
                     />
                   </th>
-                  <th className="px-2 text-left text-xs font-medium text-slate-600">TYPE</th>
-                  <th className="px-2 text-left text-xs font-medium text-slate-600">PAYEE</th>
-                  <th className="px-2 text-right text-xs font-medium text-slate-600">AMOUNT</th>
-                  <th className="px-2 text-left text-xs font-medium text-slate-600">DETAILS</th>
-                  <th className="px-2 text-right text-xs font-medium text-slate-600">SEVERITY</th>
-                  <th className="px-2 text-right text-xs font-medium text-slate-600">STATUS</th>
-                  <th className="px-2 text-right text-xs font-medium text-slate-600">ACTIONS</th>
+                  <th className="px-2 text-left text-xs font-medium text-muted-foreground">TYPE</th>
+                  <th className="px-2 text-left text-xs font-medium text-muted-foreground">PAYEE</th>
+                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">AMOUNT</th>
+                  <th className="px-2 text-left text-xs font-medium text-muted-foreground">DETAILS</th>
+                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">SEVERITY</th>
+                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">STATUS</th>
+                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">ACTIONS</th>
                 </tr>
               </thead>
 
@@ -954,23 +954,23 @@ export default function IssuesPageClient() {
                 {issuesQ.isLoading ? (
                   <>
                     {Array.from({ length: 10 }).map((_, i) => (
-                      <tr key={`sk-${i}`} className="h-[24px] border-b border-slate-200">
+                      <tr key={`sk-${i}`} className="h-[24px] border-b border-border">
                         <td className="px-2 py-0.5">
-                          <div className="h-3 w-3 rounded bg-slate-200 animate-pulse" />
+                          <div className="h-3 w-3 rounded bg-muted animate-pulse" />
                         </td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-40 rounded bg-slate-200 animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-slate-200 animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-full rounded bg-slate-200 animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-slate-200 animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-slate-200 animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-slate-200 animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-24 rounded bg-muted animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-40 rounded bg-muted animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-muted animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-full rounded bg-muted animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-muted animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-muted animate-pulse" /></td>
+                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-muted animate-pulse" /></td>
                       </tr>
                     ))}
                   </>
                 ) : issuesQ.isError ? (
                   <tr>
-                    <td colSpan={8} className="p-3 text-xs text-red-600" role="alert">
+                    <td colSpan={8} className="p-3 text-xs text-bb-status-danger-fg" role="alert">
                       <div className="flex items-center justify-between gap-3">
                         <span>
                           Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong."}
@@ -987,7 +987,7 @@ export default function IssuesPageClient() {
                   </tr>
                 ) : renderRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-3 text-xs text-slate-500">
+                    <td colSpan={8} className="p-3 text-xs text-muted-foreground">
                       {lastScanAt
                         ? `No open issues. Last scan: ${formatScanLabel(lastScanAt)}.`
                         : "No issues yet. Run Scan to generate issues."}
@@ -998,8 +998,8 @@ export default function IssuesPageClient() {
                 {renderRows.map((row) => {
                   const pill =
                     "inline-flex items-center justify-center h-5 rounded-full border px-2 text-[11px] font-semibold leading-none";
-                  const severityPill = pill + " border-yellow-200 bg-yellow-50 text-yellow-800";
-                  const statusPill = pill + " border-slate-200 bg-white text-slate-700";
+                  const severityPill = pill + " border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg";
+                  const statusPill = pill + " border-border bg-card text-foreground";
 
                   if (row.rowType === "GROUP") {
                     const g = row;
@@ -1015,7 +1015,7 @@ export default function IssuesPageClient() {
                       : "Review";
 
                     return (
-                      <tr key={`group|${g.groupKey}`} className="h-[24px] border-b border-slate-200">
+                      <tr key={`group|${g.groupKey}`} className="h-[24px] border-b border-border">
                         <td className="px-2 py-0.5 text-center">
                           <input
                             type="checkbox"
@@ -1030,7 +1030,7 @@ export default function IssuesPageClient() {
                           <div className="flex items-center gap-1 whitespace-nowrap">
                             <button
                               type="button"
-                              className="h-5 w-5 rounded hover:bg-slate-100 inline-flex items-center justify-center shrink-0"
+                              className="h-5 w-5 rounded hover:bg-muted inline-flex items-center justify-center shrink-0"
                               onClick={() => toggleGroup(g.groupKey)}
                               aria-label={isExpanded ? "Collapse group" : "Expand group"}
                               title={isExpanded ? "Collapse" : "Expand"}
@@ -1038,23 +1038,23 @@ export default function IssuesPageClient() {
                               <span className="text-xs">{isExpanded ? "▾" : "▸"}</span>
                             </button>
 
-                            <span className={pill + " border-amber-200 bg-amber-50 text-amber-800"}>{typeLabel}</span>
+                            <span className={pill + " border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"}>{typeLabel}</span>
 
                             {g.hasStale ? (
-                              <span className={pill + " border-sky-200 bg-sky-50 text-sky-800"}>Stale</span>
+                              <span className={pill + " border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"}>Stale</span>
                             ) : null}
                           </div>
                         </td>
 
-                        <td className="px-2 py-0.5 text-xs font-medium text-slate-900 truncate">{head.payee || "—"}</td>
+                        <td className="px-2 py-0.5 text-xs font-medium text-foreground truncate">{head.payee || "—"}</td>
 
                         <td className="px-2 py-0.5 text-xs text-right tabular-nums">
-                          <span className={head.amountStr.startsWith("(") ? "text-red-600" : "text-slate-900"}>
+                          <span className={head.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}>
                             {head.amountStr}
                           </span>
                         </td>
 
-                        <td className="px-2 py-0.5 text-xs text-slate-700 truncate">
+                        <td className="px-2 py-0.5 text-xs text-foreground truncate">
                           {head.details} • {g.count} entries • {head.date} • {head.methodDisplay || "—"}
                         </td>
 
@@ -1094,7 +1094,7 @@ export default function IssuesPageClient() {
                     : "Review";
 
                   return (
-                    <tr key={rowKey} className="h-[24px] border-b border-slate-200">
+                    <tr key={rowKey} className="h-[24px] border-b border-border">
                       <td className="px-2 py-0.5 text-center">
                         <input
                           type="checkbox"
@@ -1111,25 +1111,25 @@ export default function IssuesPageClient() {
                             pill +
                             " " +
                             (isDup
-                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
                               : isStale
-                                ? "border-sky-200 bg-sky-50 text-sky-800"
-                                : "border-slate-200 bg-white text-slate-800")
+                                ? "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"
+                                : "border-border bg-card text-foreground")
                           }
                         >
                           {typeLabel}
                         </span>
                       </td>
 
-                      <td className="px-2 py-0.5 text-xs font-medium text-slate-900 truncate">{r.payee || "—"}</td>
+                      <td className="px-2 py-0.5 text-xs font-medium text-foreground truncate">{r.payee || "—"}</td>
 
                       <td className="px-2 py-0.5 text-xs text-right tabular-nums">
-                        <span className={r.amountStr.startsWith("(") ? "text-red-600" : "text-slate-900"}>
+                        <span className={r.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}>
                           {r.amountStr}
                         </span>
                       </td>
 
-                      <td className="px-2 py-0.5 text-xs text-slate-700 truncate">
+                      <td className="px-2 py-0.5 text-xs text-foreground truncate">
                         {r.details} • {r.date} • {r.methodDisplay || "—"}
                       </td>
 
