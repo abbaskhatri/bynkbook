@@ -298,7 +298,7 @@ export function FixIssueDialog(props: {
                       const rawUpper = raw.toUpperCase();
 
                       if (code === "MERGE_BLOCKED" && reason === "SOURCE_MISMATCH") {
-                        setErr("Merge blocked: these entries have different source linkage. Keep both if they are legitimate, or use Delete/Legitimize instead of Merge.");
+                        setErr("Merge blocked: these entries have different source linkage. Review both entries first. If both are legitimate, keep them. If one is not needed, use the appropriate cleanup action after review.");
                       } else if (code === "MERGE_BLOCKED" && (reason === "ENTRY_RECONCILED" || rawUpper.includes("RECONCILED"))) {
                         setErr("Entry is reconciled; merge blocked. Unmatch it first if this is truly a duplicate, otherwise keep both or Legitimize.");
                       } else {
