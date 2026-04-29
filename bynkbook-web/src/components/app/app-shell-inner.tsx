@@ -25,6 +25,7 @@ import {
   Target,
   Settings,
   FileText,
+  Smartphone,
 } from "lucide-react";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -480,6 +481,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       group: "Core",
       items: [
         { label: "Dashboard", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className={NAV_ICON_CLASS} /> },
+        { label: "Mobile", path: "/mobile", needsAccountId: false, icon: <Smartphone className={NAV_ICON_CLASS} /> },
         { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
       ],
     },
