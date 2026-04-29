@@ -17,6 +17,11 @@ export type Entry = {
 
   category_id?: string | null;
   category_name?: string | null;
+  suggested_category_id?: string | null;
+  suggested_category_name?: string | null;
+  suggested_category_confidence?: string | null;
+  suggested_category_source?: string | null;
+  suggested_category_reason?: string | null;
 
   vendor_id?: string | null;
   vendor_name?: string | null;
@@ -88,6 +93,37 @@ function normalizeEntry(raw: any): Entry {
 
   const category_id = asString(pick(raw, ["category_id", "categoryId"])) ?? null;
   const category_name = asString(pick(raw, ["category_name", "categoryName"])) ?? null;
+  const suggested_category_id =
+    asString(pick(raw, ["suggested_category_id", "suggestedCategoryId"])) ?? null;
+  const suggested_category_name =
+    asString(pick(raw, ["suggested_category_name", "suggestedCategoryName"])) ?? null;
+  const suggested_category_confidence =
+    asString(
+      pick(raw, [
+        "suggested_category_confidence",
+        "suggestedCategoryConfidence",
+        "suggestion_confidence",
+        "suggestionConfidence",
+      ])
+    ) ?? null;
+  const suggested_category_source =
+    asString(
+      pick(raw, [
+        "suggested_category_source",
+        "suggestedCategorySource",
+        "suggestion_source",
+        "suggestionSource",
+      ])
+    ) ?? null;
+  const suggested_category_reason =
+    asString(
+      pick(raw, [
+        "suggested_category_reason",
+        "suggestedCategoryReason",
+        "suggestion_reason",
+        "suggestionReason",
+      ])
+    ) ?? null;
 
   const vendor_id = asString(pick(raw, ["vendor_id", "vendorId"])) ?? null;
   const vendor_name = asString(pick(raw, ["vendor_name", "vendorName"])) ?? null;
@@ -128,6 +164,11 @@ function normalizeEntry(raw: any): Entry {
     status,
     category_id,
     category_name,
+    suggested_category_id,
+    suggested_category_name,
+    suggested_category_confidence,
+    suggested_category_source,
+    suggested_category_reason,
     vendor_id,
     vendor_name,
     transfer_id,

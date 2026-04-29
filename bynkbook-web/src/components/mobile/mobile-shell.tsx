@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Activity,
   Home,
@@ -26,18 +27,23 @@ function withBusiness(path: string, businessId?: string | null, accountId?: stri
 }
 
 export function MobileShell({ children, businessId, accountId }: MobileShellProps) {
+  const pathname = usePathname();
+
   const items = [
     {
       label: "Home",
       href: withBusiness("/mobile", businessId, accountId),
       icon: <Home className="h-5 w-5" />,
-      active: true,
+      active: pathname === "/mobile",
     },
     {
       label: "Review",
-      href: withBusiness("/category-review", businessId, accountId),
+      href: withBusiness("/mobile/review", businessId, accountId),
       icon: <Tags className="h-5 w-5" />,
-      active: false,
+      active:
+        pathname === "/mobile/review" ||
+        pathname === "/mobile/uncategorized" ||
+        pathname === "/mobile/issues",
       disabled: !businessId || !accountId,
     },
     {
