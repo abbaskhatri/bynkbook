@@ -66,7 +66,7 @@ export function AppSidePanel({
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
       <div
-        className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] transition-opacity duration-200"
+        className="absolute inset-0 bg-bb-overlay backdrop-blur-[2px] transition-opacity duration-200"
         onClick={handleOverlayClick}
         aria-hidden="true"
       />
@@ -79,14 +79,14 @@ export function AppSidePanel({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-slate-200/90 bg-white shadow-2xl",
+            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-bb-border bg-bb-dialog-bg shadow-2xl",
             "transition-transform duration-200 ease-out animate-in slide-in-from-right",
             widthClass,
             "flex min-h-0 flex-col overflow-hidden",
           ].join(" ")}
         >
-          <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200/80 flex items-start justify-between gap-3 bg-white/95">
-            <div className="min-w-0 text-sm font-semibold text-slate-900 leading-6">
+          <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-bb-border-muted flex items-start justify-between gap-3 bg-bb-surface-card">
+            <div className="min-w-0 text-sm font-semibold text-bb-text leading-6">
               {title}
             </div>
 
@@ -94,8 +94,8 @@ export function AppSidePanel({
               <button
                 type="button"
                 className={[
-                  "h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors duration-200",
-                  "hover:bg-slate-50 hover:text-slate-800",
+                  "h-8 w-8 inline-flex items-center justify-center rounded-lg border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
+                  "hover:bg-bb-table-row-hover hover:text-bb-text",
                   ringFocus,
                 ].join(" ")}
                 onClick={onClose}
@@ -108,7 +108,7 @@ export function AppSidePanel({
 
           <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-5 sm:py-4">{children}</div>
 
-          <div className="min-w-0 shrink-0 overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4 border-t border-slate-200/80 bg-slate-50/70">
+          <div className="min-w-0 shrink-0 overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4 border-t border-bb-border-muted bg-bb-surface-soft">
             {footer ?? null}
           </div>
         </div>

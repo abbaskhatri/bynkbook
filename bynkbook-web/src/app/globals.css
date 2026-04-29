@@ -16,6 +16,48 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-bb-app-bg: var(--bb-app-bg);
+  --color-bb-app-fg: var(--bb-app-fg);
+  --color-bb-surface-card: var(--bb-surface-card);
+  --color-bb-surface-soft: var(--bb-surface-soft);
+  --color-bb-surface-elevated: var(--bb-surface-elevated);
+  --color-bb-border: var(--bb-border);
+  --color-bb-border-muted: var(--bb-border-muted);
+  --color-bb-text: var(--bb-text);
+  --color-bb-text-muted: var(--bb-text-muted);
+  --color-bb-text-subtle: var(--bb-text-subtle);
+  --color-bb-input-bg: var(--bb-input-bg);
+  --color-bb-input-border: var(--bb-input-border);
+  --color-bb-input-placeholder: var(--bb-input-placeholder);
+  --color-bb-table-header: var(--bb-table-header);
+  --color-bb-table-row-hover: var(--bb-table-row-hover);
+  --color-bb-table-row-selected: var(--bb-table-row-selected);
+  --color-bb-table-sticky: var(--bb-table-sticky);
+  --color-bb-sidebar-bg: var(--bb-sidebar-bg);
+  --color-bb-sidebar-fg: var(--bb-sidebar-fg);
+  --color-bb-nav-active-bg: var(--bb-nav-active-bg);
+  --color-bb-nav-active-fg: var(--bb-nav-active-fg);
+  --color-bb-mobile-nav-bg: var(--bb-mobile-nav-bg);
+  --color-bb-overlay: var(--bb-overlay);
+  --color-bb-dialog-bg: var(--bb-dialog-bg);
+  --color-bb-status-default-bg: var(--bb-status-default-bg);
+  --color-bb-status-default-fg: var(--bb-status-default-fg);
+  --color-bb-status-default-border: var(--bb-status-default-border);
+  --color-bb-status-success-bg: var(--bb-status-success-bg);
+  --color-bb-status-success-fg: var(--bb-status-success-fg);
+  --color-bb-status-success-border: var(--bb-status-success-border);
+  --color-bb-status-warning-bg: var(--bb-status-warning-bg);
+  --color-bb-status-warning-fg: var(--bb-status-warning-fg);
+  --color-bb-status-warning-border: var(--bb-status-warning-border);
+  --color-bb-status-danger-bg: var(--bb-status-danger-bg);
+  --color-bb-status-danger-fg: var(--bb-status-danger-fg);
+  --color-bb-status-danger-border: var(--bb-status-danger-border);
+  --color-bb-status-info-bg: var(--bb-status-info-bg);
+  --color-bb-status-info-fg: var(--bb-status-info-fg);
+  --color-bb-status-info-border: var(--bb-status-info-border);
+  --color-bb-amount-positive: var(--bb-amount-positive);
+  --color-bb-amount-negative: var(--bb-amount-negative);
+  --color-bb-amount-neutral: var(--bb-amount-neutral);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -101,6 +143,61 @@
 
   --ring: var(--bb-emerald-600);
 
+  /* Bynkbook semantic tokens (LIGHT) */
+  --bb-app-bg: var(--background);
+  --bb-app-fg: var(--foreground);
+
+  --bb-surface-card: var(--card);
+  --bb-surface-soft: var(--bb-slate-50);
+  --bb-surface-elevated: var(--bb-white);
+
+  --bb-border: var(--border);
+  --bb-border-muted: var(--bb-slate-100);
+  --bb-border-strong: var(--bb-slate-200);
+
+  --bb-text: var(--foreground);
+  --bb-text-muted: var(--bb-slate-500);
+  --bb-text-subtle: var(--bb-slate-400);
+  --bb-text-inverse: var(--bb-white);
+
+  --bb-input-bg: var(--bb-white);
+  --bb-input-border: var(--bb-slate-200);
+  --bb-input-placeholder: var(--bb-slate-400);
+
+  --bb-table-header: var(--bb-slate-50);
+  --bb-table-row-hover: var(--bb-slate-50);
+  --bb-table-row-selected: var(--bb-slate-100);
+  --bb-table-sticky: var(--bb-white);
+
+  --bb-sidebar-bg: var(--bb-white);
+  --bb-sidebar-fg: var(--bb-slate-900);
+  --bb-nav-active-bg: var(--primary);
+  --bb-nav-active-fg: var(--primary-foreground);
+  --bb-mobile-nav-bg: rgba(255, 255, 255, 0.95);
+
+  --bb-overlay: rgba(15, 23, 42, 0.45);
+  --bb-dialog-bg: var(--bb-white);
+
+  --bb-status-default-bg: var(--bb-slate-100);
+  --bb-status-default-fg: #334155;
+  --bb-status-default-border: var(--bb-slate-200);
+  --bb-status-success-bg: var(--bb-emerald-50);
+  --bb-status-success-fg: var(--bb-emerald-700);
+  --bb-status-success-border: var(--bb-emerald-100);
+  --bb-status-warning-bg: #fffbeb;
+  --bb-status-warning-fg: #b45309;
+  --bb-status-warning-border: #fde68a;
+  --bb-status-danger-bg: #fff1f2;
+  --bb-status-danger-fg: #be123c;
+  --bb-status-danger-border: #fecdd3;
+  --bb-status-info-bg: #f0f9ff;
+  --bb-status-info-fg: #0369a1;
+  --bb-status-info-border: #bae6fd;
+
+  --bb-amount-positive: var(--bb-emerald-700);
+  --bb-amount-negative: var(--bb-red-700);
+  --bb-amount-neutral: var(--bb-slate-900);
+
   /* Chart tokens (LIGHT) — bind to Base44 semantics */
   --chart-1: var(--bb-emerald-600); /* net / primary */
   --chart-2: var(--bb-green-600);   /* income */
@@ -118,7 +215,7 @@
   --bb-chart-tooltip-border: var(--bb-slate-200);
   --bb-chart-tooltip-text: var(--bb-slate-900);
 
-  /* Sidebar tokens unchanged in this pass */
+  /* Sidebar tokens bind to the Bynkbook navigation semantics */
   --sidebar: var(--bb-white);
   --sidebar-foreground: var(--bb-slate-900);
   --sidebar-primary: var(--bb-emerald-600);
@@ -159,6 +256,61 @@
 
   --ring: var(--bb-emerald-600);
 
+  /* Bynkbook semantic tokens (DARK) */
+  --bb-app-bg: #0b1120;
+  --bb-app-fg: #f8fafc;
+
+  --bb-surface-card: #111827;
+  --bb-surface-soft: #0f172a;
+  --bb-surface-elevated: #172033;
+
+  --bb-border: rgba(255, 255, 255, 0.10);
+  --bb-border-muted: rgba(255, 255, 255, 0.07);
+  --bb-border-strong: rgba(255, 255, 255, 0.16);
+
+  --bb-text: #f8fafc;
+  --bb-text-muted: #94a3b8;
+  --bb-text-subtle: #64748b;
+  --bb-text-inverse: #0f172a;
+
+  --bb-input-bg: rgba(255, 255, 255, 0.04);
+  --bb-input-border: rgba(255, 255, 255, 0.14);
+  --bb-input-placeholder: #64748b;
+
+  --bb-table-header: #0f172a;
+  --bb-table-row-hover: rgba(255, 255, 255, 0.04);
+  --bb-table-row-selected: rgba(5, 150, 105, 0.16);
+  --bb-table-sticky: #111827;
+
+  --bb-sidebar-bg: #0f172a;
+  --bb-sidebar-fg: #f8fafc;
+  --bb-nav-active-bg: var(--bb-emerald-600);
+  --bb-nav-active-fg: #ffffff;
+  --bb-mobile-nav-bg: rgba(15, 23, 42, 0.95);
+
+  --bb-overlay: rgba(2, 6, 23, 0.72);
+  --bb-dialog-bg: #111827;
+
+  --bb-status-default-bg: rgba(148, 163, 184, 0.12);
+  --bb-status-default-fg: #cbd5e1;
+  --bb-status-default-border: rgba(148, 163, 184, 0.22);
+  --bb-status-success-bg: rgba(16, 185, 129, 0.14);
+  --bb-status-success-fg: #6ee7b7;
+  --bb-status-success-border: rgba(16, 185, 129, 0.32);
+  --bb-status-warning-bg: rgba(245, 158, 11, 0.14);
+  --bb-status-warning-fg: #fbbf24;
+  --bb-status-warning-border: rgba(245, 158, 11, 0.34);
+  --bb-status-danger-bg: rgba(244, 63, 94, 0.14);
+  --bb-status-danger-fg: #fb7185;
+  --bb-status-danger-border: rgba(244, 63, 94, 0.34);
+  --bb-status-info-bg: rgba(56, 189, 248, 0.14);
+  --bb-status-info-fg: #7dd3fc;
+  --bb-status-info-border: rgba(56, 189, 248, 0.32);
+
+  --bb-amount-positive: #6ee7b7;
+  --bb-amount-negative: #f87171;
+  --bb-amount-neutral: #f8fafc;
+
   --chart-1: var(--bb-emerald-600);
   --chart-2: var(--bb-green-600);
   --chart-3: var(--bb-red-600);
@@ -170,6 +322,15 @@
   --bb-chart-tooltip-bg: #111827;
   --bb-chart-tooltip-border: rgba(255, 255, 255, 0.12);
   --bb-chart-tooltip-text: #f8fafc;
+
+  --sidebar: var(--bb-sidebar-bg);
+  --sidebar-foreground: var(--bb-sidebar-fg);
+  --sidebar-primary: var(--bb-nav-active-bg);
+  --sidebar-primary-foreground: var(--bb-nav-active-fg);
+  --sidebar-accent: var(--bb-surface-elevated);
+  --sidebar-accent-foreground: var(--bb-text);
+  --sidebar-border: var(--bb-border);
+  --sidebar-ring: var(--ring);
 }
 
 @layer base {
