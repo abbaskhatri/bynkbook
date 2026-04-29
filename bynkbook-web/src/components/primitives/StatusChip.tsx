@@ -11,11 +11,11 @@ type StatusChipProps = {
 };
 
 const toneClasses: Record<StatusTone, string> = {
-  default: "bg-slate-100 text-slate-700 border-slate-200",
-  success: "bg-primary/10 text-primary border-primary/20",
-  warning: "bg-amber-50 text-amber-700 border-amber-200",
-  danger: "bg-rose-50 text-rose-700 border-rose-200",
-  info: "bg-sky-50 text-sky-700 border-sky-200",
+  default: "bg-bb-status-default-bg text-bb-status-default-fg border-bb-status-default-border",
+  success: "bg-bb-status-success-bg text-bb-status-success-fg border-bb-status-success-border",
+  warning: "bg-bb-status-warning-bg text-bb-status-warning-fg border-bb-status-warning-border",
+  danger: "bg-bb-status-danger-bg text-bb-status-danger-fg border-bb-status-danger-border",
+  info: "bg-bb-status-info-bg text-bb-status-info-fg border-bb-status-info-border",
 };
 
 export function StatusChip({ label, tone = "default", className }: StatusChipProps) {

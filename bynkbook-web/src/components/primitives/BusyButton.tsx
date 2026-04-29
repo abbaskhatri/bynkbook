@@ -35,9 +35,9 @@ const variantClass: Record<BusyButtonVariant, string> = {
   primary:
     "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15",
   secondary:
-    "border-slate-200 bg-white text-slate-900 hover:bg-slate-50 disabled:bg-white",
+    "border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover disabled:bg-bb-surface-card",
   danger:
-    "border-red-200 bg-red-50 text-red-900 hover:bg-red-100 disabled:bg-red-50",
+    "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg hover:bg-bb-status-danger-bg disabled:bg-bb-status-danger-bg",
 };
 
 export function BusyButton({
