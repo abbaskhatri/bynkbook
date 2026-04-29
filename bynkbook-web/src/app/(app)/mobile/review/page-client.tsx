@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Building2,
   Landmark,
+  ReceiptText,
   Tags,
   Users,
 } from "lucide-react";
@@ -182,6 +183,7 @@ export default function MobileReviewPageClient() {
   const lastActivity = activityQ.data?.items?.[0] ?? null;
   const uncategorizedHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
   const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
+  const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
   const vendorsHref = hrefWith({ path: "/vendors", businessId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
   const homeHref = hrefWith({ path: "/mobile", businessId, accountId });
@@ -261,6 +263,14 @@ export default function MobileReviewPageClient() {
               disabled={!accountId}
             />
           )}
+
+          <MobileTaskCard
+            title="Receipt upload"
+            description="Capture a receipt for review only. No ledger entry is created automatically."
+            href={receiptHref}
+            icon={<ReceiptText className="h-5 w-5" />}
+            disabled={!businessId}
+          />
 
           {apSummaryQ.isLoading ? (
             <Skeleton className="h-[88px] w-full rounded-md" />
