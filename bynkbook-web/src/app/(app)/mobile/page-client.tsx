@@ -229,7 +229,7 @@ export default function MobilePageClient() {
 
   const categoryHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
   const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
-  const ledgerHref = hrefWith({ path: "/ledger", businessId, accountId });
+  const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
   const vendorsHref = hrefWith({ path: "/vendors", businessId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
 
@@ -359,10 +359,10 @@ export default function MobilePageClient() {
           />
           <MobileTaskCard
             title="Receipt Upload"
-            description="Go to the existing ledger upload entry point. Upload is not embedded on mobile home."
-            href={ledgerHref}
+            description="Take a photo or choose a receipt file for review-only upload."
+            href={receiptHref}
             icon={<ReceiptText className="h-5 w-5" />}
-            disabled={!accountId}
+            disabled={!businessId}
           />
           <MobileTaskCard
             title="Vendors and AP"

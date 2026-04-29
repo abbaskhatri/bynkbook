@@ -48,10 +48,10 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
     },
     {
       label: "Receipt",
-      href: withBusiness("/ledger", businessId, accountId),
+      href: withBusiness("/mobile/receipt", businessId, accountId),
       icon: <ReceiptText className="h-5 w-5" />,
-      active: false,
-      disabled: !businessId || !accountId,
+      active: pathname === "/mobile/receipt",
+      disabled: !businessId,
     },
     {
       label: "Vendors",
