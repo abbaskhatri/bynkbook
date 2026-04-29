@@ -53,8 +53,8 @@ function formatOptionalUsdFromCents(cents: any) {
 
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/55 backdrop-blur-[1px]">
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+    <div className="absolute inset-0 z-20 flex items-start justify-center bg-bb-surface-card/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-bb-border bg-bb-surface-card px-3 py-1 text-xs font-medium text-bb-text shadow-sm">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         <span>{label}</span>
       </div>
@@ -265,7 +265,7 @@ export default function VendorsPageClient() {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Building2 className="h-4 w-4" />}
@@ -274,7 +274,7 @@ export default function VendorsPageClient() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                   onClick={() => setOpenUpload(true)}
                 >
                   Upload Invoice
@@ -282,7 +282,7 @@ export default function VendorsPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
                   disabled={!canWrite}
                   title={!canWrite ? "Insufficient permissions" : "Add vendor"}
                   onClick={openCreateVendorDialog}
@@ -294,14 +294,14 @@ export default function VendorsPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         <div className="px-3 py-2">
           <FilterBar
   left={
     <div className="flex flex-wrap items-end gap-2">
       <div className="space-y-1">
-        <div className="text-[11px] text-slate-600">Search</div>
+        <div className="text-[11px] text-bb-text-muted">Search</div>
         <Input
           className="h-7 w-[260px] text-xs"
           value={q}
@@ -311,9 +311,9 @@ export default function VendorsPageClient() {
       </div>
 
       <div className="space-y-1">
-        <div className="text-[11px] text-slate-600">Sort</div>
+        <div className="text-[11px] text-bb-text-muted">Sort</div>
         <select
-          className="h-7 w-[180px] text-xs rounded-md border border-slate-200 bg-white px-2"
+          className="h-7 w-[180px] text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
         >
@@ -325,7 +325,7 @@ export default function VendorsPageClient() {
 
       <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={!businessId || vendorsLoading}>
         <span className="inline-flex items-center gap-2">
-          {vendorsLoading ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
+          {vendorsLoading ? <Loader2 className="h-3 w-3 text-bb-text-subtle animate-spin" /> : null}
           <span>Refresh</span>
         </span>
       </Button>
@@ -355,9 +355,9 @@ export default function VendorsPageClient() {
       </div>
 
       {vendors.length === 0 && !vendorsLoading ? (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-6">
-          <div className="text-sm font-semibold text-slate-900">No vendors yet</div>
-          <div className="text-sm text-slate-600 mt-1">Create a vendor to track invoices and activity.</div>
+        <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm p-6">
+          <div className="text-sm font-semibold text-bb-text">No vendors yet</div>
+          <div className="text-sm text-bb-text-muted mt-1">Create a vendor to track invoices and activity.</div>
           <div className="mt-3">
             <Button className="h-7 px-3 text-xs" onClick={openCreateVendorDialog} disabled={!canWrite}>
               Add Vendor
@@ -380,11 +380,11 @@ export default function VendorsPageClient() {
           }
           header={
             <tr className="h-9">
-              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Vendor</th>
-              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Open AP</th>
-              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Aging</th>
-              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Updated</th>
-              <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Created</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Vendor</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Open AP</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Aging</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Updated</th>
+              <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Created</th>
             </tr>
           }
           addRow={null}
@@ -392,21 +392,21 @@ export default function VendorsPageClient() {
             vendorsLoading && vendors.length === 0 ? (
               <>
                 {Array.from({ length: 10 }).map((_, i) => (
-                  <tr key={`sk-${i}`} className="h-9 border-b border-slate-100">
+                  <tr key={`sk-${i}`} className="h-9 border-b border-bb-border-muted">
                     <td className="px-3">
-                      <div className="h-3 w-40 rounded bg-slate-200 animate-pulse" />
+                      <div className="h-3 w-40 rounded bg-bb-border animate-pulse" />
                     </td>
                     <td className="px-3">
-                      <div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" />
+                      <div className="h-3 w-24 rounded bg-bb-border animate-pulse ml-auto" />
                     </td>
                     <td className="px-3">
-                      <div className="h-3 w-56 rounded bg-slate-200 animate-pulse" />
+                      <div className="h-3 w-56 rounded bg-bb-border animate-pulse" />
                     </td>
                     <td className="px-3">
-                      <div className="h-3 w-20 rounded bg-slate-200 animate-pulse" />
+                      <div className="h-3 w-20 rounded bg-bb-border animate-pulse" />
                     </td>
                     <td className="px-3">
-                      <div className="h-3 w-20 rounded bg-slate-200 animate-pulse" />
+                      <div className="h-3 w-20 rounded bg-bb-border animate-pulse" />
                     </td>
                   </tr>
                 ))}
@@ -416,7 +416,7 @@ export default function VendorsPageClient() {
                 {vendors.map((v: any) => (
                   <tr
                     key={v.id}
-                    className="h-9 border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                    className="h-9 border-b border-bb-border-muted hover:bg-bb-table-row-hover cursor-pointer"
                     onClick={() => {
                       if (!businessId) return;
                       router.push(`/vendors/${v.id}?businessId=${encodeURIComponent(businessId)}`);
@@ -431,25 +431,25 @@ export default function VendorsPageClient() {
                         const row = apByVendorId[String(v.id)];
                         if (!row) {
                           return apSummaryLoading ? (
-                            <span className="inline-flex items-center text-slate-400" title="Loading AP summary">
+                            <span className="inline-flex items-center text-bb-text-subtle" title="Loading AP summary">
                               <Loader2 className="h-3 w-3 animate-spin" />
                             </span>
                           ) : (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-bb-text-subtle">—</span>
                           );
                         }
                         const txt = formatOptionalUsdFromCents(row?.total_open_cents);
-                        if (!txt) return <span className="text-slate-400">—</span>;
+                        if (!txt) return <span className="text-bb-text-subtle">—</span>;
                         const cents = toBigIntSafe(row.total_open_cents);
-                        return <span className={cents > 0n ? "text-slate-900" : "text-slate-400"}>{txt}</span>;
+                        return <span className={cents > 0n ? "text-bb-text" : "text-bb-text-subtle"}>{txt}</span>;
                       })()}
                     </td>
 
-                    <td className="px-3 text-xs text-slate-600 tabular-nums">
+                    <td className="px-3 text-xs text-bb-text-muted tabular-nums">
                       {(() => {
                         const row = apByVendorId[String(v.id)];
                         const a = row?.aging;
-                        if (!a) return apSummaryLoading ? <span className="text-slate-400">Loading…</span> : "—";
+                        if (!a) return apSummaryLoading ? <span className="text-bb-text-subtle">Loading…</span> : "—";
                         const current = formatOptionalUsdFromCents(a.current);
                         const days30 = formatOptionalUsdFromCents(a.days_30);
                         const days60 = formatOptionalUsdFromCents(a.days_60);
@@ -460,8 +460,8 @@ export default function VendorsPageClient() {
                       })()}
                     </td>
 
-                    <td className="px-3 text-sm text-slate-600">{String(v.updated_at ?? "").slice(0, 10)}</td>
-                    <td className="px-3 text-sm text-slate-600">{String(v.created_at ?? "").slice(0, 10)}</td>
+                    <td className="px-3 text-sm text-bb-text-muted">{String(v.updated_at ?? "").slice(0, 10)}</td>
+                    <td className="px-3 text-sm text-bb-text-muted">{String(v.created_at ?? "").slice(0, 10)}</td>
                   </tr>
                 ))}
               </>
@@ -502,19 +502,19 @@ export default function VendorsPageClient() {
       >
         <div className="space-y-3">
           <div className="space-y-1">
-            <div className="text-[11px] text-slate-600">Name</div>
+            <div className="text-[11px] text-bb-text-muted">Name</div>
             <Input className="h-7 text-xs" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
           </div>
 
           <div className="space-y-1">
-            <div className="text-[11px] text-slate-600">Notes (optional)</div>
+            <div className="text-[11px] text-bb-text-muted">Notes (optional)</div>
             <Input className="h-7 text-xs" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
           </div>
 
           <div className="space-y-1">
-            <div className="text-[11px] text-slate-600">Default category (optional)</div>
+            <div className="text-[11px] text-bb-text-muted">Default category (optional)</div>
             <select
-              className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+              className="h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs"
               value={defaultCategoryId}
               onChange={(e) => setDefaultCategoryId(e.target.value)}
               disabled={categoriesLoading && categoryRows.length === 0}
@@ -527,7 +527,7 @@ export default function VendorsPageClient() {
               ))}
             </select>
             {categoriesLoading ? (
-              <div className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+              <div className="inline-flex items-center gap-1 text-[11px] text-bb-text-muted">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 <span>Loading categories</span>
               </div>

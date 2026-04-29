@@ -266,12 +266,12 @@ function hasMultiMonthSeries(monthly: Array<{ month: string }>) {
 }
 
 function NoTrendNote() {
-  return <div className="text-xs text-slate-500">No multi-month trend for this range.</div>;
+  return <div className="text-xs text-bb-text-muted">No multi-month trend for this range.</div>;
 }
 
 function ReportFootnote({ lines }: { lines: string[] }) {
   return (
-    <div className="mt-3 border-t border-slate-100 pt-2 text-[11px] text-slate-500 space-y-0.5">
+    <div className="mt-3 border-t border-bb-border-muted pt-2 text-[11px] text-bb-text-muted space-y-0.5">
       {lines.map((l) => (
         <div key={l}>{l}</div>
       ))}
@@ -443,7 +443,7 @@ function ComboBarLineChart({
         <Bar
           dataKey="a"
           name={aLabel}
-          fill="var(--bb-green-600)"
+          fill="var(--bb-chart-income)"
           radius={[4, 4, 0, 0]}
           isAnimationActive
           animationDuration={200}
@@ -451,7 +451,7 @@ function ComboBarLineChart({
         <Bar
           dataKey="b"
           name={bLabel}
-          fill="var(--bb-red-600)"
+          fill="var(--bb-chart-expense)"
           radius={[4, 4, 0, 0]}
           isAnimationActive
           animationDuration={200}
@@ -460,7 +460,7 @@ function ComboBarLineChart({
           dataKey="l"
           name={lineLabel}
           type="monotone"
-          stroke="var(--bb-slate-600)"
+          stroke="var(--bb-chart-net)"
           strokeWidth={2.25}
           dot={false}
           isAnimationActive
@@ -498,20 +498,20 @@ function DonutBreakdown({
   ];
 
   const palette = [
-    "var(--bb-slate-400)",
-    "var(--bb-blue-500)",
-    "var(--bb-amber-500)",
-    "var(--bb-green-600)",
-    "var(--bb-red-600)",
-    "var(--bb-emerald-600)",
+    "var(--bb-text-subtle)",
+    "var(--chart-4)",
+    "var(--chart-5)",
+    "var(--bb-chart-income)",
+    "var(--bb-chart-expense)",
+    "var(--bb-chart-net)",
     "rgb(147 51 234)", // purple
     "rgb(14 165 233)", // sky
   ];
 
   return (
-    <div className="rounded-md border border-slate-200 p-3">
-      <div className="flex items-center gap-2 text-[11px] text-slate-600">
-        <PieIcon className="h-4 w-4 text-slate-500" />
+    <div className="rounded-md border border-bb-border p-3">
+      <div className="flex items-center gap-2 text-[11px] text-bb-text-muted">
+        <PieIcon className="h-4 w-4 text-bb-text-muted" />
         {title}
       </div>
 
@@ -523,7 +523,14 @@ function DonutBreakdown({
                 const cents = props?.payload?.cents ?? "0";
                 return [formatUsdAccountingFromCents(String(cents)).text, String(name)];
               }}
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={{
+                fontSize: 12,
+                background: "var(--bb-chart-tooltip-bg)",
+                border: "1px solid var(--bb-chart-tooltip-border)",
+                borderRadius: 10,
+                color: "var(--bb-chart-tooltip-text)",
+              }}
+              itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
             />
             <Pie data={slices} dataKey="value" nameKey="name" innerRadius={62} outerRadius={90} paddingAngle={2}>
               {slices.map((_, i) => (
@@ -541,15 +548,15 @@ function DonutBreakdown({
                 <div key={`${r.label}-${i}`} className="flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0 flex items-center gap-2">
                     <span className="inline-block h-2 w-2 rounded-sm" style={{ background: palette[i % palette.length] }} />
-                    <span className="truncate text-slate-700">{r.label}</span>
+                    <span className="truncate text-bb-text">{r.label}</span>
                   </div>
-                  <div className={`tabular-nums ${fm.isNeg ? "text-red-600" : "text-slate-900"}`}>{fm.text}</div>
+                  <div className={`tabular-nums ${fm.isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>{fm.text}</div>
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-2 text-[11px] text-slate-500">
+          <div className="mt-2 text-[11px] text-bb-text-muted">
             Composition uses absolute values; amounts display signed accounting values.
           </div>
         </div>
@@ -865,7 +872,7 @@ export default function ReportsPageClient() {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<FileText className="h-4 w-4" />}
@@ -895,7 +902,7 @@ export default function ReportsPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         {/* Tabs */}
         <div className="px-3 py-2">
@@ -911,8 +918,8 @@ export default function ReportsPageClient() {
                 type="button"
                 onClick={() => setTab(t.key as TabKey)}
                 className={`h-7 px-3 rounded-md text-xs font-medium transition ${tab === t.key
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-100"
+                  ? "bg-bb-text text-bb-text-inverse shadow-sm"
+                  : "text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
               >
                 {t.label}
@@ -921,7 +928,7 @@ export default function ReportsPageClient() {
           </div>
         </div>
 
-        <div className="h-px bg-slate-200" />
+        <div className="h-px bg-bb-border" />
 
         {/* Controls: Month picker + YTD toggle (only) */}
         <div className="px-3 py-2">
@@ -929,9 +936,9 @@ export default function ReportsPageClient() {
             left={
               <>
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">Range</div>
+                  <div className="text-[11px] text-bb-text-muted">Range</div>
                   <select
-                    className="h-7 w-[140px] text-xs rounded-md border border-slate-200 bg-white px-2"
+                    className="h-7 w-[140px] text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                     value={rangeMode}
                     onChange={(e) => setRangeMode(e.target.value as RangeMode)}
                   >
@@ -944,7 +951,7 @@ export default function ReportsPageClient() {
 
                 {rangeMode === "monthly" ? (
                   <div className="space-y-1">
-                    <div className="text-[11px] text-slate-600">Month</div>
+                    <div className="text-[11px] text-bb-text-muted">Month</div>
 
                     <div className="w-[140px]">
                       <AppDatePicker
@@ -959,7 +966,7 @@ export default function ReportsPageClient() {
 
                 {rangeMode === "yearly" ? (
                   <div className="space-y-1">
-                    <div className="text-[11px] text-slate-600">Year</div>
+                    <div className="text-[11px] text-bb-text-muted">Year</div>
                     <Input
                       type="number"
                       className="h-7 w-[110px] text-xs"
@@ -974,7 +981,7 @@ export default function ReportsPageClient() {
 
                 {rangeMode === "weekly" ? (
                   <div className="space-y-1">
-                    <div className="text-[11px] text-slate-600">Week of</div>
+                    <div className="text-[11px] text-bb-text-muted">Week of</div>
 
                     <div className="w-[140px]">
                       <AppDatePicker
@@ -989,7 +996,7 @@ export default function ReportsPageClient() {
                 {rangeMode === "custom" ? (
                   <div className="flex items-end gap-2">
                     <div className="space-y-1">
-                      <div className="text-[11px] text-slate-600">From</div>
+                      <div className="text-[11px] text-bb-text-muted">From</div>
 
                       <div className="w-[140px]">
                         <AppDatePicker
@@ -1001,7 +1008,7 @@ export default function ReportsPageClient() {
                     </div>
 
                     <div className="space-y-1">
-                      <div className="text-[11px] text-slate-600">To</div>
+                      <div className="text-[11px] text-bb-text-muted">To</div>
 
                       <div className="w-[140px]">
                         <AppDatePicker
@@ -1015,14 +1022,14 @@ export default function ReportsPageClient() {
                 ) : null}
 
                 <div className="ml-2 flex flex-col justify-end">
-                  <div className="text-[11px] text-slate-500">Range</div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] text-bb-text-muted">Range</div>
+                  <div className="text-[11px] text-bb-text-subtle">
                     {from} → {to}
                   </div>
                 </div>
 
                 <div className="ml-4 flex items-center gap-2">
-                  <div className="text-[11px] text-slate-600">YTD</div>
+                  <div className="text-[11px] text-bb-text-muted">YTD</div>
                   <PillToggle checked={ytd} onCheckedChange={(next) => setYtd(next)} disabled={rangeMode === "weekly" || rangeMode === "custom"} />
                 </div>
 
@@ -1036,7 +1043,7 @@ export default function ReportsPageClient() {
                 <Button className="h-7 px-3 text-xs" onClick={run} disabled={!businessId || loading}>
                   {loading ? "Running…" : "Run report"}
                 </Button>
-                {err ? <div className="text-xs text-red-600 ml-2">{err}</div> : null}
+                {err ? <div className="text-xs text-bb-status-danger-fg ml-2">{err}</div> : null}
               </>
             }
           />
@@ -1051,20 +1058,20 @@ export default function ReportsPageClient() {
 
             <CardContent className="space-y-3 text-sm">
               {!pnl || !cashflow ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
+                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
               ) : (
                 <>
                   {/* KPI strip (Income / Expenses / Net) */}
                   <div className="grid grid-cols-3 gap-3">
                     {/* Income */}
-                    <div className="rounded-md border border-slate-200 p-3">
+                    <div className="rounded-md border border-bb-border p-3">
                       <div className="flex items-center gap-3">
-                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                          <TrendingUp className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                          <TrendingUp className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs text-slate-600">Income</div>
-                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                          <div className="text-xs text-bb-text-muted">Income</div>
+                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                             {formatUsdAccountingFromCents(pnl.period.income_cents).text}
                           </div>
                         </div>
@@ -1072,14 +1079,14 @@ export default function ReportsPageClient() {
                     </div>
 
                     {/* Expenses */}
-                    <div className="rounded-md border border-slate-200 p-3">
+                    <div className="rounded-md border border-bb-border p-3">
                       <div className="flex items-center gap-3">
-                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                          <TrendingDown className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                          <TrendingDown className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs text-slate-600">Expenses</div>
-                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                          <div className="text-xs text-bb-text-muted">Expenses</div>
+                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                             {formatUsdAccountingFromCents(pnl.period.expense_cents).text}
                           </div>
                         </div>
@@ -1087,14 +1094,14 @@ export default function ReportsPageClient() {
                     </div>
 
                     {/* Net */}
-                    <div className="rounded-md border border-slate-200 p-3">
+                    <div className="rounded-md border border-bb-border p-3">
                       <div className="flex items-center gap-3">
-                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                          <Sigma className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                        <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                          <Sigma className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs text-slate-600">Net</div>
-                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                          <div className="text-xs text-bb-text-muted">Net</div>
+                          <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                             {formatUsdAccountingFromCents(pnl.period.net_cents).text}
                           </div>
                         </div>
@@ -1104,9 +1111,9 @@ export default function ReportsPageClient() {
 
                   {/* Charts row: Income vs Expenses + Net, and Net Cash Flow */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                        <BarChart3 className="h-4 w-4 text-slate-500" />
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-bb-text">
+                        <BarChart3 className="h-4 w-4 text-bb-text-muted" />
                         Income vs Expenses by Month
                       </div>
                       <div className="mt-2">
@@ -1129,9 +1136,9 @@ export default function ReportsPageClient() {
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                        <LineChart className="h-4 w-4 text-slate-500" />
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-bb-text">
+                        <LineChart className="h-4 w-4 text-bb-text-muted" />
                         Net Cash Flow (Last 6 Months)
                       </div>
                       <div className="mt-2">
@@ -1172,11 +1179,11 @@ export default function ReportsPageClient() {
                             .map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents) }))}
                         />
                       ) : (
-                        <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-600">No category data.</div>
+                        <div className="rounded-md border border-bb-border p-3 text-sm text-bb-text-muted">No category data.</div>
                       )}
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-600">
+                    <div className="rounded-md border border-bb-border p-3 text-sm text-bb-text-muted">
                       Opening-balance driven account balances are intentionally excluded from Reports.
                     </div>
                   </div>
@@ -1197,8 +1204,8 @@ export default function ReportsPageClient() {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-3">
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                  <Sigma className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                  <Sigma className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                 </div>
                 <CardTitle className="text-sm">Monthly Review</CardTitle>
               </div>
@@ -1206,60 +1213,60 @@ export default function ReportsPageClient() {
 
             <CardContent className="space-y-3 text-sm">
               {!pnl || !cashflow ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
+                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Income</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Income</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(pnl.period.income_cents).text}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Expenses</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Expenses</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(pnl.period.expense_cents).text}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Net</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Net</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(pnl.period.net_cents).text}
                       </div>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs font-semibold text-slate-700">Top Categories</div>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs font-semibold text-bb-text">Top Categories</div>
                       <div className="mt-2 space-y-1">
                         {(topCats ?? []).map((r, i) => (
                           <div key={`${r.label}-${i}`} className="flex items-center justify-between text-xs">
-                            <div className="truncate text-slate-700">{r.label}</div>
-                            <div className={`tabular-nums ${formatUsdAccountingFromCents(r.cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                            <div className="truncate text-bb-text">{r.label}</div>
+                            <div className={`tabular-nums ${formatUsdAccountingFromCents(r.cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(r.cents).text}
                             </div>
                           </div>
                         ))}
-                        {(topCats ?? []).length === 0 ? <div className="text-xs text-slate-500">No category data.</div> : null}
+                        {(topCats ?? []).length === 0 ? <div className="text-xs text-bb-text-muted">No category data.</div> : null}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs font-semibold text-slate-700">Top Vendors (AP)</div>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs font-semibold text-bb-text">Top Vendors (AP)</div>
                       <div className="mt-2 space-y-1">
                         {(topVendorsAp ?? []).map((r, i) => (
                           <div key={`${r.label}-${i}`} className="flex items-center justify-between text-xs">
-                            <div className="truncate text-slate-700">{r.label}</div>
-                            <div className={`tabular-nums ${formatUsdAccountingFromCents(r.cents).isNeg ? "text-red-600" : "text-slate-900"}`}>
+                            <div className="truncate text-bb-text">{r.label}</div>
+                            <div className={`tabular-nums ${formatUsdAccountingFromCents(r.cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(r.cents).text}
                             </div>
                           </div>
                         ))}
-                        {(topVendorsAp ?? []).length === 0 ? <div className="text-xs text-slate-500">No AP vendor data.</div> : null}
+                        {(topVendorsAp ?? []).length === 0 ? <div className="text-xs text-bb-text-muted">No AP vendor data.</div> : null}
                       </div>
                     </div>
                   </div>
@@ -1281,46 +1288,46 @@ export default function ReportsPageClient() {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-3">
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                  <BarChart3 className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                  <BarChart3 className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                 </div>
                 <CardTitle className="text-sm">Profit &amp; Loss</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[11px] text-bb-text-muted">
                 Income and Expenses (ledger effective date). Net = Income − Expenses.
               </div>
               {!pnl ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
+                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Income</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Income</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.income_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(pnl.period.income_cents).text}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Expenses</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Expenses</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.expense_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(pnl.period.expense_cents).text}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Net</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Net</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(pnl.period.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(pnl.period.net_cents).text}
                       </div>
                     </div>
                   </div>
 
                   {pnlPrev?.period ? (
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Change vs prior period</div>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Change vs prior period</div>
 
                       {(() => {
                         const curInc = BigInt(String(pnl.period.income_cents ?? "0"));
@@ -1344,21 +1351,21 @@ export default function ReportsPageClient() {
                         return (
                           <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
                             <div>
-                              <div className="text-[11px] text-slate-500">Income</div>
-                              <div className={`tabular-nums ${dInc < 0n ? "text-red-600" : "text-slate-900"}`}>
-                                {formatUsdAccountingFromCents(String(dInc)).text} <span className="text-[11px] text-slate-500">({fmtPct(pInc)})</span>
+                              <div className="text-[11px] text-bb-text-muted">Income</div>
+                              <div className={`tabular-nums ${dInc < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {formatUsdAccountingFromCents(String(dInc)).text} <span className="text-[11px] text-bb-text-muted">({fmtPct(pInc)})</span>
                               </div>
                             </div>
                             <div>
-                              <div className="text-[11px] text-slate-500">Expenses</div>
-                              <div className={`tabular-nums ${dExp < 0n ? "text-red-600" : "text-slate-900"}`}>
-                                {formatUsdAccountingFromCents(String(dExp)).text} <span className="text-[11px] text-slate-500">({fmtPct(pExp)})</span>
+                              <div className="text-[11px] text-bb-text-muted">Expenses</div>
+                              <div className={`tabular-nums ${dExp < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {formatUsdAccountingFromCents(String(dExp)).text} <span className="text-[11px] text-bb-text-muted">({fmtPct(pExp)})</span>
                               </div>
                             </div>
                             <div>
-                              <div className="text-[11px] text-slate-500">Net</div>
-                              <div className={`tabular-nums ${dNet < 0n ? "text-red-600" : "text-slate-900"}`}>
-                                {formatUsdAccountingFromCents(String(dNet)).text} <span className="text-[11px] text-slate-500">({fmtPct(pNet)})</span>
+                              <div className="text-[11px] text-bb-text-muted">Net</div>
+                              <div className={`tabular-nums ${dNet < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {formatUsdAccountingFromCents(String(dNet)).text} <span className="text-[11px] text-bb-text-muted">({fmtPct(pNet)})</span>
                               </div>
                             </div>
                           </div>
@@ -1367,8 +1374,8 @@ export default function ReportsPageClient() {
                     </div>
                   ) : null}
 
-                  <div className="rounded-md border border-slate-200 p-3">
-                    <div className="text-xs text-slate-600">Trend</div>
+                  <div className="rounded-md border border-bb-border p-3">
+                    <div className="text-xs text-bb-text-muted">Trend</div>
                     <div className="mt-2">
                       {hasMultiMonthSeries(pnl.monthly ?? []) ? (
                         <ComboBarLineChart
@@ -1389,24 +1396,24 @@ export default function ReportsPageClient() {
                     </div>
 
                     {ytd && pnl.ytd ? (
-                      <div className="mt-3 rounded-md border border-slate-200 p-3">
-                        <div className="text-xs text-slate-600">YTD ({pnl.ytd.from} → {pnl.ytd.to})</div>
+                      <div className="mt-3 rounded-md border border-bb-border p-3">
+                        <div className="text-xs text-bb-text-muted">YTD ({pnl.ytd.from} → {pnl.ytd.to})</div>
                         <div className="mt-2 grid grid-cols-3 gap-3">
                           <div>
-                            <div className="text-[11px] text-slate-500">Income</div>
-                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.income_cents).isNeg ? "text-red-600" : ""}`}>
+                            <div className="text-[11px] text-bb-text-muted">Income</div>
+                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.income_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(pnl.ytd.income_cents).text}
                             </div>
                           </div>
                           <div>
-                            <div className="text-[11px] text-slate-500">Expenses</div>
-                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                            <div className="text-[11px] text-bb-text-muted">Expenses</div>
+                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.expense_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(pnl.ytd.expense_cents).text}
                             </div>
                           </div>
                           <div>
-                            <div className="text-[11px] text-slate-500">Net</div>
-                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.net_cents).isNeg ? "text-red-600" : ""}`}>
+                            <div className="text-[11px] text-bb-text-muted">Net</div>
+                            <div className={`font-semibold ${formatUsdAccountingFromCents(pnl.ytd.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(pnl.ytd.net_cents).text}
                             </div>
                           </div>
@@ -1417,15 +1424,15 @@ export default function ReportsPageClient() {
 
                   {/* Cash Flow: keep interpretation unique. Top categories/vendors shown on P&L and AP tabs. */}
 
-                  <div className="rounded-md border border-slate-200 overflow-hidden">
-                    <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-                      <div className="text-xs font-semibold text-slate-700">Monthly</div>
-                      <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
+                  <div className="rounded-md border border-bb-border overflow-hidden">
+                    <div className="bg-bb-table-header px-3 h-9 flex items-center justify-between">
+                      <div className="text-xs font-semibold text-bb-text">Monthly</div>
+                      <div className="text-[11px] text-bb-text-muted">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
                     </div>
 
                     <div className="overflow-x-auto">
-                      <div className="min-w-[640px] divide-y divide-slate-100">
-                        <div className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-[11px] font-semibold text-slate-700 bg-white">
+                      <div className="min-w-[640px] divide-y divide-bb-border-muted">
+                        <div className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-[11px] font-semibold text-bb-text bg-bb-surface-card">
                           <div className="truncate">Month</div>
                           <div className="text-right">Income</div>
                           <div className="text-right">Expenses</div>
@@ -1434,22 +1441,22 @@ export default function ReportsPageClient() {
 
                         {(pnl.monthly ?? []).map((r: any, idx: number) => (
                           <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-sm">
-                            <div className="truncate tabular-nums text-slate-700" title={formatBucketLabel(String(r.month), rangeMode)}>
+                            <div className="truncate tabular-nums text-bb-text" title={formatBucketLabel(String(r.month), rangeMode)}>
                               {formatBucketLabel(String(r.month), rangeMode)}
                             </div>
-                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-red-600" : ""}`}>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(r.income_cents).text}
                             </div>
-                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.expense_cents).isNeg ? "text-red-600" : ""}`}>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.expense_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(r.expense_cents).text}
                             </div>
-                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
+                            <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(r.net_cents).text}
                             </div>
                           </div>
                         ))}
                         {(pnl.monthly ?? []).length === 0 ? (
-                          <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
+                          <div className="h-9 px-3 flex items-center text-sm text-bb-text-muted">No activity in range.</div>
                         ) : null}
                       </div>
                     </div>
@@ -1471,46 +1478,46 @@ export default function ReportsPageClient() {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-3">
-                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                  <LineChart className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                  <LineChart className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                 </div>
                 <CardTitle className="text-sm">Cash Flow</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[11px] text-bb-text-muted">
                 Cash In/Out movements (ledger effective date). Line shows cumulative net cash change over the range.
               </div>
               {!cashflow ? (
-                <div className="text-sm text-slate-600">Run the report to view results.</div>
+                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Cash In</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Cash In</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(cashflow.totals.cash_in_cents).text}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Cash Out</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.cash_out_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Cash Out</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.cash_out_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(cashflow.totals.cash_out_cents).text}
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Net change</div>
-                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.net_cents).isNeg ? "text-red-600" : ""}`}>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Net change</div>
+                      <div className={`text-sm font-semibold ${formatUsdAccountingFromCents(cashflow.totals.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                         {formatUsdAccountingFromCents(cashflow.totals.net_cents).text}
                       </div>
                     </div>
                   </div>
 
                   {cashflowPrev?.totals ? (
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-xs text-slate-600">Change vs prior period</div>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-xs text-bb-text-muted">Change vs prior period</div>
 
                       {(() => {
                         const curIn = BigInt(String(cashflow.totals.cash_in_cents ?? "0"));
@@ -1534,21 +1541,21 @@ export default function ReportsPageClient() {
                         return (
                           <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
                             <div>
-                              <div className="text-[11px] text-slate-500">Cash In</div>
-                              <div className={`tabular-nums ${dIn < 0n ? "text-red-600" : "text-slate-900"}`}>
-                                {formatUsdAccountingFromCents(String(dIn)).text} <span className="text-[11px] text-slate-500">({fmtPct(pIn)})</span>
+                              <div className="text-[11px] text-bb-text-muted">Cash In</div>
+                              <div className={`tabular-nums ${dIn < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {formatUsdAccountingFromCents(String(dIn)).text} <span className="text-[11px] text-bb-text-muted">({fmtPct(pIn)})</span>
                               </div>
                             </div>
                             <div>
-                              <div className="text-[11px] text-slate-500">Cash Out</div>
-                              <div className={`tabular-nums ${dOut < 0n ? "text-red-600" : "text-slate-900"}`}>
-                                {formatUsdAccountingFromCents(String(dOut)).text} <span className="text-[11px] text-slate-500">({fmtPct(pOut)})</span>
+                              <div className="text-[11px] text-bb-text-muted">Cash Out</div>
+                              <div className={`tabular-nums ${dOut < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {formatUsdAccountingFromCents(String(dOut)).text} <span className="text-[11px] text-bb-text-muted">({fmtPct(pOut)})</span>
                               </div>
                             </div>
                             <div>
-                              <div className="text-[11px] text-slate-500">Net change</div>
-                              <div className={`tabular-nums ${dNet < 0n ? "text-red-600" : "text-slate-900"}`}>
-                                {formatUsdAccountingFromCents(String(dNet)).text} <span className="text-[11px] text-slate-500">({fmtPct(pNet)})</span>
+                              <div className="text-[11px] text-bb-text-muted">Net change</div>
+                              <div className={`tabular-nums ${dNet < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {formatUsdAccountingFromCents(String(dNet)).text} <span className="text-[11px] text-bb-text-muted">({fmtPct(pNet)})</span>
                               </div>
                             </div>
                           </div>
@@ -1559,8 +1566,8 @@ export default function ReportsPageClient() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                     {/* Trend (left) */}
-                    <div className="rounded-md border border-slate-200 p-3">
-                      <div className="text-[11px] text-slate-500 mb-2">Trend</div>
+                    <div className="rounded-md border border-bb-border p-3">
+                      <div className="text-[11px] text-bb-text-muted mb-2">Trend</div>
 
                       {hasMultiMonthSeries(cashflow.monthly ?? []) ? (
                         <ComboBarLineChart
@@ -1587,15 +1594,15 @@ export default function ReportsPageClient() {
                     </div>
 
                     {/* Monthly table (right) */}
-                    <div className="rounded-md border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 px-3 h-9 flex items-center justify-between">
-                        <div className="text-xs font-semibold text-slate-700">Monthly</div>
-                        <div className="text-[11px] text-slate-500">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
+                    <div className="rounded-md border border-bb-border overflow-hidden">
+                      <div className="bg-bb-table-header px-3 h-9 flex items-center justify-between">
+                        <div className="text-xs font-semibold text-bb-text">Monthly</div>
+                        <div className="text-[11px] text-bb-text-muted">{ytd ? "Fiscal YTD buckets" : "Selected month"}</div>
                       </div>
 
                       <div className="overflow-x-auto">
-                        <div className="min-w-[640px] divide-y divide-slate-100">
-                          <div className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-[11px] font-semibold text-slate-700 bg-white">
+                        <div className="min-w-[640px] divide-y divide-bb-border-muted">
+                          <div className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-[11px] font-semibold text-bb-text bg-bb-surface-card">
                             <div className="truncate">Period</div>
                             <div className="text-right">Cash In</div>
                             <div className="text-right">Cash Out</div>
@@ -1604,23 +1611,23 @@ export default function ReportsPageClient() {
 
                           {(cashflow.monthly ?? []).map((r: any, idx: number) => (
                             <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-sm">
-                              <div className="truncate tabular-nums text-slate-700" title={formatBucketLabel(String(r.month), rangeMode)}>
+                              <div className="truncate tabular-nums text-bb-text" title={formatBucketLabel(String(r.month), rangeMode)}>
                                 {formatBucketLabel(String(r.month), rangeMode)}
                               </div>
-                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-red-600" : ""}`}>
+                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                                 {formatUsdAccountingFromCents(r.cash_in_cents).text}
                               </div>
-                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_out_cents).isNeg ? "text-red-600" : ""}`}>
+                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_out_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                                 {formatUsdAccountingFromCents(r.cash_out_cents).text}
                               </div>
-                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-red-600" : ""}`}>
+                              <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.net_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                                 {formatUsdAccountingFromCents(r.net_cents).text}
                               </div>
                             </div>
                           ))}
 
                           {(cashflow.monthly ?? []).length === 0 ? (
-                            <div className="h-9 px-3 flex items-center text-sm text-slate-600">No activity in range.</div>
+                            <div className="h-9 px-3 flex items-center text-sm text-bb-text-muted">No activity in range.</div>
                           ) : null}
                         </div>
                       </div>

@@ -207,9 +207,9 @@ function getInvoiceUploadDetail(upload: any) {
 
 function invoiceStatusClass(tone: "success" | "warn" | "danger" | "neutral") {
   if (tone === "success") return "inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-primary";
-  if (tone === "warn") return "inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-amber-700";
-  if (tone === "danger") return "inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-red-700";
-  return "inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-slate-700";
+  if (tone === "warn") return "inline-flex items-center rounded-full bg-bb-status-warning-bg px-2 py-0.5 text-bb-status-warning-fg";
+  if (tone === "danger") return "inline-flex items-center rounded-full bg-bb-status-danger-bg px-2 py-0.5 text-bb-status-danger-fg";
+  return "inline-flex items-center rounded-full bg-bb-table-header px-2 py-0.5 text-bb-text";
 }
 
 function uploadParsedAmountString(upload: any) {
@@ -222,8 +222,8 @@ function uploadParsedAmountString(upload: any) {
 
 function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center rounded-xl bg-white/55 backdrop-blur-[1px]">
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+    <div className="absolute inset-0 z-20 flex items-start justify-center rounded-xl bg-bb-surface-card/55 backdrop-blur-[1px]">
+      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-bb-border bg-bb-surface-card px-3 py-1 text-xs font-medium text-bb-text shadow-sm">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         <span>{label}</span>
       </div>
@@ -717,7 +717,7 @@ export default function VendorDetailPageClient() {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Building2 className="h-4 w-4" />}
@@ -726,7 +726,7 @@ export default function VendorDetailPageClient() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={["h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
+                  className={["h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                   onClick={() => {
                     if (!businessId) return;
                     window.location.href = `/vendors?businessId=${encodeURIComponent(businessId)}`;
@@ -737,7 +737,7 @@ export default function VendorDetailPageClient() {
 
                 <button
                   type="button"
-                  className={["h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50", ringFocus].join(" ")}
+                  className={["h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                   onClick={() => setOpenUpload(true)}
                 >
                   Upload Invoice
@@ -745,7 +745,7 @@ export default function VendorDetailPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
                   disabled={!businessId || loading}
                   onClick={() => {
                     if (!businessId) return;
@@ -769,7 +769,7 @@ export default function VendorDetailPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
                   disabled={!businessId}
                   onClick={async () => {
                     if (!businessId) return;
@@ -791,7 +791,7 @@ export default function VendorDetailPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-status-danger-border bg-bb-surface-card text-bb-status-danger-fg hover:bg-bb-status-danger-bg disabled:opacity-50"
                   disabled={!canWrite || loading}
                   title={!canWrite ? "Insufficient permissions" : "Delete vendor"}
                   onClick={() => {
@@ -805,7 +805,7 @@ export default function VendorDetailPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
                   disabled={!canWrite || loading}
                   title={!canWrite ? "Insufficient permissions" : "Edit vendor"}
                   onClick={() => setEditOpen(true)}
@@ -817,11 +817,11 @@ export default function VendorDetailPageClient() {
           />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
 
         <div className="px-3 py-2">
           <FilterBar
-            left={<div className="text-xs text-slate-600">Invoices are filtered by this vendor.</div>}
+            left={<div className="text-xs text-bb-text-muted">Invoices are filtered by this vendor.</div>}
             right={
               <>
                 <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
@@ -829,12 +829,12 @@ export default function VendorDetailPageClient() {
                 </Button>
 
                 {err ? (
-                  <div className="text-xs text-red-600 ml-1">
+                  <div className="text-xs text-bb-status-danger-fg ml-1">
                     <div>{err}</div>
 
                     {errIsClosed ? (
                       <a
-                        className="mt-1 inline-flex text-[11px] underline text-slate-700 hover:text-slate-900"
+                        className="mt-1 inline-flex text-[11px] underline text-bb-text hover:text-bb-text"
                         href={
                           businessId
                             ? `/closed-periods?businessId=${encodeURIComponent(businessId)}&focus=reopen`
@@ -861,26 +861,26 @@ export default function VendorDetailPageClient() {
         <CardContent className="space-y-2 text-sm">
           {vendor ? (
             <>
-              <div><span className="text-slate-600">Name:</span> <span className="font-medium">{vendor.name}</span></div>
+              <div><span className="text-bb-text-muted">Name:</span> <span className="font-medium">{vendor.name}</span></div>
               <div>
-                <span className="text-slate-600">Default category:</span>{" "}
+                <span className="text-bb-text-muted">Default category:</span>{" "}
                 <span className="font-medium">
                   {vendor.default_category_id ? (categoryNameById.get(String(vendor.default_category_id)) ?? "—") : "—"}
                 </span>
               </div>
-              <div><span className="text-slate-600">Notes:</span> <span className="font-medium">{vendor.notes ?? "—"}</span></div>
-              <div className="text-slate-600 text-xs">
+              <div><span className="text-bb-text-muted">Notes:</span> <span className="font-medium">{vendor.notes ?? "—"}</span></div>
+              <div className="text-bb-text-muted text-xs">
                 Created: {String(vendor.created_at ?? "").slice(0, 10)} • Updated: {String(vendor.updated_at ?? "").slice(0, 10)}
               </div>
             </>
           ) : loading ? (
             <div className="space-y-2">
-              <div className="h-3 w-44 rounded bg-slate-200 animate-pulse" />
-              <div className="h-3 w-64 rounded bg-slate-200 animate-pulse" />
-              <div className="h-3 w-56 rounded bg-slate-200 animate-pulse" />
+              <div className="h-3 w-44 rounded bg-bb-border animate-pulse" />
+              <div className="h-3 w-64 rounded bg-bb-border animate-pulse" />
+              <div className="h-3 w-56 rounded bg-bb-border animate-pulse" />
             </div>
           ) : (
-            <div className="text-sm text-slate-600">Vendor not loaded.</div>
+            <div className="text-sm text-bb-text-muted">Vendor not loaded.</div>
           )}
         </CardContent>
         </div>
@@ -893,17 +893,17 @@ export default function VendorDetailPageClient() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-sm">Accounts payable</CardTitle>
-              <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+              <div className="inline-flex rounded-md border border-bb-border overflow-hidden">
                 <button
                   type="button"
-                  className={"h-7 px-3 text-xs " + (apTab === "bills" ? "bg-slate-900 text-white" : "bg-white text-slate-700")}
+                  className={"h-7 px-3 text-xs " + (apTab === "bills" ? "bg-bb-text text-bb-text-inverse" : "bg-bb-surface-card text-bb-text")}
                   onClick={() => { setApTab("bills"); setHighlightBillId(null); }}
                 >
                   Bills
                 </button>
                 <button
                   type="button"
-                  className={"h-7 px-3 text-xs " + (apTab === "payments" ? "bg-slate-900 text-white" : "bg-white text-slate-700")}
+                  className={"h-7 px-3 text-xs " + (apTab === "payments" ? "bg-bb-text text-bb-text-inverse" : "bg-bb-surface-card text-bb-text")}
                   onClick={() => setApTab("payments")}
                 >
                   Payments
@@ -955,42 +955,42 @@ export default function VendorDetailPageClient() {
         </CardHeader>
 
         <CardContent className="space-y-3">
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <div className="text-[11px] text-slate-600">AP Balance (open)</div>
+          <div className="rounded-lg border border-bb-border bg-bb-surface-card p-3">
+            <div className="text-[11px] text-bb-text-muted">AP Balance (open)</div>
             <div className="mt-1 text-sm font-semibold tabular-nums">
-              {formatOptionalUsdFromCents(apSummary?.total_open_cents) ?? <span className="text-slate-400">—</span>}
+              {formatOptionalUsdFromCents(apSummary?.total_open_cents) ?? <span className="text-bb-text-subtle">—</span>}
             </div>
 
-            <div className="mt-1 text-xs text-slate-600">
+            <div className="mt-1 text-xs text-bb-text-muted">
               Vendor credit (unapplied):{" "}
-              <span className={vendorCreditCents > 0n ? "font-semibold text-slate-900 tabular-nums" : "text-slate-500 tabular-nums"}>
+              <span className={vendorCreditCents > 0n ? "font-semibold text-bb-text tabular-nums" : "text-bb-text-muted tabular-nums"}>
                 {formatUsdFromCents(vendorCreditCents)}
               </span>
             </div>
 
             <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
-              <div className="rounded-md border border-slate-200 p-2">
-                <div className="text-[11px] text-slate-600">Current</div>
+              <div className="rounded-md border border-bb-border p-2">
+                <div className="text-[11px] text-bb-text-muted">Current</div>
                 <div className="font-semibold tabular-nums">
-                  {formatOptionalUsdFromCents(apSummary?.aging?.current) ?? <span className="text-slate-400">—</span>}
+                  {formatOptionalUsdFromCents(apSummary?.aging?.current) ?? <span className="text-bb-text-subtle">—</span>}
                 </div>
               </div>
-              <div className="rounded-md border border-slate-200 p-2">
-                <div className="text-[11px] text-slate-600">30</div>
+              <div className="rounded-md border border-bb-border p-2">
+                <div className="text-[11px] text-bb-text-muted">30</div>
                 <div className="font-semibold tabular-nums">
-                  {formatOptionalUsdFromCents(apSummary?.aging?.days_30) ?? <span className="text-slate-400">—</span>}
+                  {formatOptionalUsdFromCents(apSummary?.aging?.days_30) ?? <span className="text-bb-text-subtle">—</span>}
                 </div>
               </div>
-              <div className="rounded-md border border-slate-200 p-2">
-                <div className="text-[11px] text-slate-600">60</div>
+              <div className="rounded-md border border-bb-border p-2">
+                <div className="text-[11px] text-bb-text-muted">60</div>
                 <div className="font-semibold tabular-nums">
-                  {formatOptionalUsdFromCents(apSummary?.aging?.days_60) ?? <span className="text-slate-400">—</span>}
+                  {formatOptionalUsdFromCents(apSummary?.aging?.days_60) ?? <span className="text-bb-text-subtle">—</span>}
                 </div>
               </div>
-              <div className="rounded-md border border-slate-200 p-2">
-                <div className="text-[11px] text-slate-600">90+</div>
+              <div className="rounded-md border border-bb-border p-2">
+                <div className="text-[11px] text-bb-text-muted">90+</div>
                 <div className="font-semibold tabular-nums">
-                  {formatOptionalUsdFromCents(apSummary?.aging?.days_90) ?? <span className="text-slate-400">—</span>}
+                  {formatOptionalUsdFromCents(apSummary?.aging?.days_90) ?? <span className="text-bb-text-subtle">—</span>}
                 </div>
               </div>
             </div>
@@ -999,7 +999,7 @@ export default function VendorDetailPageClient() {
           {apTab === "bills" ? (
             <div className="space-y-2">
               {vendorCreditCents > 0n ? (
-                <div className="rounded-lg border border-slate-200 bg-primary/10 px-3 py-2 flex items-center justify-between">
+                <div className="rounded-lg border border-bb-border bg-primary/10 px-3 py-2 flex items-center justify-between">
                   <div className="text-xs text-primary">
                     Vendor credit available: <span className="font-semibold tabular-nums">{formatUsdFromCents(vendorCreditCents)}</span>
                   </div>
@@ -1026,7 +1026,7 @@ export default function VendorDetailPageClient() {
                 </div>
               ) : null}
 
-              <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="rounded-lg border border-bb-border overflow-hidden">
                 <div className="max-h-[420px] overflow-auto">
                   <table className="w-full min-w-[1070px] table-fixed text-sm">
                     <colgroup>
@@ -1039,16 +1039,16 @@ export default function VendorDetailPageClient() {
                       <col style={{ width: 100 }} />
                       <col style={{ width: 130 }} />
                     </colgroup>
-                    <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                    <thead className="sticky top-0 bg-bb-table-header border-b border-bb-border">
                       <tr className="h-9">
-                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
-                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Due</th>
-                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Memo</th>
-                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
-                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Applied</th>
-                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
-                        <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Status</th>
-                        <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actions</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Invoice</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Due</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Memo</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Amount</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Applied</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Outstanding</th>
+                        <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Status</th>
+                        <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1056,21 +1056,21 @@ export default function VendorDetailPageClient() {
                         loading ? (
                           <>
                             {Array.from({ length: 8 }).map((_, i) => (
-                              <tr key={`bill-sk-${i}`} className="h-9 border-b border-slate-100">
-                                <td className="px-3"><div className="h-3 w-20 rounded bg-slate-200 animate-pulse" /></td>
-                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse" /></td>
-                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse" /></td>
-                                <td className="px-3"><div className="h-3 w-16 rounded bg-slate-200 animate-pulse" /></td>
-                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
-                                <td className="px-3"><div className="h-3 w-24 rounded bg-slate-200 animate-pulse ml-auto" /></td>
-                                <td className="px-3"><div className="h-3 w-20 rounded bg-slate-200 animate-pulse" /></td>
-                                <td className="px-3"><div className="h-3 w-16 rounded bg-slate-200 animate-pulse ml-auto" /></td>
+                              <tr key={`bill-sk-${i}`} className="h-9 border-b border-bb-border-muted">
+                                <td className="px-3"><div className="h-3 w-20 rounded bg-bb-border animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-bb-border animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-bb-border animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-16 rounded bg-bb-border animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-bb-border animate-pulse ml-auto" /></td>
+                                <td className="px-3"><div className="h-3 w-24 rounded bg-bb-border animate-pulse ml-auto" /></td>
+                                <td className="px-3"><div className="h-3 w-20 rounded bg-bb-border animate-pulse" /></td>
+                                <td className="px-3"><div className="h-3 w-16 rounded bg-bb-border animate-pulse ml-auto" /></td>
                               </tr>
                             ))}
                           </>
                         ) : (
                           <tr>
-                            <td className="px-3 py-4 text-sm text-slate-600" colSpan={8}>
+                            <td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={8}>
                               No bills yet.
                             </td>
                           </tr>
@@ -1088,13 +1088,13 @@ export default function VendorDetailPageClient() {
                               key={b.id}
                               data-bill-row={String(b.id)}
                               className={
-                                "h-9 border-b border-slate-100 hover:bg-slate-50 " +
+                                "h-9 border-b border-bb-border-muted hover:bg-bb-table-row-hover " +
                                 (highlightBillId === String(b.id) ? "bg-accent" : "")
                               }
                             >
                               <td className="px-3 text-sm tabular-nums">{String(b.invoice_date ?? "").slice(0, 10)}</td>
                               <td className="px-3 text-sm tabular-nums">{String(b.due_date ?? "").slice(0, 10)}</td>
-                              <td className="px-3 text-sm text-slate-700" title={String(b.memo ?? "")}>
+                              <td className="px-3 text-sm text-bb-text" title={String(b.memo ?? "")}>
                                 <div className="truncate">{b.memo ?? "—"}</div>
                               </td>
                               <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(amount)}</td>
@@ -1105,10 +1105,10 @@ export default function VendorDetailPageClient() {
                                   className={
                                     "inline-flex h-6 items-center rounded-full px-2 " +
                                     (isVoid
-                                      ? "bg-slate-100 text-slate-600"
+                                      ? "bg-bb-table-row-hover text-bb-text-muted"
                                       : st === "PAID"
                                         ? "bg-primary/10 text-primary"
-                                        : "bg-amber-50 text-amber-700")
+                                        : "bg-bb-status-warning-bg text-bb-status-warning-fg")
                                   }
                                 >
                                   {st}
@@ -1118,13 +1118,13 @@ export default function VendorDetailPageClient() {
                                 <div className="inline-flex items-center gap-2">
                                   {pendingBillById[String(b.id)] ? (
                                     <span className="inline-flex items-center" title="Saving…">
-                                      <Loader2 className="h-3 w-3 text-slate-400 animate-spin" />
+                                      <Loader2 className="h-3 w-3 text-bb-text-subtle animate-spin" />
                                     </span>
                                   ) : null}
 
                                   <button
                                     type="button"
-                                    className="text-xs text-slate-700 hover:underline disabled:opacity-50"
+                                    className="text-xs text-bb-text hover:underline disabled:opacity-50"
                                     disabled={!canWrite || isVoid}
                                     onClick={() => {
                                       setBillEditId(String(b.id));
@@ -1136,7 +1136,7 @@ export default function VendorDetailPageClient() {
 
                                   <button
                                     type="button"
-                                    className="text-xs text-red-700 hover:underline disabled:opacity-50"
+                                    className="text-xs text-bb-status-danger-fg hover:underline disabled:opacity-50"
                                     disabled={!canWrite || isVoid || pendingBillById[String(b.id)]}
                                     onClick={() => {
                                       setErr(null);
@@ -1159,11 +1159,11 @@ export default function VendorDetailPageClient() {
                   </table>
                 </div>
 
-                {err ? <div className="px-3 py-2 text-xs text-red-600 border-t border-slate-200">{err}</div> : null}
+                {err ? <div className="px-3 py-2 text-xs text-bb-status-danger-fg border-t border-bb-border">{err}</div> : null}
               </div>
             </div>
           ) : (
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
+            <div className="rounded-lg border border-bb-border overflow-hidden">
               <div className="max-h-[420px] overflow-auto">
                 <table className="w-full min-w-[1150px] table-fixed text-sm">
                   <colgroup>
@@ -1175,26 +1175,26 @@ export default function VendorDetailPageClient() {
                     <col style={{ width: 140 }} />
                     <col style={{ width: 160 }} />
                   </colgroup>
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-9">
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Payee</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Applied to</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Amount</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Applied</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Unapplied</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actions</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Date</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Payee</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Applied to</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Amount</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Applied</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Unapplied</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paymentsErr ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-red-700" colSpan={7}>
+                        <td className="px-3 py-4 text-sm text-bb-status-danger-fg" colSpan={7}>
                           <div>{paymentsErr}</div>
 
                           {paymentsErrIsClosed ? (
                             <a
-                              className="mt-1 inline-flex text-[11px] underline text-slate-700 hover:text-slate-900"
+                              className="mt-1 inline-flex text-[11px] underline text-bb-text hover:text-bb-text"
                               href={
                                 businessId
                                   ? `/closed-periods?businessId=${encodeURIComponent(businessId)}&focus=reopen`
@@ -1208,7 +1208,7 @@ export default function VendorDetailPageClient() {
                       </tr>
                     ) : vendorPayments.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={7}>
+                        <td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={7}>
                           No vendor-linked payments yet.
                         </td>
                       </tr>
@@ -1219,16 +1219,16 @@ export default function VendorDetailPageClient() {
                         const isPending = !!pendingAction;
 
                         return (
-                          <tr key={entryId} className="h-9 border-b border-slate-100 hover:bg-slate-50">
+                          <tr key={entryId} className="h-9 border-b border-bb-border-muted hover:bg-bb-table-row-hover">
                             <td className="px-3 text-sm tabular-nums">{String(p.date ?? "").slice(0, 10)}</td>
                             <td className="px-3 text-sm">
                               <span className="flex min-w-0 items-center gap-2">
-                                {isPending ? <Loader2 className="h-3 w-3 text-slate-400 animate-spin" /> : null}
+                                {isPending ? <Loader2 className="h-3 w-3 text-bb-text-subtle animate-spin" /> : null}
                                 <span className="truncate" title={String(p.payee ?? "")}>{p.payee}</span>
                                 {pendingAction === "APPLYING" ? (
-                                  <span className="shrink-0 text-[11px] text-slate-500">Applying…</span>
+                                  <span className="shrink-0 text-[11px] text-bb-text-muted">Applying…</span>
                                 ) : pendingAction === "UNAPPLYING" ? (
-                                  <span className="shrink-0 text-[11px] text-slate-500">Unapplying…</span>
+                                  <span className="shrink-0 text-[11px] text-bb-text-muted">Unapplying…</span>
                                 ) : null}
                               </span>
                             </td>
@@ -1239,7 +1239,7 @@ export default function VendorDetailPageClient() {
                                     <button
                                       key={String(x.bill_id)}
                                       type="button"
-                                      className="inline-flex h-6 max-w-[120px] items-center rounded-full border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-50"
+                                      className="inline-flex h-6 max-w-[120px] items-center rounded-full border border-bb-border bg-bb-surface-card px-2 text-[11px] text-bb-text hover:bg-bb-table-row-hover"
                                       title="View invoice"
                                       onClick={() => {
                                         setApTab("bills");
@@ -1254,10 +1254,10 @@ export default function VendorDetailPageClient() {
                                       <span className="truncate">{String(x.memo ?? "Invoice")}</span>
                                     </button>
                                   ))}
-                                  {p.applied_bills.length > 6 ? <span className="text-[11px] text-slate-500">+{p.applied_bills.length - 6}</span> : null}
+                                  {p.applied_bills.length > 6 ? <span className="text-[11px] text-bb-text-muted">+{p.applied_bills.length - 6}</span> : null}
                                 </div>
                               ) : (
-                                <span className="text-slate-500">—</span>
+                                <span className="text-bb-text-muted">—</span>
                               )}
                             </td>
                             <td className="px-3 text-sm text-right tabular-nums font-semibold">{formatUsdFromCents(centsFromAny(p.amount_cents))}</td>
@@ -1267,7 +1267,7 @@ export default function VendorDetailPageClient() {
                               <div className="inline-flex items-center gap-2">
                                 <button
                                   type="button"
-                                  className="text-xs text-slate-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="text-xs text-bb-text hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                                   disabled={isPending}
                                   title={isPending ? "This payment is updating…" : "Apply or unapply this payment"}
                                   onClick={() => {
@@ -1304,7 +1304,7 @@ export default function VendorDetailPageClient() {
           </CardHeader>
 
           <CardContent>
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
+            <div className="rounded-lg border border-bb-border overflow-hidden">
               <div className="max-h-[320px] overflow-auto">
                 <table className="w-full min-w-[1000px] table-fixed text-sm">
                   <colgroup>
@@ -1313,18 +1313,18 @@ export default function VendorDetailPageClient() {
                     <col style={{ width: 360 }} />
                     <col style={{ width: 260 }} />
                   </colgroup>
-                  <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                  <thead className="sticky top-0 bg-bb-table-header border-b border-bb-border">
                     <tr className="h-9">
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">File</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Date</th>
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Status</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Actions</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">File</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Date</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Status</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {invoiceUploads.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={4}>
+                        <td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={4}>
                           No uploads yet.
                         </td>
                       </tr>
@@ -1339,15 +1339,15 @@ export default function VendorDetailPageClient() {
                           String(meta?.parsed_status ?? "").toUpperCase() === "NEEDS_REVIEW";
 
                         return (
-                          <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50 align-top">
+                          <tr key={u.id} className="border-b border-bb-border-muted hover:bg-bb-table-row-hover align-top">
                             <td className="px-3 py-2 text-sm">
-                              <div className="truncate font-medium text-slate-900" title={String(u.original_filename ?? "")}>{u.original_filename}</div>
-                              <div className="mt-0.5 truncate text-[11px] text-slate-500" title={String(meta?.vendor_name ?? parsed?.vendor_name ?? vendor?.name ?? "Vendor")}>
+                              <div className="truncate font-medium text-bb-text" title={String(u.original_filename ?? "")}>{u.original_filename}</div>
+                              <div className="mt-0.5 truncate text-[11px] text-bb-text-muted" title={String(meta?.vendor_name ?? parsed?.vendor_name ?? vendor?.name ?? "Vendor")}>
                                 {String(meta?.vendor_name ?? parsed?.vendor_name ?? vendor?.name ?? "Vendor")}
                               </div>
                             </td>
 
-                            <td className="px-3 py-2 text-sm text-slate-600">
+                            <td className="px-3 py-2 text-sm text-bb-text-muted">
                               {String(u.created_at ?? "").slice(0, 10)}
                             </td>
 
@@ -1356,7 +1356,7 @@ export default function VendorDetailPageClient() {
                                 <span className={invoiceStatusClass(status.tone)}>{status.label}</span>
                               </div>
                               {detail ? (
-                                <div className="mt-1 truncate text-[11px] text-slate-500" title={detail}>{detail}</div>
+                                <div className="mt-1 truncate text-[11px] text-bb-text-muted" title={detail}>{detail}</div>
                               ) : null}
                             </td>
 
@@ -1364,7 +1364,7 @@ export default function VendorDetailPageClient() {
                               <div className="inline-flex flex-wrap items-center justify-end gap-2">
                                 <button
                                   type="button"
-                                  className="text-xs text-slate-700 hover:underline"
+                                  className="text-xs text-bb-text hover:underline"
                                   onClick={async () => {
                                     if (!businessId) return;
                                     const res: any = await apiFetch(`/v1/businesses/${businessId}/uploads/${u.id}/download`, { method: "GET" });
@@ -1378,7 +1378,7 @@ export default function VendorDetailPageClient() {
                                 {canRetryParse ? (
                                   <button
                                     type="button"
-                                    className="text-xs text-slate-700 hover:underline"
+                                    className="text-xs text-bb-text hover:underline"
                                     onClick={async () => {
                                       if (!businessId) return;
                                       try {
@@ -1402,7 +1402,7 @@ export default function VendorDetailPageClient() {
                                 {!meta?.bill_id ? (
                                   <button
                                     type="button"
-                                    className="text-xs text-slate-700 hover:underline"
+                                    className="text-xs text-bb-text hover:underline"
                                     onClick={() => {
                                       setErr(null);
                                       setErrIsClosed(false);
@@ -1418,7 +1418,7 @@ export default function VendorDetailPageClient() {
 
                                 <button
                                   type="button"
-                                  className="text-xs text-red-700 hover:underline"
+                                  className="text-xs text-bb-status-danger-fg hover:underline"
                                   onClick={async () => {
                                     if (!businessId) return;
                                     try {
@@ -1597,7 +1597,7 @@ export default function VendorDetailPageClient() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Invoice date</div>
+                <div className="text-[11px] text-bb-text-muted">Invoice date</div>
                 <AppDatePicker
                   value={billInvoiceDate}
                   onChange={setBillInvoiceDate}
@@ -1606,7 +1606,7 @@ export default function VendorDetailPageClient() {
               </div>
 
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Due date</div>
+                <div className="text-[11px] text-bb-text-muted">Due date</div>
                 <AppDatePicker
                   value={billDueDate}
                   onChange={setBillDueDate}
@@ -1616,9 +1616,9 @@ export default function VendorDetailPageClient() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Amount</div>
+              <div className="text-[11px] text-bb-text-muted">Amount</div>
               <input
-                className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={billAmount}
@@ -1627,24 +1627,24 @@ export default function VendorDetailPageClient() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Memo (optional)</div>
+              <div className="text-[11px] text-bb-text-muted">Memo (optional)</div>
               <input
-                className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                 value={billMemo}
                 onChange={(e) => setBillMemo(e.target.value)}
               />
             </div>
 
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Terms (optional)</div>
+              <div className="text-[11px] text-bb-text-muted">Terms (optional)</div>
               <input
-                className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                 value={billTerms}
                 onChange={(e) => setBillTerms(e.target.value)}
               />
             </div>
 
-            {err ? <div className="text-xs text-red-600">{err}</div> : null}
+            {err ? <div className="text-xs text-bb-status-danger-fg">{err}</div> : null}
           </div>
         </AppDialog>
 
@@ -1655,7 +1655,7 @@ export default function VendorDetailPageClient() {
           size="sm"
           footer={
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-slate-600">
+              <div className="text-xs text-bb-text-muted">
                 Vendor: <span className="font-medium">{vendor?.name ?? "—"}</span>
               </div>
 
@@ -1781,9 +1781,9 @@ export default function VendorDetailPageClient() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">From account</div>
+                <div className="text-[11px] text-bb-text-muted">From account</div>
                 <select
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                  className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                   value={vendorPayAccountId ?? ""}
                   onChange={(e) => setVendorPayAccountId(e.target.value || null)}
                 >
@@ -1796,7 +1796,7 @@ export default function VendorDetailPageClient() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">Date</div>
+                  <div className="text-[11px] text-bb-text-muted">Date</div>
                   <AppDatePicker
                     value={vendorPayDate}
                     onChange={setVendorPayDate}
@@ -1804,9 +1804,9 @@ export default function VendorDetailPageClient() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">Amount</div>
+                  <div className="text-[11px] text-bb-text-muted">Amount</div>
                   <input
-                    className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                    className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                     inputMode="decimal"
                     placeholder="0.00"
                     value={vendorPayAmount}
@@ -1833,9 +1833,9 @@ export default function VendorDetailPageClient() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Method</div>
+                <div className="text-[11px] text-bb-text-muted">Method</div>
                 <select
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                  className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                   value={vendorPayMethod}
                   onChange={(e) => setVendorPayMethod(e.target.value)}
                 >
@@ -1848,24 +1848,24 @@ export default function VendorDetailPageClient() {
               </div>
 
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Memo (optional)</div>
+                <div className="text-[11px] text-bb-text-muted">Memo (optional)</div>
                 <input
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                  className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                   value={vendorPayMemo}
                   onChange={(e) => setVendorPayMemo(e.target.value)}
                 />
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="px-3 py-2 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <div className="rounded-lg border border-bb-border overflow-hidden">
+              <div className="px-3 py-2 border-b border-bb-border bg-bb-table-header flex items-center justify-between">
                 <div>
-                  <div className="text-xs font-semibold text-slate-900">Allocate to open bills</div>
-                  <div className="text-[11px] text-slate-600">Auto-apply or enter amounts per bill.</div>
+                  <div className="text-xs font-semibold text-bb-text">Allocate to open bills</div>
+                  <div className="text-[11px] text-bb-text-muted">Auto-apply or enter amounts per bill.</div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600 whitespace-nowrap">Auto-apply oldest first</span>
+                  <span className="text-xs text-bb-text-muted whitespace-nowrap">Auto-apply oldest first</span>
                   <PillToggle
                     checked={vendorPayAutoApply}
                     onCheckedChange={(on) => {
@@ -1894,25 +1894,25 @@ export default function VendorDetailPageClient() {
                     <col style={{ width: 140 }} />
                     <col style={{ width: 150 }} />
                   </colgroup>
-                  <thead className="sticky top-0 bg-white border-b border-slate-200">
+                  <thead className="sticky top-0 bg-bb-surface-card border-b border-bb-border">
                     <tr className="h-9">
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Apply</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Invoice</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Outstanding</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Apply</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bills.filter((b: any) => String(b.status) === "OPEN" || String(b.status) === "PARTIAL").length === 0 ? (
-                      <tr><td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>No open bills.</td></tr>
+                      <tr><td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={3}>No open bills.</td></tr>
                     ) : (
                       bills
                         .filter((b: any) => String(b.status) === "OPEN" || String(b.status) === "PARTIAL")
                         .map((b: any) => (
-                          <tr key={b.id} className="h-9 border-b border-slate-100">
+                          <tr key={b.id} className="h-9 border-b border-bb-border-muted">
                             <td className="px-3 text-sm tabular-nums">
                               <div className="flex min-w-0 items-center gap-1">
                                 <span className="shrink-0">{String(b.invoice_date ?? "").slice(0, 10)}</span>
-                                <span className="truncate text-xs text-slate-500" title={String(b.memo ?? "")}>({b.memo ?? "—"})</span>
+                                <span className="truncate text-xs text-bb-text-muted" title={String(b.memo ?? "")}>({b.memo ?? "—"})</span>
                               </div>
                             </td>
                             <td className="px-3 text-right text-sm tabular-nums font-semibold">
@@ -1920,7 +1920,7 @@ export default function VendorDetailPageClient() {
                             </td>
                             <td className="px-3 text-right">
                               <input
-                                className="h-7 w-[120px] text-right text-xs rounded-md border border-slate-200 bg-white px-2 tabular-nums disabled:bg-slate-50"
+                                className="h-7 w-[120px] text-right text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2 tabular-nums disabled:bg-bb-table-header"
                                 placeholder="0.00"
                                 value={applyAmounts[String(b.id)] ?? ""}
                                 onChange={(e) => setApplyAmounts((m) => ({ ...m, [String(b.id)]: e.target.value }))}
@@ -1934,7 +1934,7 @@ export default function VendorDetailPageClient() {
                 </table>
               </div>
 
-              <div className="px-3 py-2 border-t border-slate-200 bg-white text-xs">
+              <div className="px-3 py-2 border-t border-bb-border bg-bb-surface-card text-xs">
                 {(() => {
                   const amt = Number(vendorPayAmount);
                   const totalCents = Number.isFinite(amt) && amt > 0 ? BigInt(Math.round(amt * 100)) : 0n;
@@ -1955,12 +1955,12 @@ export default function VendorDetailPageClient() {
 
                   return (
                     <div className="flex items-center justify-between">
-                      <div className="text-slate-600">
+                      <div className="text-bb-text-muted">
                         Total applied: <span className="font-semibold tabular-nums">{formatUsdFromCents(applied)}</span>
                         {" "}• Payment: <span className="font-semibold tabular-nums">{formatUsdFromCents(totalCents)}</span>
                         {" "}• Advance: <span className="font-semibold tabular-nums">{formatUsdFromCents(advance)}</span>
                       </div>
-                      {remaining < 0n ? <div className="text-red-700">Over-applied.</div> : null}
+                      {remaining < 0n ? <div className="text-bb-status-danger-fg">Over-applied.</div> : null}
                     </div>
                   );
                 })()}
@@ -1976,7 +1976,7 @@ export default function VendorDetailPageClient() {
           size="sm"
           footer={
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-slate-600">
+              <div className="text-xs text-bb-text-muted">
                 Vendor: <span className="font-medium">{vendor?.name ?? "—"}</span>
               </div>
 
@@ -2027,7 +2027,7 @@ export default function VendorDetailPageClient() {
 
                 <Button
                   variant="outline"
-                  className="h-7 px-3 text-xs text-red-700 border-red-200 hover:bg-red-50"
+                  className="h-7 px-3 text-xs text-bb-status-danger-fg border-bb-status-danger-border hover:bg-bb-status-danger-bg"
                   disabled={applyActionLoading || !businessId || !applyAccountId || !paymentEntryId}
                   onClick={async () => {
                     if (!businessId || !applyAccountId || !paymentEntryId) return;
@@ -2150,9 +2150,9 @@ export default function VendorDetailPageClient() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Account</div>
+                <div className="text-[11px] text-bb-text-muted">Account</div>
                 <select
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                  className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                   value={applyAccountId ?? ""}
                   onChange={(e) => setApplyAccountId(e.target.value || null)}
                 >
@@ -2165,9 +2165,9 @@ export default function VendorDetailPageClient() {
               </div>
 
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">Payment</div>
+                <div className="text-[11px] text-bb-text-muted">Payment</div>
                 <select
-                  className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                  className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                   value={paymentEntryId ?? ""}
                   onChange={(e) => {
                     const id = e.target.value || null;
@@ -2235,10 +2235,10 @@ export default function VendorDetailPageClient() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
-              <div className="px-3 py-2 border-b border-slate-200 bg-slate-50">
-                <div className="text-xs font-semibold text-slate-900">Allocate to open bills</div>
-                <div className="text-[11px] text-slate-600">Enter amounts to apply per bill (USD).</div>
+            <div className="rounded-lg border border-bb-border overflow-hidden">
+              <div className="px-3 py-2 border-b border-bb-border bg-bb-table-header">
+                <div className="text-xs font-semibold text-bb-text">Allocate to open bills</div>
+                <div className="text-[11px] text-bb-text-muted">Enter amounts to apply per bill (USD).</div>
               </div>
 
               <div className="max-h-[360px] overflow-auto">
@@ -2248,17 +2248,17 @@ export default function VendorDetailPageClient() {
                     <col style={{ width: 140 }} />
                     <col style={{ width: 150 }} />
                   </colgroup>
-                  <thead className="sticky top-0 bg-white border-b border-slate-200">
+                  <thead className="sticky top-0 bg-bb-surface-card border-b border-bb-border">
                     <tr className="h-9">
-                      <th className="px-3 text-left text-[11px] font-semibold text-slate-600">Invoice</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Outstanding</th>
-                      <th className="px-3 text-right text-[11px] font-semibold text-slate-600">Apply</th>
+                      <th className="px-3 text-left text-[11px] font-semibold text-bb-text-muted">Invoice</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Outstanding</th>
+                      <th className="px-3 text-right text-[11px] font-semibold text-bb-text-muted">Apply</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bills.filter((b: any) => String(b.status) === "OPEN" || String(b.status) === "PARTIAL").length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-600" colSpan={3}>No open bills.</td>
+                        <td className="px-3 py-4 text-sm text-bb-text-muted" colSpan={3}>No open bills.</td>
                       </tr>
                     ) : (
                       bills
@@ -2268,11 +2268,11 @@ export default function VendorDetailPageClient() {
                           const key = String(b.id);
 
                           return (
-                            <tr key={b.id} className="h-9 border-b border-slate-100">
+                            <tr key={b.id} className="h-9 border-b border-bb-border-muted">
                               <td className="px-3 text-sm tabular-nums">
                                 <div className="flex min-w-0 items-center gap-1">
                                   <span className="shrink-0">{String(b.invoice_date ?? "").slice(0, 10)}</span>
-                                  <span className="truncate text-xs text-slate-500" title={String(b.memo ?? "")}>({b.memo ?? "—"})</span>
+                                  <span className="truncate text-xs text-bb-text-muted" title={String(b.memo ?? "")}>({b.memo ?? "—"})</span>
                                 </div>
                               </td>
                               <td className="px-3 text-right text-sm tabular-nums font-semibold">
@@ -2280,7 +2280,7 @@ export default function VendorDetailPageClient() {
                               </td>
                               <td className="px-3 text-right">
                                 <input
-                                  className="h-7 w-[120px] text-right text-xs rounded-md border border-slate-200 bg-white px-2 tabular-nums"
+                                  className="h-7 w-[120px] text-right text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2 tabular-nums"
                                   placeholder="0.00"
                                   value={applyAmounts[key] ?? ""}
                                   onChange={(e) => setApplyAmounts((m) => ({ ...m, [key]: e.target.value }))}
@@ -2294,7 +2294,7 @@ export default function VendorDetailPageClient() {
                 </table>
               </div>
 
-              <div className="px-3 py-2 border-t border-slate-200 bg-white">
+              <div className="px-3 py-2 border-t border-bb-border bg-bb-surface-card">
                 {(() => {
                   const entry = [...paymentEntries, ...suggestedEntries].find((e: any) => String(e.id) === String(paymentEntryId));
                   const entryAbs = entry ? absBigint(centsFromAny(entry.amount_cents)) : 0n;
@@ -2319,13 +2319,13 @@ export default function VendorDetailPageClient() {
 
                   return (
                     <div className="flex items-center justify-between">
-                      <div className="text-xs text-slate-600">
+                      <div className="text-xs text-bb-text-muted">
                         Total applied: <span className="font-semibold tabular-nums">{formatUsdFromCents(total)}</span>
                         {entry ? (
                           <>
                             {" "}• Payment amount: <span className="font-semibold tabular-nums">{formatUsdFromCents(entryAbs)}</span>
                             {" "}• Remaining:{" "}
-                            <span className={"font-semibold tabular-nums " + (remaining < 0n ? "text-red-700" : "text-slate-900")}>
+                            <span className={"font-semibold tabular-nums " + (remaining < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral")}>
                               {formatUsdFromCents(remaining)}
                             </span>
                           </>
@@ -2333,7 +2333,7 @@ export default function VendorDetailPageClient() {
                       </div>
 
                       {invalid || remaining < 0n ? (
-                        <div className="text-xs text-red-700">Fix allocation amounts (over-applied).</div>
+                        <div className="text-xs text-bb-status-danger-fg">Fix allocation amounts (over-applied).</div>
                       ) : null}
                     </div>
                   );
@@ -2404,9 +2404,9 @@ export default function VendorDetailPageClient() {
         >
           <div className="space-y-3">
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Range</div>
+              <div className="text-[11px] text-bb-text-muted">Range</div>
               <select
-                className="h-8 w-full text-xs rounded-md border border-slate-200 bg-white px-2"
+                className="h-8 w-full text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
                 value={statementPreset}
                 onChange={(e) => {
                   const v = e.target.value as any;
@@ -2430,7 +2430,7 @@ export default function VendorDetailPageClient() {
 
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">From</div>
+                <div className="text-[11px] text-bb-text-muted">From</div>
                 <AppDatePicker
                   value={statementFrom}
                   onChange={setStatementFrom}
@@ -2439,7 +2439,7 @@ export default function VendorDetailPageClient() {
                 />
               </div>
               <div className="space-y-1">
-                <div className="text-[11px] text-slate-600">To</div>
+                <div className="text-[11px] text-bb-text-muted">To</div>
                 <AppDatePicker
                   value={statementTo}
                   onChange={setStatementTo}
@@ -2449,7 +2449,7 @@ export default function VendorDetailPageClient() {
               </div>
             </div>
 
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-bb-text-muted">
               CSV includes bills and applied totals for the selected range.
             </div>
           </div>
@@ -2481,7 +2481,7 @@ export default function VendorDetailPageClient() {
               </Button>
 
               <Button
-                className="h-7 px-3 text-xs bg-rose-600 hover:bg-rose-700"
+                className="h-7 px-3 text-xs bg-destructive hover:bg-destructive/90"
                 disabled={deleteBusy || deleteConfirm.trim().toUpperCase() !== "DELETE" || !businessId || !vendorId}
                 onClick={async () => {
                   if (!businessId || !vendorId) return;
@@ -2506,14 +2506,14 @@ export default function VendorDetailPageClient() {
             </div>
           }
         >
-          <div className="space-y-3 text-sm text-slate-700">
-            <div className="font-medium text-slate-900">{vendor?.name || "This vendor"}</div>
-            <div className="text-xs text-slate-600">
+          <div className="space-y-3 text-sm text-bb-text">
+            <div className="font-medium text-bb-text">{vendor?.name || "This vendor"}</div>
+            <div className="text-xs text-bb-text-muted">
               Delete only works when this vendor has no linked bills, ledger entries, or invoice uploads.
             </div>
 
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Type DELETE to continue</div>
+              <div className="text-[11px] text-bb-text-muted">Type DELETE to continue</div>
               <Input
                 className="h-8 text-xs"
                 value={deleteConfirm}
@@ -2523,7 +2523,7 @@ export default function VendorDetailPageClient() {
               />
             </div>
 
-            {deleteErr ? <div className="text-xs text-red-600">{deleteErr}</div> : null}
+            {deleteErr ? <div className="text-xs text-bb-status-danger-fg">{deleteErr}</div> : null}
           </div>
         </AppDialog>
 
@@ -2545,19 +2545,19 @@ export default function VendorDetailPageClient() {
         >
           <div className="space-y-3">
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Name</div>
+              <div className="text-[11px] text-bb-text-muted">Name</div>
               <Input className="h-7 text-xs" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
 
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Notes</div>
+              <div className="text-[11px] text-bb-text-muted">Notes</div>
               <Input className="h-7 text-xs" value={notes} onChange={(e) => setNotes(e.target.value)} />
             </div>
 
             <div className="space-y-1">
-              <div className="text-[11px] text-slate-600">Default category</div>
+              <div className="text-[11px] text-bb-text-muted">Default category</div>
               <select
-                className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                className="h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs"
                 value={defaultCategoryId}
                 onChange={(e) => setDefaultCategoryId(e.target.value)}
               >
@@ -2647,12 +2647,12 @@ export default function VendorDetailPageClient() {
         }
       >
         <div className="space-y-3">
-          <div className="text-sm text-slate-700">
+          <div className="text-sm text-bb-text">
             This will void the bill and preserve its audit history.
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700">Reason (optional)</label>
+            <label className="text-xs font-medium text-bb-text">Reason (optional)</label>
             <Input
               value={billVoidReason}
               onChange={(e) => setBillVoidReason(e.target.value)}
