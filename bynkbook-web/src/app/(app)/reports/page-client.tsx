@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { PillToggle } from "@/components/primitives/PillToggle";
-import { ringFocus } from "@/components/primitives/tokens";
+import { tabButtonClass } from "@/components/primitives/tokens";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
@@ -917,10 +917,7 @@ export default function ReportsPageClient() {
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key as TabKey)}
-                className={`h-7 px-3 rounded-md text-xs font-medium transition ${tab === t.key
-                  ? "bg-foreground text-background shadow-sm"
-                  : "text-bb-text-muted hover:bg-bb-table-row-hover"
-                  }`}
+                className={tabButtonClass(tab === t.key)}
               >
                 {t.label}
               </button>

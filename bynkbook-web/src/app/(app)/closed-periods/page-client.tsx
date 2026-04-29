@@ -13,6 +13,7 @@ import { Lock } from "lucide-react";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { tabButtonClass } from "@/components/primitives/tokens";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -346,9 +347,7 @@ export default function ClosedPeriodsPageClient() {
                               setConfirmOverride(false);
                               setOverride(false);
                             }}
-                            className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                              mode === t.k ? "bg-primary text-primary-foreground" : "text-bb-text-muted hover:bg-bb-table-row-hover"
-                            }`}
+                            className={tabButtonClass(mode === t.k)}
                           >
                             {t.label}
                           </button>

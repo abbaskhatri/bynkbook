@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { previewClosedPeriods, closeThroughDate } from "@/lib/api/closedPeriods";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { tabButtonClass } from "@/components/primitives/tokens";
 
 type RangeMode = "MONTH" | "WEEK" | "CUSTOM";
 
@@ -191,9 +192,7 @@ export function ClosePeriodDialog(props: {
                 setErr(null);
                 setConfirmOverride(false);
               }}
-              className={`h-7 px-3 rounded-md text-xs font-medium transition ${
-                mode === t.k ? "bg-bb-text text-bb-text-inverse" : "text-bb-text-muted hover:bg-bb-table-row-hover"
-              }`}
+              className={tabButtonClass(mode === t.k)}
             >
               {t.label}
             </button>
