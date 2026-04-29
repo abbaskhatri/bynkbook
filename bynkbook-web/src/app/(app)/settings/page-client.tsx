@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -47,10 +47,11 @@ import { Label } from "@/components/ui/label";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow } from "@/components/ui/table";
-import { Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off } from "lucide-react";
+import { Check, Monitor, Moon, Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off, Sun } from "lucide-react";
 import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
 import { PillToggle } from "@/components/primitives/PillToggle";
+import { useThemePreference, type ThemePreference } from "@/lib/theme";
 
 function todayYmd() {
   const d = new Date();
@@ -66,6 +67,16 @@ const currency = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+
+const themeOptions: Array<{
+  value: ThemePreference;
+  label: string;
+  icon: ReactNode;
+}> = [
+  { value: "light", label: "Light", icon: <Sun className="h-4 w-4" /> },
+  { value: "dark", label: "Dark", icon: <Moon className="h-4 w-4" /> },
+  { value: "system", label: "System", icon: <Monitor className="h-4 w-4" /> },
+];
 
 function formatAccountType(t: AccountType) {
   switch (t) {
@@ -149,6 +160,7 @@ export default function SettingsPageClient() {
   const sp = useSearchParams();
   const spKey = sp.toString(); // stable dependency key (prevents dynamic deps array issues)
   const qc = useQueryClient();
+  const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
 
   // Phase 1: per-surface reload triggers (no router.refresh storms)
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -2996,6 +3008,49 @@ export default function SettingsPageClient() {
             <CardContent className="text-sm">
               <div className="font-medium text-foreground">{currentUserName || currentUserEmail || "—"}</div>
               <div className="text-xs text-muted-foreground">{currentUserEmail || "—"}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="space-y-0 pb-3">
+              <div className="min-w-0">
+                <CardTitle>Appearance</CardTitle>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Choose how Bynkbook appears on this device.
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {themeOptions.map((option) => {
+                  const selected = themePreference === option.value;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={selected}
+                      className={[
+                        "flex h-10 items-center justify-between rounded-md border px-3 text-sm font-medium transition-colors",
+                        selected
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-bb-border bg-bb-surface-card text-foreground hover:bg-bb-table-row-hover",
+                      ].join(" ")}
+                      onClick={() => setThemePreference(option.value)}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className={selected ? "text-primary" : "text-muted-foreground"}>{option.icon}</span>
+                        <span className="truncate">{option.label}</span>
+                      </span>
+
+                      {selected ? <Check className="h-4 w-4 shrink-0" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="text-xs text-muted-foreground">Saved on this browser.</div>
             </CardContent>
           </Card>
 
