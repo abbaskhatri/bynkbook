@@ -47,8 +47,8 @@ const NAV_ICON_CLASS = "h-5 w-5";
 
 function AuthRedirectScreen() {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
-      <div className="w-full max-w-sm rounded-md border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="min-h-screen bg-background flex items-center justify-center px-6">
+      <div className="w-full max-w-sm rounded-md border border-bb-border bg-bb-surface-card p-6 shadow-sm">
         <BrandLogo variant="full" size="md" priority className="mb-6" />
         <Skeleton className="h-5 w-40" />
         <Skeleton className="mt-3 h-4 w-56" />
@@ -59,11 +59,11 @@ function AuthRedirectScreen() {
 
 function NoWorkspaceRedirectScreen() {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
-      <div className="w-full max-w-sm rounded-md border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="min-h-screen bg-background flex items-center justify-center px-6">
+      <div className="w-full max-w-sm rounded-md border border-bb-border bg-bb-surface-card p-6 shadow-sm">
         <BrandLogo variant="full" size="md" priority className="mb-6" />
-        <div className="text-sm font-semibold text-slate-950">Opening business setup</div>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <div className="text-sm font-semibold text-foreground">Opening business setup</div>
+        <p className="mt-2 text-sm leading-6 text-foreground/70">
           You need one business workspace before entering the app.
         </p>
         <Skeleton className="mt-5 h-9 w-full rounded-md" />
@@ -520,7 +520,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           <div key={group.group} className="space-y-2">
             {/* Group label (hidden when collapsed to keep width stable) */}
             {!isCollapsed ? (
-              <div className="px-1 text-[10px] uppercase tracking-[0.16em] text-slate-500 transition-opacity duration-200">
+              <div className="px-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-200">
                 {group.group}
               </div>
             ) : null}
@@ -557,11 +557,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         <span>{item.icon}</span>
 
                         {showIssues ? (
-                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-amber-50 px-1 text-[10px] font-semibold text-amber-800 border border-amber-200">
+                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-bb-status-warning-bg px-1 text-[10px] font-semibold text-bb-status-warning-fg border border-bb-status-warning-border">
                             {attnIssues}
                           </span>
                         ) : showIssuesSkeleton ? (
-                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1 animate-pulse" />
+                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-bb-border bg-muted px-1 animate-pulse" />
                         ) : null}
                       </Link>
                     </Button>
@@ -582,14 +582,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                       className="flex w-full items-center gap-2 transition-all duration-200"
                       onClick={onNavigate}
                     >
-                      <span className="shrink-0 text-slate-600">{item.icon}</span>
+                      <span className="shrink-0 text-foreground/70">{item.icon}</span>
                       <span className="truncate">{item.label}</span>
                       {item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0 ? (
-                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-amber-50 px-1.5 text-[11px] font-semibold text-amber-800 border border-amber-200">
+                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-bb-status-warning-bg px-1.5 text-[11px] font-semibold text-bb-status-warning-fg border border-bb-status-warning-border">
                           {attnIssues}
                         </span>
                       ) : item.label === "Issues" && issuesCountQ.isLoading ? (
-                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-slate-200 bg-slate-100 px-1.5 animate-pulse" />
+                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-bb-border bg-muted px-1.5 animate-pulse" />
                       ) : null}
                     </Link>
                   </Button>
@@ -598,7 +598,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             </div>
 
             {/* Divider between groups */}
-            <div className="border-t border-slate-200 pt-2" />
+            <div className="border-t border-bb-border pt-2" />
           </div>
         );
       })}
@@ -609,9 +609,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   if (showChrome && authChecked && isAuthed && !pathname.startsWith("/create-business")) {
     if (businessesQ.isLoading) {
       return (
-        <div className="min-h-screen flex bg-slate-50">
+        <div className="min-h-screen flex bg-background">
           {/* Sidebar skeleton */}
-          <div className="hidden md:block w-64 border-r border-slate-200 bg-white p-3 space-y-3">
+          <div className="hidden md:block w-64 border-r border-bb-border bg-bb-sidebar-bg p-3 space-y-3">
             <Skeleton className="h-6 w-36" />
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-full" />
@@ -659,16 +659,16 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="min-h-screen flex bg-background">
       {/* Sidebar (sticky) */}
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "border-r border-slate-200 bg-white/95 backdrop-blur hidden md:flex flex-col sticky top-0 h-screen",
+          "border-r border-bb-border bg-bb-sidebar-bg/95 backdrop-blur hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
-        <div className="h-14 px-3 border-b border-slate-200 flex items-center bg-white/95">
+        <div className="h-14 px-3 border-b border-bb-border flex items-center bg-bb-sidebar-bg/95">
           <div
             className={
               collapsed
@@ -688,7 +688,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         {renderNavGroups(collapsed)}
 
-        <div className="p-3 border-t border-slate-200 bg-white/95">
+        <div className="p-3 border-t border-bb-border bg-bb-sidebar-bg/95">
           <Button
             variant="outline"
             size="sm"
@@ -709,12 +709,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b border-slate-200 flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-white">
+        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
             <button
               type="button"
-              className="md:hidden h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+              className="md:hidden h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
               title="Open navigation"
               aria-label="Open navigation"
               onClick={openMobileNav}
@@ -725,7 +725,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             <div className="min-w-0 max-w-full overflow-hidden">
               <Pill title="Business">
                 <span className="inline-flex items-center gap-2 min-w-0">
-                  <Building2 className="h-4 w-4 text-slate-500 shrink-0" />
+                  <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
                   <span className="truncate">
                     {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
                   </span>
@@ -751,7 +751,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             <div className="relative" ref={activityRef}>
               <button
                 type="button"
-                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Activity"
                 onClick={() => {
                   // Close other menu; toggle activity
@@ -771,13 +771,13 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {activityOpen ? (
-                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
-                  <div className="px-3 h-10 flex items-center justify-between border-b border-slate-200 bg-slate-50">
-                    <div className="text-xs font-semibold text-slate-700">Activity</div>
+                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-md border border-bb-border bg-bb-surface-elevated shadow-md overflow-hidden z-50">
+                  <div className="px-3 h-10 flex items-center justify-between border-b border-bb-border bg-bb-surface-soft">
+                    <div className="text-xs font-semibold text-foreground/80">Activity</div>
 
                     <button
                       type="button"
-                      className="text-xs text-slate-600 hover:text-slate-900"
+                      className="text-xs text-foreground/70 hover:text-foreground"
                       onClick={() => {
                         setActivityOpen(false);
 
@@ -794,11 +794,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   <div className="max-h-[calc(100dvh-5rem)] sm:max-h-[420px] overflow-auto">
                     {/* Error line (never hides last-good list) */}
                     {activityErr ? (
-                      <div className="px-3 py-2 text-xs text-rose-700 border-b border-slate-100 flex items-center justify-between gap-2">
+                      <div className="px-3 py-2 text-xs text-bb-status-danger-fg border-b border-bb-border-muted flex items-center justify-between gap-2">
                         <span>{activityErr}</span>
                         <button
                           type="button"
-                          className="text-xs text-slate-700 hover:text-slate-900"
+                          className="text-xs text-foreground/80 hover:text-foreground"
                           onClick={() => ensureActivityFresh(true)}
                         >
                           Retry
@@ -817,9 +817,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         ))}
                       </div>
                     ) : !activityItems || activityItems.length === 0 ? (
-                      <div className="p-3 text-sm text-slate-600">No activity yet.</div>
+                      <div className="p-3 text-sm text-foreground/70">No activity yet.</div>
                     ) : (
-                      <div className="divide-y divide-slate-100">
+                      <div className="divide-y divide-bb-border-muted">
                         {activityItems.slice(0, 10).map((it) => {
                           const who =
                             currentUserId && String(it.actor_user_id) === String(currentUserId)
@@ -843,15 +843,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                             <div key={it.id} className="px-3 py-2">
                               <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-slate-900 truncate">{evt}</div>
-                                  <div className="mt-0.5 text-[11px] text-slate-500 truncate">
+                                  <div className="text-sm font-semibold text-foreground truncate">{evt}</div>
+                                  <div className="mt-0.5 text-[11px] text-muted-foreground truncate">
                                     {who} • {when}
                                   </div>
                                 </div>
 
                                 {/* Keep last-good visible while refresh happens (no empty flash) */}
                                 {activityLoading ? (
-                                  <span className="text-[11px] text-slate-400">Updating…</span>
+                                  <span className="text-[11px] text-bb-text-subtle">Updating…</span>
                                 ) : null}
                               </div>
                             </div>
@@ -867,7 +867,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             <div className="relative" ref={userMenuRef}>
               <button
                 type="button"
-                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Account"
                 onClick={() => setUserMenuOpen((v) => !v)}
               >
@@ -875,37 +875,37 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {userMenuOpen ? (
-                <div className="absolute right-0 mt-2 w-44 rounded-md border border-slate-200 bg-white shadow-md overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-44 rounded-md border border-bb-border bg-bb-surface-elevated shadow-md overflow-hidden z-50">
                   <Link
                     href="/settings"
-                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/80 hover:bg-bb-table-row-hover"
                     onClick={() => setUserMenuOpen(false)}
                   >
-                    <Settings className="h-4 w-4 text-slate-500" />
+                    <Settings className="h-4 w-4 text-muted-foreground" />
                     Settings
                   </Link>
 
                   <Link
                     href="/privacy"
-                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/80 hover:bg-bb-table-row-hover"
                     onClick={() => setUserMenuOpen(false)}
                   >
-                    <HelpCircle className="h-4 w-4 text-slate-500" />
+                    <HelpCircle className="h-4 w-4 text-muted-foreground" />
                     Privacy
                   </Link>
 
                   <Link
                     href="/terms"
-                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/80 hover:bg-bb-table-row-hover"
                     onClick={() => setUserMenuOpen(false)}
                   >
-                    <FileText className="h-4 w-4 text-slate-500" />
+                    <FileText className="h-4 w-4 text-muted-foreground" />
                     Terms
                   </Link>
 
                   <button
                     type="button"
-                    className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                    className="w-full text-left px-3 py-2 text-sm text-bb-status-danger-fg hover:bg-bb-status-danger-bg"
                     onClick={async () => {
                       setUserMenuOpen(false);
                       await onSignOut();
@@ -929,17 +929,17 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         <div className="fixed inset-0 z-50 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-950/45"
+            className="absolute inset-0 bg-bb-overlay"
             aria-label="Close navigation"
             onClick={() => setMobileNavOpen(false)}
           />
 
-          <aside className="relative flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-slate-200 bg-white shadow-xl">
-            <div className="h-14 px-3 border-b border-slate-200 flex items-center justify-between bg-white">
+          <aside className="relative flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-bb-border bg-bb-sidebar-bg text-bb-sidebar-fg shadow-xl">
+            <div className="h-14 px-3 border-b border-bb-border flex items-center justify-between bg-bb-sidebar-bg">
               <BrandLogo variant="full" size="md" priority className="translate-y-[1px]" />
               <button
                 type="button"
-                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Close navigation"
                 aria-label="Close navigation"
                 onClick={() => setMobileNavOpen(false)}
