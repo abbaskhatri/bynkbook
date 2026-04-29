@@ -227,8 +227,8 @@ export default function MobilePageClient() {
     return total.toString();
   }, [apVendors]);
 
-  const categoryHref = hrefWith({ path: "/category-review", businessId, accountId });
-  const issuesHref = hrefWith({ path: "/issues", businessId, accountId });
+  const categoryHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
+  const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
   const ledgerHref = hrefWith({ path: "/ledger", businessId, accountId });
   const vendorsHref = hrefWith({ path: "/vendors", businessId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
