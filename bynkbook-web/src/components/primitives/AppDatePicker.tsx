@@ -192,11 +192,11 @@ export function AppDatePicker({
                 className={[
                     inputH7,
                     "pl-8 pr-8 text-left flex items-center",
-                    disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-slate-50",
+                    disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-bb-table-row-hover",
                 ].join(" ")}
             >
-                <CalendarDays className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <span className={value ? "text-slate-900" : "text-slate-400"}>
+                <CalendarDays className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-bb-text-subtle" />
+                <span className={value ? "text-bb-text" : "text-bb-input-placeholder"}>
                     {formatPlaceholderOrPretty(value, placeholder)}
                 </span>
             </button>
@@ -207,7 +207,7 @@ export function AppDatePicker({
                     className={[
                         "absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md",
                         "inline-flex items-center justify-center",
-                        "text-slate-500 hover:bg-slate-50",
+                        "text-bb-text-muted hover:bg-bb-table-row-hover",
                         ringFocus,
                         disabled ? "opacity-50 cursor-not-allowed" : "",
                     ].join(" ")}
@@ -249,14 +249,14 @@ export function AppDatePicker({
                         <div
                             ref={popoverRef}
                             style={{ position: "fixed", left: popoverPos.left, top: popoverPos.top, width: 320, zIndex: 60 }}
-                            className="rounded-2xl border border-slate-200 bg-white shadow-xl p-3"
+                            className="rounded-2xl border border-bb-border bg-bb-dialog-bg text-bb-text shadow-xl p-3"
                         >
                             {/* Header */}
                             <div className="grid grid-cols-[40px_1fr_40px] items-center mb-2">
                                 <button
                                     type="button"
                                     className={[
-                                        "h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50",
+                                        "h-9 w-9 rounded-xl border border-bb-border bg-bb-surface-elevated hover:bg-bb-table-row-hover",
                                         "inline-flex items-center justify-center",
                                         ringFocus,
                                     ].join(" ")}
@@ -264,15 +264,15 @@ export function AppDatePicker({
                                     aria-label="Previous month"
                                     title="Previous month"
                                 >
-                                    <ChevronLeft className="h-5 w-5 text-slate-700" />
+                                    <ChevronLeft className="h-5 w-5 text-bb-text-muted" />
                                 </button>
 
-                                <div className="text-base font-semibold text-slate-900 text-center">{monthLabel}</div>
+                                <div className="text-base font-semibold text-bb-text text-center">{monthLabel}</div>
 
                                 <button
                                     type="button"
                                     className={[
-                                        "h-9 w-9 rounded-xl border border-slate-200 bg-white hover:bg-slate-50",
+                                        "h-9 w-9 rounded-xl border border-bb-border bg-bb-surface-elevated hover:bg-bb-table-row-hover",
                                         "inline-flex items-center justify-center",
                                         ringFocus,
                                     ].join(" ")}
@@ -280,12 +280,12 @@ export function AppDatePicker({
                                     aria-label="Next month"
                                     title="Next month"
                                 >
-                                    <ChevronRight className="h-5 w-5 text-slate-700" />
+                                    <ChevronRight className="h-5 w-5 text-bb-text-muted" />
                                 </button>
                             </div>
 
                             {/* Weekdays */}
-                            <div className="grid grid-cols-7 text-[11px] font-medium text-slate-500 mb-1">
+                            <div className="grid grid-cols-7 text-[11px] font-medium text-bb-text-muted mb-1">
                                 <div className="text-center">Su</div>
                                 <div className="text-center">Mo</div>
                                 <div className="text-center">Tu</div>
@@ -307,10 +307,10 @@ export function AppDatePicker({
                                             type="button"
                                             className={[
                                                 "h-10 w-10 rounded-xl text-sm flex items-center justify-center",
-                                                inMonth ? "text-slate-900" : "text-slate-300",
-                                                !disabled ? "hover:bg-violet-50" : "",
-                                                isToday ? "bg-violet-50 ring-1 ring-violet-200" : "",
-                                                isSelected ? "bg-violet-600 text-white hover:bg-violet-600" : "",
+                                                inMonth ? "text-bb-text" : "text-bb-text-subtle",
+                                                !disabled ? "hover:bg-primary/10" : "",
+                                                isToday ? "bg-primary/10 ring-1 ring-primary/25" : "",
+                                                isSelected ? "bg-primary text-primary-foreground hover:bg-primary" : "",
                                                 ringFocus,
                                             ].join(" ")}
                                             disabled={disabled}
@@ -332,7 +332,7 @@ export function AppDatePicker({
                             <div className="mt-2 flex items-center justify-between">
                                 <button
                                     type="button"
-                                    className={["h-8 px-2 text-xs rounded-md hover:bg-slate-50", ringFocus].join(" ")}
+                                    className={["h-8 px-2 text-xs rounded-md text-bb-text-muted hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                     onClick={() => {
                                         onChange("");
                                         setOpen(false);
@@ -344,7 +344,7 @@ export function AppDatePicker({
 
                                 <button
                                     type="button"
-                                    className={["h-8 px-2 text-xs rounded-md hover:bg-slate-50", ringFocus].join(" ")}
+                                    className={["h-8 px-2 text-xs rounded-md text-bb-text-muted hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                     onClick={() => {
                                         onChange(dateToYmdLocal(today));
                                         setViewMonth(startOfMonth(today));

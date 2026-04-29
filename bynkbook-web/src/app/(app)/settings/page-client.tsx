@@ -48,7 +48,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow } from "@/components/ui/table";
 import { Check, Monitor, Moon, Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off, Sun } from "lucide-react";
-import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
+import { inputH7, ringFocus, selectTriggerClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
 import { PillToggle } from "@/components/primitives/PillToggle";
 import { useThemePreference, type ThemePreference } from "@/lib/theme";
@@ -3033,14 +3033,15 @@ export default function SettingsPageClient() {
                       aria-pressed={selected}
                       className={[
                         "flex h-10 items-center justify-between rounded-md border px-3 text-sm font-medium transition-colors",
+                        ringFocus,
                         selected
-                          ? "border-primary bg-primary/10 text-primary"
+                          ? "border-primary bg-primary text-primary-foreground shadow-sm"
                           : "border-bb-border bg-bb-surface-card text-foreground hover:bg-bb-table-row-hover",
                       ].join(" ")}
                       onClick={() => setThemePreference(option.value)}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className={selected ? "text-primary" : "text-muted-foreground"}>{option.icon}</span>
+                        <span className={selected ? "text-primary-foreground" : "text-muted-foreground"}>{option.icon}</span>
                         <span className="truncate">{option.label}</span>
                       </span>
 
