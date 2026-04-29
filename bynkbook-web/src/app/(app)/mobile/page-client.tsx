@@ -245,21 +245,21 @@ export default function MobilePageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 Mobile companion
               </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-slate-950">
+              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
                 Home
               </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Building2 className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{business?.name ?? "Business"}</span>
                 </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Landmark className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{account?.name ?? "No active account"}</span>
                 </span>
@@ -268,7 +268,7 @@ export default function MobilePageClient() {
             <Link
               href={hrefWith({ path: "/dashboard", businessId })}
               prefetch
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Desktop
             </Link>
@@ -297,38 +297,38 @@ export default function MobilePageClient() {
           {pnlQ.isLoading ? (
             <Skeleton className="h-[132px] w-full rounded-md" />
           ) : (
-            <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-md border border-border bg-card p-4 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     Month to date
                   </div>
-                  <div className="mt-1 text-sm text-slate-600">
+                  <div className="mt-1 text-sm text-muted-foreground">
                     {range.from} to {range.to}
                   </div>
                 </div>
-                <Sigma className="h-5 w-5 text-slate-500" />
+                <Sigma className="h-5 w-5 text-muted-foreground" />
               </div>
 
               <div className="mt-4 grid grid-cols-3 gap-2">
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <TrendingUp className="h-4 w-4 text-emerald-600" />
-                  <div className="mt-2 text-[11px] text-slate-500">Revenue</div>
-                  <div className="mt-1 truncate text-sm font-semibold text-slate-950">
+                <div className="rounded-md border border-border bg-muted/50 p-3">
+                  <TrendingUp className="h-4 w-4 text-bb-status-success-fg" />
+                  <div className="mt-2 text-[11px] text-muted-foreground">Revenue</div>
+                  <div className="mt-1 truncate text-sm font-semibold text-foreground">
                     {formatUsdFromCents(pnlQ.data?.period?.income_cents)}
                   </div>
                 </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <TrendingDown className="h-4 w-4 text-rose-600" />
-                  <div className="mt-2 text-[11px] text-slate-500">Expense</div>
-                  <div className="mt-1 truncate text-sm font-semibold text-slate-950">
+                <div className="rounded-md border border-border bg-muted/50 p-3">
+                  <TrendingDown className="h-4 w-4 text-bb-status-danger-fg" />
+                  <div className="mt-2 text-[11px] text-muted-foreground">Expense</div>
+                  <div className="mt-1 truncate text-sm font-semibold text-foreground">
                     {formatUsdFromCents(pnlQ.data?.period?.expense_cents)}
                   </div>
                 </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <Sigma className="h-4 w-4 text-slate-600" />
-                  <div className="mt-2 text-[11px] text-slate-500">Net</div>
-                  <div className="mt-1 truncate text-sm font-semibold text-slate-950">
+                <div className="rounded-md border border-border bg-muted/50 p-3">
+                  <Sigma className="h-4 w-4 text-muted-foreground" />
+                  <div className="mt-2 text-[11px] text-muted-foreground">Net</div>
+                  <div className="mt-1 truncate text-sm font-semibold text-foreground">
                     {formatUsdFromCents(pnlQ.data?.period?.net_cents)}
                   </div>
                 </div>
@@ -338,7 +338,7 @@ export default function MobilePageClient() {
         </div>
 
         <section className="space-y-3">
-          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Tasks
           </div>
           <MobileTaskCard
@@ -385,16 +385,16 @@ export default function MobilePageClient() {
           />
         </section>
 
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-slate-950">Recent Activity</div>
-              <div className="mt-1 text-sm text-slate-600">Latest workspace events.</div>
+              <div className="text-sm font-semibold text-foreground">Recent Activity</div>
+              <div className="mt-1 text-sm text-muted-foreground">Latest workspace events.</div>
             </div>
             <Link
               href={activityHref}
               prefetch
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               View
             </Link>
@@ -407,21 +407,21 @@ export default function MobilePageClient() {
                 <Skeleton className="h-12 w-full rounded-md" />
               </>
             ) : (activityQ.data?.items ?? []).length === 0 ? (
-              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
                 No recent activity yet.
               </div>
             ) : (
               (activityQ.data?.items ?? []).map((item) => (
                 <div
                   key={item.id}
-                  className="flex min-h-12 items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3"
+                  className="flex min-h-12 items-center gap-3 rounded-md border border-border bg-muted/50 p-3"
                 >
-                  <Activity className="h-4 w-4 shrink-0 text-slate-500" />
+                  <Activity className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-slate-900">
+                    <div className="truncate text-sm font-medium text-foreground">
                       {formatEvent(item.event_type)}
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-slate-500">
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
                       {new Date(item.created_at).toLocaleString()}
                     </div>
                   </div>

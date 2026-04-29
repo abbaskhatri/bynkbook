@@ -244,21 +244,21 @@ export default function MobileInvoicePageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 Mobile capture
               </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-slate-950">
+              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
                 Invoice Upload
               </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Building2 className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{business?.name ?? "Business"}</span>
                 </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Landmark className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{account?.name ?? "No active account"}</span>
                 </span>
@@ -267,7 +267,7 @@ export default function MobileInvoicePageClient() {
             <Link
               href={reviewHref}
               prefetch
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Queue
             </Link>
@@ -278,23 +278,23 @@ export default function MobileInvoicePageClient() {
           <InlineBanner title="Invoice capture is unavailable" message={bannerMessage} />
         ) : null}
 
-        <section className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm">
+        <section className="space-y-3 rounded-md border border-bb-status-success-border bg-bb-status-success-bg p-4 shadow-sm">
           <div className="flex gap-3">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
-            <div className="space-y-2 text-sm leading-5 text-emerald-950">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-bb-status-success-fg" />
+            <div className="space-y-2 text-sm leading-5 text-bb-status-success-fg">
               <p>Invoices are uploaded for review only. This will not create a vendor or AP bill automatically.</p>
               <p>For multiple-page invoices, upload a PDF or add images as separate review files for now.</p>
             </div>
           </div>
         </section>
 
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="space-y-3">
             <button
               type="button"
               onClick={() => cameraInputRef.current?.click()}
               disabled={!businessId}
-              className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Camera className="h-5 w-5" />
               Take invoice photo
@@ -303,7 +303,7 @@ export default function MobileInvoicePageClient() {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={!businessId}
-              className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Paperclip className="h-5 w-5" />
               Choose image or PDF
@@ -333,19 +333,19 @@ export default function MobileInvoicePageClient() {
             }}
           />
 
-          <div className="mt-4 text-xs leading-5 text-slate-500">
+          <div className="mt-4 text-xs leading-5 text-muted-foreground">
             Images and PDFs only. Maximum 25 MB per file.
           </div>
         </section>
 
         {validationErrors.length ? (
-          <section className="space-y-2 rounded-md border border-rose-200 bg-rose-50/70 p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-rose-950">
+          <section className="space-y-2 rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-bb-status-danger-fg">
               <AlertTriangle className="h-4 w-4" />
               Some files were not added
             </div>
             {validationErrors.map((error, index) => (
-              <div key={`${error}-${index}`} className="text-sm leading-5 text-rose-900">
+              <div key={`${error}-${index}`} className="text-sm leading-5 text-bb-status-danger-fg">
                 {error}
               </div>
             ))}
@@ -353,18 +353,18 @@ export default function MobileInvoicePageClient() {
         ) : null}
 
         <section className="space-y-3">
-          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Review before upload
           </div>
 
           {selectedFiles.length === 0 ? (
-            <div className="rounded-md border border-slate-200 bg-white p-4 text-sm leading-5 text-slate-600 shadow-sm">
+            <div className="rounded-md border border-border bg-card p-4 text-sm leading-5 text-muted-foreground shadow-sm">
               No invoice files selected yet.
             </div>
           ) : (
             <>
               {hasMultipleImages ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50/70 p-4 text-sm leading-5 text-amber-950 shadow-sm">
+                <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg p-4 text-sm leading-5 text-bb-status-warning-fg shadow-sm">
                   Multiple images will upload as separate invoice review files for now. Use a PDF for a single multi-page invoice.
                 </div>
               ) : null}
@@ -372,10 +372,10 @@ export default function MobileInvoicePageClient() {
               {selectedFiles.map((item) => (
                 <article
                   key={item.id}
-                  className="rounded-md border border-slate-200 bg-white p-3 shadow-sm"
+                  className="rounded-md border border-border bg-card p-3 shadow-sm"
                 >
                   <div className="flex gap-3">
-                    <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/50">
                       {item.previewUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -384,16 +384,16 @@ export default function MobileInvoicePageClient() {
                           className="h-full w-full object-cover"
                         />
                       ) : (
-                        <FileText className="h-8 w-8 text-slate-500" />
+                        <FileText className="h-8 w-8 text-muted-foreground" />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-slate-950">
+                          <div className="truncate text-sm font-semibold text-foreground">
                             {item.file.name}
                           </div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                             <span className="inline-flex items-center gap-1">
                               {fileKind(item.file) === "Image" ? (
                                 <ImageIcon className="h-3.5 w-3.5" />
@@ -408,7 +408,7 @@ export default function MobileInvoicePageClient() {
                         <button
                           type="button"
                           onClick={() => removeSelected(item.id)}
-                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-muted/50"
                           aria-label={`Remove ${item.file.name}`}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -423,7 +423,7 @@ export default function MobileInvoicePageClient() {
                 type="button"
                 onClick={uploadSelected}
                 disabled={!businessId || selectedFiles.length === 0 || uploader.hasActiveUploads}
-                className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-md bg-foreground px-4 text-sm font-semibold text-background shadow-sm hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Upload className="h-5 w-5" />
                 Upload for review
@@ -433,12 +433,12 @@ export default function MobileInvoicePageClient() {
         </section>
 
         <section className="space-y-3">
-          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Upload status
           </div>
 
           {uploader.items.length === 0 ? (
-            <div className="rounded-md border border-slate-200 bg-white p-4 text-sm leading-5 text-slate-600 shadow-sm">
+            <div className="rounded-md border border-border bg-card p-4 text-sm leading-5 text-muted-foreground shadow-sm">
               Uploaded invoices will appear here during this session. Desktop invoice behavior is unchanged.
             </div>
           ) : (
@@ -450,30 +450,30 @@ export default function MobileInvoicePageClient() {
               return (
                 <article
                   key={item.id}
-                  className="rounded-md border border-slate-200 bg-white p-4 shadow-sm"
+                  className="rounded-md border border-border bg-card p-4 shadow-sm"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600">
+                    <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
                       {isActive ? (
                         <Loader2 className="h-5 w-5 animate-spin" />
                       ) : failed ? (
-                        <AlertTriangle className="h-5 w-5 text-rose-600" />
+                        <AlertTriangle className="h-5 w-5 text-bb-status-danger-fg" />
                       ) : (
-                        <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                        <CheckCircle2 className="h-5 w-5 text-bb-status-success-fg" />
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold text-slate-950">
+                      <div className="truncate text-sm font-semibold text-foreground">
                         {item.file.name}
                       </div>
-                      <div className="mt-1 text-sm text-slate-600">
+                      <div className="mt-1 text-sm text-muted-foreground">
                         {statusLabel(item)}
                       </div>
                       {summary ? (
-                        <div className="mt-2 text-sm leading-5 text-slate-600">{summary}</div>
+                        <div className="mt-2 text-sm leading-5 text-muted-foreground">{summary}</div>
                       ) : null}
                       {item.status === "COMPLETED" ? (
-                        <div className="mt-2 text-sm leading-5 text-emerald-700">
+                        <div className="mt-2 text-sm leading-5 text-bb-status-success-fg">
                           Review needed. No vendor or AP bill was created.
                         </div>
                       ) : null}
@@ -482,7 +482,7 @@ export default function MobileInvoicePageClient() {
                       <button
                         type="button"
                         onClick={() => uploader.retry(item.id)}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-muted/50"
                         aria-label={`Retry ${item.file.name}`}
                       >
                         <RefreshCcw className="h-4 w-4" />
@@ -495,9 +495,9 @@ export default function MobileInvoicePageClient() {
           )}
         </section>
 
-        <section className="rounded-md border border-slate-200 bg-white p-4 text-sm leading-5 text-slate-600 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 text-sm leading-5 text-muted-foreground shadow-sm">
           Need the full AP workflow?{" "}
-          <Link href={ledgerHref} prefetch className="font-medium text-slate-950 underline underline-offset-4">
+          <Link href={ledgerHref} prefetch className="font-medium text-foreground underline underline-offset-4">
             Open desktop ledger
           </Link>
           .

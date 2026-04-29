@@ -1114,12 +1114,12 @@ export default function SettingsPageClient() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<Settings className="h-4 w-4" />} title="Settings" />
         </div>
 
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-border" />
 
         <div className="px-3 py-3">
           <div className="flex gap-2 text-sm">
@@ -1138,7 +1138,7 @@ export default function SettingsPageClient() {
                   router.replace(`?${params.toString()}`);
                 }}
                 className={`h-7 px-3 rounded-md text-xs font-medium transition
-                  ${tab === t.key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                  ${tab === t.key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}
               >
                 {t.label}
               </button>
@@ -1209,7 +1209,7 @@ export default function SettingsPageClient() {
 
               <button
                 type="button"
-                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                className="h-7 px-2 text-xs rounded-md border border-border bg-card hover:bg-muted/50"
                 onClick={() => {
                   setActEventType("ALL");
                   setActUserId("ALL");
@@ -1221,24 +1221,24 @@ export default function SettingsPageClient() {
               </button>
 
               <div className="flex-1" />
-              <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">Read-only</span>
+              <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">Read-only</span>
             </div>
 
             {actLoading ? (
               <Skeleton className="h-24 w-full" />
             ) : actError ? (
-              <div className="text-xs text-red-600">{actError}</div>
+              <div className="text-xs text-bb-status-danger-fg">{actError}</div>
             ) : actVisibleItems.length === 0 ? (
               <div className="text-xs text-muted-foreground">No activity found for the current filters.</div>
             ) : (
-              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <Table minWidth={640}>
-                  <THead className="bg-slate-50">
-                    <TableRow className="hover:bg-slate-50">
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">When</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Event</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Actor</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Details</TableHead>
+                  <THead className="bg-muted/50">
+                    <TableRow className="hover:bg-muted/50">
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">When</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Event</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Actor</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-right">Details</TableHead>
                     </TableRow>
                   </THead>
 
@@ -1258,20 +1258,20 @@ export default function SettingsPageClient() {
 
                       return (
                         <Fragment key={it.id}>
-                          <TableRow className="hover:bg-slate-50">
-                            <TableCell className="py-2 text-slate-700 text-xs whitespace-nowrap">{when}</TableCell>
-                            <TableCell className="py-2 text-slate-900 text-xs font-medium">
+                          <TableRow className="hover:bg-muted/50">
+                            <TableCell className="py-2 text-foreground text-xs whitespace-nowrap">{when}</TableCell>
+                            <TableCell className="py-2 text-foreground text-xs font-medium">
                               <span className="inline-block max-w-[220px] truncate" title={humanize(it.event_type)}>
                                 {humanize(it.event_type)}
                               </span>
                             </TableCell>
-                            <TableCell className="py-2 text-slate-700 text-xs">
+                            <TableCell className="py-2 text-foreground text-xs">
                               {currentUserId && String(it.actor_user_id) === String(currentUserId) ? "You" : "Member"}
                             </TableCell>
                             <TableCell className="py-2 text-right">
                               <button
                                 type="button"
-                                className="h-7 px-2 text-xs rounded-md border border-slate-200 bg-white hover:bg-slate-50"
+                                className="h-7 px-2 text-xs rounded-md border border-border bg-card hover:bg-muted/50"
                                 onClick={() => setActDetailsId((cur) => (cur === it.id ? null : it.id))}
                               >
                                 {open ? "Hide" : "View"}
@@ -1280,9 +1280,9 @@ export default function SettingsPageClient() {
                           </TableRow>
 
                           {open ? (
-                            <TableRow className="bg-slate-50">
+                            <TableRow className="bg-muted/50">
                               <TableCell colSpan={4} className="py-2">
-                                <pre className="text-[11px] whitespace-pre-wrap break-words bg-white border border-slate-200 rounded-md p-2">
+                                <pre className="text-[11px] whitespace-pre-wrap break-words bg-card border border-border rounded-md p-2">
                                   {JSON.stringify(it.payload_json ?? {}, null, 2)}
                                 </pre>
                               </TableCell>
@@ -1305,7 +1305,7 @@ export default function SettingsPageClient() {
                 <CardTitle>Team</CardTitle>
                 <div className="mt-1 text-xs text-muted-foreground">Manage members, roles, and pending invites.</div>
               </div>
-              <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+              <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                 Role: {roleLabel(selectedBusinessRole)}
               </span>
             </div>
@@ -1317,7 +1317,7 @@ export default function SettingsPageClient() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "members" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "members" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
                     }`}
                   onClick={() => setTeamSubTab("members")}
                 >
@@ -1326,7 +1326,7 @@ export default function SettingsPageClient() {
 
                 <button
                   type="button"
-                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "roles" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                  className={`h-7 px-3 rounded-md text-xs font-medium transition ${teamSubTab === "roles" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
                     }`}
                   onClick={() => setTeamSubTab("roles")}
                 >
@@ -1335,7 +1335,7 @@ export default function SettingsPageClient() {
               </div>
 
               {teamSubTab === "roles" ? (
-                <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                   Policies: store-only
                 </span>
               ) : null}
@@ -1345,8 +1345,8 @@ export default function SettingsPageClient() {
             {teamSubTab === "members" ? (
               <>
                 {/* Invite */}
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="text-xs font-medium text-slate-800">Invite member</div>
+                <div className="rounded-xl border border-border bg-card p-3">
+                  <div className="text-xs font-medium text-foreground">Invite member</div>
 
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
                     <div className="md:col-span-2">
@@ -1411,41 +1411,41 @@ export default function SettingsPageClient() {
                     ) : null}
                   </div>
 
-                  {inviteMsg ? <div className="mt-2 text-xs text-slate-700">{inviteMsg}</div> : null}
+                  {inviteMsg ? <div className="mt-2 text-xs text-foreground">{inviteMsg}</div> : null}
                 </div>
 
                 {/* Pending invites */}
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-                    <div className="text-xs font-medium text-slate-700">Pending invites</div>
+                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="px-3 py-2 bg-muted/50 border-b border-border">
+                    <div className="text-xs font-medium text-foreground">Pending invites</div>
                   </div>
 
                   {teamLoading ? (
                     <div className="p-3"><Skeleton className="h-20 w-full" /></div>
                   ) : teamError ? (
-                    <div className="p-3 text-xs text-red-600">{teamError}</div>
+                    <div className="p-3 text-xs text-bb-status-danger-fg">{teamError}</div>
                   ) : teamInvites.length === 0 ? (
                     <div className="p-3 text-xs text-muted-foreground">No pending invites.</div>
                   ) : (
                     <Table minWidth={640}>
-                      <THead className="bg-slate-50">
-                        <TableRow className="hover:bg-slate-50">
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Email</TableHead>
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Role</TableHead>
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Expires</TableHead>
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
+                      <THead className="bg-muted/50">
+                        <TableRow className="hover:bg-muted/50">
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Email</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Role</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Expires</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-right">Actions</TableHead>
                         </TableRow>
                       </THead>
                       <TableBody>
                         {teamInvites.map((i) => (
-                          <TableRow key={i.id} className="hover:bg-slate-50">
-                            <TableCell className="py-2 font-medium text-slate-900">
+                          <TableRow key={i.id} className="hover:bg-muted/50">
+                            <TableCell className="py-2 font-medium text-foreground">
                               <span className="inline-block max-w-[280px] truncate" title={i.email}>
                                 {i.email}
                               </span>
                             </TableCell>
-                            <TableCell className="py-2 text-slate-700">{i.role}</TableCell>
-                            <TableCell className="py-2 text-slate-700">{formatShortDate(i.expires_at)}</TableCell>
+                            <TableCell className="py-2 text-foreground">{i.role}</TableCell>
+                            <TableCell className="py-2 text-foreground">{formatShortDate(i.expires_at)}</TableCell>
                             <TableCell className="py-2 text-right">
                               <div className="flex justify-end gap-2">
                                 <Button
@@ -1468,23 +1468,23 @@ export default function SettingsPageClient() {
                 </div>
 
                 {/* Members */}
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-                    <div className="text-xs font-medium text-slate-700">Members</div>
+                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="px-3 py-2 bg-muted/50 border-b border-border">
+                    <div className="text-xs font-medium text-foreground">Members</div>
                   </div>
 
                   {teamLoading ? (
                     <div className="p-3"><Skeleton className="h-20 w-full" /></div>
                   ) : teamError ? (
-                    <div className="p-3 text-xs text-red-600">{teamError}</div>
+                    <div className="p-3 text-xs text-bb-status-danger-fg">{teamError}</div>
                   ) : (
                     <Table minWidth={720}>
-                      <THead className="bg-slate-50">
-                        <TableRow className="hover:bg-slate-50">
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Email</TableHead>
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Role</TableHead>
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Added</TableHead>
-                          <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
+                      <THead className="bg-muted/50">
+                        <TableRow className="hover:bg-muted/50">
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Email</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Role</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Added</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-right">Actions</TableHead>
                         </TableRow>
                       </THead>
                       <TableBody>
@@ -1499,14 +1499,14 @@ export default function SettingsPageClient() {
                           })();
 
                           return (
-                            <TableRow key={m.user_id} className="hover:bg-slate-50">
-                              <TableCell className="py-2 font-medium text-slate-900">
-                                <span className="inline-flex max-w-[280px] items-center truncate rounded-md bg-slate-50 border border-slate-200 px-2 py-1 text-xs text-slate-800" title={shownEmail || "Email not available"}>
+                            <TableRow key={m.user_id} className="hover:bg-muted/50">
+                              <TableCell className="py-2 font-medium text-foreground">
+                                <span className="inline-flex max-w-[280px] items-center truncate rounded-md bg-muted/50 border border-border px-2 py-1 text-xs text-foreground" title={shownEmail || "Email not available"}>
                                   {shownEmail || "Email not available"}
                                 </span>
                               </TableCell>
 
-                              <TableCell className="py-2 text-slate-700">
+                              <TableCell className="py-2 text-foreground">
                                 <Select
                                   value={m.role}
                                   onValueChange={async (v) => {
@@ -1536,7 +1536,7 @@ export default function SettingsPageClient() {
                                 </Select>
                               </TableCell>
 
-                              <TableCell className="py-2 text-slate-700">{formatShortDate(m.created_at)}</TableCell>
+                              <TableCell className="py-2 text-foreground">{formatShortDate(m.created_at)}</TableCell>
 
                               <TableCell className="py-2 text-right">
                                 <Button
@@ -1568,33 +1568,33 @@ export default function SettingsPageClient() {
             ) : (
               // Roles & Permissions (still store-only UI, but NOT placeholder buttons)
               <div className="space-y-3">
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="rounded-xl border border-border bg-card p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-xs font-medium text-slate-800">Roles & Permissions</div>
+                      <div className="text-xs font-medium text-foreground">Roles & Permissions</div>
                       <div className="text-[11px] text-muted-foreground">Policies are saved and used by supported UI surfaces; allowlists still remain a fallback.</div>
                     </div>
-                    <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                    <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                       Store-only
                     </span>
                   </div>
 
                   {polLoading ? <div className="mt-3"><Skeleton className="h-20 w-full" /></div> : null}
-                  {polError ? <div className="mt-3 text-xs text-red-600">{polError}</div> : null}
-                  {polMsg ? <div className="mt-3 text-xs text-slate-700">{polMsg}</div> : null}
+                  {polError ? <div className="mt-3 text-xs text-bb-status-danger-fg">{polError}</div> : null}
+                  {polMsg ? <div className="mt-3 text-xs text-foreground">{polMsg}</div> : null}
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-                    <div className="text-xs font-medium text-slate-700">Permissions matrix</div>
+                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="px-3 py-2 bg-muted/50 border-b border-border">
+                    <div className="text-xs font-medium text-foreground">Permissions matrix</div>
                   </div>
 
                   <Table minWidth={720}>
-                    <THead className="bg-slate-50">
-                      <TableRow className="hover:bg-slate-50">
-                        <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Feature</TableHead>
+                    <THead className="bg-muted/50">
+                      <TableRow className="hover:bg-muted/50">
+                        <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Feature</TableHead>
                         {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => (
-                          <TableHead key={r} className="text-[11px] uppercase tracking-wide text-slate-500 text-center">{r}</TableHead>
+                          <TableHead key={r} className="text-[11px] uppercase tracking-wide text-muted-foreground text-center">{r}</TableHead>
                         ))}
                       </TableRow>
                     </THead>
@@ -1612,8 +1612,8 @@ export default function SettingsPageClient() {
                         ["bank_connections", "Bank Connections"],
                         ["team_management", "Team Management"],
                       ].map(([key, label]) => (
-                        <TableRow key={key} className="hover:bg-slate-50">
-                          <TableCell className="py-2 font-medium text-slate-900">
+                        <TableRow key={key} className="hover:bg-muted/50">
+                          <TableCell className="py-2 font-medium text-foreground">
                             <span className="inline-block max-w-[180px] truncate" title={label}>
                               {label}
                             </span>
@@ -1627,8 +1627,8 @@ export default function SettingsPageClient() {
                               value === "FULL"
                                 ? "bg-primary/10 text-primary border-primary/20"
                                 : value === "VIEW"
-                                  ? "bg-slate-50 text-slate-800 border-slate-200"
-                                  : "bg-slate-50 text-slate-500 border-slate-200";
+                                  ? "bg-muted/50 text-foreground border-border"
+                                  : "bg-muted/50 text-muted-foreground border-border";
 
                             const canEdit = isOwnerRole; // only owner edits for now
 
@@ -1704,7 +1704,7 @@ export default function SettingsPageClient() {
                     </TableBody>
                   </Table>
 
-                  <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-slate-200">
+                  <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border">
                     Policies are active on supported screens. Where a screen does not yet enforce policy directly, allowlists remain the fallback source of truth.
                   </div>
                 </div>
@@ -1729,12 +1729,12 @@ export default function SettingsPageClient() {
 
             <CardContent className="space-y-4">
               {bkError ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
                   {bkError}
                 </div>
               ) : null}
 
-              {bkMsg ? <div className="text-xs text-slate-700">{bkMsg}</div> : null}
+              {bkMsg ? <div className="text-xs text-foreground">{bkMsg}</div> : null}
               {bkLoading ? <Skeleton className="h-20 w-full" /> : null}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1763,10 +1763,10 @@ export default function SettingsPageClient() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="rounded-xl border border-border bg-card p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs font-medium text-slate-800">Auto-suggest categories</div>
+                    <div className="text-xs font-medium text-foreground">Auto-suggest categories</div>
                     <div className="text-[11px] text-muted-foreground">Automatically suggest categories based on payee history and rules.</div>
                   </div>
 
@@ -1846,7 +1846,7 @@ export default function SettingsPageClient() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Label className="text-[11px] text-slate-600">Show archived</Label>
+                  <Label className="text-[11px] text-muted-foreground">Show archived</Label>
                   <input
                     type="checkbox"
                     checked={catShowArchived}
@@ -1858,7 +1858,7 @@ export default function SettingsPageClient() {
 
             <CardContent className="space-y-3">
               {catError ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
                   {catError}
                 </div>
               ) : null}
@@ -1928,7 +1928,7 @@ export default function SettingsPageClient() {
                     return (
                       <span
                         key={c.id}
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-800"
+                        className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-foreground"
                       >
                         <span className="max-w-[220px] truncate" title={c.name}>
                           {c.name}
@@ -1937,7 +1937,7 @@ export default function SettingsPageClient() {
                         {!archived ? (
                           <button
                             type="button"
-                            className="text-slate-500 hover:text-slate-700"
+                            className="text-muted-foreground hover:text-foreground"
                             title="Archive"
                             onClick={async () => {
                               if (!selectedBusinessId) return;
@@ -1958,7 +1958,7 @@ export default function SettingsPageClient() {
                           <>
                             <button
                               type="button"
-                              className="text-slate-500 hover:text-slate-700"
+                              className="text-muted-foreground hover:text-foreground"
                               title="Unarchive"
                               onClick={async () => {
                                 if (!selectedBusinessId) return;
@@ -1978,7 +1978,7 @@ export default function SettingsPageClient() {
 
                             <button
                               type="button"
-                              className="text-rose-600 hover:text-rose-700"
+                              className="text-bb-status-danger-fg hover:text-bb-status-danger-fg"
                               title="Delete category"
                               onClick={() => {
                                 setCategoryDeleteTarget({ id: c.id, name: c.name });
@@ -2008,7 +2008,7 @@ export default function SettingsPageClient() {
 
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
-                  <Label className="text-[11px] text-slate-600">Show archived</Label>
+                  <Label className="text-[11px] text-muted-foreground">Show archived</Label>
                   <PillToggle checked={showArchivedAccounts} onCheckedChange={setShowArchivedAccounts} />
                 </div>
 
@@ -2095,34 +2095,34 @@ export default function SettingsPageClient() {
                   }
                 >
                   <div className="space-y-3">
-                    {err && <div className="text-sm text-red-600">{err}</div>}
+                    {err && <div className="text-sm text-bb-status-danger-fg">{err}</div>}
 
                     {createMode === "choose" ? (
                       <div className="space-y-3">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                          <div className="text-sm font-semibold text-slate-900">How would you like to add this account?</div>
-                          <div className="mt-1 text-xs text-slate-600">
+                        <div className="rounded-lg border border-border bg-muted/50 p-3">
+                          <div className="text-sm font-semibold text-foreground">How would you like to add this account?</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
                             Connect via Plaid for automatic bank sync, or set up manually for cash/offline tracking.
                           </div>
                         </div>
 
                         <button
                           type="button"
-                          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          className="w-full rounded-xl border border-border bg-card p-4 text-left hover:bg-muted/50"
                           onClick={() => setCreateMode("plaid")}
                           disabled={!selectedBusinessId}
                         >
-                          <div className="text-sm font-semibold text-slate-900">Connect with Plaid</div>
-                          <div className="mt-1 text-xs text-slate-600">Link your bank account for automatic transaction sync</div>
+                          <div className="text-sm font-semibold text-foreground">Connect with Plaid</div>
+                          <div className="mt-1 text-xs text-muted-foreground">Link your bank account for automatic transaction sync</div>
                         </button>
 
                         <button
                           type="button"
-                          className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          className="w-full rounded-xl border border-border bg-card p-4 text-left hover:bg-muted/50"
                           onClick={() => setCreateMode("manual")}
                         >
-                          <div className="text-sm font-semibold text-slate-900">Set up account manually</div>
-                          <div className="mt-1 text-xs text-slate-600">For cash accounts or manual tracking</div>
+                          <div className="text-sm font-semibold text-foreground">Set up account manually</div>
+                          <div className="mt-1 text-xs text-muted-foreground">For cash accounts or manual tracking</div>
                         </button>
                       </div>
                     ) : createMode === "manual" ? (
@@ -2204,7 +2204,7 @@ export default function SettingsPageClient() {
                     ) : (
                       <>
 
-                        <div className="text-sm text-slate-700">
+                        <div className="text-sm text-foreground">
                           Choose an opening balance date (retention start). You’ll review account details next.
                         </div>
 
@@ -2341,7 +2341,7 @@ export default function SettingsPageClient() {
                   }
                 >
                   <div className="space-y-3">
-                    {err ? <div className="text-sm text-red-600">{err}</div> : null}
+                    {err ? <div className="text-sm text-bb-status-danger-fg">{err}</div> : null}
 
                     <div className="space-y-1">
                       <Label>Name</Label>
@@ -2390,7 +2390,7 @@ export default function SettingsPageClient() {
                           allowClear={false}
                         />
                       </div>
-                      <div className="text-[11px] text-slate-500">
+                      <div className="text-[11px] text-muted-foreground">
                         This date controls how far back we retain transactions. Opening is computed after creation.
                       </div>
                     </div>
@@ -2496,14 +2496,14 @@ export default function SettingsPageClient() {
                     </div>
                   }
                 >
-                  <div className="text-sm text-slate-700">
-                    <div className="font-medium text-slate-900">{deleteAccountName || "This account"}</div>
-                    <div className="mt-1 text-xs text-slate-600">
+                  <div className="text-sm text-foreground">
+                    <div className="font-medium text-foreground">{deleteAccountName || "This account"}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
                       Deleting an account cannot be undone.
                     </div>
 
                     {deleteSuggestArchive ? (
-                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
                         This account has related records, so hard delete is blocked. Archive hides the account while preserving accounting history.
                       </div>
                     ) : null}
@@ -2520,7 +2520,7 @@ export default function SettingsPageClient() {
                     </div>
 
                     {deleteErr ? (
-                      <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                      <div className="mt-3 rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
                         {deleteErr}
                       </div>
                     ) : null}
@@ -2574,7 +2574,7 @@ export default function SettingsPageClient() {
                   }
                 >
                   <div className="space-y-3">
-                    {editErr ? <div className="text-sm text-red-600">{editErr}</div> : null}
+                    {editErr ? <div className="text-sm text-bb-status-danger-fg">{editErr}</div> : null}
 
                     <div className="space-y-1">
                       <Label>Name</Label>
@@ -2640,18 +2640,18 @@ export default function SettingsPageClient() {
                 {showArchivedAccounts ? "No accounts yet." : "No active accounts. Turn on Show archived to view archived accounts."}
               </div>
             ) : (
-              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <Table minWidth={1180}>
-                  <THead className="bg-slate-50">
-                    <TableRow className="hover:bg-slate-50">
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Name</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Type</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Institution</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500">Last 4</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Opening balance</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Status</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-center">Plaid</TableHead>
-                      <TableHead className="text-[11px] uppercase tracking-wide text-slate-500 text-right">Actions</TableHead>
+                  <THead className="bg-muted/50">
+                    <TableRow className="hover:bg-muted/50">
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Name</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Type</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Institution</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Last 4</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-right">Opening balance</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-right">Status</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-center">Plaid</TableHead>
+                      <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground text-right">Actions</TableHead>
                     </TableRow>
                   </THead>
 
@@ -2666,16 +2666,16 @@ export default function SettingsPageClient() {
                       const checked = !!plaidChecked[a.id];
 
                       return (
-                        <TableRow key={a.id} className="hover:bg-slate-50">
-                          <TableCell className="py-2 font-medium text-slate-900">
+                        <TableRow key={a.id} className="hover:bg-muted/50">
+                          <TableCell className="py-2 font-medium text-foreground">
                             <span className="inline-block max-w-[180px] truncate" title={a.name}>
                               {a.name}
                             </span>
                           </TableCell>
-                          <TableCell className="py-2 text-slate-700">{formatAccountType(a.type)}</TableCell>
+                          <TableCell className="py-2 text-foreground">{formatAccountType(a.type)}</TableCell>
 
                           {/* Institution (Plaid OR manual) */}
-                          <TableCell className="py-2 text-slate-700 text-xs">
+                          <TableCell className="py-2 text-foreground text-xs">
                             {st?.institutionName ? (
                               <span className="truncate inline-block max-w-[220px]" title={st.institutionName}>
                                 {st.institutionName}
@@ -2685,28 +2685,28 @@ export default function SettingsPageClient() {
                                 {(a as any).institution_name}
                               </span>
                             ) : (
-                              <span className="text-slate-400"></span>
+                              <span className="text-muted-foreground/80"></span>
                             )}
                           </TableCell>
 
                           {/* Last 4 (Plaid OR manual) */}
-                          <TableCell className="py-2 text-slate-700 text-xs font-mono">
+                          <TableCell className="py-2 text-foreground text-xs font-mono">
                             {st?.last4
                               ? `•••• ${st.last4}`
                               : (a as any)?.last4
                                 ? `•••• ${(a as any).last4}`
                                 : st?.connected
-                                  ? <span className="text-slate-600">Reconnect</span>
-                                  : <span className="text-slate-400"></span>}
+                                  ? <span className="text-muted-foreground">Reconnect</span>
+                                  : <span className="text-muted-foreground/80"></span>}
                           </TableCell>
 
                           <TableCell className="py-2 text-right">
-                            <div className="font-medium text-slate-900 leading-none">{amount}</div>
-                            {date ? <div className="text-[11px] text-slate-500 leading-none mt-1">{date}</div> : null}
+                            <div className="font-medium text-foreground leading-none">{amount}</div>
+                            {date ? <div className="text-[11px] text-muted-foreground leading-none mt-1">{date}</div> : null}
                           </TableCell>
 
                           <TableCell className="py-2 text-right">
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isArchived ? "bg-slate-100 text-slate-700" : "bg-primary/10 text-primary"}`}>
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isArchived ? "bg-muted text-foreground" : "bg-primary/10 text-primary"}`}>
                               {isArchived ? "Archived" : "Active"}
                             </span>
                           </TableCell>
@@ -2714,16 +2714,16 @@ export default function SettingsPageClient() {
                           {/* Plaid (status only) */}
                           <TableCell className="py-2 text-center">
                             {!st && loading ? (
-                              <span className="text-[11px] text-slate-500">Checking…</span>
+                              <span className="text-[11px] text-muted-foreground">Checking…</span>
                             ) : st?.needsAttention ? (
                               <span
-                                className="inline-flex items-center rounded-full bg-amber-50 text-amber-800 px-2 py-0.5 text-[11px] font-medium"
+                                className="inline-flex items-center rounded-full bg-bb-status-warning-bg text-bb-status-warning-fg px-2 py-0.5 text-[11px] font-medium"
                                 title={st?.errorMessage ?? "Reconnect required"}
                               >
                                 Needs attention
                               </span>
                             ) : isArchived ? (
-                              <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                              <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                                 Not connected
                               </span>
                             ) : st?.connected ? (
@@ -2731,7 +2731,7 @@ export default function SettingsPageClient() {
                                 Connected
                               </span>
                             ) : (
-                              <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                              <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                                 Not connected
                               </span>
                             )}
@@ -2762,7 +2762,7 @@ export default function SettingsPageClient() {
                                       accountId={a.id}
                                       effectiveStartDate={todayYmd()}
                                       disabledClassName="opacity-50 cursor-not-allowed"
-                                      buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                      buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-border text-xs font-medium hover:bg-muted/50"
                                       disabled={!selectedBusinessId}
                                       label="Reconnect (Plaid)"
                                       onConnected={async () => {
@@ -2796,7 +2796,7 @@ export default function SettingsPageClient() {
                                       accountId={a.id}
                                       effectiveStartDate={todayYmd()}
                                       disabledClassName="opacity-50 cursor-not-allowed"
-                                      buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                      buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-border text-xs font-medium hover:bg-muted/50"
                                       disabled={!selectedBusinessId}
                                       label="Connect (Plaid)"
                                       onConnected={async () => {
@@ -2832,7 +2832,7 @@ export default function SettingsPageClient() {
                                         accountId={a.id}
                                         effectiveStartDate={todayYmd()}
                                         disabledClassName="opacity-50 cursor-not-allowed"
-                                        buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-slate-200 text-xs font-medium hover:bg-slate-50"
+                                        buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-border text-xs font-medium hover:bg-muted/50"
                                         disabled={!selectedBusinessId}
                                         label="Connect different bank account (Plaid)"
                                         onConnected={async () => {
@@ -2858,7 +2858,7 @@ export default function SettingsPageClient() {
 
                                       <button
                                         type="button"
-                                        className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                        className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted/50"
                                         title="Disconnect Plaid"
                                         onClick={async () => {
                                           await plaidDisconnect(selectedBusinessId, a.id);
@@ -2880,7 +2880,7 @@ export default function SettingsPageClient() {
                               {!isArchived ? (
                                 <button
                                   type="button"
-                                  className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                  className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted/50"
                                   title="Edit"
                                   onClick={() => {
                                     setEditAccountId(a.id);
@@ -2899,7 +2899,7 @@ export default function SettingsPageClient() {
                               {/* Archive / Unarchive */}
                               <button
                                 type="button"
-                                className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted/50"
                                 title={isArchived ? "Unarchive" : "Archive"}
                                 onClick={() => {
                                   setArchiveTarget({
@@ -2940,7 +2940,7 @@ export default function SettingsPageClient() {
                                 return (
                                   <button
                                     type="button"
-                                    className={`h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-200 ${disabled ? "text-slate-300 cursor-not-allowed" : "text-rose-600 hover:bg-rose-50"
+                                    className={`h-6 w-6 inline-flex items-center justify-center rounded-md border border-border ${disabled ? "text-muted-foreground/60 cursor-not-allowed" : "text-bb-status-danger-fg hover:bg-bb-status-danger-bg"
                                       }`}
                                     title={title}
                                     disabled={disabled}
@@ -2994,7 +2994,7 @@ export default function SettingsPageClient() {
             </CardHeader>
 
             <CardContent className="text-sm">
-              <div className="font-medium text-slate-900">{currentUserName || currentUserEmail || "—"}</div>
+              <div className="font-medium text-foreground">{currentUserName || currentUserEmail || "—"}</div>
               <div className="text-xs text-muted-foreground">{currentUserEmail || "—"}</div>
             </CardContent>
           </Card>
@@ -3006,21 +3006,21 @@ export default function SettingsPageClient() {
             </CardHeader>
 
             <CardContent className="pt-0">
-              <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+              <div className="rounded-lg border border-border bg-card overflow-hidden">
                 <div className="flex items-stretch">
                   <div className="flex-1 px-4 py-3 text-center">
-                    <div className="text-lg font-semibold text-slate-900 leading-none">{usageQ.isLoading ? "—" : (usageQ.data?.entries_count ?? 0)}</div>
-                    <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">Entries</div>
+                    <div className="text-lg font-semibold text-foreground leading-none">{usageQ.isLoading ? "—" : (usageQ.data?.entries_count ?? 0)}</div>
+                    <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">Entries</div>
                   </div>
-                  <div className="w-px bg-slate-200" />
+                  <div className="w-px bg-border" />
                   <div className="flex-1 px-4 py-3 text-center">
-                    <div className="text-lg font-semibold text-slate-900 leading-none">{usageQ.isLoading ? "—" : (usageQ.data?.accounts_count ?? (accountsQ.data?.length ?? 0))}</div>
-                    <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">Accounts</div>
+                    <div className="text-lg font-semibold text-foreground leading-none">{usageQ.isLoading ? "—" : (usageQ.data?.accounts_count ?? (accountsQ.data?.length ?? 0))}</div>
+                    <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">Accounts</div>
                   </div>
-                  <div className="w-px bg-slate-200" />
+                  <div className="w-px bg-border" />
                   <div className="flex-1 px-4 py-3 text-center">
-                    <div className="text-lg font-semibold text-slate-900 leading-none">{usageQ.isLoading ? "—" : (usageQ.data?.members_count ?? 1)}</div>
-                    <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">Users</div>
+                    <div className="text-lg font-semibold text-foreground leading-none">{usageQ.isLoading ? "—" : (usageQ.data?.members_count ?? 1)}</div>
+                    <div className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">Users</div>
                   </div>
                 </div>
               </div>
@@ -3034,16 +3034,16 @@ export default function SettingsPageClient() {
                   <CardTitle>Business Profile</CardTitle>
                   <div className="mt-1 text-xs text-muted-foreground">Optional profile details (saved)</div>
                 </div>
-                <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+                <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                   {canEditBusinessProfile ? "Editable" : "View-only"}
                 </span>
               </div>
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {bpMsg ? <div className="text-xs text-slate-700">{bpMsg}</div> : null}
+              {bpMsg ? <div className="text-xs text-foreground">{bpMsg}</div> : null}
               {backupErr ? (
-                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
                   {backupErr}
                 </div>
               ) : null}
@@ -3128,7 +3128,7 @@ export default function SettingsPageClient() {
                       {(selectedBusiness as any)?.logo_upload_id ? "Replace logo" : "Upload logo"}
                     </Button>
 
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-muted-foreground">
                       {(selectedBusiness as any)?.logo_upload_id ? "Logo uploaded" : "No logo uploaded"}
                     </div>
                   </div>
@@ -3216,7 +3216,7 @@ export default function SettingsPageClient() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-7 px-3 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
+                        className="h-7 px-3 text-xs text-bb-status-warning-fg border-bb-status-warning-border hover:bg-bb-status-warning-bg"
                         onClick={() => {
                           setResetBusinessErr(null);
                           setResetBusinessConfirm("");
@@ -3229,7 +3229,7 @@ export default function SettingsPageClient() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-7 px-3 text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+                        className="h-7 px-3 text-xs text-bb-status-danger-fg border-bb-status-danger-border hover:bg-bb-status-danger-bg"
                         onClick={() => {
                           setDeleteBusinessErr(null);
                           setDeleteBusinessConfirm("");
@@ -3287,12 +3287,12 @@ export default function SettingsPageClient() {
         size="sm"
       >
         <div className="space-y-4">
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-muted-foreground">
             Export a client-generated JSON snapshot for a closed month, including account previews, entries in the selected month, and month-filtered match groups.
           </div>
 
           {exportClosedErr ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
               {exportClosedErr}
             </div>
           ) : null}
@@ -3312,7 +3312,7 @@ export default function SettingsPageClient() {
               </SelectContent>
             </Select>
             {exportClosedPeriods.length === 0 && !exportClosedBusy ? (
-              <div className="text-[11px] text-slate-500">No closed periods found.</div>
+              <div className="text-[11px] text-muted-foreground">No closed periods found.</div>
             ) : null}
           </div>
 
@@ -3374,8 +3374,8 @@ export default function SettingsPageClient() {
           </div>
         }
       >
-        <div className="text-sm text-slate-700">
-          Delete <span className="font-medium text-slate-900">{categoryDeleteTarget?.name || "this category"}</span>? This cannot be undone.
+        <div className="text-sm text-foreground">
+          Delete <span className="font-medium text-foreground">{categoryDeleteTarget?.name || "this category"}</span>? This cannot be undone.
         </div>
       </AppDialog>
 
@@ -3410,8 +3410,8 @@ export default function SettingsPageClient() {
           </div>
         }
       >
-        <div className="text-sm text-slate-700">
-          Revoke the pending invite for <span className="font-medium text-slate-900">{revokeInviteTarget?.email || "this user"}</span>?
+        <div className="text-sm text-foreground">
+          Revoke the pending invite for <span className="font-medium text-foreground">{revokeInviteTarget?.email || "this user"}</span>?
         </div>
       </AppDialog>
 
@@ -3449,8 +3449,8 @@ export default function SettingsPageClient() {
         }
       >
         <div className="space-y-3">
-          <div className="text-sm text-slate-700">
-            Remove <span className="font-medium text-slate-900">{removeMemberTarget?.email || "this member"}</span> from the business?
+          <div className="text-sm text-foreground">
+            Remove <span className="font-medium text-foreground">{removeMemberTarget?.email || "this member"}</span> from the business?
           </div>
 
           <div className="space-y-1">
@@ -3512,14 +3512,14 @@ export default function SettingsPageClient() {
         }
       >
         <div className="space-y-3">
-          <div className="text-sm text-slate-700">
+          <div className="text-sm text-foreground">
             {archiveTarget?.action === "archive" ? (
               <>
-                Archive <span className="font-medium text-slate-900">{archiveTarget?.name || "this account"}</span>? It will be hidden from active views but preserved for accounting history.
+                Archive <span className="font-medium text-foreground">{archiveTarget?.name || "this account"}</span>? It will be hidden from active views but preserved for accounting history.
               </>
             ) : (
               <>
-                Unarchive <span className="font-medium text-slate-900">{archiveTarget?.name || "this account"}</span>?
+                Unarchive <span className="font-medium text-foreground">{archiveTarget?.name || "this account"}</span>?
               </>
             )}
           </div>
@@ -3548,20 +3548,20 @@ export default function SettingsPageClient() {
         size="sm"
       >
         <div className="space-y-4">
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
             This will erase operational data for the current business but keep the workspace itself.
           </div>
 
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-muted-foreground">
             Preserved: business profile, members, accounts, categories, bookkeeping preferences, invites, and role policies.
           </div>
 
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-muted-foreground">
             Cleared: entries, uploads, bank transactions, matches, reconcile snapshots, closed periods, vendors, bills, payments, transfers, budgets, goals, and activity history.
           </div>
 
           {resetBusinessErr ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
               {resetBusinessErr}
             </div>
           ) : null}
@@ -3589,7 +3589,7 @@ export default function SettingsPageClient() {
             </Button>
 
             <Button
-              className="h-7 px-3 text-xs bg-amber-600 hover:bg-amber-700"
+              className="h-7 px-3 text-xs bg-bb-status-warning-fg text-background hover:bg-bb-status-warning-fg/90"
               disabled={resetBusinessBusy || !selectedBusinessId || resetBusinessConfirm.trim().toUpperCase() !== "RESET"}
               onClick={async () => {
                 if (!selectedBusinessId) return;
@@ -3644,7 +3644,7 @@ export default function SettingsPageClient() {
             </Button>
 
             <Button
-              className="h-7 px-3 text-xs bg-rose-600 hover:bg-rose-700"
+              className="h-7 px-3 text-xs bg-bb-status-danger-fg text-background hover:bg-bb-status-danger-fg/90"
               disabled={
                 deleteBusinessBusy ||
                 !selectedBusinessId ||
@@ -3683,9 +3683,9 @@ export default function SettingsPageClient() {
           </div>
         }
       >
-        <div className="text-sm text-slate-700">
-          <div className="font-medium text-slate-900">{selectedBusiness?.name || "This business"}</div>
-          <div className="mt-1 text-xs text-slate-600">
+        <div className="text-sm text-foreground">
+          <div className="font-medium text-foreground">{selectedBusiness?.name || "This business"}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
             This permanently deletes the business and all related data. This cannot be undone.
           </div>
 
@@ -3702,7 +3702,7 @@ export default function SettingsPageClient() {
           </div>
 
           {deleteBusinessErr ? (
-            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="mt-3 rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
               {deleteBusinessErr}
             </div>
           ) : null}

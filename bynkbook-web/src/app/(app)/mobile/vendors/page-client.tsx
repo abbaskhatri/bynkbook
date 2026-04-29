@@ -111,7 +111,7 @@ function AgingPills({
 }) {
   if (!aging) {
     return (
-      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500">
+      <div className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
         Aging: —
       </div>
     );
@@ -127,11 +127,11 @@ function AgingPills({
   return (
     <div className="grid grid-cols-4 gap-1">
       {buckets.map(([label, cents]) => (
-        <div key={label} className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
-          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+        <div key={label} className="min-w-0 rounded-md border border-border bg-muted/50 px-2 py-1">
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {label}
           </div>
-          <div className="mt-0.5 truncate text-xs font-semibold tabular-nums text-slate-900">
+          <div className="mt-0.5 truncate text-xs font-semibold tabular-nums text-foreground">
             {formatUsdFromCents(cents)}
           </div>
         </div>
@@ -229,21 +229,21 @@ export default function MobileVendorsPageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 Mobile vendors
               </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-slate-950">
+              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
                 Vendors and AP
               </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Building2 className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{business?.name ?? "Business"}</span>
                 </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
                   <Landmark className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{account?.name ?? "No active account"}</span>
                 </span>
@@ -252,7 +252,7 @@ export default function MobileVendorsPageClient() {
             <Link
               href={reviewHref}
               prefetch
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Review
             </Link>
@@ -268,43 +268,43 @@ export default function MobileVendorsPageClient() {
         ) : null}
 
         <section className="grid grid-cols-2 gap-3">
-          <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600">
+          <div className="rounded-md border border-border bg-card p-4 shadow-sm">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
               <Users className="h-4 w-4" />
             </div>
-            <div className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+            <div className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Open vendors
             </div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-950">
+            <div className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
               {apSummaryQ.isLoading ? "—" : vendors.length}
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600">
+          <div className="rounded-md border border-border bg-card p-4 shadow-sm">
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
               <ReceiptText className="h-4 w-4" />
             </div>
-            <div className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+            <div className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Open AP
             </div>
-            <div className="mt-1 truncate text-2xl font-semibold tabular-nums text-slate-950">
+            <div className="mt-1 truncate text-2xl font-semibold tabular-nums text-foreground">
               {apSummaryQ.isLoading ? "—" : formatUsdFromCents(totalOpenCents)}
             </div>
           </div>
         </section>
 
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-950">Read-only AP cards</div>
-              <div className="mt-1 text-sm text-slate-600">
+              <div className="text-sm font-semibold text-foreground">Read-only AP cards</div>
+              <div className="mt-1 text-sm text-muted-foreground">
                 Showing up to {MOBILE_VENDOR_LIMIT} vendors with open balances as of {apSummaryQ.data?.as_of ?? asOf}.
               </div>
             </div>
             <Link
               href={invoiceHref}
               prefetch
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               <FileText className="mr-2 h-4 w-4" />
               Invoice
@@ -320,11 +320,11 @@ export default function MobileVendorsPageClient() {
               <Skeleton className="h-[192px] w-full rounded-md" />
             </>
           ) : !businessId ? (
-            <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+            <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
               Select a business to view vendor balances.
             </div>
           ) : vendors.length === 0 ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-950 shadow-sm">
+            <div className="rounded-md border border-bb-status-success-border bg-bb-status-success-bg p-4 text-sm text-bb-status-success-fg shadow-sm">
               No open vendor balances
             </div>
           ) : (
@@ -337,34 +337,34 @@ export default function MobileVendorsPageClient() {
 
               return (
                 <Link key={vendor.vendor_id} href={detailHref} prefetch className="block">
-                  <article className="rounded-md border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:bg-slate-50">
+                  <article className="rounded-md border border-border bg-card p-4 shadow-sm transition-colors hover:bg-muted/50">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h2 className="truncate text-base font-semibold text-slate-950">
+                        <h2 className="truncate text-base font-semibold text-foreground">
                           {vendor.vendor_name || "Unknown vendor"}
                         </h2>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <span
                             className={
                               signal.tone === "danger"
-                                ? "rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700"
+                                ? "rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-2 py-1 text-xs font-semibold text-bb-status-danger-fg"
                                 : signal.tone === "warning"
-                                  ? "rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800"
-                                  : "rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-700"
+                                  ? "rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1 text-xs font-semibold text-bb-status-warning-fg"
+                                  : "rounded-md border border-border bg-muted/50 px-2 py-1 text-xs font-semibold text-foreground"
                             }
                           >
                             {signal.label}
                           </span>
-                          <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600">
+                          <span className="rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-muted-foreground">
                             Open bills: —
                           </span>
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <div className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-500">
+                        <div className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
                           Open AP
                         </div>
-                        <div className="mt-1 text-base font-semibold tabular-nums text-slate-950">
+                        <div className="mt-1 text-base font-semibold tabular-nums text-foreground">
                           {formatUsdFromCents(vendor.totalOpen?.toString() ?? null)}
                         </div>
                       </div>
@@ -374,12 +374,12 @@ export default function MobileVendorsPageClient() {
                       <AgingPills aging={vendor.aging} />
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
+                    <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 pt-3 text-xs text-muted-foreground">
                       <span className="inline-flex min-w-0 items-center gap-1">
                         <CalendarClock className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">Last activity: —</span>
                       </span>
-                      <span className="inline-flex shrink-0 items-center gap-1 font-medium text-slate-700">
+                      <span className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground">
                         Desktop detail
                         <ChevronRight className="h-4 w-4" />
                       </span>
@@ -391,11 +391,11 @@ export default function MobileVendorsPageClient() {
           )}
         </section>
 
-        <section className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <Link
             href={desktopVendorsHref}
             prefetch
-            className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
           >
             Open desktop vendors
           </Link>
