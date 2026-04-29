@@ -163,10 +163,10 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
   return (
     <div className="relative">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-bb-text-subtle" />
         <Input
           ref={inputRef}
-          className="h-9 w-[320px] rounded-xl border-slate-200 bg-white pl-9 pr-16 text-sm shadow-sm"
+          className="h-9 w-[320px] rounded-xl border-bb-input-border bg-bb-input-bg pl-9 pr-16 text-sm shadow-sm"
           placeholder="Search entries, bank txns, payees…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -213,7 +213,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
         />
 
         <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
-          <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+          <div className="inline-flex items-center gap-1 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
             {keyHint.includes("⌘") ? <Command className="h-3 w-3" /> : null}
             <span>{keyHint}</span>
           </div>
@@ -221,34 +221,34 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
       </div>
 
       {open ? (
-        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_60px_rgba(15,23,42,0.14)]">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.14)]">
+          <div className="flex items-center justify-between border-b border-bb-border-muted px-4 py-3">
             <div>
-              <div className="text-xs font-semibold tracking-wide text-slate-700">Global search</div>
-              <div className="mt-0.5 text-[11px] text-slate-500">
+              <div className="text-xs font-semibold tracking-wide text-foreground/80">Global search</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
                 {canSearch ? "Scoped to the current business." : "Type at least 3 characters to search."}
               </div>
             </div>
-            <div className="text-[11px] text-slate-400">{busy ? "Searching…" : totalVisible ? `${totalVisible} shown` : ""}</div>
+            <div className="text-[11px] text-bb-text-subtle">{busy ? "Searching…" : totalVisible ? `${totalVisible} shown` : ""}</div>
           </div>
 
-          {errMsg ? <div className="px-4 py-3 text-sm text-rose-600">{errMsg}</div> : null}
+          {errMsg ? <div className="px-4 py-3 text-sm text-bb-status-danger-fg">{errMsg}</div> : null}
 
           {!canSearch ? (
             <div className="px-4 py-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <div className="rounded-xl border border-bb-border bg-bb-surface-soft px-4 py-3 text-sm text-foreground/70">
                 Search by payee, memo, amount phrasing, or transaction context. Try:
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Uber</span>
-                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Office supplies</span>
-                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">Expenses over 500</span>
+                  <span className="rounded-full border border-bb-border bg-bb-surface-card px-2.5 py-1">Uber</span>
+                  <span className="rounded-full border border-bb-border bg-bb-surface-card px-2.5 py-1">Office supplies</span>
+                  <span className="rounded-full border border-bb-border bg-bb-surface-card px-2.5 py-1">Expenses over 500</span>
                 </div>
               </div>
             </div>
           ) : (
             <>
               <div className="px-4 py-3">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Entries</div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Entries</div>
                 {entries.length ? (
                   <div className="flex flex-col gap-1">
                     {entries.slice(0, 6).map((e: any, idx: number) => {
@@ -262,21 +262,21 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                           aria-selected={isActive}
                           className={[
                             "rounded-xl border px-3 py-2.5 text-left transition",
-                            isActive ? "border-slate-300 bg-slate-50" : "border-transparent hover:border-slate-200 hover:bg-slate-50",
+                            isActive ? "border-bb-border bg-bb-surface-soft" : "border-transparent hover:border-bb-border hover:bg-bb-table-row-hover",
                           ].join(" ")}
                           onMouseEnter={() => setActiveIndex(rowIndex)}
                           onClick={() => onSelect(String(e.link))}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-slate-900">
+                              <div className="truncate text-sm font-medium text-foreground">
                                 {String(e.payee ?? "Entry")}
                               </div>
-                              <div className="mt-0.5 truncate text-xs text-slate-500">
+                              <div className="mt-0.5 truncate text-xs text-muted-foreground">
                                 {e.memo ? String(e.memo).slice(0, 60) : "No memo"}
                               </div>
                             </div>
-                            <div className="shrink-0 text-xs tabular-nums text-slate-500">
+                            <div className="shrink-0 text-xs tabular-nums text-muted-foreground">
                               {String(e.date ?? "")}
                             </div>
                           </div>
@@ -285,16 +285,16 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                  <div className="rounded-xl border border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-muted-foreground">
                     No entry matches.
                   </div>
                 )}
               </div>
 
-              <div className="h-px bg-slate-100" />
+              <div className="h-px bg-bb-border-muted" />
 
               <div className="px-4 py-3">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Bank transactions</div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Bank transactions</div>
                 {bankTxns.length ? (
                   <div className="flex flex-col gap-1">
                     {bankTxns.slice(0, 6).map((t: any, idx: number) => {
@@ -308,21 +308,21 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                           aria-selected={isActive}
                           className={[
                             "rounded-xl border px-3 py-2.5 text-left transition",
-                            isActive ? "border-slate-300 bg-slate-50" : "border-transparent hover:border-slate-200 hover:bg-slate-50",
+                            isActive ? "border-bb-border bg-bb-surface-soft" : "border-transparent hover:border-bb-border hover:bg-bb-table-row-hover",
                           ].join(" ")}
                           onMouseEnter={() => setActiveIndex(rowIndex)}
                           onClick={() => onSelect(String(t.link))}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-slate-900">
+                              <div className="truncate text-sm font-medium text-foreground">
                                 {String(t.description ?? "Bank transaction")}
                               </div>
-                              <div className="mt-0.5 truncate text-xs text-slate-500">
+                              <div className="mt-0.5 truncate text-xs text-muted-foreground">
                                 {t.memo ? String(t.memo).slice(0, 60) : "Bank transaction result"}
                               </div>
                             </div>
-                            <div className="shrink-0 text-xs tabular-nums text-slate-500">
+                            <div className="shrink-0 text-xs tabular-nums text-muted-foreground">
                               {String(t.date ?? "")}
                             </div>
                           </div>
@@ -331,7 +331,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                  <div className="rounded-xl border border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-muted-foreground">
                     No bank transaction matches.
                   </div>
                 )}

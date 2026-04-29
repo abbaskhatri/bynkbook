@@ -35,7 +35,7 @@ export function CapsuleSelect(props: {
   const capsuleTriggerClass =
     (variant === "flat"
       ? "!h-[28px] !min-h-0 w-auto bg-transparent border-0 shadow-none px-2 !py-0 "
-      : "!h-[28px] !min-h-0 w-auto rounded-full bg-white border border-slate-200 px-3 !py-0 ") +
+      : "!h-[28px] !min-h-0 w-auto rounded-full bg-bb-surface-card border border-bb-border px-3 !py-0 ") +
     // Hide any default trigger SVG (we render our own chevron)
     "[&>svg]:hidden " +
     "text-xs leading-tight inline-flex items-center justify-between gap-2 " +

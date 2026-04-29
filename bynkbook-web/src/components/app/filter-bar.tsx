@@ -20,7 +20,7 @@ export function FilterBar(props: {
         className={[
           inputH7,
           "max-w-[15%]",
-          "hover:border-slate-300",
+          "hover:border-bb-border",
         ].join(" ")}
         placeholder="Search payee..."
         value={searchValue}

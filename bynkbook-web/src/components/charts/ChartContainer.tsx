@@ -119,12 +119,12 @@ export function ChartContainer({
     }, []);
 
     return (
-        <Card className={`rounded-[10px] border border-slate-200 shadow-sm ${motionFast}`}>
+        <Card className={`rounded-[10px] border border-bb-border shadow-sm ${motionFast}`}>
             <CardHeader className="py-1">
                 <div className="flex items-start justify-between gap-3">
                     <div>
-                        <CardTitle className="text-base font-semibold text-slate-800">{title}</CardTitle>
-                        {subtitle ? <div className="text-[11px] text-slate-500">{subtitle}</div> : null}
+                        <CardTitle className="text-base font-semibold text-foreground/90">{title}</CardTitle>
+                        {subtitle ? <div className="text-[11px] text-muted-foreground">{subtitle}</div> : null}
                     </div>
                     {right ? <div className="pt-0.5">{right}</div> : null}
                 </div>
@@ -135,13 +135,13 @@ export function ChartContainer({
                     <Skeleton className="w-full rounded-md" style={{ height: h }} />
                 ) : empty ? (
                     <div
-                        className="flex items-center justify-center rounded-md border border-slate-200 bg-white"
+                        className="flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card"
                         style={{ height: h }}
                     >
                         <div className="max-w-[420px] px-4 text-center">
-                            <div className="text-sm font-medium text-slate-800">{empty.title}</div>
+                            <div className="text-sm font-medium text-foreground/90">{empty.title}</div>
                             {empty.description ? (
-                                <div className="mt-1 text-xs text-slate-500">{empty.description}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{empty.description}</div>
                             ) : null}
                         </div>
                     </div>
@@ -158,7 +158,7 @@ export function ChartContainer({
                                 {children as any}
                             </ResponsiveContainer>
                         ) : (
-                            <div className="h-full w-full rounded-md bg-slate-50" />
+                            <div className="h-full w-full rounded-md bg-bb-surface-soft" />
                         )}
                     </div>
                 )}

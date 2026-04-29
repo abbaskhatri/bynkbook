@@ -142,10 +142,10 @@ function centsToNumber(centsStr: string) {
 
 function moneyClassFromCents(centsStr?: string) {
   try {
-    if (!centsStr) return "text-slate-900";
-    return BigInt(centsStr) < 0n ? "text-rose-600" : "text-slate-900";
+    if (!centsStr) return "text-bb-amount-neutral";
+    return BigInt(centsStr) < 0n ? "text-bb-amount-negative" : "text-bb-amount-neutral";
   } catch {
-    return "text-slate-900";
+    return "text-bb-amount-neutral";
   }
 }
 
@@ -1319,7 +1319,7 @@ export default function DashboardPageClient() {
   }
 
   const periodCapsule = (
-    <div className="h-6 px-1.5 rounded-lg border border-slate-200 bg-white flex items-center">
+    <div className="h-6 px-1.5 rounded-lg border border-bb-border bg-bb-surface-card flex items-center">
       <CapsuleSelect
         variant="flat"
         value={periodMode}
@@ -1338,7 +1338,7 @@ export default function DashboardPageClient() {
 
   return (
     <div className="space-y-5 max-w-7xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<LayoutDashboard className="h-4 w-4" />}
@@ -1376,7 +1376,7 @@ export default function DashboardPageClient() {
                       />
                     </div>
 
-                    <span className="text-xs text-slate-400">→</span>
+                    <span className="text-xs text-bb-text-subtle">→</span>
 
                     <div className="w-[155px]">
                       <AppDatePicker
@@ -1391,7 +1391,7 @@ export default function DashboardPageClient() {
             }
           />
         </div>
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
@@ -1417,9 +1417,9 @@ export default function DashboardPageClient() {
             sub: `As of ${range.to}`,
             tooltip: null as string | null,
             icon: Wallet,
-            accent: "bg-emerald-600",
-            iconBg: "bg-emerald-50",
-            iconFg: "text-emerald-700",
+            accent: "bg-primary",
+            iconBg: "bg-bb-status-success-bg",
+            iconFg: "text-bb-status-success-fg",
           },
           {
             label: "Cash Runway",
@@ -1428,9 +1428,9 @@ export default function DashboardPageClient() {
             sub: "based on 3-mo avg expenses",
             tooltip: runway.tooltip,
             icon: Timer,
-            accent: "bg-emerald-600",
-            iconBg: "bg-emerald-50",
-            iconFg: "text-emerald-700",
+            accent: "bg-primary",
+            iconBg: "bg-bb-status-success-bg",
+            iconFg: "text-bb-status-success-fg",
           },
           {
             label: "Revenue",
@@ -1439,9 +1439,9 @@ export default function DashboardPageClient() {
             sub: "Cash-basis",
             tooltip: null as string | null,
             icon: TrendingUp,
-            accent: "bg-green-600",
-            iconBg: "bg-emerald-50",
-            iconFg: "text-emerald-700",
+            accent: "bg-bb-amount-positive",
+            iconBg: "bg-bb-status-success-bg",
+            iconFg: "text-bb-status-success-fg",
           },
           {
             label: "Expenses",
@@ -1450,9 +1450,9 @@ export default function DashboardPageClient() {
             sub: "Cash-basis",
             tooltip: null as string | null,
             icon: TrendingDown,
-            accent: "bg-red-600",
-            iconBg: "bg-emerald-50",
-            iconFg: "text-emerald-700",
+            accent: "bg-bb-amount-negative",
+            iconBg: "bg-bb-status-danger-bg",
+            iconFg: "text-bb-status-danger-fg",
           },
           {
             label: "Net",
@@ -1461,16 +1461,16 @@ export default function DashboardPageClient() {
             sub: "Revenue − Expenses",
             tooltip: null as string | null,
             icon: Sigma,
-            accent: "bg-emerald-600",
-            iconBg: "bg-emerald-50",
-            iconFg: "text-emerald-700",
+            accent: "bg-primary",
+            iconBg: "bg-bb-status-success-bg",
+            iconFg: "text-bb-status-success-fg",
           },
         ].map((k) => {
           const Icon = k.icon;
           const loading = pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching;
 
           return (
-            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-slate-200 shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
+            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-bb-border shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
               <CardContent className="px-3 py-3">
                 <div className="flex items-center gap-3">
                   <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${k.iconBg}`}>
@@ -1478,10 +1478,10 @@ export default function DashboardPageClient() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="text-[10px] uppercase tracking-wide font-semibold text-slate-600">{k.label}</div>
+                    <div className="text-[10px] uppercase tracking-wide font-semibold text-foreground/70">{k.label}</div>
 
                     <div
-                      className={`mt-0.5 text-[18px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-rose-600" : "text-slate-900"}`}
+                      className={`mt-0.5 text-[18px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}
                       title={k.tooltip ?? undefined}
                     >
                       {loading ? (
@@ -1493,7 +1493,7 @@ export default function DashboardPageClient() {
                       )}
                     </div>
 
-                    <div className="mt-0.5 text-[10px] text-slate-500 truncate">{k.sub}</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground truncate">{k.sub}</div>
                   </div>
                 </div>
               </CardContent>
@@ -1511,8 +1511,8 @@ export default function DashboardPageClient() {
             title="Cash Flow"
             subtitle="Cash In vs Cash Out by month"
             right={
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                <BarChart3 className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                <BarChart3 className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
               </div>
             }
             height="sm"
@@ -1581,8 +1581,8 @@ export default function DashboardPageClient() {
             title="Cash Position"
             subtitle="Ending cash balance by month (cash-basis)"
             right={
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                <LineChart className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                <LineChart className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
               </div>
             }
             height="sm"
@@ -1646,8 +1646,8 @@ export default function DashboardPageClient() {
             title="Category Breakdown"
             subtitle="Top expense categories"
             right={
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                <PieIcon className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                <PieIcon className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
               </div>
             }
             height="md"
@@ -1695,10 +1695,10 @@ export default function DashboardPageClient() {
                       ))}
                     </Pie>
 
-                    <text x="50%" y="48%" textAnchor="middle" fill="#94a3b8" fontSize="11">
+                    <text x="50%" y="48%" textAnchor="middle" fill="var(--bb-text-muted)" fontSize="11">
                       Total
                     </text>
-                    <text x="50%" y="58%" textAnchor="middle" fill="#0f172a" fontSize="14" fontWeight="600">
+                    <text x="50%" y="58%" textAnchor="middle" fill="var(--bb-amount-neutral)" fontSize="14" fontWeight="600">
                       {formatUsdAccountingFromCents(-BigInt(String(topExpenseCats.totalAbs ?? 0n))).text}
                     </text>
                   </PieChart>
@@ -1707,27 +1707,27 @@ export default function DashboardPageClient() {
 
               {/* Ranked list (table-like; compact) */}
               <div>
-                <div className="-mt-1 divide-y divide-slate-100">
+                <div className="-mt-1 divide-y divide-bb-border-muted">
                   {expenseRanked.map((r: any, idx: number) => (
                     <div key={`${r.label}-${idx}`} className="py-2">
                       {/* Top row: label left, amount + % right */}
                       <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0 truncate text-sm font-medium text-slate-800">
+                        <div className="min-w-0 truncate text-sm font-medium text-foreground/90">
                           {r.label}
                         </div>
 
                         <div className="flex items-baseline gap-3 text-right tabular-nums">
-                          <div className="text-sm font-semibold text-slate-900">
+                          <div className="text-sm font-semibold text-bb-amount-neutral">
                             {formatUsdAccountingFromCents(-BigInt(r.absCents)).text}
                           </div>
-                          <div className="text-[12px] text-slate-500">
+                          <div className="text-[12px] text-muted-foreground">
                             {(r.pct * 100).toFixed(0)}%
                           </div>
                         </div>
                       </div>
 
                       {/* Bar */}
-                      <div className="mt-1.5 h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="mt-1.5 h-2 rounded-full bg-muted overflow-hidden">
                         <div
                           className="h-full rounded-full"
                           style={{
@@ -1747,37 +1747,37 @@ export default function DashboardPageClient() {
         {/* RIGHT: cards stack */}
         <div className="space-y-4">
           {/* Account Balances (Base44 structure) */}
-          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                    <Landmark className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                    <Landmark className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Account Balances</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Account Balances</CardTitle>
                 </div>
 
-                <div className="text-[11px] text-slate-500 leading-none">As of {range.to}</div>
+                <div className="text-[11px] text-muted-foreground leading-none">As of {range.to}</div>
               </div>
             </CHeader>
 
             <CardContent className="p-0">
               {(accountsSummaryQ.data?.rows ?? []).length === 0 ? (
-                <div className="px-4 py-3 text-sm text-slate-500">No accounts found.</div>
+                <div className="px-4 py-3 text-sm text-muted-foreground">No accounts found.</div>
               ) : (
-                <div className="-mt-1 divide-y divide-slate-100">
+                <div className="-mt-1 divide-y divide-bb-border-muted">
                   {(accountsSummaryQ.data?.rows ?? []).slice(0, 6).map((r: any, idx: number) => (
                     <div
                       key={`${String(r.account_id ?? "")}-${String(r.name ?? "")}-${idx}`}
                       className="flex items-center justify-between px-4 py-1.5"
                     >
                       <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                        <Landmark className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                        <Landmark className="w-4 h-4 text-bb-text-subtle flex-shrink-0" />
                         <div className="min-w-0 leading-tight">
-                          <div className="font-medium text-[13px] truncate text-slate-900">
+                          <div className="font-medium text-[13px] truncate text-foreground">
                             {String(r.name ?? "Account")}
                           </div>
-                          <div className="text-[11px] text-slate-500">
+                          <div className="text-[11px] text-muted-foreground">
                             {String(r.type ?? "")}
                           </div>
                         </div>
@@ -1794,36 +1794,36 @@ export default function DashboardPageClient() {
           </Card>
 
           {/* Next Actions */}
-          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                    <Tag className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                    <Tag className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Next Actions</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Next Actions</CardTitle>
                 </div>
 
-                <div className="text-xs font-medium rounded-full border border-slate-200 px-2 py-0.5 text-slate-700 bg-white">
+                <div className="text-xs font-medium rounded-full border border-bb-border px-2 py-0.5 text-foreground/80 bg-bb-surface-card">
                   {openIssuesN} open
                 </div>
               </div>
             </CHeader>
 
             <CardContent className="p-0">
-              <div className="-mt-1 divide-y divide-slate-100">
+              <div className="-mt-1 divide-y divide-bb-border-muted">
                 <button
                   type="button"
                   onClick={() => router.push(issuesHref)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-rose-100 flex items-center justify-center">
-                      <AlertTriangle className="h-4 w-4 text-rose-600" strokeWidth={2} />
+                    <div className="w-7 h-7 rounded-lg bg-bb-status-danger-bg flex items-center justify-center">
+                      <AlertTriangle className="h-4 w-4 text-bb-status-danger-fg" strokeWidth={2} />
                     </div>
                     <div>
-                      <div className="font-medium text-sm text-slate-900">{openIssuesN} Open Issues</div>
-                      <div className="text-xs text-slate-500">Review and resolve</div>
+                      <div className="font-medium text-sm text-foreground">{openIssuesN} Open Issues</div>
+                      <div className="text-xs text-muted-foreground">Review and resolve</div>
                     </div>
                   </div>
                 </button>
@@ -1831,15 +1831,15 @@ export default function DashboardPageClient() {
                 <button
                   type="button"
                   onClick={() => router.push("/category-review")}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors text-left"
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
-                      <Tag className="h-4 w-4 text-emerald-700" strokeWidth={2} />
+                    <div className="w-7 h-7 rounded-lg bg-bb-status-success-bg flex items-center justify-center">
+                      <Tag className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2} />
                     </div>
                     <div>
-                      <div className="font-medium text-sm text-slate-900">Category Review</div>
-                      <div className="text-xs text-slate-500">Assign categories</div>
+                      <div className="font-medium text-sm text-foreground">Category Review</div>
+                      <div className="text-xs text-muted-foreground">Assign categories</div>
                     </div>
                   </div>
                 </button>
@@ -1848,17 +1848,17 @@ export default function DashboardPageClient() {
           </Card>
 
           {/* AI Insights */}
-          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                    <Sparkles className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                    <Sparkles className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">AI Insights</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-foreground leading-none">AI Insights</CardTitle>
                 </div>
 
-                <div className="text-xs text-slate-500 leading-none">Suggestion-only</div>
+                <div className="text-xs text-muted-foreground leading-none">Suggestion-only</div>
               </div>
             </CHeader>
 
@@ -1869,14 +1869,14 @@ export default function DashboardPageClient() {
                   <Skeleton className="h-12 w-full" />
                 </div>
               ) : insights.length === 0 ? (
-                <div className="px-4 py-4 text-sm text-slate-500">No notable signals for this period.</div>
+                <div className="px-4 py-4 text-sm text-muted-foreground">No notable signals for this period.</div>
               ) : (
-                <div className="-mt-1 divide-y divide-slate-100">
+                <div className="-mt-1 divide-y divide-bb-border-muted">
                   {insights.slice(0, 3).map((it) => (
                     <div key={it.title} className="px-4 py-3">
-                      <div className="text-xs text-slate-500">{it.title}</div>
+                      <div className="text-xs text-muted-foreground">{it.title}</div>
                       <div
-                        className={`mt-0.5 text-sm font-semibold tabular-nums ${it.tone === "good" ? "text-emerald-700" : it.tone === "bad" ? "text-rose-600" : "text-slate-900"
+                        className={`mt-0.5 text-sm font-semibold tabular-nums ${it.tone === "good" ? "text-bb-amount-positive" : it.tone === "bad" ? "text-bb-amount-negative" : "text-bb-amount-neutral"
                           }`}
                       >
                         {it.value}
@@ -1889,44 +1889,44 @@ export default function DashboardPageClient() {
           </Card>
 
                 {/* AI Summary (read-only; aggregates only) */}
-      <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
+      <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-emerald-600" />
+            <Sparkles className="h-4 w-4 text-primary" />
             <CardTitle className="text-sm">AI Summary</CardTitle>
           </div>
-          {aiNarrativeQ.isFetching && aiNarrativeQ.data?.ok ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
+          {aiNarrativeQ.isFetching && aiNarrativeQ.data?.ok ? <div className="text-[11px] text-muted-foreground">Updating…</div> : null}
         </CHeader>
 
         <CardContent className="space-y-2">
-          <div className="text-[11px] text-slate-500">Read-only guidance based on dashboard totals and trends.</div>
+          <div className="text-[11px] text-muted-foreground">Read-only guidance based on dashboard totals and trends.</div>
 
           {ai429 ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-sm text-bb-status-warning-fg">
               {dashboardAiMessage(aiNarrativeQ.error)}
             </div>
           ) : aiNarrativeQ.isLoading && !aiNarrativeQ.data ? (
             <div className="space-y-2">
-              <div className="h-4 w-2/3 rounded bg-slate-200 animate-pulse" />
-              <div className="h-4 w-full rounded bg-slate-200 animate-pulse" />
-              <div className="h-4 w-5/6 rounded bg-slate-200 animate-pulse" />
+              <div className="h-4 w-2/3 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-full rounded bg-muted animate-pulse" />
+              <div className="h-4 w-5/6 rounded bg-muted animate-pulse" />
             </div>
           ) : aiNarrativeQ.data?.ok ? (
-            <div className="text-sm text-slate-700 whitespace-pre-wrap">{aiSummaryText}</div>
+            <div className="text-sm text-foreground/80 whitespace-pre-wrap">{aiSummaryText}</div>
           ) : (
-            <div className="text-sm text-slate-600">{dashboardAiMessage(aiNarrativeQ.error, "AI summary is unavailable right now.")}</div>
+            <div className="text-sm text-foreground/70">{dashboardAiMessage(aiNarrativeQ.error, "AI summary is unavailable right now.")}</div>
           )}
         </CardContent>
       </Card>
 
       {/* AI Anomalies (deterministic; read-only) */}
-      <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
+      <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <AlertTriangle className="h-4 w-4 text-bb-status-warning-fg" />
             <CardTitle className="text-sm">Anomalies</CardTitle>
           </div>
-          {aiAnomaliesQ.isFetching && aiAnomaliesQ.data?.ok ? <div className="text-[11px] text-slate-500">Updating…</div> : null}
+          {aiAnomaliesQ.isFetching && aiAnomaliesQ.data?.ok ? <div className="text-[11px] text-muted-foreground">Updating…</div> : null}
         </CHeader>
 
         <CardContent className="space-y-2">
@@ -1934,18 +1934,18 @@ export default function DashboardPageClient() {
             <div className="space-y-2">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="space-y-1">
-                  <div className="h-4 w-48 rounded bg-slate-200 animate-pulse" />
-                  <div className="h-3 w-full rounded bg-slate-200 animate-pulse" />
+                  <div className="h-4 w-48 rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-full rounded bg-muted animate-pulse" />
                 </div>
               ))}
             </div>
           ) : aiAnomaliesQ.data?.ok && Array.isArray(aiAnomaliesQ.data.anomalies) && aiAnomaliesQ.data.anomalies.length ? (
-            <div className="divide-y divide-slate-100 rounded-md border border-slate-200 overflow-hidden">
+            <div className="divide-y divide-bb-border-muted rounded-md border border-bb-border overflow-hidden">
               {aiAnomaliesQ.data.anomalies.slice(0, 5).map((a: any) => (
                 <div key={a.entryId} className="px-3 py-2">
-                  <div className="text-sm font-semibold text-slate-900">{a.title ?? "Anomaly"}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-600">{a.reason ?? ""}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">
+                  <div className="text-sm font-semibold text-foreground">{a.title ?? "Anomaly"}</div>
+                  <div className="mt-0.5 text-[11px] text-foreground/70">{a.reason ?? ""}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
                     Baseline median: {a?.baseline?.median_abs_cents ?? "—"}¢ • Sample: {a?.baseline?.sample_size ?? "—"} • Confidence:{" "}
                     {typeof a?.confidence === "number" ? Math.round(a.confidence * 100) + "%" : "—"}
                   </div>
@@ -1953,37 +1953,37 @@ export default function DashboardPageClient() {
               ))}
             </div>
           ) : (
-            <div className="text-sm text-slate-600">No unusual transactions detected in the current range.</div>
+            <div className="text-sm text-foreground/70">No unusual transactions detected in the current range.</div>
           )}
         </CardContent>
       </Card>
 
             {/* Ask AI (aggregates-only; read-only) */}
-      <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-slate-200 flex flex-row items-center justify-between">
+      <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-emerald-600" />
+            <Sparkles className="h-4 w-4 text-primary" />
             <CardTitle className="text-sm">Ask AI</CardTitle>
           </div>
-          {chatBusy ? <div className="text-[11px] text-slate-500">Thinking…</div> : null}
+          {chatBusy ? <div className="text-[11px] text-muted-foreground">Thinking…</div> : null}
         </CHeader>
 
         <CardContent className="space-y-2">
           {chatErr ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-sm text-bb-status-warning-fg">
               {chatErr}
             </div>
           ) : null}
 
-          <div className="rounded-md border border-slate-200 bg-white p-2 h-44 overflow-auto space-y-2">
+          <div className="rounded-md border border-bb-border bg-bb-surface-card p-2 h-44 overflow-auto space-y-2">
             {chatMsgs.length === 0 ? (
-              <div className="text-sm text-slate-600">
+              <div className="text-sm text-foreground/70">
                 Ask about cash flow, income and expenses, trends, or top categories. AI answers are read-only and based on the current dashboard range.
               </div>
             ) : (
               chatMsgs.map((m, i) => (
-                <div key={i} className={m.role === "user" ? "text-sm text-slate-900" : "text-sm text-slate-700"}>
-                  <span className="text-[11px] font-semibold text-slate-500 mr-2">
+                <div key={i} className={m.role === "user" ? "text-sm text-foreground" : "text-sm text-foreground/80"}>
+                  <span className="text-[11px] font-semibold text-muted-foreground mr-2">
                     {m.role === "user" ? "You" : "AI"}
                   </span>
                   <span className="whitespace-pre-wrap">{m.text}</span>
@@ -1997,7 +1997,7 @@ export default function DashboardPageClient() {
               value={chatQ}
               onChange={(e) => setChatQ(e.target.value)}
               placeholder="Ask AI: Why did net income change?"
-              className="h-9 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-slate-200"
+              className="h-9 flex-1 rounded-md border border-bb-input-border bg-bb-input-bg px-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
               disabled={chatBusy}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -2011,24 +2011,24 @@ export default function DashboardPageClient() {
             </Button>
           </div>
 
-          <div className="text-[11px] text-slate-500">
+          <div className="text-[11px] text-muted-foreground">
             Uses dashboard aggregates only • No ledger dump • Includes links in answers when possible
           </div>
         </CardContent>
       </Card>
 
           {/* Monthly Summary (Base44 card structure) */}
-          <Card className="rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-white flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-slate-200 !gap-0">
+          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50">
-                    <CalendarDays className="h-7 w-7 text-emerald-700" strokeWidth={2} />
+                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
+                    <CalendarDays className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-slate-900 leading-none">Monthly Summary</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Monthly Summary</CardTitle>
                 </div>
 
-                <div className="text-xs text-slate-500 leading-none">{monthlySummaryLabel}</div>
+                <div className="text-xs text-muted-foreground leading-none">{monthlySummaryLabel}</div>
               </div>
             </CHeader>
 
@@ -2039,16 +2039,16 @@ export default function DashboardPageClient() {
                 </div>
               ) : (
                 <div>
-                  <div className="grid grid-cols-3 items-center px-4 py-2 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                  <div className="grid grid-cols-3 items-center px-4 py-2 text-[11px] uppercase tracking-wide text-muted-foreground border-b border-bb-border">
                     <div>Month</div>
                     <div className="text-right">Net</div>
                     <div className="text-right">End Cash</div>
                   </div>
 
-                  <div className="-mt-1 divide-y divide-slate-100">
+                  <div className="-mt-1 divide-y divide-bb-border-muted">
                     {monthlySummary.slice(-4).map((r) => (
                       <div key={r.ym} className="grid grid-cols-3 items-center px-4 py-3 text-sm">
-                        <div className="text-slate-700">{r.label}</div>
+                        <div className="text-foreground/80">{r.label}</div>
                         <div className={`text-right tabular-nums ${moneyClassFromCents(r.net_cents)}`}>
                           {fmtUsdAccountingFromCents(r.net_cents).text}
                         </div>
@@ -2058,7 +2058,7 @@ export default function DashboardPageClient() {
                               {fmtUsdAccountingFromCents(r.ending_cash_cents).text}
                             </span>
                           ) : (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-bb-text-subtle">—</span>
                           )}
                         </div>
                       </div>

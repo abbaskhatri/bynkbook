@@ -25,12 +25,12 @@ export function PageHeader(props: PageHeaderProps) {
               {icon}
             </div>
           ) : null}
-          <h1 className="text-xl font-semibold text-slate-900 truncate">{title}</h1>
+          <h1 className="text-xl font-semibold text-foreground truncate">{title}</h1>
           {afterTitle ? <div className="shrink-0">{afterTitle}</div> : null}
         </div>
 
         {subtitle ? (
-          <div className="mt-1 text-sm text-slate-500">{subtitle}</div>
+          <div className="mt-1 text-sm text-muted-foreground">{subtitle}</div>
         ) : null}
       </div>
 

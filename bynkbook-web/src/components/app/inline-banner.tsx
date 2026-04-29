@@ -19,11 +19,11 @@ export function InlineBanner({
   if (!message) return null;
 
   return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+    <div className="rounded-xl border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2">
       <div className="flex items-start justify-between gap-3">
         <div>
-          {title ? <div className="text-sm font-semibold text-rose-900">{title}</div> : null}
-          <div className="text-sm text-rose-800">{message}</div>
+          {title ? <div className="text-sm font-semibold text-bb-status-danger-fg">{title}</div> : null}
+          <div className="text-sm text-bb-status-danger-fg">{message}</div>
         </div>
 
         {(actionLabel && actionHref) || onRetry ? (
