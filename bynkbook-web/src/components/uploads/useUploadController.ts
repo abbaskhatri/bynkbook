@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { UploadType, UploadContext } from "./uploadTypes";
 import { apiFetch } from "@/lib/api/client";
+import { completeUpload, type CompleteUploadOptions } from "@/lib/api/uploads";
 
 export type UploadItemStatus = "QUEUED" | "UPLOADING" | "UPLOADED" | "COMPLETED" | "FAILED" | "CANCELED";
 
@@ -44,7 +45,12 @@ type InitResponse = {
   };
 };
 
-export function useUploadController(args: { type: UploadType; ctx?: UploadContext; meta?: Record<string, any> }) {
+export function useUploadController(args: {
+  type: UploadType;
+  ctx?: UploadContext;
+  meta?: Record<string, any>;
+  completeOptions?: CompleteUploadOptions;
+}) {
   const { type, ctx } = args;
 
   const [items, setItems] = useState<UploadItem[]>([]);
@@ -106,14 +112,11 @@ export function useUploadController(args: { type: UploadType; ctx?: UploadContex
     async (uploadId: string) => {
       const businessId = requireBusinessId();
 
-      const res = await apiFetch(`/v1/businesses/${businessId}/uploads/complete`, {
-        method: "POST",
-        body: JSON.stringify({ uploadId }),
-      });
+      const res = await completeUpload(businessId, uploadId, args.completeOptions);
 
       return res;
     },
-    [ctx?.businessId],
+    [args.completeOptions, ctx?.businessId],
   );
 
   const uploadPutWithProgress = useCallback(

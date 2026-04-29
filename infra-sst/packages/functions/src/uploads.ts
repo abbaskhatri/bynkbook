@@ -119,6 +119,12 @@ function getParsedMeta(meta: any) {
   return parsed as Record<string, any>;
 }
 
+function isReviewOnlyCompleteRequest(body: any) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  if (body.reviewOnly === true) return true;
+  return String(body.mode ?? "").trim().toUpperCase() === "REVIEW_ONLY";
+}
+
 // Normalize date strings to YYYY-MM-DD for entry.date
 function toIsoDateStr(v: string) {
   const s = String(v || "").trim();
@@ -421,6 +427,7 @@ export async function handler(event: any) {
       where: { id: completeUploadId, business_id: biz, created_by_user_id: sub },
     });
     if (!row) return json(404, { ok: false, error: "Upload not found" });
+    const reviewOnlyInvoice = row.upload_type === "INVOICE" && isReviewOnlyCompleteRequest(body);
 
     try {
       const head = await s3.send(new HeadObjectCommand({ Bucket: row.s3_bucket, Key: row.s3_key }));
@@ -430,6 +437,13 @@ export async function handler(event: any) {
       // Merge meta safely
       const baseMeta =
         row.meta && typeof row.meta === "object" && !Array.isArray(row.meta) ? (row.meta as Record<string, any>) : {};
+      const completionBaseMeta = reviewOnlyInvoice
+        ? Object.fromEntries(
+            Object.entries(baseMeta).filter(
+              ([key]) => !["vendor_id", "vendor_name", "bill_id", "bill_created_at"].includes(key)
+            )
+          )
+        : baseMeta;
 
       let parsed: any = null;
       let parseStatus: "SKIPPED" | "PARSED" | "NEEDS_REVIEW" | "FAILED" = "SKIPPED";
@@ -532,9 +546,20 @@ export async function handler(event: any) {
         }
       }
 
+      if (reviewOnlyInvoice && parseStatus === "PARSED") {
+        parseStatus = "NEEDS_REVIEW";
+        const reviewReasons = Array.isArray(parsed?.review_reasons) ? [...parsed.review_reasons] : [];
+        if (!reviewReasons.includes("review_only")) reviewReasons.push("review_only");
+        parsed = {
+          ...parsed,
+          review_reasons: reviewReasons,
+          review_message: "Invoice uploaded in review-only mode; vendor and bill creation skipped.",
+        };
+      }
+
       // If INVOICE: derive/link vendor deterministically (no user pick required)
       let vendorLinked: any = null;
-      if (row.upload_type === "INVOICE" && parseStatus === "PARSED") {
+      if (row.upload_type === "INVOICE" && parseStatus === "PARSED" && !reviewOnlyInvoice) {
         // Prefer explicit vendor_id passed by the client (vendor detail upload),
         // else fall back to parsed vendor_name/filename stem.
         const explicitVendorId =
@@ -636,8 +661,8 @@ export async function handler(event: any) {
       }
 
       const mergedMeta = {
-        ...baseMeta,
-        etag: etag ?? baseMeta.etag,
+        ...completionBaseMeta,
+        etag: etag ?? completionBaseMeta.etag,
         parsed_status: parseStatus,
         parsed,
         ...(parseStatus === "FAILED"
@@ -654,6 +679,13 @@ export async function handler(event: any) {
               error_message: String(
                 parsed?.review_message || "Invoice needs review before vendor or bill creation."
               ),
+            }
+          : {}),
+        ...(reviewOnlyInvoice
+          ? {
+              review_only: true,
+              mode: "REVIEW_ONLY",
+              needs_review: true,
             }
           : {}),
         ...(vendorLinked ? { vendor_id: vendorLinked.id, vendor_name: vendorLinked.name } : {}),
