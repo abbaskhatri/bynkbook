@@ -32,7 +32,7 @@ export function MobileTaskCard({
   const content = (
     <div
       className={cn(
-        "flex min-h-[76px] items-center gap-3 rounded-md border p-4 shadow-sm",
+        "flex min-h-[76px] items-center gap-3 rounded-md border p-4 text-card-foreground shadow-sm",
         toneClasses[tone],
         disabled ? "opacity-60" : "transition-colors hover:bg-muted/50"
       )}
@@ -45,9 +45,9 @@ export function MobileTaskCard({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <div className="truncate text-sm font-semibold text-foreground">{title}</div>
+          <div className="truncate text-sm font-semibold text-card-foreground">{title}</div>
           {metric ? (
-            <span className="mobile-token-card-control ml-auto shrink-0 rounded-md border px-2 py-1 text-xs font-semibold text-foreground">
+            <span className="mobile-token-card-control ml-auto shrink-0 rounded-md border px-2 py-1 text-xs font-semibold text-card-foreground">
               {metric}
             </span>
           ) : null}

@@ -111,7 +111,7 @@ function AgingPills({
 }) {
   if (!aging) {
     return (
-      <div className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
+      <div className="mobile-token-card rounded-md border px-2 py-1 text-xs text-muted-foreground">
         Aging: —
       </div>
     );
@@ -127,7 +127,7 @@ function AgingPills({
   return (
     <div className="grid grid-cols-4 gap-1">
       {buckets.map(([label, cents]) => (
-        <div key={label} className="min-w-0 rounded-md border border-border bg-muted/50 px-2 py-1">
+        <div key={label} className="mobile-token-card min-w-0 rounded-md border px-2 py-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {label}
           </div>
@@ -268,8 +268,8 @@ export default function MobileVendorsPageClient() {
         ) : null}
 
         <section className="grid grid-cols-2 gap-3">
-          <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
+          <div className="mobile-token-card rounded-md border p-4 shadow-sm">
+            <div className="mobile-token-card-control inline-flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground">
               <Users className="h-4 w-4" />
             </div>
             <div className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -280,8 +280,8 @@ export default function MobileVendorsPageClient() {
             </div>
           </div>
 
-          <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-            <div className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
+          <div className="mobile-token-card rounded-md border p-4 shadow-sm">
+            <div className="mobile-token-card-control inline-flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground">
               <ReceiptText className="h-4 w-4" />
             </div>
             <div className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -337,7 +337,7 @@ export default function MobileVendorsPageClient() {
 
               return (
                 <Link key={vendor.vendor_id} href={detailHref} prefetch className="block">
-                  <article className="rounded-md border border-border bg-card p-4 shadow-sm transition-colors hover:bg-muted/50">
+                  <article className="mobile-token-card rounded-md border p-4 shadow-sm transition-colors hover:bg-muted/50">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="truncate text-base font-semibold text-foreground">
@@ -355,7 +355,7 @@ export default function MobileVendorsPageClient() {
                           >
                             {signal.label}
                           </span>
-                          <span className="rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-muted-foreground">
+                          <span className="mobile-token-card-control rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground">
                             Open bills: —
                           </span>
                         </div>

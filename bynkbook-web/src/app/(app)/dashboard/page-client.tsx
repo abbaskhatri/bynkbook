@@ -1470,7 +1470,7 @@ export default function DashboardPageClient() {
           const loading = pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching;
 
           return (
-            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-bb-border shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
+            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
               <CardContent className="px-3 py-3">
                 <div className="flex items-center gap-3">
                   <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${k.iconBg}`}>
@@ -1478,7 +1478,7 @@ export default function DashboardPageClient() {
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="text-[10px] uppercase tracking-wide font-semibold text-foreground/70">{k.label}</div>
+                    <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">{k.label}</div>
 
                     <div
                       className={`mt-0.5 text-[18px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}
