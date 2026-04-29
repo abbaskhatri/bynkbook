@@ -213,7 +213,7 @@ export function FixIssueDialog(props: {
       size={dialogSize}
       footer={
         <div className="flex items-center justify-between gap-2 w-full">
-          <div className="text-xs text-red-600">{err ?? ""}</div>
+          <div className="text-xs text-bb-status-danger-fg">{err ?? ""}</div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
               Close
@@ -321,7 +321,7 @@ export function FixIssueDialog(props: {
       <div className="space-y-3">
         {kind === "MISSING_CATEGORY" ? (
           <div className="flex items-center gap-2">
-            <div className="text-sm text-slate-700 w-28">Category</div>
+            <div className="text-sm text-bb-text w-28">Category</div>
             <div className="flex-1">
               <Select value={pickedCategoryId} onValueChange={setPickedCategoryId}>
                 <SelectTrigger className="h-8">
@@ -339,8 +339,8 @@ export function FixIssueDialog(props: {
           </div>
         ) : null}
 
-        <div className="rounded-md border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+        <div className="rounded-md border border-bb-border overflow-hidden">
+          <div className="bg-bb-table-header px-3 py-2 text-xs font-medium text-bb-text">
             Affected entries ({affectedRows.length})
           </div>
           <div className="overflow-x-hidden overflow-y-hidden">
@@ -367,8 +367,8 @@ export function FixIssueDialog(props: {
                 )}
               </colgroup>
 
-              <thead className="sticky top-0 bg-white">
-                <tr className="border-b border-slate-200 text-xs text-slate-600">
+              <thead className="sticky top-0 bg-bb-surface-card">
+                <tr className="border-b border-bb-border text-xs text-bb-text-muted">
                   <th className="text-left font-medium px-2 py-1">Date</th>
                   <th className="text-left font-medium px-2 py-1">Payee</th>
                   <th className="text-left font-medium px-2 py-1">Method</th>
@@ -378,7 +378,7 @@ export function FixIssueDialog(props: {
               </thead>
               <tbody>
                 {affectedRows.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-100">
+                  <tr key={r.id} className="border-b border-bb-border-muted">
                     <td className="px-2 py-1 tabular-nums">{r.date}</td>
                     <td className="px-2 py-1 whitespace-normal break-normal">{r.payee}</td>
                     <td className="px-2 py-1">{r.methodDisplay}</td>
@@ -388,7 +388,7 @@ export function FixIssueDialog(props: {
                 ))}
                 {affectedRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-slate-600" colSpan={5}>
+                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={5}>
                       No affected entries found.
                     </td>
                   </tr>
@@ -400,7 +400,7 @@ export function FixIssueDialog(props: {
 
         {kind === "DUPLICATE" ? (
           <div className="space-y-2">
-            <div className="text-xs text-slate-600">
+            <div className="text-xs text-bb-text-muted">
               {duplicateMentionsMatch
                 ? "Review the bank match before cleanup. Use Reconcile match/revert if the bank-created entry is the one that should be removed."
                 : "Review the entries before cleanup. Survivor amount stays unchanged if you choose to merge."}
@@ -408,7 +408,7 @@ export function FixIssueDialog(props: {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="text-xs">
-                <div className="text-[11px] text-slate-600 mb-1">Survivor</div>
+                <div className="text-[11px] text-bb-text-muted mb-1">Survivor</div>
                 <Select value={mergeSurvivorId} onValueChange={setMergeSurvivorId}>
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-primary/30 bg-primary/5">
                     <span className="truncate" title={mergeSurvivorId ? entryLabel(mergeSurvivorId) : ""}>
@@ -426,9 +426,9 @@ export function FixIssueDialog(props: {
               </div>
 
               <div className="text-xs">
-                <div className="text-[11px] text-slate-600 mb-1">Entry to merge after review</div>
+                <div className="text-[11px] text-bb-text-muted mb-1">Entry to merge after review</div>
                 <Select value={mergeDuplicateId} onValueChange={setMergeDuplicateId}>
-                  <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-red-200 bg-red-50">
+                  <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-bb-status-danger-border bg-bb-status-danger-bg">
                     <span className="truncate" title={mergeDuplicateId ? entryLabel(mergeDuplicateId) : ""}>
                       {mergeDuplicateId ? entryLabel(mergeDuplicateId) : "Pick duplicate"}
                     </span>
