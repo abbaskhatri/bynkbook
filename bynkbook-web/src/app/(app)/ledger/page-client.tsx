@@ -18,14 +18,12 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession } from "aws-amplify/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UploadPanel } from "@/components/uploads/UploadPanel";
-
-import { UploadsList } from "@/components/uploads/UploadsList";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -96,6 +94,11 @@ import {
   Download,
   Printer,
 } from "lucide-react";
+
+const UploadPanel = dynamic(
+  () => import("@/components/uploads/UploadPanel").then((mod) => mod.UploadPanel),
+  { loading: () => null }
+);
 
 // ================================
 // SECTION: Helpers
@@ -5829,13 +5832,15 @@ export default function LedgerPageClient() {
         </div>
       </AppDialog>
 
-      <UploadPanel
-        open={openUpload}
-        onClose={() => setOpenUpload(false)}
-        type={uploadType}
-        ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
-        allowMultiple={true}
-      />
+      {openUpload ? (
+        <UploadPanel
+          open={openUpload}
+          onClose={() => setOpenUpload(false)}
+          type={uploadType}
+          ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
+          allowMultiple={true}
+        />
+      ) : null}
 
       {selectedBusinessId && selectedAccountId ? (
         <ClosePeriodDialog
