@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +29,6 @@ import {
   type AccountType,
 } from "@/lib/api/accounts";
 import { plaidStatus, plaidDisconnect, plaidLinkTokenBusiness, plaidCreateAccount } from "@/lib/api/plaid";
-import { PlaidConnectButton } from "@/components/plaid/PlaidConnectButton";
 import { getTeam, createInvite, revokeInvite, updateMemberRole, removeMember, type TeamInvite, type TeamMember } from "@/lib/api/team";
 import { getRolePolicies, upsertRolePolicy, type RolePolicyRow } from "@/lib/api/rolePolicies";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
@@ -52,6 +52,11 @@ import { inputH7, ringFocus, selectTriggerClass, tabButtonClass } from "@/compon
 import { useUploadController } from "@/components/uploads/useUploadController";
 import { PillToggle } from "@/components/primitives/PillToggle";
 import { useThemePreference, type ThemePreference } from "@/lib/theme";
+
+const PlaidConnectButton = dynamic(
+  () => import("@/components/plaid/PlaidConnectButton").then((mod) => mod.PlaidConnectButton),
+  { loading: () => null }
+);
 
 function todayYmd() {
   const d = new Date();

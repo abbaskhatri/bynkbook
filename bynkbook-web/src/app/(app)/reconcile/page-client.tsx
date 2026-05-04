@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
@@ -11,8 +12,6 @@ import { useEntries } from "@/lib/queries/useEntries";
 import { apiFetch } from "@/lib/api/client";
 import { listCategories } from "@/lib/api/categories";
 
-import { PlaidConnectButton } from "@/components/plaid/PlaidConnectButton";
-
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -20,8 +19,6 @@ import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { inputH7 } from "@/components/primitives/tokens";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UploadPanel } from "@/components/uploads/UploadPanel";
-import { UploadsList } from "@/components/uploads/UploadsList";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { BusyButton } from "@/components/primitives/BusyButton";
 import { DialogFooter } from "@/components/primitives/DialogFooter";
@@ -58,7 +55,26 @@ import { getTeam } from "@/lib/api/team";
 import { aiSuggestReconcileBank, aiSuggestReconcileEntry } from "@/lib/api/ai";
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
-import { AutoReconcileDialog } from "@/components/reconcile/auto-reconcile-dialog";
+
+const PlaidConnectButton = dynamic(
+  () => import("@/components/plaid/PlaidConnectButton").then((mod) => mod.PlaidConnectButton),
+  { loading: () => null }
+);
+
+const UploadPanel = dynamic(
+  () => import("@/components/uploads/UploadPanel").then((mod) => mod.UploadPanel),
+  { loading: () => null }
+);
+
+const UploadsList = dynamic(
+  () => import("@/components/uploads/UploadsList").then((mod) => mod.UploadsList),
+  { loading: () => <div className="p-3 text-xs text-bb-text-muted">Loading history...</div> }
+);
+
+const AutoReconcileDialog = dynamic(
+  () => import("@/components/reconcile/auto-reconcile-dialog").then((mod) => mod.AutoReconcileDialog),
+  { loading: () => null }
+);
 
 function TinySpinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
@@ -6473,44 +6489,50 @@ const displayBankActiveList = useMemo(() => {
       </AppDialog>
 
       {/* Statement history dialog */}
-      <AppDialog
-        open={openStatementHistory}
-        onClose={() => setOpenStatementHistory(false)}
-        title="Statement history"
-        size="lg"
-      >
-        <UploadsList
-          title="Bank statement history"
+      {openStatementHistory ? (
+        <AppDialog
+          open={openStatementHistory}
+          onClose={() => setOpenStatementHistory(false)}
+          title="Statement history"
+          size="lg"
+        >
+          <UploadsList
+            title="Bank statement history"
+            businessId={selectedBusinessId ?? ""}
+            accountId={selectedAccountId ?? undefined}
+            type="BANK_STATEMENT"
+            limit={25}
+            showStatementPeriod
+          />
+        </AppDialog>
+      ) : null}
+
+      {openAutoReconcile ? (
+        <AutoReconcileDialog
+          open={openAutoReconcile}
+          onOpenChange={setOpenAutoReconcile}
           businessId={selectedBusinessId ?? ""}
-          accountId={selectedAccountId ?? undefined}
-          type="BANK_STATEMENT"
-          limit={25}
-          showStatementPeriod
+          accountId={selectedAccountId ?? ""}
+          bankTxns={bankUnmatchedList}
+          expectedEntries={entriesExpectedList}
+          // existing helpers/state
+          canWrite={canWriteReconcileEffective}
+          canWriteReason={reconcileWriteReason ?? noPermTitle}
+          onApplied={async () => {
+            refreshAllDebounced();
+          }}
         />
-      </AppDialog>
+      ) : null}
 
-      <AutoReconcileDialog
-        open={openAutoReconcile}
-        onOpenChange={setOpenAutoReconcile}
-        businessId={selectedBusinessId ?? ""}
-        accountId={selectedAccountId ?? ""}
-        bankTxns={bankUnmatchedList}
-        expectedEntries={entriesExpectedList}
-        // existing helpers/state
-        canWrite={canWriteReconcileEffective}
-        canWriteReason={reconcileWriteReason ?? noPermTitle}
-        onApplied={async () => {
-          refreshAllDebounced();
-        }}
-      />
-
-      <UploadPanel
-        open={openUpload}
-        onClose={() => setOpenUpload(false)}
-        type="BANK_STATEMENT"
-        ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
-        allowMultiple={false}
-      />
+      {openUpload ? (
+        <UploadPanel
+          open={openUpload}
+          onClose={() => setOpenUpload(false)}
+          type="BANK_STATEMENT"
+          ctx={{ businessId: selectedBusinessId ?? undefined, accountId: selectedAccountId ?? undefined }}
+          allowMultiple={false}
+        />
+      ) : null}
     </div>
   );
 }

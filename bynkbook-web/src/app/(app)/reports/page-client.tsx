@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactElement, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,21 +18,7 @@ import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
-import { FileText, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, PieChart as PieIcon, Landmark } from "lucide-react";
-
-import {
-  ResponsiveContainer,
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
+import { FileText, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, Landmark } from "lucide-react";
 
 import {
   getPnlSummary,
@@ -45,6 +32,24 @@ import {
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+
+const ComboBarLineChart = dynamic(
+  () => import("./reports-chart-panels").then((mod) => mod.ComboBarLineChart),
+  { loading: () => <ReportsChartFallback /> }
+);
+
+const DonutBreakdown = dynamic(
+  () => import("./reports-chart-panels").then((mod) => mod.DonutBreakdown),
+  { loading: () => <ReportsDonutFallback /> }
+);
+
+function ReportsChartFallback() {
+  return <div className="h-[260px] min-h-[260px] w-full rounded-md bg-bb-surface-soft" />;
+}
+
+function ReportsDonutFallback() {
+  return <div className="h-[260px] min-h-[260px] w-full rounded-md border border-bb-border bg-bb-surface-soft" />;
+}
 
 type TabKey = "overview" | "pnl" | "cashflow" | "monthly";
 type RangeMode = "weekly" | "monthly" | "yearly" | "custom";
@@ -232,32 +237,6 @@ function formatBucketLabel(raw: string, rangeMode: RangeMode) {
   return s || "—";
 }
 
-function normalizeMonthKeysForChart(rawMonths: string[], rangeToYmd: string) {
-  const months = (rawMonths ?? []).map((m) => String(m ?? "").trim());
-  if (months.length === 0) return months;
-
-  // Accept already-good keys: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-W##.
-  const ok = (s: string) =>
-    /^\d{4}$/.test(s) ||
-    /^\d{4}-\d{2}$/.test(s) ||
-    /^\d{4}-\d{2}-\d{2}$/.test(s) ||
-    /^\d{4}-W?\d{1,2}$/i.test(s);
-
-  // If ALL are acceptable, do nothing.
-  if (months.every(ok)) return months;
-
-  // Otherwise: synthesize YYYY-MM buckets ending at rangeTo month.
-  // This fixes bad labels like "Fri Aug" while staying deterministic.
-  const end = new Date(`${rangeToYmd}T00:00:00`);
-  const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
-
-  const n = months.length;
-  return months.map((_, i) => {
-    const d = new Date(endMonth.getFullYear(), endMonth.getMonth() - (n - 1 - i), 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
-}
-
 function hasMultiMonthSeries(monthly: Array<{ month: string }>) {
   if (!Array.isArray(monthly)) return false;
   const uniq = new Set(monthly.map((m) => String(m.month)));
@@ -275,292 +254,6 @@ function ReportFootnote({ lines }: { lines: string[] }) {
       {lines.map((l) => (
         <div key={l}>{l}</div>
       ))}
-    </div>
-  );
-}
-
-function compactUsdTickFromCentsNumber(v: number) {
-  // v is cents in number form (charting)
-  try {
-    const cents = BigInt(Math.round(v));
-    const fm = formatUsdAccountingFromCents(String(cents));
-    const raw = fm.text.replace(/[(),$]/g, "").replace(/,/g, "");
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return fm.text;
-
-    const abs = Math.abs(n);
-    const withSuffix =
-      abs >= 1_000_000 ? `${(abs / 1_000_000).toFixed(1)}M`
-        : abs >= 1_000 ? `${(abs / 1_000).toFixed(1)}k`
-          : abs.toFixed(0);
-
-    const base = `$${withSuffix}`;
-    return fm.isNeg ? `(${base})` : base;
-  } catch {
-    return "$0";
-  }
-}
-
-function mkComboSeriesData(months: string[], a: string[], b: string[], l: string[]) {
-  const n = Math.min(months.length, a.length, b.length, l.length);
-  return Array.from({ length: n }).map((_, i) => {
-    const A = (() => { try { return Number(BigInt(a[i] ?? "0")); } catch { return 0; } })();
-    const B = (() => { try { return Number(BigInt(b[i] ?? "0")); } catch { return 0; } })();
-    const L = (() => { try { return Number(BigInt(l[i] ?? "0")); } catch { return 0; } })();
-    return { month: String(months[i] ?? ""), a: A, b: B, l: L };
-  });
-}
-
-function ReportsResponsiveChartFrame({
-  children,
-  className = "h-[260px] min-h-[260px]",
-}: {
-  children: ReactElement;
-  className?: string;
-}) {
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [initialDimension, setInitialDimension] = useState<{ width: number; height: number } | null>(null);
-
-  useEffect(() => {
-    let rafId = 0;
-    let disposed = false;
-
-    const markReadyIfMeasured = () => {
-      const el = frameRef.current;
-      if (!el || disposed) return;
-
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setInitialDimension((current) => current ?? {
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        });
-      }
-    };
-
-    rafId = window.requestAnimationFrame(markReadyIfMeasured);
-
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(markReadyIfMeasured);
-
-    if (frameRef.current) {
-      resizeObserver?.observe(frameRef.current);
-    }
-
-    return () => {
-      disposed = true;
-      window.cancelAnimationFrame(rafId);
-      resizeObserver?.disconnect();
-    };
-  }, []);
-
-  return (
-    <div ref={frameRef} className={`min-w-0 w-full ${className}`}>
-      {initialDimension ? (
-        <ResponsiveContainer
-          width="99%"
-          height="99%"
-          minWidth={0}
-          minHeight={0}
-          initialDimension={initialDimension}
-        >
-          {children}
-        </ResponsiveContainer>
-      ) : (
-        <div className="h-full w-full" />
-      )}
-    </div>
-  );
-}
-
-function ComboBarLineChart({
-  title,
-  months,
-  barA,
-  barB,
-  line,
-  aLabel,
-  bLabel,
-  lineLabel,
-  rangeMode,
-  rangeTo,
-}: {
-  title: string;
-  months: string[];
-  barA: string[];
-  barB: string[];
-  line: string[];
-  aLabel: string;
-  bLabel: string;
-  lineLabel: string;
-  rangeMode: RangeMode;
-  rangeTo: string;
-}) {
-  const normMonths = normalizeMonthKeysForChart(months, rangeTo);
-  const data = mkComboSeriesData(normMonths, barA, barB, line);
-  if (data.length < 1) return <NoTrendNote />;
-
-  const tooltipFmt = (v: any) => {
-    try {
-      const cents = BigInt(Math.round(Number(v) || 0));
-      return formatUsdAccountingFromCents(String(cents)).text;
-    } catch {
-      return "—";
-    }
-  };
-
-  return (
-    <ReportsResponsiveChartFrame>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 6, left: 8 }}>
-        <CartesianGrid stroke="var(--bb-chart-grid)" strokeDasharray="3 3" />
-
-        <XAxis
-          dataKey="month"
-          tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
-          tickFormatter={(v: any) => formatBucketLabel(String(v), rangeMode)}
-        />
-        <YAxis
-          tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
-          tickFormatter={(v) => compactUsdTickFromCentsNumber(Number(v))}
-          width={72}
-        />
-
-        <Tooltip
-          formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
-          labelFormatter={(label: any) => formatBucketLabel(String(label), rangeMode)}
-          contentStyle={{
-            fontSize: 12,
-            background: "var(--bb-chart-tooltip-bg)",
-            border: "1px solid var(--bb-chart-tooltip-border)",
-            borderRadius: 10,
-          }}
-          labelStyle={{ color: "var(--bb-chart-tooltip-text)", fontWeight: 600 }}
-          itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
-        />
-
-        <Bar
-          dataKey="a"
-          name={aLabel}
-          fill="var(--bb-chart-income)"
-          radius={[4, 4, 0, 0]}
-          isAnimationActive
-          animationDuration={200}
-        />
-        <Bar
-          dataKey="b"
-          name={bLabel}
-          fill="var(--bb-chart-expense)"
-          radius={[4, 4, 0, 0]}
-          isAnimationActive
-          animationDuration={200}
-        />
-        <Line
-          dataKey="l"
-          name={lineLabel}
-          type="monotone"
-          stroke="var(--bb-chart-net)"
-          strokeWidth={2.25}
-          dot={false}
-          isAnimationActive
-          animationDuration={200}
-        />
-      </ComposedChart>
-    </ReportsResponsiveChartFrame>
-  );
-}
-
-function DonutBreakdown({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: Array<{ label: string; cents: string }>;
-}) {
-  if (!rows || rows.length < 2) return null;
-
-  const absBig = (s: string) => {
-    try { const n = BigInt(s); return n < 0n ? -n : n; } catch { return 0n; }
-  };
-
-  const sorted = [...rows]
-    .map((r) => ({ ...r, abs: absBig(r.cents) }))
-    .sort((a, b) => (b.abs > a.abs ? 1 : b.abs < a.abs ? -1 : 0));
-
-  const top = sorted.slice(0, 8);
-  const rest = sorted.slice(8);
-  const otherAbs = rest.reduce((acc, r) => acc + r.abs, 0n);
-
-  const slices = [
-    ...top.map((r) => ({ name: r.label, value: Number(r.abs), cents: r.cents })),
-    ...(otherAbs > 0n ? [{ name: "Other", value: Number(otherAbs), cents: "0" }] : []),
-  ];
-
-  const palette = [
-    "var(--bb-text-subtle)",
-    "var(--chart-4)",
-    "var(--chart-5)",
-    "var(--bb-chart-income)",
-    "var(--bb-chart-expense)",
-    "var(--bb-chart-net)",
-    "rgb(147 51 234)", // purple
-    "rgb(14 165 233)", // sky
-  ];
-
-  return (
-    <div className="rounded-md border border-bb-border p-3">
-      <div className="flex items-center gap-2 text-[11px] text-bb-text-muted">
-        <PieIcon className="h-4 w-4 text-bb-text-muted" />
-        {title}
-      </div>
-
-      <div className="mt-2 grid grid-cols-[260px_1fr] gap-6 items-start">
-        <ReportsResponsiveChartFrame>
-          <PieChart>
-            <Tooltip
-              formatter={(v: any, name: any, props: any) => {
-                const cents = props?.payload?.cents ?? "0";
-                return [formatUsdAccountingFromCents(String(cents)).text, String(name)];
-              }}
-              contentStyle={{
-                fontSize: 12,
-                background: "var(--bb-chart-tooltip-bg)",
-                border: "1px solid var(--bb-chart-tooltip-border)",
-                borderRadius: 10,
-                color: "var(--bb-chart-tooltip-text)",
-              }}
-              itemStyle={{ color: "var(--bb-chart-tooltip-text)" }}
-            />
-            <Pie data={slices} dataKey="value" nameKey="name" innerRadius={62} outerRadius={90} paddingAngle={2}>
-              {slices.map((_, i) => (
-                <Cell key={`cell-${i}`} fill={palette[i % palette.length]} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ReportsResponsiveChartFrame>
-
-        <div className="min-w-0">
-          <div className="space-y-1">
-            {top.map((r, i) => {
-              const fm = formatUsdAccountingFromCents(r.cents);
-              return (
-                <div key={`${r.label}-${i}`} className="flex items-center justify-between gap-3 text-xs">
-                  <div className="min-w-0 flex items-center gap-2">
-                    <span className="inline-block h-2 w-2 rounded-sm" style={{ background: palette[i % palette.length] }} />
-                    <span className="truncate text-bb-text">{r.label}</span>
-                  </div>
-                  <div className={`tabular-nums ${fm.isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>{fm.text}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-2 text-[11px] text-bb-text-muted">
-            Composition uses absolute values; amounts display signed accounting values.
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
