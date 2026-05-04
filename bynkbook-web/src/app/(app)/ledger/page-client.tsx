@@ -1272,7 +1272,7 @@ export default function LedgerPageClient() {
   // ---------- Bundle F: Ledger anomalies (read-only) ----------
   const anomaliesQ = useQuery({
     queryKey: ["ledgerAnomalies", selectedBusinessId, selectedAccountId, filterFrom || allTimeStartYmd(), filterTo || todayYmd()],
-    enabled: !!selectedBusinessId && !!selectedAccountId,
+    enabled: false,
     placeholderData: (prev) => prev ?? null,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -1677,6 +1677,12 @@ export default function LedgerPageClient() {
     });
   }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedAbsByEntryId, hasAdjustmentByEntryId]);
 
+  const rowModelById = useMemo(() => {
+    const map = new Map<string, (typeof rowModels)[number]>();
+    for (const row of rowModels) map.set(row.id, row);
+    return map;
+  }, [rowModels]);
+
   // Header "Uncategorized" chip count (Stage A attention indicator; instant, no backend calls).
   // NOTE: Visibility only; Category Review page is the workflow destination.
   const uncategorizedCount = useMemo(() => {
@@ -1741,7 +1747,7 @@ export default function LedgerPageClient() {
       if (iss.issue_type === "MISSING_CATEGORY") {
         // Guardrail: only show "missing category" if the entry truly has no category_id.
         // (Prevents false positives if backend scan used legacy fields.)
-        const row = rowModels.find((r) => r.id === eid);
+        const row = rowModelById.get(eid);
         const hasCatId = !!row?.categoryId;
         if (!hasCatId) {
           cur.missing = true;
@@ -1760,7 +1766,7 @@ export default function LedgerPageClient() {
     }
 
     return map;
-  }, [openIssues, rowModels]);
+  }, [openIssues, rowModelById]);
 
   // Stage A attention counts (UI-only; not authoritative)
   const issuesAttentionCount = useMemo(() => {
@@ -1900,8 +1906,9 @@ export default function LedgerPageClient() {
       .join("|");
   }, [pageRows]);
 
-  // Phase F2+: batch-fetch top-1 suggestions for visible uncategorized rows (bounded)
-  useEffect(() => {
+  // Phase F2+: batch-fetch top-1 suggestions for visible uncategorized rows (bounded).
+  // Kept manual so Ledger first paint does not start AI suggestion work.
+  async function fetchLedgerCategorySuggestions(opts?: { force?: boolean }) {
     if (!selectedBusinessId || !selectedAccountId) return;
 
     if (!ledgerSuggestionTargetIds) {
@@ -1928,68 +1935,56 @@ export default function LedgerPageClient() {
       setLedgerSugLoading(false);
       return;
     }
-    if (ledgerSugKeyRef.current === key) return;
+    if (!opts?.force && ledgerSugKeyRef.current === key) return;
     ledgerSugKeyRef.current = key;
 
-    let cancelled = false;
+    setLedgerSugLoading(true);
+    setLedgerSugNotice(null);
 
-    (async () => {
-      setLedgerSugLoading(true);
-      setLedgerSugNotice(null);
+    const items = targets.map((r: any) => {
+      const raw = entryById.get(String(r.id));
+      return {
+        kind: "ENTRY" as const,
+        id: String(r.id),
+        date: String(r.date ?? "").slice(0, 10),
+        amount_cents: r.amountCents,
+        payee_or_name: String(r.payee ?? ""),
+        memo: String(raw?.memo ?? "").trim(),
+      };
+    });
 
-      const items = targets.map((r: any) => {
-        const raw = entryById.get(String(r.id));
-        return {
-          kind: "ENTRY" as const,
-          id: String(r.id),
-          date: String(r.date ?? "").slice(0, 10),
-          amount_cents: r.amountCents,
-          payee_or_name: String(r.payee ?? ""),
-          memo: String(raw?.memo ?? "").trim(),
-        };
+    try {
+      const res: any = await getCategorySuggestions({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        items,
+        limitPerItem: 1,
       });
 
-      try {
-        const res: any = await getCategorySuggestions({
-          businessId: selectedBusinessId,
-          accountId: selectedAccountId,
-          items,
-          limitPerItem: 1,
-        });
-
-        const next: Record<string, any> = {};
-        for (const it of items) {
-          const s = res?.suggestionsById?.[it.id];
-          const top = Array.isArray(s) && s.length ? s[0] : null;
-          if (top) next[it.id] = top;
-        }
-
-        if (!cancelled) {
-          setLedgerSugTopByEntryId((prev) => ({ ...prev, ...next }));
-          setLedgerSugTriedByEntryId((prev) => {
-            const done = { ...prev };
-            for (const it of items) done[String(it.id)] = true;
-            return done;
-          });
-        }
-      } catch (e: any) {
-        if (!cancelled) {
-          setLedgerSugNotice(aiFriendlyMessage(e, "AI suggestions are unavailable right now."));
-          setLedgerSugTriedByEntryId((prev) => {
-            const done = { ...prev };
-            for (const it of items) done[String(it.id)] = true;
-            return done;
-          });
-        }
-      } finally {
-        if (!cancelled) setLedgerSugLoading(false);
+      const next: Record<string, any> = {};
+      for (const it of items) {
+        const s = res?.suggestionsById?.[it.id];
+        const top = Array.isArray(s) && s.length ? s[0] : null;
+        if (top) next[it.id] = top;
       }
-    })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedBusinessId, selectedAccountId, ledgerSuggestionTargetIds, entryById]);
+      setLedgerSugTopByEntryId((prev) => ({ ...prev, ...next }));
+      setLedgerSugTriedByEntryId((prev) => {
+        const done = { ...prev };
+        for (const it of items) done[String(it.id)] = true;
+        return done;
+      });
+    } catch (e: any) {
+      setLedgerSugNotice(aiFriendlyMessage(e, "AI suggestions are unavailable right now."));
+      setLedgerSugTriedByEntryId((prev) => {
+        const done = { ...prev };
+        for (const it of items) done[String(it.id)] = true;
+        return done;
+      });
+    } finally {
+      setLedgerSugLoading(false);
+    }
+  }
 
   // ================================
   // WYSIWYG footer totals (current visible rows only)
@@ -5195,6 +5190,36 @@ export default function LedgerPageClient() {
                     Uncategorized: <span className="font-semibold">{uncategorizedCount}</span>
                   </button>
                 ) : null}
+
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 inline-flex items-center gap-1.5"
+                  onClick={() => void anomaliesQ.refetch()}
+                  disabled={!selectedBusinessId || !selectedAccountId || anomaliesQ.isFetching}
+                  title={(anomaliesQ.data as any)?.anomalies ? "Refresh anomaly insights" : "Run anomaly scan"}
+                >
+                  {anomaliesQ.isFetching ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  {(anomaliesQ.data as any)?.anomalies ? "Refresh anomalies" : "Run anomalies"}
+                </button>
+
+                <button
+                  type="button"
+                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 inline-flex items-center gap-1.5"
+                  onClick={() => void fetchLedgerCategorySuggestions({ force: true })}
+                  disabled={!selectedBusinessId || !selectedAccountId || !ledgerSuggestionTargetIds || ledgerSugLoading}
+                  title="Suggest categories for visible uncategorized entries"
+                >
+                  {ledgerSugLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Suggest categories
+                </button>
 
                 <button
                   type="button"
