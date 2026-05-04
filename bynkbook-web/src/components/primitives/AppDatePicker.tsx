@@ -14,6 +14,9 @@ export type AppDatePickerProps = {
 
     ariaLabel?: string;
     className?: string;
+    buttonClassName?: string;
+    displayFormat?: "pretty" | "numeric";
+    showIcon?: boolean;
 
     allowClear?: boolean;
 };
@@ -37,9 +40,12 @@ function dateToYmdLocal(dt: Date): string {
     return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
 
-function formatPlaceholderOrPretty(ymd: string, placeholder: string) {
+function formatPlaceholderOrPretty(ymd: string, placeholder: string, displayFormat: "pretty" | "numeric") {
     const dt = ymdToDateLocal(ymd);
     if (!dt) return placeholder;
+    if (displayFormat === "numeric") {
+        return `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())}/${String(dt.getFullYear()).slice(-2)}`;
+    }
     try {
         return dt.toLocaleDateString(undefined, {
             year: "numeric",
@@ -78,6 +84,9 @@ export function AppDatePicker({
     disabled = false,
     ariaLabel = "Select date",
     className = "",
+    buttonClassName = "",
+    displayFormat = "pretty",
+    showIcon = true,
     allowClear = true,
 }: AppDatePickerProps) {
     const [open, setOpen] = React.useState(false);
@@ -191,13 +200,18 @@ export function AppDatePicker({
                 ref={anchorRef}
                 className={[
                     inputH7,
-                    "pl-8 pr-8 text-left flex items-center",
+                    showIcon ? "pl-8" : "pl-2",
+                    allowClear ? "pr-8" : "pr-2",
+                    "text-left flex items-center whitespace-nowrap",
                     disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-bb-table-row-hover",
+                    buttonClassName,
                 ].join(" ")}
             >
-                <CalendarDays className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-bb-text-subtle" />
-                <span className={value ? "text-bb-text" : "text-bb-input-placeholder"}>
-                    {formatPlaceholderOrPretty(value, placeholder)}
+                {showIcon ? (
+                    <CalendarDays className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-bb-text-subtle" />
+                ) : null}
+                <span className={[value ? "text-bb-text" : "text-bb-input-placeholder", "min-w-0 truncate whitespace-nowrap"].join(" ")}>
+                    {formatPlaceholderOrPretty(value, placeholder, displayFormat)}
                 </span>
             </button>
 

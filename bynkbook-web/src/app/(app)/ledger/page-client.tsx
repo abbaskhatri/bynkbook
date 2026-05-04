@@ -3322,18 +3322,18 @@ export default function LedgerPageClient() {
 
   const cols = [
     <col key="c0" style={{ width: "24px" }} />,
-    <col key="c1" style={{ width: "78px" }} />,   // date
-    <col key="c2" style={{ width: "44px" }} />,   // ref
-    <col key="c3" style={{ width: "auto", minWidth: "170px" }} />, // payee flex
-    <col key="c4" style={{ width: "74px" }} />,   // type
-    <col key="c5" style={{ width: "78px" }} />,   // method
-    <col key="c6" style={{ width: "100px" }} />,  // category
-    <col key="c7" style={{ width: "88px" }} />,   // amount
-    <col key="c8" style={{ width: "88px" }} />,   // balance
-    <col key="c9" style={{ width: "110px" }} />,  // status
-    <col key="c10" style={{ width: "16px" }} />,  // dup icon
-    <col key="c11" style={{ width: "16px" }} />,  // cat icon
-    <col key="c12" style={{ width: "76px" }} />,  // actions
+    <col key="c1" style={{ width: "90px" }} />,   // date
+    <col key="c2" style={{ width: "64px" }} />,   // ref
+    <col key="c3" style={{ width: "auto", minWidth: "150px" }} />, // payee flex
+    <col key="c4" style={{ width: "68px" }} />,   // type
+    <col key="c5" style={{ width: "72px" }} />,   // method
+    <col key="c6" style={{ width: "94px" }} />,  // category
+    <col key="c7" style={{ width: "84px" }} />,   // amount
+    <col key="c8" style={{ width: "84px" }} />,   // balance
+    <col key="c9" style={{ width: "102px" }} />,  // status
+    <col key="c10" style={{ width: "20px" }} />,  // dup icon
+    <col key="c11" style={{ width: "20px" }} />,  // cat icon
+    <col key="c12" style={{ width: "92px" }} />,  // actions
   ];
 
   const headerRow = useMemo(() => (
@@ -3359,7 +3359,7 @@ export default function LedgerPageClient() {
       {/* No "Dup/Cat" header text */}
       <th className={th + " " + center + " px-0.5"} aria-label="Duplicate issues"></th>
       <th className={th + " " + center + " px-0.5"} aria-label="Missing category issues"></th>
-      <th className={th + " text-right"}>Actions</th>
+      <th className={th + " " + center}>Actions</th>
     </tr>
   ), [allPageSelected]);
 
@@ -3367,8 +3367,15 @@ export default function LedgerPageClient() {
     <tr>
       <td className={td + " " + center + " relative"}>
         {/* Borrow the empty checkbox column space so Date doesn't crush Ref */}
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[100px] z-10">
-          <AppDatePicker value={draftDate} onChange={setDraftDate} ariaLabel="Entry date" />
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[112px] z-10">
+          <AppDatePicker
+            value={draftDate}
+            onChange={setDraftDate}
+            ariaLabel="Entry date"
+            displayFormat="numeric"
+            showIcon={false}
+            buttonClassName="justify-center pl-2 pr-7 text-center tabular-nums"
+          />
         </div>
       </td>
 
@@ -3378,7 +3385,7 @@ export default function LedgerPageClient() {
       {/* Ref */}
       <td className={td}>
         <input
-          className={inputH7}
+          className={inputH7 + " tabular-nums"}
           placeholder="Ref"
           value={draftRef}
           onChange={(e) => setDraftRef(e.target.value)}
@@ -3548,8 +3555,8 @@ export default function LedgerPageClient() {
       <td className={td + " " + center + " px-0.5"}></td>
 
       {/* Actions */}
-      <td className={td + " text-right"}>
-        <Button className="h-7 w-8 p-0" onClick={submitInline} title="Add entry">
+      <td className={td + " text-center pr-1"}>
+        <Button className="h-7 w-8 p-0 inline-flex items-center justify-center" onClick={submitInline} title="Add entry">
           <Plus className="h-4 w-4" />
         </Button>
       </td>
@@ -4007,13 +4014,16 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Date */}
-          <td className={td + " whitespace-nowrap " + deletedText}>
+          <td className={td + " whitespace-nowrap tabular-nums " + deletedText}>
             {isEditing && editDraft ? (
-              <div className="w-[100px]">
+              <div className="w-full min-w-0">
                 <AppDatePicker
                   value={editDraft.date}
                   onChange={(next) => setEditDraft({ ...editDraft, date: next })}
                   ariaLabel="Edit date"
+                  displayFormat="numeric"
+                  showIcon={false}
+                  buttonClassName="justify-center pl-2 pr-7 text-center tabular-nums"
                 />
               </div>
             ) : (
@@ -4026,7 +4036,7 @@ export default function LedgerPageClient() {
             {isEditing && editDraft ? (
               <input
                 ref={editRefRef}
-                className={inputH7}
+                className={inputH7 + " tabular-nums"}
                 value={editDraft.ref}
                 onChange={(e) => setEditDraft({ ...editDraft, ref: e.target.value })}
                 onKeyDown={onEditKeyDown}
@@ -4590,7 +4600,7 @@ export default function LedgerPageClient() {
               >
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center"
+                  className="mx-auto flex h-6 w-6 items-center justify-center"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                     setFixDialog({
@@ -4618,7 +4628,7 @@ export default function LedgerPageClient() {
               <HoverTooltip text={r.missingTooltip}>
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center"
+                  className="mx-auto flex h-6 w-6 items-center justify-center"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
 
@@ -4636,13 +4646,13 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Actions */}
-          <td className={td + " text-right pr-1"}>
-            <div className="relative inline-flex items-center justify-end gap-1 w-[68px]" data-rowmenu={r.id}>
+          <td className={td + " text-center pr-1"}>
+            <div className="relative mx-auto flex h-full min-h-7 w-[86px] items-center justify-end gap-1.5" data-rowmenu={r.id}>
               {deletedRow ? (
                 <>
                   <Button
                     variant="outline"
-                    className="h-6 w-8 p-0"
+                    className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                     title="Restore"
                     onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
@@ -4657,7 +4667,7 @@ export default function LedgerPageClient() {
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-6 w-8 p-0"
+                    className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                     title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
                     disabled={deletingId === r.id || hardDeleteMut.isPending}
                     onClick={() => {
@@ -4670,10 +4680,10 @@ export default function LedgerPageClient() {
                 </>
               ) : isEditing ? (
                 <>
-                  <Button variant="outline" className="h-6 w-8 p-0" title="Cancel edit" onClick={cancelEdit}>
+                  <Button variant="outline" className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0" title="Cancel edit" onClick={cancelEdit}>
                     <X className="h-4 w-4" />
                   </Button>
-                  <Button className="h-6 w-8 p-0" title="Save edit" onClick={() => triggerSaveEdit(r.id)}>
+                  <Button className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0" title="Save edit" onClick={() => triggerSaveEdit(r.id)}>
                     <Check className="h-4 w-4" />
                   </Button>
                 </>
@@ -4683,7 +4693,7 @@ export default function LedgerPageClient() {
                     <>
                       <Button
                         variant="outline"
-                        className="h-6 w-8 p-0"
+                        className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                         title="Actions"
                         onClick={() => setMenuOpenId(menuOpen ? null : r.id)}
                       >
@@ -4821,7 +4831,7 @@ export default function LedgerPageClient() {
 
                       <Button
                         variant="outline"
-                        className="h-6 w-8 p-0"
+                        className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                         title={r.entryKind === "VENDOR_PAYMENT" ? "Delete payment" : "Move to Deleted"}
                         disabled={deletingId === r.id || deleteMut.isPending}
                         onClick={() => {
