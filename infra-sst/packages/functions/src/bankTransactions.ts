@@ -76,6 +76,63 @@ const POSSIBLE_DUPLICATE_ENTRY_MESSAGE =
   "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
 const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
 
+function normalizeCheckNumberCandidate(value: any) {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  if (!/^\d{2,8}$/.test(s)) return "";
+  if (/^0+$/.test(s)) return "";
+  return s;
+}
+
+function rawString(raw: any, keys: string[]) {
+  if (!raw || typeof raw !== "object") return "";
+  for (const key of keys) {
+    const v = raw?.[key];
+    if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
+  }
+  return "";
+}
+
+function extractCheckNumberFromBankTransaction(bankTxn: any) {
+  const raw = bankTxn?.raw && typeof bankTxn.raw === "object" ? bankTxn.raw : {};
+  const explicit = normalizeCheckNumberCandidate(
+    rawString(raw, ["check_number", "checkNumber", "check_num", "checkNum"])
+  );
+  if (explicit) return explicit;
+
+  const parts = [
+    bankTxn?.name,
+    rawString(raw, ["name", "merchant_name", "merchantName", "original_description", "originalDescription"]),
+  ]
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean);
+
+  for (const text of parts) {
+    const patterns = [
+      /\b(?:check|chk)\s*(?:#|no\.?|number)?\s*([0-9]{2,8})\b/i,
+      /\bdeposit\s+check\s*(?:#|no\.?|number)?\s*([0-9]{2,8})\b/i,
+    ];
+    for (const pattern of patterns) {
+      const candidate = normalizeCheckNumberCandidate(text.match(pattern)?.[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  return "";
+}
+
+function memoHasRef(memo: any) {
+  return /\bref\s*:/i.test(String(memo ?? ""));
+}
+
+function memoWithCheckRef(memo: string, checkRef: string) {
+  const ref = normalizeCheckNumberCandidate(checkRef);
+  const base = String(memo ?? "").trim();
+  if (!ref || memoHasRef(base)) return base;
+  if (!base) return `Ref: ${ref}`;
+  return `Ref: ${ref}\n${base}`.slice(0, 400);
+}
+
 function dateOnlyUtc(ymd: string) {
   return new Date(`${ymd}T00:00:00Z`);
 }
@@ -171,6 +228,11 @@ function duplicateCandidatePayload(entry: any) {
     date: isoToYmd(entry.date),
     payee: entry.payee ?? null,
     memo: entry.memo ?? null,
+    ref: (() => {
+      const m = String(entry?.memo ?? "").match(/\bref\s*:\s*([^\n\r;|,]+)/i);
+      return m?.[1]?.trim() || null;
+    })(),
+    category_id: entry.category_id ?? null,
     amount_cents: entry.amount_cents,
     status: entry.status ?? null,
   };
@@ -208,6 +270,7 @@ async function findPossibleCreateEntryDuplicates(args: {
       date: true,
       payee: true,
       memo: true,
+      category_id: true,
       amount_cents: true,
       type: true,
       status: true,
@@ -471,7 +534,7 @@ export async function handler(event: any) {
               id: bankId,
               is_removed: false,
             },
-            select: { id: true, posted_date: true, name: true, amount_cents: true },
+            select: { id: true, posted_date: true, name: true, amount_cents: true, raw: true },
           });
 
           if (!bankTxn) {
@@ -554,7 +617,7 @@ export async function handler(event: any) {
           const rawMemo = it?.memo ? String(it.memo) : "";
           const memoOverride = rawMemo.trim() ? rawMemo.trim().slice(0, 400) : "";
           const defaultMemo = `Bank txn: ${(bankTxn.name ?? "").toString().trim() || "—"} • ${bankId}`;
-          const memo = memoOverride || defaultMemo;
+          const memo = memoWithCheckRef(memoOverride || defaultMemo, extractCheckNumberFromBankTransaction(bankTxn));
 
           const rawMethod = it?.method ? String(it.method) : "";
           const methodOverride = rawMethod.trim().toUpperCase();
@@ -830,6 +893,7 @@ export async function handler(event: any) {
       }
 
       const autoMatch = body?.autoMatch === true;
+      const allowPossibleDuplicate = body?.allowPossibleDuplicate === true;
 
       const rawMemo = body?.memo ? String(body.memo) : "";
       const memoOverride = rawMemo.trim() ? rawMemo.trim().slice(0, 400) : "";
@@ -855,6 +919,7 @@ export async function handler(event: any) {
           posted_date: true,
           name: true,
           amount_cents: true,
+          raw: true,
         },
       });
 
@@ -915,7 +980,7 @@ export async function handler(event: any) {
       const entryAmountCents = sign > 0n ? bankAbs : -bankAbs;
 
       const defaultMemo = `Bank txn: ${(bankTxn.name ?? "").toString().trim() || "—"} • ${bankTransactionId}`;
-      const memo = memoOverride || defaultMemo;
+      const memo = memoWithCheckRef(memoOverride || defaultMemo, extractCheckNumberFromBankTransaction(bankTxn));
 
       const allowedMethods = new Set([
         "CASH",
@@ -1014,7 +1079,7 @@ export async function handler(event: any) {
         entryDateYmd,
       });
 
-      if (possibleDuplicateCandidates.length > 0) {
+      if (possibleDuplicateCandidates.length > 0 && !allowPossibleDuplicate) {
         return json(409, {
           ok: false,
           code: POSSIBLE_DUPLICATE_ENTRY_CODE,
@@ -1118,6 +1183,8 @@ export async function handler(event: any) {
           entry_id: result.createdEntryId,
           auto_matched: !!result.createdMatchGroupId,
           match_group_id: result.createdMatchGroupId,
+          duplicate_warning_overridden: allowPossibleDuplicate && possibleDuplicateCandidates.length > 0,
+          possible_duplicate_candidates: allowPossibleDuplicate ? possibleDuplicateCandidates : undefined,
           remaining_abs_cents: result.createdMatchGroupId ? "0" : bankAbs.toString(),
         },
       });
@@ -1127,6 +1194,7 @@ export async function handler(event: any) {
         entry_id: result.createdEntryId,
         match_group_id: result.createdMatchGroupId,
         auto_matched: !!result.createdMatchGroupId,
+        duplicate_warning_overridden: allowPossibleDuplicate && possibleDuplicateCandidates.length > 0,
       });
     } catch (e: any) {
       const msg = String(e?.message ?? e ?? "Unknown error");

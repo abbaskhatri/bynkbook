@@ -740,21 +740,31 @@ export default function ReconcilePageClient() {
   const possibleDuplicateEntryMessage =
     "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
 
-  function possibleDuplicateCreateEntryMessage(e: any) {
-    const directCode = e?.code || e?.payload?.code || e?.data?.code || e?.response?.data?.code;
-    if (directCode === "POSSIBLE_DUPLICATE_ENTRY") return possibleDuplicateEntryMessage;
+  function possibleDuplicateCreateEntryPayload(e: any) {
+    const directPayload = e?.payload ?? e?.data ?? e?.response?.data ?? null;
+    if (directPayload?.code === "POSSIBLE_DUPLICATE_ENTRY") return directPayload;
 
     const msg = String(e?.message ?? "");
     const jsonStart = msg.indexOf("{");
     if (jsonStart >= 0) {
       try {
         const payload = JSON.parse(msg.slice(jsonStart));
-        if (payload?.code === "POSSIBLE_DUPLICATE_ENTRY") return possibleDuplicateEntryMessage;
+        if (payload?.code === "POSSIBLE_DUPLICATE_ENTRY") return payload;
       } catch {
         // Fall through to the string check below.
       }
     }
 
+    return null;
+  }
+
+  function possibleDuplicateCreateEntryMessage(e: any) {
+    const directCode = e?.code || e?.payload?.code || e?.data?.code || e?.response?.data?.code;
+    if (directCode === "POSSIBLE_DUPLICATE_ENTRY") return possibleDuplicateEntryMessage;
+
+    if (possibleDuplicateCreateEntryPayload(e)) return possibleDuplicateEntryMessage;
+
+    const msg = String(e?.message ?? "");
     return msg.includes("POSSIBLE_DUPLICATE_ENTRY") ? possibleDuplicateEntryMessage : null;
   }
 
@@ -1560,6 +1570,8 @@ export default function ReconcilePageClient() {
   const [openCreateEntry, setOpenCreateEntry] = useState(false);
   const [createEntryBankTxnId, setCreateEntryBankTxnId] = useState<string | null>(null);
   const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(true);
+  const [createEntryDuplicateCandidates, setCreateEntryDuplicateCandidates] = useState<any[]>([]);
+  const [createEntryDuplicateConfirm, setCreateEntryDuplicateConfirm] = useState("");
 
   // Overrides
   const [createEntryMemo, setCreateEntryMemo] = useState("");
@@ -3086,6 +3098,8 @@ const displayBankActiveList = useMemo(() => {
             setOpenCreateEntry(false);
             setCreateEntryBankTxnId(null);
             setCreateEntryAutoMatch(true);
+            setCreateEntryDuplicateCandidates([]);
+            setCreateEntryDuplicateConfirm("");
           }}
           title="Create entry"
           size="md"
@@ -3103,10 +3117,30 @@ const displayBankActiveList = useMemo(() => {
               }
               right={
                 <>
+                  {createEntryDuplicateCandidates.length ? (
+                    <BusyButton
+                      variant="primary"
+                      size="md"
+                      onClick={() => {
+                        setOpenCreateEntry(false);
+                        setCreateEntryBankTxnId(null);
+                        setCreateEntryDuplicateCandidates([]);
+                        setCreateEntryDuplicateConfirm("");
+                      }}
+                      disabled={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
+                    >
+                      Match existing
+                    </BusyButton>
+                  ) : null}
+
                   <BusyButton
                     variant="secondary"
                     size="md"
-                    onClick={() => setOpenCreateEntry(false)}
+                    onClick={() => {
+                      setOpenCreateEntry(false);
+                      setCreateEntryDuplicateCandidates([]);
+                      setCreateEntryDuplicateConfirm("");
+                    }}
                     disabled={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
                   >
                     Cancel
@@ -3117,11 +3151,16 @@ const displayBankActiveList = useMemo(() => {
                     reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
                   >
                     <BusyButton
-                      variant="primary"
+                      variant={createEntryDuplicateCandidates.length ? "danger" : "primary"}
                       size="md"
                       busy={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
                       busyLabel="Creating…"
-                      disabled={!canWriteReconcileEffective || !createEntryBankTxnId}
+                      disabled={
+                        !canWriteReconcileEffective ||
+                        !createEntryBankTxnId ||
+                        (createEntryDuplicateCandidates.length > 0 &&
+                          createEntryDuplicateConfirm.trim() !== "Create a separate ledger entry")
+                      }
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId) return;
                         if (!canWriteReconcileEffective) return;
@@ -3174,6 +3213,7 @@ const displayBankActiveList = useMemo(() => {
                             method: createEntryMethod,
                             category_id: createEntryCategoryId.trim() || "",
                             suggested_category_id: suggestedCategoryId || "",
+                            allowPossibleDuplicate: createEntryDuplicateCandidates.length > 0,
                           });
 
                           await refreshTablesFully({
@@ -3195,6 +3235,8 @@ const displayBankActiveList = useMemo(() => {
                           clearMutErr();
                           setOpenCreateEntry(false);
                           setCreateEntryBankTxnId(null);
+                          setCreateEntryDuplicateCandidates([]);
+                          setCreateEntryDuplicateConfirm("");
                         } catch (e: any) {
                           setOptimisticPendingEntryDrafts((prev) =>
                             prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
@@ -3207,20 +3249,29 @@ const displayBankActiveList = useMemo(() => {
 
                           const duplicateMessage = possibleDuplicateCreateEntryMessage(e);
                           if (duplicateMessage) {
+                            const payload = possibleDuplicateCreateEntryPayload(e);
                             clearMutErr();
                             setCreateEntryErr(duplicateMessage);
+                            setCreateEntryDuplicateCandidates(
+                              Array.isArray(payload?.possible_duplicate_candidates)
+                                ? payload.possible_duplicate_candidates
+                                : []
+                            );
+                            setCreateEntryDuplicateConfirm("");
                             return;
                           }
 
                           applyMutationError(e, "Can’t create entry");
                           setCreateEntryErr(null);
+                          setCreateEntryDuplicateCandidates([]);
+                          setCreateEntryDuplicateConfirm("");
                         } finally {
                           clearPending(bankId);
                           setCreateEntryBusyByBankId((m) => ({ ...m, [bankId]: false }));
                         }
                       }}
                     >
-                      Create entry
+                      {createEntryDuplicateCandidates.length ? "Create separate entry anyway" : "Create entry"}
                     </BusyButton>
                   </HintWrap>
                 </>
@@ -3263,6 +3314,51 @@ const displayBankActiveList = useMemo(() => {
                       </div>
                     </div>
                   </div>
+
+                  {createEntryDuplicateCandidates.length ? (
+                    <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
+                      <div className="font-semibold text-bb-text">Possible duplicate ledger entries</div>
+                      <div className="mt-1 text-bb-text-muted">
+                        Match an existing entry when one of these is the same transaction. Use this only if these are truly separate transactions.
+                      </div>
+                      <div className="mt-2 flex flex-col gap-2">
+                        {createEntryDuplicateCandidates.slice(0, 5).map((candidate: any) => {
+                          const id = String(candidate?.entry_id ?? candidate?.id ?? "");
+                          const cDate = String(candidate?.date ?? "").slice(0, 10) || "—";
+                          const cPayee = compactText(candidate?.payee ?? candidate?.memo ?? "");
+                          const cAmount = formatUsdFromCents(toBigIntSafe(candidate?.amount_cents));
+                          const cRef = compactText(candidate?.ref ?? "", "");
+                          const cCategory = compactText(candidate?.category_name ?? candidate?.categoryName ?? candidate?.category_id ?? "", "");
+                          return (
+                            <div key={id || `${cDate}-${cPayee}-${cAmount}`} className="rounded border border-bb-border bg-bb-surface-card px-2 py-1.5 text-bb-text">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium truncate">{cPayee}</span>
+                                <span className="tabular-nums whitespace-nowrap">{cAmount}</span>
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-bb-text-muted">
+                                <span>{cDate}</span>
+                                {cCategory ? <span>Category: {cCategory}</span> : null}
+                                {cRef ? <span>Ref: {cRef}</span> : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <label className="mt-2 block">
+                        <span className="text-[11px] font-semibold text-bb-text-muted">
+                          Type "Create a separate ledger entry" to create anyway.
+                        </span>
+                        <input
+                          className={[
+                            "mt-1 h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card text-bb-text",
+                            ringFocus,
+                          ].join(" ")}
+                          value={createEntryDuplicateConfirm}
+                          onChange={(e) => setCreateEntryDuplicateConfirm(e.target.value)}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -4198,6 +4294,8 @@ const displayBankActiveList = useMemo(() => {
                                     if (remaining === 0n) return;
 
                                     setCreateEntryErr(null);
+                                    setCreateEntryDuplicateCandidates([]);
+                                    setCreateEntryDuplicateConfirm("");
                                     setCreateEntryBankTxnId(bankId);
                                     setCreateEntryAutoMatch(true);
 
