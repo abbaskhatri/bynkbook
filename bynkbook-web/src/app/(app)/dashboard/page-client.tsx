@@ -516,10 +516,12 @@ export default function DashboardPageClient() {
     placeholderData: (prev) => prev,
   });
 
+  const [aiInsightsRequested, setAiInsightsRequested] = useState(false);
+
     // ---------- Bundle F: AI narrative + anomalies (read-only) ----------
   const aiNarrativeQ = useQuery({
     queryKey: ["aiNarrative", selectedBusinessId, accountScopeId, range.from, range.to, range.mode],
-    enabled: !!selectedBusinessId && !!range?.from && !!range?.to,
+    enabled: aiInsightsRequested && !!selectedBusinessId && !!range?.from && !!range?.to,
     placeholderData: (prev) => prev ?? null,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -543,7 +545,7 @@ export default function DashboardPageClient() {
 
   const aiAnomaliesQ = useQuery({
     queryKey: ["aiAnomalies", selectedBusinessId, accountScopeId, range.from, range.to],
-    enabled: !!selectedBusinessId && !!range?.from && !!range?.to,
+    enabled: aiInsightsRequested && !!selectedBusinessId && !!range?.from && !!range?.to,
     placeholderData: (prev) => prev ?? null,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -583,6 +585,18 @@ export default function DashboardPageClient() {
   const ai429 =
     String((aiNarrativeQ.error as any)?.message ?? "").includes("429") ||
     String((aiAnomaliesQ.error as any)?.message ?? "").includes("429");
+
+  function requestAiInsights() {
+    if (!selectedBusinessId) return;
+
+    if (!aiInsightsRequested) {
+      setAiInsightsRequested(true);
+      return;
+    }
+
+    void aiNarrativeQ.refetch();
+    void aiAnomaliesQ.refetch();
+  }
 
   const dashErr = useMemo(() => {
     const errs = [pnlQ.error, cashflowQ.error, categoriesQ.error, accountsSummaryQ.error].filter(Boolean) as any[];
@@ -1895,13 +1909,25 @@ export default function DashboardPageClient() {
             <Sparkles className="h-4 w-4 text-primary" />
             <CardTitle className="text-sm">AI Summary</CardTitle>
           </div>
-          {aiNarrativeQ.isFetching && aiNarrativeQ.data?.ok ? <div className="text-[11px] text-muted-foreground">Updating…</div> : null}
+          <div className="flex items-center gap-2">
+            {aiNarrativeQ.isFetching && aiNarrativeQ.data?.ok ? <div className="text-[11px] text-muted-foreground">Updating…</div> : null}
+            <Button
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={requestAiInsights}
+              disabled={!selectedBusinessId || aiNarrativeQ.isFetching || aiAnomaliesQ.isFetching}
+            >
+              {aiInsightsRequested ? "Refresh AI insights" : "Generate insights"}
+            </Button>
+          </div>
         </CHeader>
 
         <CardContent className="space-y-2">
           <div className="text-[11px] text-muted-foreground">Read-only guidance based on dashboard totals and trends.</div>
 
-          {ai429 ? (
+          {!aiInsightsRequested ? (
+            <div className="text-sm text-foreground/70">Generate insights when you want read-only AI guidance for this dashboard range.</div>
+          ) : ai429 ? (
             <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-sm text-bb-status-warning-fg">
               {dashboardAiMessage(aiNarrativeQ.error)}
             </div>
@@ -1930,7 +1956,9 @@ export default function DashboardPageClient() {
         </CHeader>
 
         <CardContent className="space-y-2">
-          {aiAnomaliesQ.isLoading && !aiAnomaliesQ.data ? (
+          {!aiInsightsRequested ? (
+            <div className="text-sm text-foreground/70">Generate insights to check this range for unusual transactions.</div>
+          ) : aiAnomaliesQ.isLoading && !aiAnomaliesQ.data ? (
             <div className="space-y-2">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="space-y-1">

@@ -327,6 +327,34 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   const effectiveAccountId = accountIdFromUrl ?? firstActiveAccountId ?? null;
   const currentAccountId = effectiveAccountId ?? "";
+  const issuesCountScopeKey = businessId && currentAccountId ? `${businessId}:${currentAccountId}` : "";
+  const [issuesCountReadyKey, setIssuesCountReadyKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIssuesCountReadyKey(null);
+    if (!issuesCountScopeKey) return;
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+
+    const markReady = () => {
+      if (!cancelled) setIssuesCountReadyKey(issuesCountScopeKey);
+    };
+
+    const w = window as any;
+    if (typeof w.requestIdleCallback === "function") {
+      idleId = w.requestIdleCallback(markReady, { timeout: 1500 });
+    } else {
+      timeoutId = setTimeout(markReady, 800);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (idleId != null && typeof w.cancelIdleCallback === "function") w.cancelIdleCallback(idleId);
+    };
+  }, [issuesCountScopeKey]);
 
   // When the current URL uses accountId=all, single-account routes must never navigate with "all".
   // Compute a safe fallback for link-building: last real account for this business, else first active account.
@@ -428,10 +456,10 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   // Sidebar Issues count (authoritative; server-derived)
   const issuesCountQ = useQuery({
     queryKey: ["issuesCount", businessId, currentAccountId || "all", "OPEN"],
-    enabled: !!businessId && !!currentAccountId,
+    enabled: issuesCountReadyKey === issuesCountScopeKey && !!businessId && !!currentAccountId,
     queryFn: () => getIssuesCount(businessId!, { status: "OPEN", accountId: currentAccountId! }),
-    staleTime: 15_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
