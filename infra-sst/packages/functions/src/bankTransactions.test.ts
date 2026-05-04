@@ -147,6 +147,7 @@ async function loadHandler(options: {
   bankMatchIds?: string[];
   activeGroupIds?: string[];
   bankTransactionsInActiveGroups?: string[];
+  closedPeriodOk?: boolean;
 }) {
   vi.resetModules();
 
@@ -248,7 +249,18 @@ async function loadHandler(options: {
     authorizeWrite: vi.fn(async () => ({ allowed: true })),
   }));
   vi.doMock("./lib/closedPeriods", () => ({
-    assertNotClosedPeriod: vi.fn(async () => ({ ok: true })),
+    assertNotClosedPeriod: vi.fn(async () =>
+      options.closedPeriodOk === false
+        ? {
+            ok: false,
+            response: {
+              statusCode: 409,
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ok: false, code: "CLOSED_PERIOD", error: "This period is closed. Reopen period to modify." }),
+            },
+          }
+        : { ok: true }
+    ),
   }));
   vi.doMock("./lib/activityLog", () => ({
     logActivity: vi.fn(async () => undefined),
@@ -394,6 +406,21 @@ describe("bank transaction create-entry duplicate preflight", () => {
     expect(prisma.matchGroup.create).not.toHaveBeenCalled();
   });
 
+  test("creates possible duplicate only with explicit single-row override", async () => {
+    const rows = [tx("bank-dup-override", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
+    const manual = entry("entry-dup-override", "2026-04-26", -1250n, { payee: "Coffee House", memo: "Manual expected entry" });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(postCreateEntryEvent("bank-dup-override", { autoMatch: true, allowPossibleDuplicate: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(body.duplicate_warning_overridden).toBe(true);
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+    expect(prisma.matchGroup.create).toHaveBeenCalledTimes(1);
+  });
+
   test("allows create-entry-and-match when no similar entry exists", async () => {
     const rows = [tx("bank-safe", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
     const unrelated = entry("entry-rent", "2026-04-26", -1250n, { payee: "Office rent", memo: "April rent" });
@@ -440,6 +467,33 @@ describe("bank transaction create-entry duplicate preflight", () => {
       }),
     ]);
     expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("bulk create ignores possible duplicate override flags", async () => {
+    const rows = [
+      tx("bank-bulk-dup-override", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n }),
+    ];
+    const manual = entry("entry-bulk-dup-override", "2026-04-26", -1250n, { payee: "Coffee House", memo: "Expected coffee" });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(
+      postCreateEntriesBatchEvent({
+        items: [
+          { bank_transaction_id: "bank-bulk-dup-override", autoMatch: true, allowPossibleDuplicate: true },
+        ],
+      })
+    );
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.results[0]).toEqual(
+      expect.objectContaining({
+        bank_transaction_id: "bank-bulk-dup-override",
+        status: "SKIPPED",
+        code: "POSSIBLE_DUPLICATE_ENTRY",
+      })
+    );
+    expect(prisma.entry.create).not.toHaveBeenCalled();
   });
 
   test("matched/manual candidate can still block duplicate creation", async () => {
@@ -506,5 +560,62 @@ describe("bank transaction create-entry duplicate preflight", () => {
       })
     );
     expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("closed period still blocks duplicate override", async () => {
+    const rows = [tx("bank-closed-override", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
+    const manual = entry("entry-closed-override", "2026-04-26", -1250n, { payee: "Coffee House" });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual], closedPeriodOk: false });
+
+    const res = await handler(postCreateEntryEvent("bank-closed-override", { autoMatch: true, allowPossibleDuplicate: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("CLOSED_PERIOD");
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("bank transaction create-entry check reference extraction", () => {
+  test("stores a conservative check number as Ref in memo when creating from bank transaction", async () => {
+    const rows = [
+      tx("bank-check-ref", "2026-04-26", "2026-04-26T12:00:00.000Z", {
+        name: "CHECK #1234",
+        amount_cents: -2500n,
+      }),
+    ];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const res = await handler(postCreateEntryEvent("bank-check-ref", { autoMatch: false }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+    expect(prisma.entry.create.mock.calls[0][0].data.memo).toContain("Ref: 1234");
+  });
+
+  test("prefers explicit Plaid raw check_number and avoids random long ids", async () => {
+    const rows = [
+      tx("bank-check-raw", "2026-04-26", "2026-04-26T12:00:00.000Z", {
+        name: "ACH TRACE 123456789012345",
+        amount_cents: -2500n,
+        raw: { check_number: "4321", original_description: "ACH TRACE 123456789012345" },
+      }),
+      tx("bank-ach-long-id", "2026-04-27", "2026-04-27T12:00:00.000Z", {
+        name: "ACH TRACE 123456789012345",
+        amount_cents: -2600n,
+        raw: { original_description: "ACH TRACE 123456789012345" },
+      }),
+    ];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const explicit = await handler(postCreateEntryEvent("bank-check-raw", { autoMatch: false }));
+    const longId = await handler(postCreateEntryEvent("bank-ach-long-id", { autoMatch: false }));
+
+    expect(explicit.statusCode).toBe(201);
+    expect(longId.statusCode).toBe(201);
+    expect(prisma.entry.create.mock.calls[0][0].data.memo).toContain("Ref: 4321");
+    expect(prisma.entry.create.mock.calls[1][0].data.memo).not.toContain("Ref:");
   });
 });

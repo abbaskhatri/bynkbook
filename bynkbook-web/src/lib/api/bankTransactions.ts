@@ -39,6 +39,7 @@ export async function createEntryFromBankTransaction(args: {
   method?: string;
   category_id?: string;
   suggested_category_id?: string;
+  allowPossibleDuplicate?: boolean;
 }) {
   const {
     businessId,
@@ -49,6 +50,7 @@ export async function createEntryFromBankTransaction(args: {
     method,
     category_id,
     suggested_category_id,
+    allowPossibleDuplicate,
   } = args;
 
   return apiFetch(
@@ -61,6 +63,7 @@ export async function createEntryFromBankTransaction(args: {
         method: method ?? "",
         category_id: category_id ?? "",
         suggested_category_id: suggested_category_id ?? "",
+        allowPossibleDuplicate: allowPossibleDuplicate === true,
       }),
     }
   );

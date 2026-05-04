@@ -818,6 +818,29 @@ function normalizeBackendMethod(uiMethod: UiMethod): string {
   return "OTHER";
 }
 
+function extractEntryRef(entry: any): string {
+  const explicit = String(entry?.ref ?? entry?.reference ?? entry?.reference_number ?? entry?.referenceNumber ?? "").trim();
+  if (explicit) return explicit;
+  const memo = String(entry?.memo ?? "");
+  const m = memo.match(/\bref\s*:\s*([^\n\r;|,]+)/i);
+  return m?.[1]?.trim() || "";
+}
+
+function stripMemoRef(memo: any): string {
+  return String(memo ?? "")
+    .replace(/^\s*ref\s*:\s*[^\n\r;|,]+(?:\r?\n)?/i, "")
+    .replace(/\r?\n\s*ref\s*:\s*[^\n\r;|,]+/gi, "")
+    .trim();
+}
+
+function memoWithRef(note: any, ref: any): string | undefined {
+  const cleanNote = stripMemoRef(note);
+  const cleanRef = String(ref ?? "").trim();
+  if (cleanRef && cleanNote) return `Ref: ${cleanRef}\n${cleanNote}`;
+  if (cleanRef) return `Ref: ${cleanRef}`;
+  return cleanNote || undefined;
+}
+
 type CreateVars = {
   tempId: string;
   date: string;
@@ -1582,7 +1605,7 @@ export default function LedgerPageClient() {
       return {
         id: e.id,
         date: e.date,
-        ref: "",
+        ref: extractEntryRef(e),
         payee: e.payee ?? "",
         typeDisplay: titleCase(e.type ?? ""),
         methodDisplay: uiMethodLabel(uiMethodFromRaw(e.method ?? "")),
@@ -2599,7 +2622,7 @@ export default function LedgerPageClient() {
             date: vars.date,
             amount_cents: centsRaw, // <-- signed, not abs
             payee: vars.payee.trim(),
-            memo: vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : null,
+            memo: memoWithRef(vars.note, vars.ref) ?? null,
             method: "TRANSFER",
             status: "EXPECTED",
           },
@@ -2614,9 +2637,7 @@ export default function LedgerPageClient() {
           input: {
             date: vars.date,
             payee: vars.payee.trim(),
-            memo:
-              (vars.note ?? "").trim() ||
-              (vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined),
+            memo: memoWithRef(vars.note, vars.ref),
             category_id: vars.categoryId ?? null,
             vendor_id: vars.vendorId ?? null,
             amount_cents: centsRaw,
@@ -2637,7 +2658,7 @@ export default function LedgerPageClient() {
         input: {
           date: vars.date,
           payee: vars.payee.trim(),
-          memo: (vars.note ?? "").trim() || (vars.ref?.trim() ? `Ref: ${vars.ref.trim()}` : undefined),
+          memo: memoWithRef(vars.note, vars.ref),
           category_id: vars.categoryId ?? null,
           vendor_id: vars.vendorId ?? null,
           amount_cents: signed,
@@ -3162,6 +3183,7 @@ export default function LedgerPageClient() {
     // TRANSFER edits must go through updateTransfer (atomic)
     if (backendType === "TRANSFER") {
       const row = rowModels.find((r) => r.id === entryId);
+      const current = entriesWithOpening.find((e) => String(e.id) === String(entryId));
       const transferId = row?.transferId ?? null;
       if (!transferId) {
         setErr("Transfer link missing. Cannot edit this transfer.");
@@ -3180,7 +3202,7 @@ export default function LedgerPageClient() {
         updates: {
           date: editDraft.date,
           payee: editDraft.payee.trim(),
-          memo: editDraft.ref?.trim() ? `Ref: ${editDraft.ref.trim()}` : null,
+          memo: memoWithRef(stripMemoRef(current?.memo), editDraft.ref) ?? (extractEntryRef(current) ? null : undefined),
           amount_cents: centsRaw, // signed relative to this account
           method: "TRANSFER",
           status: "EXPECTED",
@@ -3213,7 +3235,11 @@ export default function LedgerPageClient() {
         date: editDraft.date,
         payee: editDraft.payee.trim(),
         category_id: backendType === "INCOME" || backendType === "EXPENSE" ? catId : null,
-        memo: backendType === "ADJUSTMENT" ? catName || null : undefined,
+        memo: (() => {
+          const current = entriesWithOpening.find((e) => String(e.id) === String(entryId));
+          if (backendType === "ADJUSTMENT") return memoWithRef(catName, editDraft.ref) ?? null;
+          return memoWithRef(stripMemoRef(current?.memo), editDraft.ref) ?? (extractEntryRef(current) ? null : undefined);
+        })(),
         amount_cents: signed,
         type: backendType,
         method: backendType === "ADJUSTMENT" ? "OTHER" : normalizeBackendMethod(editDraft.method),
