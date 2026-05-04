@@ -159,9 +159,8 @@ export default function IssuesPageClient() {
   }
 
   // ================================
-  // Stage B background refresh (non-blocking)
-  // Rule: Issues page loads from GET /issues immediately.
-  // Then triggers POST /issues/scan only if last scan > 2 minutes ago (throttle).
+  // Stage B issue scan state
+  // Rule: Issues page loads from GET /issues only. POST /issues/scan is manual.
   // ================================
   const scanKey = useMemo(() => {
     if (!selectedBusinessId || !selectedAccountId) return "";
@@ -190,13 +189,6 @@ export default function IssuesPageClient() {
     scanEpochRef.current += 1;
     setScanBusy(false);
   }, [selectedBusinessId, selectedAccountId]);
-
-  function shouldRunScan(iso: string | null) {
-    if (!iso) return true;
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return true;
-    return Date.now() - t > 15 * 60 * 1000; // 15 minutes
-  }
 
   function formatScanLabel(iso: string | null) {
     if (!iso) return "Never";
@@ -282,79 +274,6 @@ export default function IssuesPageClient() {
       if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
   }
-
-  async function runBackgroundScan() {
-    if (scanBusy) return;
-    if (!selectedBusinessId || !selectedAccountId) return;
-
-    const myEpoch = ++scanEpochRef.current;
-    setScanBusy(true);
-    try {
-      const session = await fetchAuthSession();
-      const token = session.tokens?.accessToken?.toString();
-      if (!token) throw new Error("Missing access token");
-
-      const base =
-        process.env.NEXT_PUBLIC_API_URL ||
-        process.env.NEXT_PUBLIC_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_ENDPOINT ||
-        "";
-
-      if (!base) throw new Error("Missing NEXT_PUBLIC_API_URL");
-
-      const url = `${base}/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`;
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          includeMissingCategory: false,
-          dryRun: false,
-        }),
-      });
-
-      if (!res.ok) {
-        // Silent failure (no blocking/no toast). We keep the Issues list usable.
-        // Still stop the busy indicator.
-        return;
-      }
-
-      // Targeted invalidation only (no storms)
-      void qc.invalidateQueries({
-        queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
-        exact: false,
-      });
-
-      // Persist last scan timestamp (UI-only throttle)
-      const nowIso = new Date().toISOString();
-      if (scanKey) {
-        try {
-          localStorage.setItem(scanKey, nowIso);
-        } catch {
-          // ignore
-        }
-      }
-      setLastScanAt(nowIso);
-    } finally {
-      if (myEpoch === scanEpochRef.current) setScanBusy(false);
-    }
-  }
-
-  // Trigger background scan after initial render, but only when stale (>2 minutes).
-  // IMPORTANT: Do not block initial GET /issues rendering.
-  useEffect(() => {
-    if (!selectedBusinessId || !selectedAccountId) return;
-    if (!scanKey) return;
-    if (!shouldRunScan(lastScanAt)) return;
-
-    const raf = requestAnimationFrame(() => {
-      void runBackgroundScan();
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [selectedBusinessId, selectedAccountId, scanKey, lastScanAt]);
 
   // Real categories (needed for FixIssueDialog: missing category fix)
   const categoriesQ = useQuery({
