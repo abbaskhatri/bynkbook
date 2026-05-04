@@ -560,6 +560,17 @@ function matchGroupSignature(items: any[]): string {
   return active.join("|");
 }
 
+function upsertMatchGroup(items: any[], group: any): any[] {
+  const gid = String(group?.id ?? "");
+  if (!gid) return Array.isArray(items) ? items : [];
+
+  const next = Array.isArray(items) ? items.slice() : [];
+  const i = next.findIndex((g: any) => String(g?.id ?? "") === gid);
+  if (i >= 0) next[i] = group;
+  else next.unshift(group);
+  return next;
+}
+
 function entriesSignature(items: any[]): string {
   const arr = Array.isArray(items) ? items : [];
   return String(arr.length);
@@ -993,6 +1004,15 @@ export default function ReconcilePageClient() {
   const [matches, setMatches] = useState<any[]>([]);
   const [matchGroups, setMatchGroups] = useState<any[]>([]);
   const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
+  const [allMatchGroups, setAllMatchGroups] = useState<any[]>([]);
+  const [allMatchGroupsLoading, setAllMatchGroupsLoading] = useState(false);
+  const [allMatchGroupsLoadedScope, setAllMatchGroupsLoadedScope] = useState("");
+  const allMatchGroupsInFlightRef = useRef<Promise<any[]> | null>(null);
+  const allMatchGroupsRequestSeqRef = useRef(0);
+  const allMatchGroupsScopeKey =
+    selectedBusinessId && selectedAccountId ? `${selectedBusinessId}:${selectedAccountId}` : "";
+  const allMatchGroupsHydrated =
+    !!allMatchGroupsScopeKey && allMatchGroupsLoadedScope === allMatchGroupsScopeKey;
 
   // Real first-load truth hydration:
   // do not treat bank / match-group truth as ready until each source
@@ -1311,7 +1331,7 @@ export default function ReconcilePageClient() {
           const mg: any = await listMatchGroups({
             businessId: selectedBusinessId,
             accountId: selectedAccountId,
-            status: "all", // needed for History (includes voided groups)
+            status: "active",
           });
           matchGroupItems = mg?.items ?? [];
           if (myEpoch === refreshEpochRef.current) setMatchGroups(matchGroupItems);
@@ -1348,6 +1368,48 @@ export default function ReconcilePageClient() {
       }
     }
   }
+
+  const loadAllMatchGroups = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!selectedBusinessId || !selectedAccountId || !allMatchGroupsScopeKey) return [] as any[];
+      if (!opts?.force && allMatchGroupsHydrated) return allMatchGroups;
+      if (!opts?.force && allMatchGroupsInFlightRef.current) return allMatchGroupsInFlightRef.current;
+
+      const scopeKey = allMatchGroupsScopeKey;
+      const requestSeq = ++allMatchGroupsRequestSeqRef.current;
+      const run = (async () => {
+        setAllMatchGroupsLoading(true);
+        try {
+          const mg: any = await listMatchGroups({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            status: "all",
+          });
+          const items = mg?.items ?? [];
+          setAllMatchGroups(items);
+          setAllMatchGroupsLoadedScope(scopeKey);
+          return items;
+        } catch {
+          setAllMatchGroups([]);
+          setAllMatchGroupsLoadedScope("");
+          return [];
+        } finally {
+          setAllMatchGroupsLoading(false);
+          if (allMatchGroupsRequestSeqRef.current === requestSeq) allMatchGroupsInFlightRef.current = null;
+        }
+      })();
+
+      allMatchGroupsInFlightRef.current = run;
+      return run;
+    },
+    [
+      selectedBusinessId,
+      selectedAccountId,
+      allMatchGroupsScopeKey,
+      allMatchGroupsHydrated,
+      allMatchGroups,
+    ]
+  );
 
   async function loadMoreBankTransactions() {
     if (!selectedBusinessId || !selectedAccountId) return;
@@ -1690,6 +1752,8 @@ export default function ReconcilePageClient() {
     // Reset first-load truth hydration for the new scope before fetching.
     setBankTruthHydrated(false);
     setMatchGroupsTruthHydrated(false);
+    setAllMatchGroups([]);
+    setAllMatchGroupsLoadedScope("");
 
     // One targeted refresh on mount / scope change (prevents “needs manual refresh” after navigation)
     void qc.invalidateQueries({
@@ -1702,6 +1766,12 @@ export default function ReconcilePageClient() {
 
     void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true });
   }, [selectedBusinessId, selectedAccountId, from, to]);
+
+  useEffect(() => {
+    const needsAllMatchGroups = openReconciliationHistory || openIssuesHub || openIssuesList || openExportHub;
+    if (!needsAllMatchGroups) return;
+    void loadAllMatchGroups();
+  }, [openReconciliationHistory, openIssuesHub, openIssuesList, openExportHub, loadAllMatchGroups]);
 
   // Phase 6B: Load snapshot list when dialog opens
   useEffect(() => {
@@ -2144,8 +2214,9 @@ const isReconcileExemptEntry = (e: any) => {
   }, [matchGroups]);
 
   const voidedGroups = useMemo(() => {
-    return (matchGroups ?? []).filter((g: any) => !!g?.voided_at);
-  }, [matchGroups]);
+    if (!allMatchGroupsHydrated) return [];
+    return (allMatchGroups ?? []).filter((g: any) => !!g?.voided_at);
+  }, [allMatchGroups, allMatchGroupsHydrated]);
 
   // Issues threshold (tunable)
   const VOID_HEAVY_THRESHOLD = 3;
@@ -2284,7 +2355,9 @@ const isReconcileExemptEntry = (e: any) => {
   const reconAuditAll = useMemo(() => {
     const out: ReconAuditEvent[] = [];
 
-    for (const g of matchGroups ?? []) {
+    if (!allMatchGroupsHydrated) return out;
+
+    for (const g of allMatchGroups ?? []) {
       if (!g?.id) continue;
 
       const gid = String(g.id);
@@ -2331,7 +2404,7 @@ const isReconcileExemptEntry = (e: any) => {
     });
 
     return out.slice(0, 500);
-  }, [matchGroups]);
+  }, [allMatchGroups, allMatchGroupsHydrated]);
 
   const reconAuditCounts = useMemo(() => {
     let matchN = 0;
@@ -2809,6 +2882,21 @@ const displayBankActiveList = useMemo(() => {
     entriesUpdating;
 
   const revertsInScope = voidedGroups.length;
+  const revertsInScopeLabel = allMatchGroupsHydrated
+    ? String(revertsInScope)
+    : allMatchGroupsLoading
+      ? "Loading"
+      : "Deferred";
+  const issuesTotalLabel = allMatchGroupsHydrated
+    ? String(issuesCounts.total)
+    : allMatchGroupsLoading
+      ? "Loading"
+      : String(issuesCounts.notInView);
+  const issuesVoidHeavyLabel = allMatchGroupsHydrated
+    ? String(issuesCounts.voidHeavy)
+    : allMatchGroupsLoading
+      ? "Loading"
+      : "Deferred";
 
   const opts = (accountsQ.data ?? [])
     .filter((a) => !a.archived_at && String(a.type ?? "").toUpperCase() !== "CASH")
@@ -2902,7 +2990,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Issues (read-only diagnostics)"
       >
-        <AlertCircle className="h-3.5 w-3.5" /> <span className="font-semibold">{issuesCounts.total}</span> issues
+        <AlertCircle className="h-3.5 w-3.5" /> <span className="font-semibold">{issuesTotalLabel}</span> issues
       </button>
     </div>
   );
@@ -2969,7 +3057,7 @@ const displayBankActiveList = useMemo(() => {
 
           <div className="leading-tight">
             <div className="text-bb-text-muted">Reverts</div>
-            <div className="font-semibold text-bb-text">{revertsInScope}</div>
+            <div className="font-semibold text-bb-text">{revertsInScopeLabel}</div>
           </div>
 
           {plaid?.connected ? (
@@ -4806,12 +4894,10 @@ const displayBankActiveList = useMemo(() => {
                           null;
 
                         if (createdGroup?.id) {
-                          setMatchGroups((prev) => {
-                            const next = Array.isArray(prev) ? prev.slice() : [];
-                            const gid = String(createdGroup.id);
-                            if (!next.some((g: any) => String(g?.id) === gid)) next.unshift(createdGroup);
-                            return next;
-                          });
+                          setMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
+                          if (allMatchGroupsHydrated) {
+                            setAllMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
+                          }
                         }
 
                         await refreshTablesFully({
@@ -5362,12 +5448,10 @@ const displayBankActiveList = useMemo(() => {
                           null;
 
                         if (createdGroup?.id) {
-                          setMatchGroups((prev) => {
-                            const next = Array.isArray(prev) ? prev.slice() : [];
-                            const gid = String(createdGroup.id);
-                            if (!next.some((g: any) => String(g?.id) === gid)) next.unshift(createdGroup);
-                            return next;
-                          });
+                          setMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
+                          if (allMatchGroupsHydrated) {
+                            setAllMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
+                          }
                         }
 
                         await refreshTablesFully({
@@ -5787,7 +5871,7 @@ const displayBankActiveList = useMemo(() => {
           <div className="h-px bg-bb-border" />
 
           <div className="mt-2 max-h-[64vh] overflow-y-auto overflow-x-auto">
-            {matchesLoading ? (
+            {matchesLoading || allMatchGroupsLoading || !allMatchGroupsHydrated ? (
               <div className="p-2">
                 <Skeleton className="h-24 w-full" />
               </div>
@@ -6172,6 +6256,7 @@ const displayBankActiveList = useMemo(() => {
                   });
 
                   await refreshTablesFully({ preserveOnEmpty: true });
+                  await loadAllMatchGroups({ force: true });
 
                   clearMutErr();
                   setRevertConfirmOpen(false);
@@ -6329,7 +6414,7 @@ const displayBankActiveList = useMemo(() => {
               <RotateCcw className="h-6 w-6 text-bb-text" />
               <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Reverts</span>
               <span className="text-[11px] text-bb-text-muted">{VOID_HEAVY_THRESHOLD}+</span>
-              <span className="text-[11px] text-bb-text-muted">{issuesCounts.voidHeavy}</span>
+              <span className="text-[11px] text-bb-text-muted">{issuesVoidHeavyLabel}</span>
             </button>
 
             {null /* Full-match MatchGroups: conflicts are not expected (one-active-group-per-item). */}
