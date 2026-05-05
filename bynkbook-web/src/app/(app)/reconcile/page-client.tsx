@@ -29,6 +29,7 @@ import { ringFocus } from "@/components/primitives/tokens";
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+import { CategoryCombobox } from "@/components/categories/category-combobox";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
@@ -3806,65 +3807,28 @@ const displayBankActiveList = useMemo(() => {
                         )}
                       </div>
 
-                      <div className="relative overflow-visible">
-                        <input
-                          className={[
-                            "h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card",
-                            ringFocus,
-                          ].join(" ")}
-                          placeholder={categoriesLoading ? "Loading categories…" : "Search categories…"}
-                          value={categoryQuery || createEntryCategoryName}
-                          onChange={(e) => {
-                            // typing starts a new search
-                            if (!categoryQuery && createEntryCategoryName) setCreateEntryCategoryName("");
-                            setCategoryQuery(e.target.value);
-                          }}
-                        />
+                      <CategoryCombobox
+                        options={categories}
+                        value={categoryQuery || createEntryCategoryName}
+                        categoryId={createEntryCategoryId || null}
+                        placeholder={categoriesLoading ? "Loading categories…" : "Search categories…"}
+                        inputClassName={[
+                          "h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card text-bb-text placeholder:text-bb-text-muted",
+                          ringFocus,
+                        ].join(" ")}
+                        onChange={(value, option) => {
+                          if (option) {
+                            setCreateEntryCategoryId(option.id ?? "");
+                            setCreateEntryCategoryName(option.name);
+                            setCategoryQuery("");
+                            return;
+                          }
 
-                        {/* Dropdown */}
-                        {categoryQuery.trim() ? (
-                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-bb-border bg-bb-surface-card shadow-sm">
-                            {(() => {
-                              const q = categoryQuery.trim().toLowerCase();
-                              const base = categories ?? [];
-                              if (base.length === 0) {
-                                return <div className="px-2 py-2 text-xs text-bb-text-muted">No categories loaded</div>;
-                              }
-
-                              const filtered = base
-                                .filter((c: any) => {
-                                  const name = String(c?.name ?? "").toLowerCase();
-                                  const norm = String(c?.normalized_name ?? "").toLowerCase();
-                                  return name.includes(q) || norm.includes(q);
-                                })
-                                .slice(0, 20);
-
-                              if (filtered.length === 0) {
-                                return <div className="px-2 py-2 text-xs text-bb-text-muted">No matches</div>;
-                              }
-
-                              return filtered.map((c: any) => {
-                                const id = String(c?.id ?? "");
-                                const name = String(c?.name ?? "—");
-                                return (
-                                  <button
-                                    key={id}
-                                    type="button"
-                                    className="w-full text-left px-2 py-2 hover:bg-bb-table-row-hover text-xs"
-                                    onClick={() => {
-                                      setCreateEntryCategoryId(id);
-                                      setCreateEntryCategoryName(name);
-                                      setCategoryQuery(""); // close dropdown
-                                    }}
-                                  >
-                                    <div className="font-medium text-bb-text truncate">{name}</div>
-                                  </button>
-                                );
-                              });
-                            })()}
-                          </div>
-                        ) : null}
-                      </div>
+                          setCreateEntryCategoryId("");
+                          setCreateEntryCategoryName("");
+                          setCategoryQuery(value);
+                        }}
+                      />
 
                       {createEntryCategoryName ? (
                         <div className="mt-1 text-[11px] text-bb-text-muted">
