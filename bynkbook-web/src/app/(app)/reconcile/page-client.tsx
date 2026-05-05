@@ -346,9 +346,88 @@ function ymdFromBankTxn(bank: any) {
   return isoToYmd(raw);
 }
 
+function ymdFromUnknownDate(value: unknown) {
+  const raw = String(value ?? "");
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  return isoToYmd(raw);
+}
+
 function compactText(value: unknown, fallback = "—") {
   const s = String(value ?? "").trim();
   return s || fallback;
+}
+
+function extractCheckRefFromBankTransaction(bank: any) {
+  const explicit = compactText(
+    bank?.check_number ?? bank?.checkNumber ?? bank?.check_num ?? bank?.checkNum ?? "",
+    ""
+  ).replace(/[^0-9A-Za-z-]/g, "");
+  if (explicit) return explicit;
+
+  const text = [
+    bank?.name,
+    bank?.merchant_name,
+    bank?.original_description,
+    bank?.payment_channel,
+  ].map((v) => String(v ?? "")).join(" ");
+
+  const match = text.match(/\b(?:check|chk)\s*(?:#|no\.?|number)?\s*([0-9]{2,8})\b/i) ??
+    text.match(/\bdeposit\s+check\s*(?:#|no\.?|number)?\s*([0-9]{2,8})\b/i);
+  return compactText(match?.[1] ?? "", "");
+}
+
+function directionLabel(amountCents: unknown) {
+  return toBigIntSafe(amountCents) < 0n ? "Outflow" : "Inflow";
+}
+
+function sameAmountAbs(a: unknown, b: unknown) {
+  return absBig(toBigIntSafe(a)) === absBig(toBigIntSafe(b));
+}
+
+function sameDirection(a: unknown, b: unknown) {
+  const aVal = toBigIntSafe(a);
+  const bVal = toBigIntSafe(b);
+  if (aVal === 0n || bVal === 0n) return false;
+  return (aVal < 0n && bVal < 0n) || (aVal > 0n && bVal > 0n);
+}
+
+function duplicateReasonChips(bank: any, candidate: any, matchStatus: string) {
+  const chips: Array<{ label: string; tone?: MatchSignalTone; title?: string }> = [];
+  const candidateForScore = {
+    ...(candidate ?? {}),
+    date: ymdFromUnknownDate(candidate?.date),
+  };
+  const meta = scoreEntryCandidate(bank, candidateForScore);
+
+  if (sameAmountAbs(bank?.amount_cents, candidate?.amount_cents)) {
+    chips.push({ label: "same amount", tone: "success" });
+  }
+
+  if (Number(meta.dtDays ?? 9999) <= 3) {
+    chips.push({
+      label: "nearby date",
+      tone: "success",
+      title: `${meta.dtDays} day${meta.dtDays === 1 ? "" : "s"} apart`,
+    });
+  }
+
+  if (Number(meta.overlap ?? 0) > 0) {
+    chips.push({ label: "similar payee", tone: "success" });
+  }
+
+  if (sameDirection(bank?.amount_cents, candidate?.amount_cents)) {
+    chips.push({ label: "same direction", tone: "success" });
+  }
+
+  if (matchStatus) {
+    chips.push({
+      label: matchStatus.toLowerCase().includes("matched") ? "existing matched" : "existing unmatched",
+      tone: matchStatus.toLowerCase().includes("matched") ? "warning" : "default",
+    });
+  }
+
+  return chips.length ? chips : [{ label: "possible duplicate", tone: "warning" as const }];
 }
 
 function entryCategoryLabel(entry: any) {
@@ -3189,8 +3268,8 @@ const displayBankActiveList = useMemo(() => {
             setCreateEntryDuplicateCandidates([]);
             setCreateEntryDuplicateConfirm("");
           }}
-          title="Create entry"
-          size="md"
+          title={createEntryDuplicateCandidates.length ? "Possible duplicate ledger entry" : "Create entry"}
+          size="lg"
           footer={
             <DialogFooter
               left={
@@ -3210,14 +3289,30 @@ const displayBankActiveList = useMemo(() => {
                       variant="primary"
                       size="md"
                       onClick={() => {
+                        const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
+                        const bank = bankId ? bankTxSorted.find((x: any) => String(x.id) === bankId) : null;
+                        const firstCandidateId = String(
+                          createEntryDuplicateCandidates[0]?.entry_id ??
+                            createEntryDuplicateCandidates[0]?.id ??
+                            ""
+                        );
                         setOpenCreateEntry(false);
                         setCreateEntryBankTxnId(null);
                         setCreateEntryDuplicateCandidates([]);
                         setCreateEntryDuplicateConfirm("");
+                        if (!bankId) return;
+                        setMatchBankTxnId(bankId);
+                        setMatchSearch("");
+                        setMatchSelectedEntryIds(firstCandidateId ? new Set([firstCandidateId]) : new Set());
+                        setMatchError(null);
+                        setMatchAiSuggestions([]);
+                        setMatchSuggestError(null);
+                        setOpenMatch(true);
+                        if (bank) void runAiSuggestForBank(bank);
                       }}
                       disabled={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
                     >
-                      Match existing
+                      Review / Match existing entry
                     </BusyButton>
                   ) : null}
 
@@ -3374,6 +3469,19 @@ const displayBankActiveList = useMemo(() => {
             const amt = t ? toBigIntSafe(t.amount_cents) : 0n;
             const dateStr = t?.posted_date ? isoToYmd(String(t.posted_date)) : "—";
             const desc = (t?.name ?? "").toString().trim() || "—";
+            const bankAccount = accountLabelFor(t, selectedAccountName);
+            const extractedRef = t ? extractCheckRefFromBankTransaction(t) : "";
+            const selectedCategoryLabel =
+              createEntryCategoryName ||
+              compactText(categories.find((c: any) => String(c?.id ?? "") === createEntryCategoryId)?.name ?? "", "");
+            const newEntryPreview = {
+              date: dateStr,
+              payee: desc,
+              amount_cents: amt,
+              method: createEntryMethod || "OTHER",
+              category: selectedCategoryLabel || "None selected",
+              ref: extractedRef,
+            };
 
             const busy = bankId ? !!createEntryBusyByBankId[bankId] : false;
 
@@ -3381,50 +3489,161 @@ const displayBankActiveList = useMemo(() => {
               <div className="flex flex-col max-h-[55vh]">
                 <div className="flex-1 overflow-y-auto overflow-x-hidden">
                   <div className="text-xs text-bb-text-muted">
-                    This will create an entry from the selected bank transaction. Review method, category, and memo before creating.
+                    {createEntryDuplicateCandidates.length
+                      ? "A possible existing ledger entry was found. Review the bank transaction, suggested existing match, and new entry preview before choosing what to do."
+                      : "This will create an entry from the selected bank transaction. Review method, category, and memo before creating."}
                   </div>
 
-                  <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-bb-text-muted">Date</div>
-                      <div className="font-semibold text-bb-text">{dateStr}</div>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 mt-1">
-                      <div className="text-bb-text-muted">Description</div>
-                      <div className="font-semibold text-bb-text truncate max-w-[260px]" title={desc}>
-                        {desc}
+                  <div className={`mt-3 grid grid-cols-1 gap-3 ${createEntryDuplicateCandidates.length ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
+                    <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">Bank transaction</div>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="text-bb-text-muted">Date</div>
+                        <div className="font-semibold text-bb-text">{dateStr}</div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Description</div>
+                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={desc}>
+                          {desc}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Amount</div>
+                        <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
+                          {formatUsdFromCents(amt)}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Account</div>
+                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={bankAccount}>
+                          {bankAccount}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between gap-2 mt-1">
-                      <div className="text-bb-text-muted">Amount</div>
-                      <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
-                        {formatUsdFromCents(amt)}
+
+                    {createEntryDuplicateCandidates.length ? (
+                      <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">Possible existing ledger entry</div>
+                        <div className="mt-2 flex flex-col gap-2">
+                          {createEntryDuplicateCandidates.slice(0, 3).map((candidate: any) => {
+                            const id = String(candidate?.entry_id ?? candidate?.id ?? "");
+                            const localEntry = id ? entryByIdFast.get(id) : null;
+                            const entryForDisplay = { ...(candidate ?? {}), ...(localEntry ?? {}) };
+                            const cDate = ymdFromUnknownDate(entryForDisplay?.date ?? candidate?.date) || "—";
+                            const cPayee = compactText(entryForDisplay?.payee ?? entryForDisplay?.memo ?? "");
+                            const cAmount = toBigIntSafe(entryForDisplay?.amount_cents ?? candidate?.amount_cents);
+                            const cRef = compactText(entryForDisplay?.ref ?? candidate?.ref ?? "", "");
+                            const cCategory = compactText(
+                              entryCategoryLabel(entryForDisplay) !== "—"
+                                ? entryCategoryLabel(entryForDisplay)
+                                : categories.find((cat: any) => String(cat?.id ?? "") === String(entryForDisplay?.category_id ?? ""))?.name,
+                              ""
+                            );
+                            const matched = Boolean(
+                              (id && activeGroupByEntryId.has(id)) ||
+                                (id && matchByEntryId.has(id))
+                            );
+                            const matchStatus = matched ? "Matched" : "Unmatched";
+                            return (
+                              <div key={id || `${cDate}-${cPayee}-${cAmount}`} className="rounded border border-bb-border bg-bb-surface-card px-2 py-1.5 text-bb-text">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold truncate" title={cPayee}>{cPayee}</span>
+                                  <span className={`tabular-nums whitespace-nowrap ${cAmount < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
+                                    {formatUsdFromCents(cAmount)}
+                                  </span>
+                                </div>
+                                <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-bb-text-muted">
+                                  <span>Date: {cDate}</span>
+                                  <span>Status: {matchStatus}</span>
+                                  <span className="truncate" title={cCategory}>Category: {cCategory || "—"}</span>
+                                  <span className="truncate" title={cRef}>Ref: {cRef || "—"}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">New entry preview</div>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="text-bb-text-muted">Date</div>
+                        <div className="font-semibold text-bb-text">{newEntryPreview.date}</div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Payee</div>
+                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.payee}>{newEntryPreview.payee}</div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Amount</div>
+                        <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
+                          {formatUsdFromCents(newEntryPreview.amount_cents)}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Method</div>
+                        <div className="font-semibold text-bb-text">{newEntryPreview.method}</div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Category</div>
+                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.category}>
+                          {newEntryPreview.category}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Ref</div>
+                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.ref || "—"}>
+                          {newEntryPreview.ref || "—"}
+                        </div>
                       </div>
                     </div>
                   </div>
 
                   {createEntryDuplicateCandidates.length ? (
                     <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
-                      <div className="font-semibold text-bb-text">Possible duplicate ledger entries</div>
+                      <div className="font-semibold text-bb-text">Suggested existing match</div>
                       <div className="mt-1 text-bb-text-muted">
-                        Match an existing entry when one of these is the same transaction. Use this only if these are truly separate transactions.
+                        Match an existing entry when it represents this bank transaction. Create a separate entry only when these are truly separate transactions.
+                      </div>
+                      <div className="mt-1 text-bb-text-muted">
+                        Duplication is suspected because the candidate has the same amount, a nearby date, a similar payee, or the same inflow/outflow direction.
                       </div>
                       <div className="mt-2 flex flex-col gap-2">
                         {createEntryDuplicateCandidates.slice(0, 5).map((candidate: any) => {
                           const id = String(candidate?.entry_id ?? candidate?.id ?? "");
-                          const cDate = String(candidate?.date ?? "").slice(0, 10) || "—";
-                          const cPayee = compactText(candidate?.payee ?? candidate?.memo ?? "");
-                          const cAmount = formatUsdFromCents(toBigIntSafe(candidate?.amount_cents));
-                          const cRef = compactText(candidate?.ref ?? "", "");
-                          const cCategory = compactText(candidate?.category_name ?? candidate?.categoryName ?? candidate?.category_id ?? "", "");
+                          const localEntry = id ? entryByIdFast.get(id) : null;
+                          const entryForDisplay = { ...(candidate ?? {}), ...(localEntry ?? {}) };
+                          const cDate = ymdFromUnknownDate(entryForDisplay?.date ?? candidate?.date) || "—";
+                          const cPayee = compactText(entryForDisplay?.payee ?? entryForDisplay?.memo ?? "");
+                          const cAmountValue = toBigIntSafe(entryForDisplay?.amount_cents ?? candidate?.amount_cents);
+                          const cAmount = formatUsdFromCents(cAmountValue);
+                          const cRef = compactText(entryForDisplay?.ref ?? candidate?.ref ?? "", "");
+                          const cCategory = compactText(
+                            entryCategoryLabel(entryForDisplay) !== "—"
+                              ? entryCategoryLabel(entryForDisplay)
+                              : categories.find((cat: any) => String(cat?.id ?? "") === String(entryForDisplay?.category_id ?? ""))?.name,
+                            ""
+                          );
+                          const matched = Boolean(
+                            (id && activeGroupByEntryId.has(id)) ||
+                              (id && matchByEntryId.has(id))
+                          );
+                          const chips = t ? duplicateReasonChips(t, entryForDisplay, matched ? "Matched" : "Unmatched") : [];
                           return (
                             <div key={id || `${cDate}-${cPayee}-${cAmount}`} className="rounded border border-bb-border bg-bb-surface-card px-2 py-1.5 text-bb-text">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium truncate">{cPayee}</span>
                                 <span className="tabular-nums whitespace-nowrap">{cAmount}</span>
                               </div>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {chips.map((chip) => (
+                                  <MatchSignalChip key={`${id}-${chip.label}`} {...chip} />
+                                ))}
+                              </div>
                               <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-bb-text-muted">
                                 <span>{cDate}</span>
+                                <span>{directionLabel(cAmountValue)}</span>
                                 {cCategory ? <span>Category: {cCategory}</span> : null}
                                 {cRef ? <span>Ref: {cRef}</span> : null}
                               </div>
