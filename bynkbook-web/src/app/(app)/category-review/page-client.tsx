@@ -261,7 +261,7 @@ export default function CategoryReviewPageClient() {
   function retryCategoryReview() {
     void entriesQ.refetch?.();
     void categoriesQ.refetch();
-    void suggestionsQ.refetch();
+    if (suggestionsLoadedForCurrentFilters) void suggestionsQ.refetch();
   }
 
   // Entries (single fetch via hook; filters only apply after Run)
@@ -300,6 +300,7 @@ export default function CategoryReviewPageClient() {
 
   // Phase F2: suggestions (batch) + selection + bulk apply
   const [selectedSuggestionByEntryId, setSelectedSuggestionByEntryId] = useState<Record<string, string>>({});
+  const [suggestionsRequestedKey, setSuggestionsRequestedKey] = useState<string | null>(null);
 
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -451,12 +452,24 @@ export default function CategoryReviewPageClient() {
     return suggestionTargets.map((x) => x.id).join("|");
   }, [suggestionTargets]);
 
+  const suggestionsLoadedForCurrentFilters =
+    suggestionTargets.length > 0 && suggestionsRequestedKey === suggestionTargetsKey;
+
+  useEffect(() => {
+    setSuggestionsRequestedKey(null);
+    setSelectedSuggestionByEntryId({});
+    setWhyEntryId(null);
+    setWhyText(null);
+    setWhyErr(null);
+  }, [selectedBusinessId, selectedAccountId, suggestionTargetsKey]);
+
   const suggestionsQ = useQuery({
     queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId, suggestionTargetsKey],
-    enabled: !!selectedBusinessId && !!selectedAccountId && suggestionTargets.length > 0,
-
-    // Keep last-good suggestions while refetching; no empty flash.
-    placeholderData: (prev) => prev ?? ({} as Record<string, any[]>),
+    enabled:
+      !!selectedBusinessId &&
+      !!selectedAccountId &&
+      suggestionTargets.length > 0 &&
+      suggestionsLoadedForCurrentFilters,
 
     staleTime: 15_000,
     gcTime: 5 * 60_000,
@@ -500,8 +513,22 @@ export default function CategoryReviewPageClient() {
   });
 
   const sugByEntryId = (suggestionsQ.data ?? {}) as Record<string, any[]>;
-  const sugLoading = suggestionsQ.isFetching;
-  const sugUpdating = suggestionsQ.isFetching && !!suggestionsQ.data && Object.keys(suggestionsQ.data as any).length > 0;
+  const sugLoading = suggestionsLoadedForCurrentFilters && suggestionsQ.isFetching;
+  const sugUpdating = suggestionsLoadedForCurrentFilters && suggestionsQ.isFetching && !!suggestionsQ.data && Object.keys(suggestionsQ.data as any).length > 0;
+
+  function loadSuggestionsForCurrentFilters() {
+    if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0 || sugLoading) return;
+
+    clearMutErr();
+    setApplySummary(null);
+
+    if (suggestionsLoadedForCurrentFilters) {
+      void suggestionsQ.refetch();
+      return;
+    }
+
+    setSuggestionsRequestedKey(suggestionTargetsKey);
+  }
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1008,6 +1035,31 @@ export default function CategoryReviewPageClient() {
 
             <div className="flex items-center gap-2">
               <Button
+                variant="outline"
+                className="h-7 px-3 text-xs"
+                disabled={
+                  applyBusy ||
+                  sugLoading ||
+                  entriesQ.isLoading ||
+                  suggestionTargets.length === 0 ||
+                  !selectedBusinessId ||
+                  !selectedAccountId
+                }
+                onClick={loadSuggestionsForCurrentFilters}
+              >
+                {sugLoading ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading suggestions
+                  </span>
+                ) : suggestionsLoadedForCurrentFilters ? (
+                  "Reload suggestions"
+                ) : (
+                  "Load suggestions"
+                )}
+              </Button>
+
+              <Button
                 className="h-7 px-3 text-xs"
                 disabled={applyBusy || visibleRows.length === 0}
                 onClick={() => {
@@ -1104,6 +1156,19 @@ export default function CategoryReviewPageClient() {
           {err ? (
             <div className="text-sm text-bb-status-danger-fg" role="alert">
               {err}
+            </div>
+          ) : null}
+
+          {!entriesQ.isLoading && visibleRows.length > 0 && suggestionTargets.length > 0 && !suggestionsLoadedForCurrentFilters && !sugLoading ? (
+            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Suggestions are not loaded yet. Load suggestions when you’re ready to review.
+            </div>
+          ) : null}
+
+          {sugLoading && !sugUpdating ? (
+            <div className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading category suggestions…
             </div>
           ) : null}
 
@@ -1472,8 +1537,11 @@ export default function CategoryReviewPageClient() {
                                           })}
 
                                           {more > 0 ? <span className="text-[10px] text-muted-foreground/80">+{more}</span> : null}
-                                          {sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-muted animate-pulse" /> : null}
-                                          {!sugLoading && suggestionsQ.error && !list.length ? (
+                                          {!suggestionsLoadedForCurrentFilters ? (
+                                            <span className="text-[10px] text-muted-foreground/80">Suggestions not loaded</span>
+                                          ) : null}
+                                          {suggestionsLoadedForCurrentFilters && sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-muted animate-pulse" /> : null}
+                                          {suggestionsLoadedForCurrentFilters && !sugLoading && suggestionsQ.error && !list.length ? (
                                             <div className="inline-flex items-center gap-2 min-w-0">
                                               <span className="text-[10px] text-muted-foreground">Category suggestions unavailable</span>
                                               <button
@@ -1485,7 +1553,7 @@ export default function CategoryReviewPageClient() {
                                               </button>
                                             </div>
                                           ) : null}
-                                          {!sugLoading && !suggestionsQ.error && !list.length ? (
+                                          {suggestionsLoadedForCurrentFilters && !sugLoading && !suggestionsQ.error && !list.length ? (
                                             <span className="text-[10px] text-muted-foreground/80">No category suggestions</span>
                                           ) : null}
                                         </>
