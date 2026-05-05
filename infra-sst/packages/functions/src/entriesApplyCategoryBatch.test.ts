@@ -22,6 +22,7 @@ async function loadHandler(args: {
   role?: string;
   suggestionsById?: Record<string, any[]>;
   body?: any;
+  closedMonths?: string[];
 }) {
   vi.resetModules();
 
@@ -47,7 +48,12 @@ async function loadHandler(args: {
       update: vi.fn(async () => ({})),
     },
     closedPeriod: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async (query: any) => {
+        const months = query?.where?.month?.in ?? [];
+        return (args.closedMonths ?? [])
+          .filter((month) => months.includes(month))
+          .map((month) => ({ month }));
+      }),
     },
     category: {
       findMany: vi.fn(async () => [
@@ -94,7 +100,7 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("apply-category-batch suggestion safety", () => {
+describe("apply-category-batch category safety", () => {
   test("applies SAFE_DETERMINISTIC top suggestion", async () => {
     const { handler, prisma, request } = await loadHandler({
       suggestionsById: {
@@ -187,8 +193,8 @@ describe("apply-category-batch suggestion safety", () => {
     expect(prisma.entry.update).not.toHaveBeenCalled();
   });
 
-  test("rejects missing suggested category marker", async () => {
-    const { handler, prisma, request } = await loadHandler({
+  test("applies explicit manual category selections without requiring a current suggestion", async () => {
+    const { handler, prisma, computeCategorySuggestionsForItems, request } = await loadHandler({
       body: { items: [{ entryId, category_id: safeCatId }] },
       suggestionsById: {
         [entryId]: [{ category_id: safeCatId, confidence_tier: "SAFE_DETERMINISTIC", confidence: 95 }],
@@ -198,8 +204,26 @@ describe("apply-category-batch suggestion safety", () => {
     const res = await handler(request);
     const body = JSON.parse(res.body);
 
+    expect(body.applied).toBe(1);
+    expect(body.blocked).toBe(0);
+    expect(body.blockedByCode).toEqual({});
+    expect(prisma.entry.update).toHaveBeenCalledOnce();
+    expect(computeCategorySuggestionsForItems).not.toHaveBeenCalled();
+  });
+
+  test("reports closed-period blocks by code for affected rows", async () => {
+    const { handler, prisma, request } = await loadHandler({
+      body: { items: [{ entryId, category_id: safeCatId }] },
+      closedMonths: ["2026-04"],
+    });
+
+    const res = await handler(request);
+    const body = JSON.parse(res.body);
+
     expect(body.applied).toBe(0);
-    expect(body.results[0]).toMatchObject({ ok: false, code: "SUGGESTION_REQUIRED" });
+    expect(body.blocked).toBe(1);
+    expect(body.blockedByCode).toEqual({ CLOSED_PERIOD: 1 });
+    expect(body.results[0]).toMatchObject({ ok: false, code: "CLOSED_PERIOD", month: "2026-04" });
     expect(prisma.entry.update).not.toHaveBeenCalled();
   });
 

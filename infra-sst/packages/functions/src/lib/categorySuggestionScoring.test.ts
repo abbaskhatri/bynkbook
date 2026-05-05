@@ -226,6 +226,46 @@ describe("category keyword suggestions", () => {
     expect(btotSuggestions[0]?.category_id).toBe("cat-sales");
   });
 
+  test("suggests tax expense category for IRS and tax payment signals", () => {
+    const irsSuggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({ payee: "IRS USATAXPYMT", memo: "tax payment" }),
+      categories: [
+        { id: "cat-tax", name: "Taxes" },
+        { id: "cat-bank", name: "Bank Fees" },
+      ],
+      limit: 3,
+    });
+
+    expect(irsSuggestions[0]).toMatchObject({
+      category_id: "cat-tax",
+      category_name: "Taxes",
+      confidence: 84,
+      reason: expect.stringContaining("Matched tax payment keyword"),
+    });
+
+    const stateTaxSuggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({ payee: "State Tax Payment", memo: "treasury tax pymt" }),
+      categories: [{ id: "cat-income-tax", name: "Income Tax" }],
+      limit: 3,
+    });
+
+    expect(stateTaxSuggestions[0]?.category_id).toBe("cat-income-tax");
+  });
+
+  test("does not suggest tax category for income direction tax refunds", () => {
+    const suggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({
+        payee: "IRS TAX REFUND",
+        direction: "INCOME",
+        amount_cents: 12500n,
+      }),
+      categories: [{ id: "cat-tax", name: "Taxes" }],
+      limit: 3,
+    });
+
+    expect(suggestions).toEqual([]);
+  });
+
   test("does not suggest Sale/Sales for bankcard-like EXPENSE direction", () => {
     const suggestions = buildKeywordCategorySuggestions({
       item: keywordItem({ payee: "Bankcard Deposit", memo: "merchant batch", direction: "EXPENSE" }),
@@ -302,6 +342,21 @@ describe("category keyword suggestions", () => {
       isBulkSafeCategorySuggestion(
         {
           category_id: "cat-fuel",
+          confidence,
+          confidence_tier: confidenceTierFromScore(confidence),
+        },
+        0
+      )
+    ).toBe(false);
+  });
+
+  test("Tax keyword suggestion remains review-only under existing bulk safety rules", () => {
+    const confidence = 84;
+
+    expect(
+      isBulkSafeCategorySuggestion(
+        {
+          category_id: "cat-tax",
           confidence,
           confidence_tier: confidenceTierFromScore(confidence),
         },

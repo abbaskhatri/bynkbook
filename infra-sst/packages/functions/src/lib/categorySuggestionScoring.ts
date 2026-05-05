@@ -114,6 +114,15 @@ const KEYWORD_CATEGORY_FAMILIES: KeywordCategoryFamily[] = [
     confidence: 83,
     reason: "Matched income deposit keyword; Direction matched income",
   },
+  {
+    id: "tax",
+    direction: "EXPENSE",
+    categoryAliases: ["tax", "taxes", "payroll tax", "sales tax", "federal tax", "irs", "income tax"],
+    tokenSignals: ["irs", "usataxpymt", "tax", "taxes", "treasury"],
+    phraseSignals: ["tax pymt", "tax payment", "tax payments", "state tax", "federal tax", "income tax"],
+    confidence: 84,
+    reason: "Matched tax payment keyword; Direction matched expense",
+  },
 ];
 
 const AMBIGUOUS_KEYWORD_TOKENS = new Set([

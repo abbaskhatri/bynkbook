@@ -619,3 +619,38 @@ describe("bank transaction create-entry check reference extraction", () => {
     expect(prisma.entry.create.mock.calls[1][0].data.memo).not.toContain("Ref:");
   });
 });
+
+describe("bank transaction create-entry method inference", () => {
+  test("infers Zelle, Wire, ACH, Check, and Transfer methods when no override is provided", async () => {
+    const rows = [
+      tx("bank-zelle", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "ZELLE PAYMENT FROM CUSTOMER" }),
+      tx("bank-wire", "2026-04-27", "2026-04-27T12:00:00.000Z", { name: "WIRE TYPE CREDIT" }),
+      tx("bank-ach", "2026-04-28", "2026-04-28T12:00:00.000Z", { name: "ACH DEBIT VENDOR" }),
+      tx("bank-check", "2026-04-29", "2026-04-29T12:00:00.000Z", { name: "CHK 1042" }),
+      tx("bank-transfer", "2026-04-30", "2026-04-30T12:00:00.000Z", { name: "Online Transfer" }),
+    ];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    for (const row of rows) {
+      const res = await handler(postCreateEntryEvent(row.id, { autoMatch: false }));
+      expect(res.statusCode).toBe(201);
+    }
+
+    const methods = prisma.entry.create.mock.calls.map((call: any) => call[0].data.method);
+    expect(methods).toEqual(["ZELLE", "WIRE", "ACH", "CHECK", "TRANSFER"]);
+  });
+
+  test("preserves explicit method override over inferred bank text", async () => {
+    const rows = [
+      tx("bank-zelle-override", "2026-04-26", "2026-04-26T12:00:00.000Z", {
+        name: "ZELLE PAYMENT FROM CUSTOMER",
+      }),
+    ];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const res = await handler(postCreateEntryEvent("bank-zelle-override", { autoMatch: false, method: "CARD" }));
+
+    expect(res.statusCode).toBe(201);
+    expect(prisma.entry.create.mock.calls[0][0].data.method).toBe("CARD");
+  });
+});

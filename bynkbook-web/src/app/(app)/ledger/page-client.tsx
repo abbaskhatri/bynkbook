@@ -1959,6 +1959,7 @@ export default function LedgerPageClient() {
         accountId: selectedAccountId,
         items,
         limitPerItem: 1,
+        includeAiFallback: false,
       });
 
       const next: Record<string, any> = {};

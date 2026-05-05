@@ -75,6 +75,17 @@ const POSSIBLE_DUPLICATE_ENTRY_CODE = "POSSIBLE_DUPLICATE_ENTRY";
 const POSSIBLE_DUPLICATE_ENTRY_MESSAGE =
   "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
 const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
+const ALLOWED_BANK_ENTRY_METHODS = new Set([
+  "CASH",
+  "CARD",
+  "ACH",
+  "WIRE",
+  "CHECK",
+  "DIRECT_DEPOSIT",
+  "ZELLE",
+  "TRANSFER",
+  "OTHER",
+]);
 
 function normalizeCheckNumberCandidate(value: any) {
   const s = String(value ?? "").trim();
@@ -91,6 +102,34 @@ function rawString(raw: any, keys: string[]) {
     if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
   }
   return "";
+}
+
+function bankTransactionSearchText(bankTxn: any) {
+  const raw = bankTxn?.raw && typeof bankTxn.raw === "object" ? bankTxn.raw : {};
+  const rawParts = [
+    rawString(raw, ["name", "merchant_name", "merchantName", "original_description", "originalDescription"]),
+    rawString(raw, ["payment_channel", "paymentChannel", "transaction_type", "transactionType"]),
+    rawString(raw, ["check_number", "checkNumber", "check_num", "checkNum"]),
+    rawString(raw, ["payment_meta", "paymentMeta"]),
+  ];
+
+  return [bankTxn?.name, ...rawParts]
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function inferMethodFromBankTransaction(bankTxn: any) {
+  if (extractCheckNumberFromBankTransaction(bankTxn)) return "CHECK";
+
+  const text = bankTransactionSearchText(bankTxn);
+  if (/\bzelle\b/i.test(text)) return "ZELLE";
+  if (/\bwire(?:\s+type)?\b/i.test(text)) return "WIRE";
+  if (/\bach\b/i.test(text)) return ALLOWED_BANK_ENTRY_METHODS.has("ACH") ? "ACH" : "OTHER";
+  if (/\b(?:check|chk)\b/i.test(text)) return "CHECK";
+  if (/\btransfer\b/i.test(text)) return ALLOWED_BANK_ENTRY_METHODS.has("TRANSFER") ? "TRANSFER" : "OTHER";
+
+  return "OTHER";
 }
 
 function extractCheckNumberFromBankTransaction(bankTxn: any) {
@@ -625,10 +664,8 @@ export async function handler(event: any) {
           const rawCategoryId = it?.category_id ? String(it.category_id) : "";
           const categoryIdOverride = rawCategoryId.trim() ? rawCategoryId.trim() : "";
 
-          const allowedMethods = new Set([
-            "CASH","CARD","ACH","WIRE","CHECK","DIRECT_DEPOSIT","ZELLE","TRANSFER","OTHER",
-          ]);
-          const methodFinal = allowedMethods.has(methodOverride) ? methodOverride : "OTHER";
+          const inferredMethod = inferMethodFromBankTransaction(bankTxn);
+          const methodFinal = ALLOWED_BANK_ENTRY_METHODS.has(methodOverride) ? methodOverride : inferredMethod;
           const categoryIdFinal = categoryIdOverride || null;
 
           const now = new Date();
@@ -982,19 +1019,8 @@ export async function handler(event: any) {
       const defaultMemo = `Bank txn: ${(bankTxn.name ?? "").toString().trim() || "—"} • ${bankTransactionId}`;
       const memo = memoWithCheckRef(memoOverride || defaultMemo, extractCheckNumberFromBankTransaction(bankTxn));
 
-      const allowedMethods = new Set([
-        "CASH",
-        "CARD",
-        "ACH",
-        "WIRE",
-        "CHECK",
-        "DIRECT_DEPOSIT",
-        "ZELLE",
-        "TRANSFER",
-        "OTHER",
-      ]);
-
-      const methodFinal = allowedMethods.has(methodOverride) ? methodOverride : "OTHER";
+      const inferredMethod = inferMethodFromBankTransaction(bankTxn);
+      const methodFinal = ALLOWED_BANK_ENTRY_METHODS.has(methodOverride) ? methodOverride : inferredMethod;
       const categoryIdFinal = categoryIdOverride || null;
 
       const now = new Date();

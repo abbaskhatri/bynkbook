@@ -377,6 +377,24 @@ function extractCheckRefFromBankTransaction(bank: any) {
   return compactText(match?.[1] ?? "", "");
 }
 
+function inferMethodFromBankTransaction(bank: any) {
+  if (extractCheckRefFromBankTransaction(bank)) return "CHECK";
+
+  const text = [
+    bank?.name,
+    bank?.merchant_name,
+    bank?.original_description,
+    bank?.payment_channel,
+  ].map((v) => String(v ?? "")).join(" ");
+
+  if (/\bzelle\b/i.test(text)) return "ZELLE";
+  if (/\bwire(?:\s+type)?\b/i.test(text)) return "WIRE";
+  if (/\bach\b/i.test(text)) return "ACH";
+  if (/\b(?:check|chk)\b/i.test(text)) return "CHECK";
+  if (/\btransfer\b/i.test(text)) return "TRANSFER";
+  return "OTHER";
+}
+
 function directionLabel(amountCents: unknown) {
   return toBigIntSafe(amountCents) < 0n ? "Outflow" : "Inflow";
 }
@@ -1804,6 +1822,7 @@ export default function ReconcilePageClient() {
             },
           ],
           limitPerItem: 3,
+          includeAiFallback: false,
         });
 
         const s = res?.suggestionsById?.[bankId] ?? [];
@@ -3471,6 +3490,7 @@ const displayBankActiveList = useMemo(() => {
             const desc = (t?.name ?? "").toString().trim() || "—";
             const bankAccount = accountLabelFor(t, selectedAccountName);
             const extractedRef = t ? extractCheckRefFromBankTransaction(t) : "";
+            const suggestedMethod = t ? inferMethodFromBankTransaction(t) : "OTHER";
             const selectedCategoryLabel =
               createEntryCategoryName ||
               compactText(categories.find((c: any) => String(c?.id ?? "") === createEntryCategoryId)?.name ?? "", "");
@@ -3479,7 +3499,11 @@ const displayBankActiveList = useMemo(() => {
               payee: desc,
               amount_cents: amt,
               method: createEntryMethod || "OTHER",
+              suggestedMethod,
               category: selectedCategoryLabel || "None selected",
+              suggestedCategory:
+                String(createEntrySuggestions?.[0]?.category_name ?? createEntrySuggestions?.[0]?.categoryName ?? "").trim() ||
+                "None",
               ref: extractedRef,
             };
 
@@ -3586,9 +3610,19 @@ const displayBankActiveList = useMemo(() => {
                         <div className="font-semibold text-bb-text">{newEntryPreview.method}</div>
                       </div>
                       <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Suggested method</div>
+                        <div className="font-semibold text-bb-text">{newEntryPreview.suggestedMethod}</div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
                         <div className="text-bb-text-muted">Category</div>
                         <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.category}>
                           {newEntryPreview.category}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-bb-text-muted">Suggested category</div>
+                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.suggestedCategory}>
+                          {newEntryPreview.suggestedCategory}
                         </div>
                       </div>
                       <div className="flex items-center justify-between gap-2 mt-1">
@@ -4609,7 +4643,7 @@ const displayBankActiveList = useMemo(() => {
                                     // Prefill overrides
                                     const defaultDesc = (t?.name ?? "").toString().trim() || "—";
                                     setCreateEntryMemo(`Bank txn: ${defaultDesc} • ${bankId}`);
-                                    setCreateEntryMethod("OTHER");
+                                    setCreateEntryMethod(inferMethodFromBankTransaction(t));
                                     setCreateEntryCategoryId("");
                                     setCreateEntryCategoryName("");
                                     setCategoryQuery("");

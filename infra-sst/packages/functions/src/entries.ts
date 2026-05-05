@@ -147,6 +147,11 @@ export async function handler(event: any) {
     }
 
     const entryIds: string[] = Array.from(new Set(items.map((x: ApplyItem) => x.entryId)));
+    const suggestionApplyEntryIds = new Set(
+      items
+        .filter((x: ApplyItem) => !!String(x.suggested_category_id ?? "").trim())
+        .map((x: ApplyItem) => x.entryId)
+    );
 
     const rows = await prisma.entry.findMany({
       where: {
@@ -175,15 +180,9 @@ export async function handler(event: any) {
       entryById.set(id, r);
       dateById.set(id, r?.date);
 
-      // Use closedPeriods helpers without per-row DB calls:
-      // compute YYYY-MM from ISO date string (safe)
-      try {
-        const ymd = new Date(r.date).toISOString().slice(0, 10);
-        const month = ymd.slice(0, 7);
-        if (month) months.add(month);
-      } catch {
-        // ignore
-      }
+      const ymd = normalizeToYmd(r?.date);
+      const month = ymd ? ymd.slice(0, 7) : "";
+      if (month) months.add(month);
     }
 
     const closedRows = months.size
@@ -212,24 +211,27 @@ export async function handler(event: any) {
     const validCat = new Set<string>(catRows.map((c: any) => String(c?.id ?? "").trim()).filter(Boolean));
 
     const suggestionItems = rows
+      .filter((r: any) => suggestionApplyEntryIds.has(String(r?.id ?? "").trim()))
       .map((r: any) => ({
         kind: "ENTRY" as const,
         id: String(r?.id ?? "").trim(),
-        date: r?.date ? new Date(r.date).toISOString().slice(0, 10) : undefined,
+        date: normalizeToYmd(r?.date) ?? undefined,
         amount_cents: r?.amount_cents,
         payee_or_name: String(r?.payee ?? ""),
         memo: String(r?.memo ?? ""),
       }))
       .filter((r) => !!r.id);
 
-    const currentSuggestions = await computeCategorySuggestionsForItems({
-      prisma,
-      businessId: biz,
-      accountId: acct,
-      items: suggestionItems,
-      limitPerItem: 3,
-      includeAiFallback: false,
-    });
+    const currentSuggestions = suggestionItems.length
+      ? await computeCategorySuggestionsForItems({
+          prisma,
+          businessId: biz,
+          accountId: acct,
+          items: suggestionItems,
+          limitPerItem: 3,
+          includeAiFallback: false,
+        })
+      : { suggestionsById: {} as Record<string, any[]> };
 
     const results: any[] = [];
     let applied = 0;
@@ -252,68 +254,55 @@ export async function handler(event: any) {
       }
 
       const suggestedCategoryId = String(it.suggested_category_id ?? "").trim();
-      if (!suggestedCategoryId) {
-        results.push({
-          entryId,
-          ok: false,
-          code: "SUGGESTION_REQUIRED",
-          error: "Batch category apply requires a current strong category suggestion.",
-        });
-        blocked++;
-        continue;
-      }
+      if (suggestedCategoryId) {
+        const topSuggestion = (currentSuggestions.suggestionsById?.[entryId] ?? [])[0] ?? null;
+        const topSuggestionAny: any = topSuggestion;
+        const topCategoryId = String(topSuggestionAny?.category_id ?? topSuggestionAny?.categoryId ?? "").trim();
 
-      const topSuggestion = (currentSuggestions.suggestionsById?.[entryId] ?? [])[0] ?? null;
-      const topSuggestionAny: any = topSuggestion;
-      const topCategoryId = String(topSuggestionAny?.category_id ?? topSuggestionAny?.categoryId ?? "").trim();
+        if (!topSuggestion || !topCategoryId) {
+          results.push({
+            entryId,
+            ok: false,
+            code: "SUGGESTION_UNAVAILABLE",
+            error: "No current category suggestion is available for this entry.",
+          });
+          blocked++;
+          continue;
+        }
 
-      if (!topSuggestion || !topCategoryId) {
-        results.push({
-          entryId,
-          ok: false,
-          code: "SUGGESTION_UNAVAILABLE",
-          error: "No current category suggestion is available for this entry.",
-        });
-        blocked++;
-        continue;
-      }
+        if (!isBulkSafeCategorySuggestion(topSuggestion, 0)) {
+          results.push({
+            entryId,
+            ok: false,
+            code: "UNSAFE_SUGGESTION",
+            error: "This category suggestion needs manual review before applying.",
+            suggested_category_id: topCategoryId,
+            confidence: topSuggestion.confidence,
+            confidence_tier: topSuggestion.confidence_tier,
+          });
+          blocked++;
+          continue;
+        }
 
-      if (!isBulkSafeCategorySuggestion(topSuggestion, 0)) {
-        results.push({
-          entryId,
-          ok: false,
-          code: "UNSAFE_SUGGESTION",
-          error: "This category suggestion needs manual review before applying.",
-          suggested_category_id: topCategoryId,
-          confidence: topSuggestion.confidence,
-          confidence_tier: topSuggestion.confidence_tier,
-        });
-        blocked++;
-        continue;
-      }
-
-      if (categoryId !== suggestedCategoryId || categoryId !== topCategoryId) {
-        results.push({
-          entryId,
-          ok: false,
-          code: "SUGGESTION_MISMATCH",
-          error: "Requested category does not match the current top category suggestion.",
-          suggested_category_id: topCategoryId,
-          confidence: topSuggestion.confidence,
-          confidence_tier: topSuggestion.confidence_tier,
-        });
-        blocked++;
-        continue;
+        if (categoryId !== suggestedCategoryId || categoryId !== topCategoryId) {
+          results.push({
+            entryId,
+            ok: false,
+            code: "SUGGESTION_MISMATCH",
+            error: "Requested category does not match the current top category suggestion.",
+            suggested_category_id: topCategoryId,
+            confidence: topSuggestion.confidence,
+            confidence_tier: topSuggestion.confidence_tier,
+          });
+          blocked++;
+          continue;
+        }
       }
 
       // CLOSED_PERIOD per row: check entry.date month
       let month = "";
-      try {
-        const ymd = new Date(dateById.get(entryId)).toISOString().slice(0, 10);
-        month = ymd.slice(0, 7);
-      } catch {
-        month = "";
-      }
+      const ymd = normalizeToYmd(dateById.get(entryId));
+      month = ymd ? ymd.slice(0, 7) : "";
 
       if (month && closedMonths.has(month)) {
         results.push({
@@ -371,7 +360,14 @@ export async function handler(event: any) {
       // non-fatal
     }
 
-    return json(200, { ok: true, results, applied, blocked });
+    const blockedByCode: Record<string, number> = {};
+    for (const r of results) {
+      if (r?.ok === true) continue;
+      const code = String(r?.code ?? "BLOCKED").trim() || "BLOCKED";
+      blockedByCode[code] = (blockedByCode[code] ?? 0) + 1;
+    }
+
+    return json(200, { ok: true, results, applied, blocked, blockedByCode });
   }
 
   const claims = getClaims(event);
