@@ -12,8 +12,10 @@ import {
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { resolveIssue, type EntryIssueRow } from "@/lib/api/issues";
 import { mergeEntry } from "@/lib/api/entries";
+import { Loader2 } from "lucide-react";
 
 type Kind = "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+type ActiveAction = "legitimize" | "merge" | "fix-category" | "ack-stale" | null;
 
 export function FixIssueDialog(props: {
   open: boolean;
@@ -57,9 +59,10 @@ export function FixIssueDialog(props: {
     onDidMutate,
   } = props;
 
-  const [busy, setBusy] = useState(false);
+  const [activeAction, setActiveAction] = useState<ActiveAction>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pickedCategoryId, setPickedCategoryId] = useState<string>("");
+  const busy = activeAction !== null;
 
   // Merge (Duplicate only)
   const [mergeSurvivorId, setMergeSurvivorId] = useState<string>("");
@@ -169,7 +172,10 @@ export function FixIssueDialog(props: {
 
   const duplicateMentionsMatch = duplicateIssueDetails.toLowerCase().includes("matched");
 
-  async function doResolve(action: "LEGITIMIZE" | "ACK_STALE" | "FIX_MISSING_CATEGORY") {
+  async function doResolve(
+    action: "LEGITIMIZE" | "ACK_STALE" | "FIX_MISSING_CATEGORY",
+    actionKey: Exclude<ActiveAction, "merge" | null>
+  ) {
     if (!kind || !entryId) return;
     setErr(null);
 
@@ -178,7 +184,7 @@ export function FixIssueDialog(props: {
       return;
     }
 
-    setBusy(true);
+    setActiveAction(actionKey);
     try {
       // Resolve all relevant issue ids (duplicate group resolves all in group; others resolve single)
       for (const issueId of relevant.issueIds) {
@@ -201,7 +207,7 @@ export function FixIssueDialog(props: {
           : "Couldn’t resolve this issue. Please try again.";
       setErr(msg);
     } finally {
-      setBusy(false);
+      setActiveAction(null);
     }
   }
 
@@ -223,10 +229,17 @@ export function FixIssueDialog(props: {
               <>
                 {/* No "Legitimize" for missing category — must fix the data */}
                 <Button
-                  onClick={() => doResolve("FIX_MISSING_CATEGORY")}
+                  onClick={() => doResolve("FIX_MISSING_CATEGORY", "fix-category")}
                   disabled={busy || relevant.issueIds.length === 0 || !pickedCategoryId}
                 >
-                  {busy ? "Saving…" : "Fix category"}
+                  {activeAction === "fix-category" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Saving…
+                    </span>
+                  ) : (
+                    "Fix category"
+                  )}
                 </Button>
               </>
             ) : null}
@@ -235,10 +248,17 @@ export function FixIssueDialog(props: {
               <>
                 {/* No "Legitimize" for missing category — must actually fix data */}
                 <Button
-                  onClick={() => doResolve("ACK_STALE")}
+                  onClick={() => doResolve("ACK_STALE", "ack-stale")}
                   disabled={busy || relevant.issueIds.length === 0}
                 >
-                  {busy ? "Saving…" : "Acknowledge stale"}
+                  {activeAction === "ack-stale" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Saving…
+                    </span>
+                  ) : (
+                    "Acknowledge stale"
+                  )}
                 </Button>
               </>
             ) : null}
@@ -247,10 +267,17 @@ export function FixIssueDialog(props: {
               <>
                 <Button
                   variant="outline"
-                  onClick={() => doResolve("LEGITIMIZE")}
+                  onClick={() => doResolve("LEGITIMIZE", "legitimize")}
                   disabled={busy || relevant.issueIds.length === 0}
                 >
-                  {busy ? "Saving…" : "Legitimize"}
+                  {activeAction === "legitimize" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Saving…
+                    </span>
+                  ) : (
+                    "Legitimize"
+                  )}
                 </Button>
 
                 <Button
@@ -264,7 +291,7 @@ export function FixIssueDialog(props: {
                       return;
                     }
 
-                    setBusy(true);
+                    setActiveAction("merge");
                     setErr(null);
                     try {
                       await mergeEntry({
@@ -305,12 +332,19 @@ export function FixIssueDialog(props: {
                         setErr(String(payload?.error ?? raw ?? "Merge failed"));
                       }
                     } finally {
-                      setBusy(false);
+                      setActiveAction(null);
                     }
                   }}
                   disabled={busy || relevant.entryIds.length < 2}
                 >
-                  {busy ? "Merging…" : "Merge after review"}
+                  {activeAction === "merge" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Merging…
+                    </span>
+                  ) : (
+                    "Merge after review"
+                  )}
                 </Button>
               </>
             ) : null}
