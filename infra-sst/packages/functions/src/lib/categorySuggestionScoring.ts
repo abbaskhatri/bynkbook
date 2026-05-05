@@ -67,17 +67,61 @@ const LOW_SIGNAL_TOKENS = new Set([
   "qa",
 ]);
 
-const FUEL_CATEGORY_NAMES = new Set(["fuel"]);
+type KeywordCategoryFamily = {
+  id: string;
+  direction: Direction;
+  categoryAliases: string[];
+  tokenSignals: string[];
+  phraseSignals: string[];
+  confidence: number;
+  reason: string;
+};
 
-const FUEL_KEYWORD_TOKENS = new Set([
-  "bp",
-  "chevron",
-  "exxon",
-  "fuel",
-  "gas",
-  "gasoline",
-  "quiktrip",
-  "shell",
+const KEYWORD_CATEGORY_FAMILIES: KeywordCategoryFamily[] = [
+  {
+    id: "fuel",
+    direction: "EXPENSE",
+    categoryAliases: ["fuel", "gas", "gasoline", "auto fuel", "vehicle fuel", "car fuel"],
+    tokenSignals: ["bp", "chevron", "exxon", "fuel", "gas", "gasoline", "quiktrip", "shell"],
+    phraseSignals: ["fuel stop", "gas station"],
+    confidence: 84,
+    reason: "Matched fuel merchant keyword; Direction matched expense",
+  },
+  {
+    id: "bank_fees",
+    direction: "EXPENSE",
+    categoryAliases: ["bank fee", "bank fees", "service charge", "overdraft", "wire fee"],
+    tokenSignals: ["overdraft"],
+    phraseSignals: ["bank fee", "bank fees", "service charge", "overdraft fee", "wire fee"],
+    confidence: 83,
+    reason: "Matched bank fee keyword; Direction matched expense",
+  },
+  {
+    id: "software_subscriptions",
+    direction: "EXPENSE",
+    categoryAliases: ["software", "subscriptions", "software subscription", "saas", "apps", "digital services"],
+    tokenSignals: ["software", "subscription", "subscriptions", "saas", "app", "apps"],
+    phraseSignals: ["software subscription", "digital service", "digital services"],
+    confidence: 83,
+    reason: "Matched software subscription keyword; Direction matched expense",
+  },
+  {
+    id: "income_deposit",
+    direction: "INCOME",
+    categoryAliases: ["sale", "sales", "revenue", "income", "merchant deposit", "bankcard deposit"],
+    tokenSignals: ["btot"],
+    phraseSignals: ["bankcard deposit", "btot dep", "merchant deposit", "card deposit", "deposit"],
+    confidence: 83,
+    reason: "Matched income deposit keyword; Direction matched income",
+  },
+];
+
+const AMBIGUOUS_KEYWORD_TOKENS = new Set([
+  "zelle",
+  "check",
+  "payment",
+  "transfer",
+  "payroll",
 ]);
 
 function clampInt(n: number, min: number, max: number) {
@@ -227,20 +271,83 @@ function normalizedCategoryName(value: unknown) {
   return normalizeFreeText(value).replace(/\s+/g, " ").trim();
 }
 
-function findFuelCategory(categories: CandidateCategory[]) {
-  return (categories ?? []).find((category) => FUEL_CATEGORY_NAMES.has(normalizedCategoryName(category.name))) ?? null;
+function singularizeToken(token: string) {
+  if (token.length <= 3) return token;
+  if (token.endsWith("ies")) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("ses")) return token.slice(0, -2);
+  if (token.endsWith("s")) return token.slice(0, -1);
+  return token;
 }
 
-function hasFuelKeywordSignal(tokens: Set<string>, normalizedContext: string) {
-  if (
-    normalizedContext.includes("fuel stop") ||
-    normalizedContext.includes("gas station")
-  ) {
-    return true;
+function categoryNameVariants(value: unknown) {
+  const normalized = normalizedCategoryName(value);
+  if (!normalized) return new Set<string>();
+
+  const tokens = normalized.split(" ").filter(Boolean);
+  const singularTokens = tokens.map(singularizeToken);
+  const variants = new Set<string>([
+    normalized,
+    singularTokens.join(" "),
+  ]);
+
+  for (const token of tokens) variants.add(token);
+  for (const token of singularTokens) variants.add(token);
+
+  for (let i = 0; i < singularTokens.length - 1; i++) {
+    variants.add(`${singularTokens[i]} ${singularTokens[i + 1]}`);
   }
 
-  for (const token of tokens) {
-    if (FUEL_KEYWORD_TOKENS.has(token)) return true;
+  return variants;
+}
+
+function categoryMatchesFamily(category: CandidateCategory, family: KeywordCategoryFamily) {
+  const variants = categoryNameVariants(category.name);
+  const aliases = family.categoryAliases.map(normalizedCategoryName);
+
+  for (const alias of aliases) {
+    if (!alias) continue;
+    if (variants.has(alias)) return true;
+
+    const aliasTokens = alias.split(" ").map(singularizeToken).filter(Boolean);
+    if (aliasTokens.length && aliasTokens.every((token) => variants.has(token))) return true;
+  }
+
+  return false;
+}
+
+function findFamilyCategory(categories: CandidateCategory[], family: KeywordCategoryFamily) {
+  return (categories ?? []).find((category) => categoryMatchesFamily(category, family)) ?? null;
+}
+
+function hasFamilyKeywordSignal(family: KeywordCategoryFamily, tokens: Set<string>, normalizedContext: string) {
+  for (const phrase of family.phraseSignals) {
+    if (normalizedContext.includes(normalizedCategoryName(phrase))) return true;
+  }
+
+  for (const token of family.tokenSignals) {
+    if (tokens.has(normalizedCategoryName(token))) return true;
+  }
+
+  return false;
+}
+
+function hasStrongFamilyKeywordSignal(family: KeywordCategoryFamily, tokens: Set<string>, normalizedContext: string) {
+  for (const phrase of family.phraseSignals) {
+    const normalizedPhrase = normalizedCategoryName(phrase);
+    if (normalizedPhrase === "deposit") continue;
+    if (normalizedContext.includes(normalizedPhrase)) return true;
+  }
+
+  for (const token of family.tokenSignals) {
+    if (tokens.has(normalizedCategoryName(token))) return true;
+  }
+
+  return false;
+}
+
+function hasAmbiguousKeywordToken(tokens: Set<string>) {
+  for (const token of AMBIGUOUS_KEYWORD_TOKENS) {
+    if (tokens.has(token)) return true;
   }
 
   return false;
@@ -255,14 +362,21 @@ export function buildKeywordCategorySuggestions(args: {
   const suggestions: HeuristicSuggestion[] = [];
   const itemContextTokens = new Set(tokenizeMerchantText(args.item.payee_or_name ?? "", args.item.memo ?? ""));
   const normalizedContext = normalizeFreeText(`${args.item.payee_or_name ?? ""} ${args.item.memo ?? ""}`);
-  const fuelCategory = findFuelCategory(args.categories);
+  const hasAmbiguousToken = hasAmbiguousKeywordToken(itemContextTokens);
 
-  if (fuelCategory && hasFuelKeywordSignal(itemContextTokens, normalizedContext)) {
+  for (const family of KEYWORD_CATEGORY_FAMILIES) {
+    if (args.item.direction !== family.direction) continue;
+    if (!hasFamilyKeywordSignal(family, itemContextTokens, normalizedContext)) continue;
+    if (hasAmbiguousToken && !hasStrongFamilyKeywordSignal(family, itemContextTokens, normalizedContext)) continue;
+
+    const category = findFamilyCategory(args.categories, family);
+    if (!category) continue;
+
     suggestions.push({
-      category_id: fuelCategory.id,
-      category_name: fuelCategory.name,
-      confidence: 84,
-      reason: "Matched fuel or gas merchant keywords",
+      category_id: category.id,
+      category_name: category.name,
+      confidence: family.confidence,
+      reason: family.reason,
     });
   }
 
