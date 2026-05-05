@@ -41,11 +41,13 @@ async function loadHandler(options: {
   entries: any[];
   matchedEntryIds?: string[];
   sourceBankRows?: any[];
+  suppressedDuplicateGroupKeys?: string[];
 } = { entries: [] }) {
   vi.resetModules();
 
   const matchedEntryIds = new Set(options.matchedEntryIds ?? []);
   const sourceBankRows = options.sourceBankRows ?? [];
+  const suppressedDuplicateGroupKeys = options.suppressedDuplicateGroupKeys ?? [];
 
   const prisma = {
     userBusinessRole: {
@@ -81,7 +83,13 @@ async function loadHandler(options: {
       findMany: vi.fn(async () => sourceBankRows),
     },
     entryIssue: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async (args: any = {}) => {
+        if (args?.where?.group_key?.startsWith === "LEGIT_DUP:") {
+          return suppressedDuplicateGroupKeys.map((key) => ({ group_key: `LEGIT_DUP:${key}` }));
+        }
+
+        return [];
+      }),
       findFirst: vi.fn(async () => null),
       create: vi.fn(async (args: any) => args.data),
       update: vi.fn(async (args: any) => args.data),
@@ -100,6 +108,8 @@ async function loadHandler(options: {
 function createdIssues(prisma: any) {
   return prisma.entryIssue.create.mock.calls.map((call: any[]) => call[0].data);
 }
+
+const NEAR_DUPLICATE_COPY = "Potential duplicate: similar payee, same amount, close date. Review before merging or cleanup.";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -139,9 +149,8 @@ describe("issues scan duplicate detection", () => {
 
     const issues = createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE");
     expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["generated-1", "manual-1"]);
-    expect(issues.every((row: any) => String(row.group_key).startsWith("MATCHED_DUP|"))).toBe(true);
-    expect(issues[0].details).toContain("one entry is matched to a bank transaction");
-    expect(issues[0].details).toContain("Review match/revert");
+    expect(issues.every((row: any) => String(row.group_key).startsWith("NEAR_DUP|"))).toBe(true);
+    expect(issues[0].details).toBe(NEAR_DUPLICATE_COPY);
     expect(issues[0].details.toLowerCase()).not.toContain("delete this");
   });
 
@@ -178,6 +187,39 @@ describe("issues scan duplicate detection", () => {
     expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["manual-1", "matched-1"]);
   });
 
+  test("flags ordinary near duplicate unity ez llc and unity rows", async () => {
+    const rows = [
+      entry("unity-ez", "2026-04-26", -48000n, { payee: "unity ez llc", method: "ACH" }),
+      entry("unity", "2026-04-28", -48000n, { payee: "unity", method: "ACH" }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const issues = createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE");
+    expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["unity", "unity-ez"]);
+    expect(issues.every((row: any) => String(row.group_key).startsWith("NEAR_DUP|"))).toBe(true);
+    expect(issues.every((row: any) => row.details === NEAR_DUPLICATE_COPY)).toBe(true);
+  });
+
+  test("flags ordinary near duplicate business suffix rows", async () => {
+    const rows = [
+      entry("abc-llc", "2026-04-26", -9000n, { payee: "ABC LLC", method: "CARD" }),
+      entry("abc", "2026-04-27", -9000n, { payee: "ABC", method: "CARD" }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const issues = createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE");
+    expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["abc", "abc-llc"]);
+    expect(issues.every((row: any) => row.details === NEAR_DUPLICATE_COPY)).toBe(true);
+  });
+
   test("excludes transfer adjustment opening and deleted rows from duplicate scan", async () => {
     const rows = [
       entry("transfer-1", "2026-04-26", -1200n, { payee: "Acme Supplies", type: "TRANSFER", transfer_id: "transfer-1" }),
@@ -188,6 +230,24 @@ describe("issues scan duplicate detection", () => {
       entry("opening-2", "2026-04-26", 1200n, { payee: "Opening Balance (estimated)", type: "OPENING" }),
       entry("deleted-1", "2026-04-26", -1200n, { payee: "Acme Supplies", deleted_at: new Date("2026-04-27T00:00:00.000Z") }),
       entry("deleted-2", "2026-04-26", -1200n, { payee: "Acme Supplies", deleted_at: new Date("2026-04-27T00:00:00.000Z") }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
+  test("excludes deleted and voided rows from near duplicate scan", async () => {
+    const rows = [
+      entry("deleted-unity-ez", "2026-04-26", -48000n, {
+        payee: "Unity EZ LLC",
+        deleted_at: new Date("2026-04-27T00:00:00.000Z"),
+      }),
+      entry("live-unity", "2026-04-27", -48000n, { payee: "Unity" }),
+      entry("voided-abc-llc", "2026-04-26", -9000n, { payee: "ABC LLC", status: "VOIDED" }),
+      entry("live-abc", "2026-04-27", -9000n, { payee: "ABC" }),
     ];
 
     const { handler, prisma } = await loadHandler({ entries: rows });
@@ -208,6 +268,81 @@ describe("issues scan duplicate detection", () => {
     const res = await handler(scanEvent({ includeMissingCategory: false }));
     expect(res.statusCode).toBe(200);
     expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
+  test("does not flag same near payee with different amount", async () => {
+    const rows = [
+      entry("unity-ez", "2026-04-26", -48000n, { payee: "Unity EZ LLC", method: "ACH" }),
+      entry("unity", "2026-04-27", -49000n, { payee: "Unity", method: "ACH" }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
+  test("does not flag generic deposit rows with same amount and date", async () => {
+    const rows = [
+      entry("deposit-a", "2026-04-26", 120000n, { payee: "Deposit", memo: "deposit", method: "ACH", type: "INCOME" }),
+      entry("deposit-b", "2026-04-26", 120000n, { payee: "Deposit", memo: "deposit", method: "ACH", type: "INCOME" }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
+  test("does not flag near payee rows with opposite direction", async () => {
+    const rows = [
+      entry("unity-expense", "2026-04-26", -48000n, { payee: "Unity EZ LLC", method: "ACH", type: "EXPENSE" }),
+      entry("unity-income", "2026-04-27", 48000n, { payee: "Unity", method: "ACH", type: "INCOME" }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
+  test("does not flag unrelated payees with same amount and date", async () => {
+    const rows = [
+      entry("unity", "2026-04-26", -48000n, { payee: "Unity", method: "ACH" }),
+      entry("acme", "2026-04-26", -48000n, { payee: "Acme Supplies", method: "ACH" }),
+    ];
+
+    const { handler, prisma } = await loadHandler({ entries: rows });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
+  test("LEGIT_DUP suppression prevents re-surfacing the same near duplicate group", async () => {
+    const rows = [
+      entry("unity-ez", "2026-04-26", -48000n, { payee: "unity ez llc", method: "ACH" }),
+      entry("unity", "2026-04-28", -48000n, { payee: "unity", method: "ACH" }),
+    ];
+
+    const first = await loadHandler({ entries: rows });
+    const firstRes = await first.handler(scanEvent({ includeMissingCategory: false }));
+    expect(firstRes.statusCode).toBe(200);
+
+    const groupKey = createdIssues(first.prisma).find((row: any) => row.issue_type === "DUPLICATE")?.group_key;
+    expect(String(groupKey)).toMatch(/^NEAR_DUP\|/);
+
+    const second = await loadHandler({
+      entries: rows,
+      suppressedDuplicateGroupKeys: [String(groupKey)],
+    });
+
+    const secondRes = await second.handler(scanEvent({ includeMissingCategory: false }));
+    expect(secondRes.statusCode).toBe(200);
+    expect(createdIssues(second.prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
   });
 
   test("preserves ordinary unmatched duplicate behavior", async () => {

@@ -85,51 +85,121 @@ function normalizePayee(raw: string) {
 function duplicateTokens(value: any) {
   const stop = new Set([
     "ach",
+    "and",
     "bank",
+    "bankcard",
     "card",
     "check",
+    "checkcard",
+    "ccd",
     "co",
+    "company",
+    "corp",
+    "corporation",
     "debit",
+    "dep",
+    "des",
     "deposit",
+    "id",
+    "inc",
+    "llc",
+    "llp",
+    "lp",
+    "ltd",
     "online",
     "payment",
+    "pllc",
     "pos",
     "purchase",
+    "sale",
+    "the",
     "transaction",
+    "transfer",
     "txn",
     "visa",
     "withdrawal",
+    "zelle",
   ]);
 
-  return String(value ?? "")
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const token of String(value ?? "")
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b\d{4,}\b/g, " ")
     .trim()
     .split(/\s+/)
     .map((token) => token.trim())
-    .filter((token) => token.length >= 3 && !stop.has(token));
+    .filter((token) => token.length >= 2 && !/^\d+$/.test(token) && !stop.has(token))) {
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+
+  return out;
 }
 
-function normalizedDuplicateText(value: any) {
-  return duplicateTokens(value).join(" ");
-}
-
-function hasSimilarDuplicateText(a: any, b: any) {
-  const aTokens = duplicateTokens(a);
-  const bTokens = duplicateTokens(b);
+function hasNearDuplicateTokenMatch(aTokens: string[], bTokens: string[]) {
   if (aTokens.length === 0 || bTokens.length === 0) return false;
 
+  const aSet = new Set(aTokens);
   const bSet = new Set(bTokens);
-  if (aTokens.some((token) => token.length >= 4 && bSet.has(token))) return true;
+  const shared = aTokens.filter((token) => bSet.has(token));
+  if (shared.length === 0) return false;
+  if (!shared.some((token) => token.length >= 3)) return false;
+  if (shared.length >= 2) return true;
 
-  const aText = normalizedDuplicateText(a);
-  const bText = normalizedDuplicateText(b);
-  if (!aText || !bText) return false;
+  const smaller = aTokens.length <= bTokens.length ? aTokens : bTokens;
+  const largerSet = aTokens.length <= bTokens.length ? bSet : aSet;
+  if (smaller.every((token) => largerSet.has(token))) return true;
 
-  return aTokens.some((token) => token.length >= 4 && bText.includes(token)) ||
-    bTokens.some((token) => token.length >= 4 && aText.includes(token));
+  return shared.length >= 2 && shared.length / Math.min(aTokens.length, bTokens.length) >= 0.67;
+}
+
+function duplicateTokenSignature(tokens: string[]) {
+  return Array.from(new Set(tokens))
+    .sort()
+    .slice(0, 6)
+    .join("-");
+}
+
+function duplicateComponentTokenSignature(tokenRows: string[][]) {
+  const rows = tokenRows.filter((tokens) => tokens.length > 0);
+  if (rows.length === 0) return "generic";
+
+  let shared = new Set(rows[0]);
+  for (const tokens of rows.slice(1)) {
+    const set = new Set(tokens);
+    shared = new Set(Array.from(shared).filter((token) => set.has(token)));
+  }
+
+  const sharedSig = duplicateTokenSignature(Array.from(shared));
+  if (sharedSig) return sharedSig;
+
+  return duplicateTokenSignature(rows.flat()) || "generic";
+}
+
+function duplicateEvidenceText(entry: any, bankDescriptions: string[] = []) {
+  return [
+    entry?.payee ?? "",
+    entry?.memo ?? "",
+    ...bankDescriptions,
+  ].join(" ");
+}
+
+function duplicateExactBaseKey(entry: any) {
+  const methodUpper = (entry?.method || "").toString().toUpperCase();
+  const isCheck = methodUpper === "CHECK";
+  const payeeKey = normalizePayee(entry?.payee || "");
+  const amount = String(entry?.amount_cents ?? "");
+  if (!amount || !payeeKey) return "";
+
+  return isCheck
+    ? `CHECK|${amount}|${payeeKey}`
+    : `NONCHECK|${amount}|${methodUpper}|${payeeKey}`;
 }
 
 function absBig(n: bigint) {
@@ -436,6 +506,8 @@ export async function handler(event: any) {
 
     const payeeKey = normalizePayee(e.payee || "");
     const descriptorKey = normalizePayee(String((e as any).memo ?? ""));
+    const evidenceTokens = duplicateTokens(duplicateEvidenceText(e, entryBankDescriptions(e)));
+    if (evidenceTokens.length === 0) continue;
 
     // Reduce false positives: skip NONCHECK duplicate detection when payee is too short/generic.
     // Narrow exception: allow short-payee NONCHECK duplicate candidates only when a usable
@@ -531,20 +603,21 @@ export async function handler(event: any) {
     }
   }
 
-  type FlexibleCandidate = {
+  const nearDuplicateDetails = "Potential duplicate: similar payee, same amount, close date. Review before merging or cleanup.";
+
+  type NearDuplicateCandidate = {
     id: string;
     day: number;
-    ymd: string;
     amount: bigint;
     amountAbs: bigint;
     sign: -1 | 0 | 1;
-    text: string;
+    tokens: string[];
     isCheck: boolean;
-    isMatched: boolean;
-    isBankGenerated: boolean;
+    type: string;
+    exactKey: string;
   };
 
-  const flexibleCandidates: FlexibleCandidate[] = [];
+  const nearCandidates: NearDuplicateCandidate[] = [];
   for (const e of entries as any[]) {
     if (!isDuplicateScanEligibleEntry(e)) continue;
 
@@ -554,93 +627,80 @@ export async function handler(event: any) {
 
     const amount = BigInt(e.amount_cents);
     const bankDescriptions = entryBankDescriptions(e);
-    const text = [
-      e.payee ?? "",
-      e.memo ?? "",
-      ...bankDescriptions,
-    ].join(" ");
+    const tokens = duplicateTokens(duplicateEvidenceText(e, bankDescriptions));
+    if (tokens.length === 0) continue;
 
-    flexibleCandidates.push({
+    nearCandidates.push({
       id: String(e.id),
       day,
-      ymd,
       amount,
       amountAbs: absBig(amount),
       sign: amount < 0n ? -1 : amount > 0n ? 1 : 0,
-      text,
+      tokens,
       isCheck: String(e.method ?? "").toUpperCase() === "CHECK",
-      isMatched: activeMatchGroupIdsByEntryId.has(String(e.id)),
-      isBankGenerated: !!sourceBankTxnId(e),
+      type: String(e.type ?? "").trim().toUpperCase(),
+      exactKey: duplicateExactBaseKey(e),
     });
   }
 
-  flexibleCandidates.sort((a, b) => (a.day !== b.day ? a.day - b.day : a.id.localeCompare(b.id)));
+  nearCandidates.sort((a, b) => (a.day !== b.day ? a.day - b.day : a.id.localeCompare(b.id)));
 
-  const flexParent = new Array<number>(flexibleCandidates.length);
-  for (let i = 0; i < flexParent.length; i++) flexParent[i] = i;
+  const nearParent = new Array<number>(nearCandidates.length);
+  for (let i = 0; i < nearParent.length; i++) nearParent[i] = i;
 
-  const flexFind = (x: number): number => {
-    while (flexParent[x] !== x) {
-      flexParent[x] = flexParent[flexParent[x]];
-      x = flexParent[x];
+  const nearFind = (x: number): number => {
+    while (nearParent[x] !== x) {
+      nearParent[x] = nearParent[nearParent[x]];
+      x = nearParent[x];
     }
     return x;
   };
 
-  const flexUnion = (a: number, b: number) => {
-    const ra = flexFind(a);
-    const rb = flexFind(b);
-    if (ra !== rb) flexParent[rb] = ra;
+  const nearUnion = (a: number, b: number) => {
+    const ra = nearFind(a);
+    const rb = nearFind(b);
+    if (ra !== rb) nearParent[rb] = ra;
   };
 
-  for (let i = 0; i < flexibleCandidates.length; i++) {
-    const a = flexibleCandidates[i];
-    for (let j = i + 1; j < flexibleCandidates.length; j++) {
-      const b = flexibleCandidates[j];
-      const windowDays = a.isCheck && b.isCheck ? 30 : 3;
+  for (let i = 0; i < nearCandidates.length; i++) {
+    const a = nearCandidates[i];
+    for (let j = i + 1; j < nearCandidates.length; j++) {
+      const b = nearCandidates[j];
+      const windowDays = a.isCheck && b.isCheck ? 30 : 7;
       if (b.day - a.day > windowDays) break;
 
       const sameSignedAmount = a.amount === b.amount;
       const sameCompatibleAbs = a.amountAbs === b.amountAbs && a.sign !== 0 && a.sign === b.sign;
       if (!sameSignedAmount && !sameCompatibleAbs) continue;
+      if (a.sign !== 0 && b.sign !== 0 && a.sign !== b.sign) continue;
+      if (a.type && b.type && a.type !== b.type) continue;
 
-      const hasBankOrMatchEvidence =
-        a.isMatched || b.isMatched || a.isBankGenerated || b.isBankGenerated;
-      if (!hasBankOrMatchEvidence) continue;
+      // Exact duplicate groups keep their original group_key, copy, and LEGIT_DUP suppression.
+      if (a.exactKey && b.exactKey && a.exactKey === b.exactKey) continue;
 
-      const hasManualLookingSide =
-        (!a.isMatched && !a.isBankGenerated) || (!b.isMatched && !b.isBankGenerated);
-      if (!hasManualLookingSide) continue;
+      if (!hasNearDuplicateTokenMatch(a.tokens, b.tokens)) continue;
 
-      if (!hasSimilarDuplicateText(a.text, b.text)) continue;
-
-      flexUnion(i, j);
+      nearUnion(i, j);
     }
   }
 
-  const flexComps = new Map<number, number[]>();
-  for (let i = 0; i < flexibleCandidates.length; i++) {
-    const r = flexFind(i);
-    const arr = flexComps.get(r);
+  const nearComps = new Map<number, number[]>();
+  for (let i = 0; i < nearCandidates.length; i++) {
+    const r = nearFind(i);
+    const arr = nearComps.get(r);
     if (arr) arr.push(i);
-    else flexComps.set(r, [i]);
+    else nearComps.set(r, [i]);
   }
 
-  for (const idxs of flexComps.values()) {
+  for (const idxs of nearComps.values()) {
     if (idxs.length < 2) continue;
 
-    const rows = idxs.map((ix) => flexibleCandidates[ix]);
-    const hasMatched = rows.some((row) => row.isMatched);
-    const hasBankGenerated = rows.some((row) => row.isBankGenerated);
+    const rows = idxs.map((ix) => nearCandidates[ix]);
     const minDay = Math.min(...rows.map((row) => row.day));
-    const amountAbs = rows[0]?.amountAbs?.toString() ?? "0";
-    const tokenSig = duplicateTokens(rows.map((row) => row.text).join(" "))
-      .slice(0, 3)
-      .join("-");
-    const groupKey = `MATCHED_DUP|${amountAbs}|${minDay}|${tokenSig || "bank"}`;
-    const details = hasMatched || hasBankGenerated
-      ? "Potential duplicate: one entry is matched to a bank transaction. Review match/revert before deleting anything."
-      : "Potential duplicate (within 3 days)";
+    const signedAmount = rows[0]?.amount?.toString() ?? "0";
+    const typeSig = Array.from(new Set(rows.map((row) => row.type).filter(Boolean))).sort().join("+") || "ANY";
+    const tokenSig = duplicateComponentTokenSignature(rows.map((row) => row.tokens));
+    const groupKey = `NEAR_DUP|${signedAmount}|${typeSig}|${minDay}|${tokenSig}`;
 
     for (const row of rows) {
       detected.push({
@@ -649,7 +709,7 @@ export async function handler(event: any) {
         severity: "WARNING",
         status: "OPEN",
         group_key: groupKey,
-        details,
+        details: nearDuplicateDetails,
       });
     }
   }
