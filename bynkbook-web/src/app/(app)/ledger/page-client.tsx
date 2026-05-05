@@ -50,6 +50,7 @@ import { listMatchGroups } from "@/lib/api/match-groups";
 import { aiExplainEntry, aiAnomalies, aiMerchantNormalize } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
+import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { FixIssueDialog } from "@/components/ledger/fix-issue-dialog";
@@ -1520,7 +1521,7 @@ export default function LedgerPageClient() {
     return m;
   }, [categoryRows]);
 
-  // Used by AutoInput to prevent showing "Create" when options lag behind fetched categories.
+  // Used by category entry flows to prevent showing "Create" when options lag behind fetched categories.
   useEffect(() => {
     (globalThis as any).__BYNK_CATEGORY_NORM_MAP_HAS = (k: string) => categoryIdByNormName.has(k);
     return () => {
@@ -1540,12 +1541,10 @@ export default function LedgerPageClient() {
     return Array.from(set);
   }, [entriesWithOpening]);
 
-  const categoryOptions = useMemo(() => {
-    // real categories (not memo)
+  const categoryComboboxOptions = useMemo(() => {
     return categoryRows
       .filter((c) => !c.archived_at)
-      .map((c) => c.name)
-      .sort((a, b) => a.localeCompare(b));
+      .map((c) => ({ id: c.id, name: c.name }));
   }, [categoryRows]);
 
   // Header "Uncategorized" chip count is defined after rowModels (below).
@@ -3488,7 +3487,7 @@ export default function LedgerPageClient() {
             onKeyDown={(e) => e.key === "Enter" && submitInline()}
           />
         ) : (
-          <AutoInput
+          <CategoryCombobox
             value={draftCategory}
             onValueChange={(v) => {
               setDraftCategory(v);
@@ -3498,9 +3497,9 @@ export default function LedgerPageClient() {
               const hit = categoryIdByNormName.get(normKey(n)) ?? null;
               setDraftCategoryId(hit);
             }}
-            options={categoryOptions}
+            options={categoryComboboxOptions}
             placeholder="Category"
-            inputRef={categoryInputRef}
+            ref={categoryInputRef}
             inputClassName={inputH7}
             allowCreate
             onCreate={async (name) => {
@@ -4317,10 +4316,10 @@ export default function LedgerPageClient() {
           {/* Category */}
           <td className={td + " min-w-0 " + deletedText}>
             {isEditing && editDraft ? (
-              <AutoInput
+              <CategoryCombobox
                 value={editDraft.category}
                 onValueChange={(v) => setEditDraft({ ...editDraft, category: v })}
-                options={categoryOptions}
+                options={categoryComboboxOptions}
                 placeholder="Category"
                 inputClassName={inputH7}
                 allowCreate
@@ -4329,10 +4328,10 @@ export default function LedgerPageClient() {
               />
             ) : quickCatEntryId === r.id ? (
               <div className="flex flex-col gap-1">
-                <AutoInput
+                <CategoryCombobox
                   value={quickCatValue}
                   onValueChange={(v) => setQuickCatValue(v)}
-                  options={categoryOptions}
+                  options={categoryComboboxOptions}
                   placeholder="Category"
                   inputClassName={inputH7}
                   allowCreate
@@ -4902,7 +4901,7 @@ export default function LedgerPageClient() {
     apTotalsByEntryId,
     deletingId,
     deleteMut.isPending,
-    categoryOptions,
+    categoryComboboxOptions,
   ]);
 
 
