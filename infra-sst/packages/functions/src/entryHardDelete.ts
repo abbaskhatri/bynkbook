@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
+import { assertEntryNotActiveMatchedForDelete } from "./lib/entryDeleteSafety";
 
 function json(statusCode: number, body: any) {
   return {
@@ -88,6 +89,14 @@ export async function handler(event: any) {
 
     const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: anyEntry.date });
     if (!cp.ok) return cp.response;
+
+    const matchSafety = await assertEntryNotActiveMatchedForDelete({
+      prisma,
+      businessId: biz,
+      accountId: acct,
+      entryId: ent,
+    });
+    if (!matchSafety.ok) return matchSafety.response;
 
     // Safety: only allow hard delete after soft delete.
     if (!anyEntry.deleted_at) {

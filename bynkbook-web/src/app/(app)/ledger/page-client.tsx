@@ -2111,6 +2111,12 @@ export default function LedgerPageClient() {
       }
 
       const results = await Promise.allSettled(tasks);
+      const matchedDeleteFailure = results.find(
+        (r): r is PromiseRejectedResult =>
+          r.status === "rejected" && r.reason?.code === "ENTRY_MATCHED_REQUIRES_UNMATCH"
+      );
+      if (matchedDeleteFailure) throw matchedDeleteFailure.reason;
+
       const failed = results.filter((r) => r.status === "rejected").length;
       return { failed, total: tasks.length };
     },
