@@ -37,6 +37,31 @@ function extractApiCode(e: unknown): string | null {
   );
 }
 
+function formatMatchedBankTransaction(e: unknown): string {
+  const bank = (e as any)?.payload?.bankTransaction;
+  if (!bank) return "";
+
+  const parts: string[] = [];
+  const date = typeof bank.date === "string" ? bank.date.trim() : "";
+  const name = typeof bank.name === "string" ? bank.name.trim() : "";
+  if (date) parts.push(date);
+  if (name) parts.push(name);
+
+  const rawCents = String(bank.amount_cents ?? "").trim();
+  if (/^-?\d+$/.test(rawCents)) {
+    const cents = Number(rawCents);
+    if (Number.isSafeInteger(cents)) {
+      const amount = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+      }).format(cents / 100);
+      parts.push(amount);
+    }
+  }
+
+  return parts.length ? ` Matched bank transaction: ${parts.join(" · ")}.` : "";
+}
+
 export function appErrorMessageOrNull(e: unknown): string | null {
   if (!e) return null;
 
@@ -56,6 +81,13 @@ export function appErrorMessageOrNull(e: unknown): string | null {
   if (status === 409 && code === "CANNOT_CLOSE_BEYOND_TODAY") {
     const st = anyE?.payload?.server_today ? ` (Server today: ${anyE.payload.server_today})` : "";
     return `Cannot close beyond today.${st}`;
+  }
+
+  if (status === 409 && code === "ENTRY_MATCHED_REQUIRES_UNMATCH") {
+    return (
+      "This entry is matched to a bank transaction. Unmatch or revert the match before deleting it." +
+      formatMatchedBankTransaction(e)
+    );
   }
 
   return "Something went wrong. Try again.";

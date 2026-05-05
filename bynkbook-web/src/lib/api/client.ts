@@ -88,6 +88,17 @@ const token = await getAuthToken();
       throw err;
     }
 
+    if (res.status === 409 && payload?.code === "ENTRY_MATCHED_REQUIRES_UNMATCH") {
+      const err: any = new Error(
+        payload?.message ||
+          "This entry is matched to a bank transaction. Unmatch or revert the match before deleting it."
+      );
+      err.status = 409;
+      err.code = "ENTRY_MATCHED_REQUIRES_UNMATCH";
+      err.payload = payload;
+      throw err;
+    }
+
     if (!text) {
       text = payload ? JSON.stringify(payload) : res.statusText;
     }

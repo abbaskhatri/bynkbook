@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
+import { assertEntryNotActiveMatchedForDelete } from "./lib/entryDeleteSafety";
 import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
 import { computeCategorySuggestionsForItems } from "./aiCategorySuggestions";
 import { isBulkSafeCategorySuggestion } from "./lib/categorySuggestionScoring";
@@ -978,8 +979,16 @@ export async function handler(event: any) {
     const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
     if (!cp.ok) return cp.response;
 
+    const matchSafety = await assertEntryNotActiveMatchedForDelete({
+      prisma,
+      businessId: biz,
+      accountId: acct,
+      entryId: ent,
+    });
+    if (!matchSafety.ok) return matchSafety.response;
+
     await prisma.$transaction(async (tx: any) => {
-      // 1) Void any ACTIVE matches for this entry (brings bank txn back to Unmatched)
+      // 1) Preserve legacy BankMatch cleanup for non-MatchGroup rows.
       await tx.bankMatch.updateMany({
         where: {
           business_id: biz,
