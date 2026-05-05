@@ -35,6 +35,7 @@ import {
   hardDeleteEntry,
   listEntries,
   restoreEntry,
+  unmatchAndDeleteEntry,
   updateEntry,
   type Entry,
 } from "@/lib/api/entries";
@@ -2908,6 +2909,20 @@ export default function LedgerPageClient() {
   });
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const MATCHED_DELETE_CONFIRM_TEXT = "Unmatch and delete";
+  const [matchedDeleteDialog, setMatchedDeleteDialog] = useState<{
+    id: string;
+    matchGroupId?: string | null;
+    bankTransaction?: {
+      id?: string | null;
+      date?: string | null;
+      name?: string | null;
+      amount_cents?: string | number | null;
+      amountCents?: string | number | null;
+    } | null;
+    confirmText: string;
+    error: string | null;
+  } | null>(null);
 
   const deleteMut = useMutation({
     mutationFn: async (p: { entryId: string; transferId?: string | null; isTransfer?: boolean }) => {
@@ -2967,6 +2982,23 @@ export default function LedgerPageClient() {
 
       if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
       const msg2 = String(e?.message ?? "");
+      if (e?.code === "ENTRY_MATCHED_REQUIRES_UNMATCH" || msg2.includes("ENTRY_MATCHED_REQUIRES_UNMATCH")) {
+        if (!id) {
+          setMutErr("This matched entry cannot be deleted until it is reviewed in Reconcile.");
+          return;
+        }
+        setMatchedDeleteDialog({
+          id: String(id),
+          matchGroupId: e?.payload?.matchGroupId ?? e?.payload?.match_group_id ?? null,
+          bankTransaction: e?.payload?.bankTransaction ?? e?.payload?.bank_transaction ?? null,
+          confirmText: "",
+          error: null,
+        });
+        setErr(null);
+        setMutErr(null);
+        setMutErrIsClosed(false);
+        return;
+      }
       if (msg2.includes("APPLIED_PAYMENT_IMMUTABLE")) {
         // Open the correct payment delete dialog (explicit unapply+delete) instead of generic delete UX.
         setPaymentDeleteDialog({ id: id, isApplied: true });
@@ -3003,6 +3035,42 @@ export default function LedgerPageClient() {
       void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
     },
 
+  });
+
+  const matchedDeleteMut = useMutation({
+    mutationFn: async (entryId: string) => {
+      if (!selectedBusinessId || !selectedAccountId) throw new Error("Missing business/account");
+      return unmatchAndDeleteEntry({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        entryId,
+        reason: "Unmatch and delete from Ledger",
+      });
+    },
+    onMutate: () => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
+      setMatchedDeleteDialog((cur) => (cur ? { ...cur, error: null } : cur));
+    },
+    onError: (e: any) => {
+      const msg = e?.payload?.error ?? appErrorMessageOrNull(e) ?? e?.message ?? "Unmatch and delete failed";
+      setMatchedDeleteDialog((cur) => (cur ? { ...cur, error: msg } : cur));
+      setMutErrIsClosed(isClosedPeriodError(e, msg));
+    },
+    onSuccess: async (_data: any, entryId: string) => {
+      setMutErr(null);
+      setMutErrIsClosed(false);
+      setDeletingId(null);
+      markEntryDeletedInCache(selectedBusinessId, selectedAccountId, entryId);
+      setMatchedDeleteDialog(null);
+
+      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "matchedUnmatchDelete");
+      void qc.invalidateQueries({ queryKey: ["matchGroups", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+      setTimeout(() => void scanIssues(), 1500);
+    },
   });
 
   const restoreMut = useMutation({
@@ -3887,6 +3955,7 @@ export default function LedgerPageClient() {
     createMut.isPending ||
     updateMut.isPending ||
     deleteMut.isPending ||
+    matchedDeleteMut.isPending ||
     restoreMut.isPending ||
     hardDeleteMut.isPending ||
     bulkDeleteMut.isPending ||
@@ -5169,6 +5238,21 @@ export default function LedgerPageClient() {
     </div>
   );
 
+  const matchedDeleteRow = matchedDeleteDialog ? rowModelById.get(matchedDeleteDialog.id) : null;
+  const matchedDeleteBank = matchedDeleteDialog?.bankTransaction ?? null;
+  const matchedDeleteBankAmountRaw =
+    matchedDeleteBank?.amount_cents ?? matchedDeleteBank?.amountCents ?? null;
+  const matchedDeleteBankAmount =
+    matchedDeleteBankAmountRaw === null || matchedDeleteBankAmountRaw === undefined
+      ? "—"
+      : formatUsdFromCents(toBigIntSafe(String(matchedDeleteBankAmountRaw)));
+  const matchedDeleteConfirmReady =
+    (matchedDeleteDialog?.confirmText ?? "").trim() === MATCHED_DELETE_CONFIRM_TEXT;
+  const matchedDeleteReviewUrl =
+    selectedBusinessId && selectedAccountId
+      ? `/reconcile?businessId=${encodeURIComponent(selectedBusinessId)}&accountId=${encodeURIComponent(selectedAccountId)}`
+      : "/reconcile";
+
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
       {/* Unified header + filters container (old app style) */}
@@ -5568,6 +5652,122 @@ export default function LedgerPageClient() {
           {deleteDialog?.mode === "hard"
             ? "This will permanently delete the entry. This action is irreversible."
             : "This will move the entry to Deleted. You can restore it later (reversible)."}
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={!!matchedDeleteDialog}
+        onClose={() => {
+          if (matchedDeleteMut.isPending) return;
+          setMatchedDeleteDialog(null);
+        }}
+        title="This entry is matched to a bank transaction"
+        size="md"
+        disableOverlayClose={matchedDeleteMut.isPending}
+        footer={
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setMatchedDeleteDialog(null);
+                router.push(matchedDeleteReviewUrl);
+              }}
+              disabled={matchedDeleteMut.isPending}
+            >
+              Review in Reconcile
+            </Button>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setMatchedDeleteDialog(null)} disabled={matchedDeleteMut.isPending}>
+                Cancel
+              </Button>
+
+              <Button
+                variant="destructive"
+                disabled={!matchedDeleteDialog || !matchedDeleteConfirmReady || matchedDeleteMut.isPending}
+                onClick={() => {
+                  if (!matchedDeleteDialog || !matchedDeleteConfirmReady) return;
+                  matchedDeleteMut.mutate(matchedDeleteDialog.id);
+                }}
+              >
+                {matchedDeleteMut.isPending ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Deleting
+                  </span>
+                ) : (
+                  "Unmatch and delete"
+                )}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4 text-sm text-bb-text">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            Deleting will first unmatch the bank transaction, then move this ledger entry to Deleted. The bank transaction will return to the unmatched table.
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-bb-border bg-bb-surface-card p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-bb-text-muted">Ledger entry</div>
+              <dl className="grid grid-cols-[88px_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt className="text-bb-text-muted">Date</dt>
+                <dd>{matchedDeleteRow?.date ? formatLedgerDateForDisplay(matchedDeleteRow.date) : "—"}</dd>
+                <dt className="text-bb-text-muted">Payee</dt>
+                <dd className="min-w-0 break-words">{matchedDeleteRow?.payee || "—"}</dd>
+                <dt className="text-bb-text-muted">Amount</dt>
+                <dd className={matchedDeleteRow?.amountNeg ? "text-red-700" : "text-emerald-700"}>
+                  {matchedDeleteRow?.amountStr ?? "—"}
+                </dd>
+                <dt className="text-bb-text-muted">Ref</dt>
+                <dd>{matchedDeleteRow?.ref || "—"}</dd>
+                <dt className="text-bb-text-muted">Category</dt>
+                <dd className="min-w-0 break-words">{matchedDeleteRow?.category || "Uncategorized"}</dd>
+              </dl>
+            </div>
+
+            <div className="rounded-lg border border-bb-border bg-bb-surface-card p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-bb-text-muted">Matched bank transaction</div>
+              <dl className="grid grid-cols-[88px_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt className="text-bb-text-muted">Date</dt>
+                <dd>
+                  {matchedDeleteBank?.date
+                    ? formatLedgerDateForDisplay(String(matchedDeleteBank.date).slice(0, 10))
+                    : "—"}
+                </dd>
+                <dt className="text-bb-text-muted">Name</dt>
+                <dd className="min-w-0 break-words">{matchedDeleteBank?.name || "—"}</dd>
+                <dt className="text-bb-text-muted">Amount</dt>
+                <dd>{matchedDeleteBankAmount}</dd>
+                <dt className="text-bb-text-muted">Match</dt>
+                <dd>{matchedDeleteDialog?.matchGroupId ? `Group ${matchedDeleteDialog.matchGroupId}` : "Active match"}</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-bb-border bg-bb-surface p-3">
+            <div className="mb-2 font-medium">Confirm this safe action</div>
+            <div className="mb-2 text-xs text-bb-text-muted">
+              Type <span className="font-semibold text-bb-text">{MATCHED_DELETE_CONFIRM_TEXT}</span> to continue.
+            </div>
+            <input
+              className={inputH7 + " w-full"}
+              value={matchedDeleteDialog?.confirmText ?? ""}
+              onChange={(ev) =>
+                setMatchedDeleteDialog((cur) => (cur ? { ...cur, confirmText: ev.target.value, error: null } : cur))
+              }
+              disabled={matchedDeleteMut.isPending}
+              placeholder={MATCHED_DELETE_CONFIRM_TEXT}
+              autoComplete="off"
+            />
+          </div>
+
+          {matchedDeleteDialog?.error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {matchedDeleteDialog.error}
+            </div>
+          ) : null}
         </div>
       </AppDialog>
 

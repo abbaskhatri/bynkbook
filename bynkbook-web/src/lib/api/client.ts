@@ -99,6 +99,25 @@ const token = await getAuthToken();
       throw err;
     }
 
+    if (
+      payload?.code &&
+      [
+        "CONFIRMATION_REQUIRED",
+        "HARD_DELETE_NOT_ALLOWED",
+        "ENTRY_NOT_ACTIVE_MATCHED",
+        "MATCH_GROUP_NOT_ACTIVE",
+        "MATCHED_DELETE_AMBIGUOUS",
+        "MATCHED_BANK_TRANSACTION_NOT_FOUND",
+        "MATCHED_DELETE_FAILED",
+      ].includes(String(payload.code))
+    ) {
+      const err: any = new Error(payload?.error || "Matched entry could not be unmatched and deleted.");
+      err.status = res.status;
+      err.code = payload.code;
+      err.payload = payload;
+      throw err;
+    }
+
     if (!text) {
       text = payload ? JSON.stringify(payload) : res.statusText;
     }
