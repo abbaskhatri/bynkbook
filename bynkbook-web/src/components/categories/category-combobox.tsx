@@ -156,10 +156,16 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
     const rect = anchorRef.current?.getBoundingClientRect();
     if (!rect) return;
 
+    const viewportPadding = 8;
+    const maxWidth = Math.max(220, window.innerWidth - viewportPadding * 2);
+    const width = Math.min(maxWidth, Math.max(rect.width, 320));
+    const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
+
     setPopoverStyle({
-      left: rect.left,
+      left,
       top: rect.bottom + 4,
-      width: rect.width,
+      width,
+      maxWidth,
     });
   };
 
@@ -237,6 +243,7 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
                   setDisplayValue("", null);
                   setOpen(false);
                 }}
+                title="Uncategorized"
               >
                 Uncategorized
               </button>
@@ -253,9 +260,10 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
                   void onCreate?.(normalizeCategoryComboboxName(resolvedValue));
                   setOpen(false);
                 }}
+                title={`Create "${normalizeCategoryComboboxName(resolvedValue)}"`}
               >
                 <span className="shrink-0 text-bb-text">Create</span>
-                <span className="ml-1 min-w-0 truncate font-medium text-bb-text">
+                <span className="ml-1 min-w-0 whitespace-normal break-words font-medium leading-snug text-bb-text">
                   &quot;{normalizeCategoryComboboxName(resolvedValue)}&quot;
                 </span>
               </button>
@@ -274,8 +282,9 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
                 onMouseEnter={() => setActive(idx)}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => selectOption(option)}
+                title={option.name}
               >
-                <span className="min-w-0 truncate">{option.name}</span>
+                <span className="min-w-0 whitespace-normal break-words leading-snug">{option.name}</span>
               </button>
             ))}
           </div>,
