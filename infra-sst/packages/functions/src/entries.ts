@@ -1,7 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
-import { assertNotClosedPeriod } from "./lib/closedPeriods";
+import { assertNotClosedPeriod, normalizeToYmd } from "./lib/closedPeriods";
 import { assertEntryNotActiveMatchedForDelete } from "./lib/entryDeleteSafety";
 import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
 import { computeCategorySuggestionsForItems } from "./aiCategorySuggestions";
@@ -30,6 +30,14 @@ function pp(event: any) {
 
 function qs(event: any) {
   return event?.queryStringParameters ?? {};
+}
+
+function centsToString(value: any): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number" && Number.isFinite(value)) return String(Math.trunc(value));
+  const s = String(value).trim();
+  return s || null;
 }
 
 async function requireMembership(prisma: any, businessId: string, userId: string) {
@@ -584,6 +592,268 @@ export async function handler(event: any) {
       merge_id: mergeId,
       survivor_entry_id: survivorEntryId,
       deleted_entry_id: duplicateEntryId,
+    });
+  }
+
+  // POST /entries/{entryId}/unmatch-and-delete
+  // Guided matched-entry delete: void a single active match group, then soft-delete the entry.
+  if (method === "POST" && ent && path?.endsWith("/unmatch-and-delete")) {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+
+    if (body?.hardDelete === true || body?.permanent === true) {
+      return json(400, {
+        ok: false,
+        code: "HARD_DELETE_NOT_ALLOWED",
+        error: "Hard delete is not allowed for matched entries.",
+      });
+    }
+
+    if (body?.confirmUnmatchAndDelete !== true) {
+      return json(400, {
+        ok: false,
+        code: "CONFIRMATION_REQUIRED",
+        error: "Explicit confirmation is required to unmatch and delete this entry.",
+      });
+    }
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "reconcile.matchGroup.void",
+      requiredLevel: "FULL",
+      endpointForLog:
+        "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/unmatch-and-delete",
+    });
+
+    if (!az.allowed) {
+      return json(403, {
+        ok: false,
+        error: "Policy denied",
+        code: "POLICY_DENIED",
+        actionKey: "reconcile.matchGroup.void",
+        requiredLevel: az.requiredLevel,
+        policyValue: az.policyValue,
+        policyKey: az.policyKey,
+      });
+    }
+
+    const activeApps = await prisma.billPaymentApplication.count({
+      where: { business_id: biz, account_id: acct, entry_id: ent, is_active: true },
+    });
+    if (activeApps > 0) {
+      return json(409, { ok: false, error: "APPLIED_PAYMENT_IMMUTABLE" });
+    }
+
+    const existing = await prisma.entry.findFirst({
+      where: { id: ent, business_id: biz, account_id: acct, deleted_at: null },
+      select: {
+        id: true,
+        date: true,
+        payee: true,
+        amount_cents: true,
+        method: true,
+        category_id: true,
+      },
+    });
+    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+
+    const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
+    if (!cp.ok) return cp.response;
+
+    const activeLinks = await prisma.matchGroupEntry.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        entry_id: ent,
+        matchGroup: { status: "ACTIVE", voided_at: null },
+      },
+      select: { match_group_id: true, matched_amount_cents: true },
+    });
+
+    const activeGroupIds = Array.from(
+      new Set(activeLinks.map((row: any) => String(row?.match_group_id ?? "").trim()).filter(Boolean))
+    );
+
+    if (activeGroupIds.length === 0) {
+      return json(409, {
+        ok: false,
+        code: "ENTRY_NOT_ACTIVE_MATCHED",
+        error: "Entry is not actively matched.",
+      });
+    }
+
+    if (activeGroupIds.length !== 1) {
+      return json(409, {
+        ok: false,
+        code: "MATCHED_DELETE_AMBIGUOUS",
+        error: "Entry has multiple active match groups. Review in Reconcile before deleting.",
+      });
+    }
+
+    const matchGroupId = activeGroupIds[0];
+
+    const [groupRow, groupEntries, groupBanks] = await Promise.all([
+      prisma.matchGroup.findFirst({
+        where: { id: matchGroupId, business_id: biz, account_id: acct, status: "ACTIVE", voided_at: null },
+        select: { id: true, status: true },
+      }),
+      prisma.matchGroupEntry.findMany({
+        where: { business_id: biz, account_id: acct, match_group_id: matchGroupId },
+        select: { entry_id: true, matched_amount_cents: true },
+      }),
+      prisma.matchGroupBank.findMany({
+        where: { business_id: biz, account_id: acct, match_group_id: matchGroupId },
+        select: { bank_transaction_id: true, matched_amount_cents: true },
+      }),
+    ]);
+
+    if (!groupRow) {
+      return json(409, {
+        ok: false,
+        code: "MATCH_GROUP_NOT_ACTIVE",
+        error: "The match group is no longer active.",
+      });
+    }
+
+    if (
+      groupEntries.length !== 1 ||
+      String(groupEntries[0]?.entry_id ?? "") !== ent ||
+      groupBanks.length !== 1
+    ) {
+      return json(409, {
+        ok: false,
+        code: "MATCHED_DELETE_AMBIGUOUS",
+        error: "This match affects multiple rows. Review in Reconcile before deleting.",
+      });
+    }
+
+    const bankTransactionId = String(groupBanks[0]?.bank_transaction_id ?? "").trim();
+    const bankRow = bankTransactionId
+      ? await prisma.bankTransaction.findFirst({
+          where: { id: bankTransactionId, business_id: biz, account_id: acct },
+          select: { id: true, posted_date: true, name: true, amount_cents: true },
+        })
+      : null;
+
+    if (!bankRow) {
+      return json(409, {
+        ok: false,
+        code: "MATCHED_BANK_TRANSACTION_NOT_FOUND",
+        error: "Matched bank transaction could not be found.",
+      });
+    }
+
+    const reason =
+      String(body?.reason ?? "").trim() ||
+      "Guided ledger delete: unmatch bank transaction and soft-delete ledger entry";
+
+    try {
+      await prisma.$transaction(async (tx: any) => {
+        const now = new Date();
+
+        const voided = await tx.matchGroup.updateMany({
+          where: {
+            id: matchGroupId,
+            business_id: biz,
+            account_id: acct,
+            status: "ACTIVE",
+            voided_at: null,
+          },
+          data: {
+            status: "VOIDED",
+            voided_at: now,
+            voided_by_user_id: sub,
+            void_reason: reason,
+          },
+        });
+
+        if (Number(voided?.count ?? 0) !== 1) {
+          throw new Error("The match group is no longer active.");
+        }
+
+        await tx.bankMatch.updateMany({
+          where: {
+            business_id: biz,
+            entry_id: ent,
+            voided_at: null,
+          },
+          data: {
+            voided_at: now,
+            voided_by_user_id: sub,
+          },
+        });
+
+        const deleted = await tx.entry.updateMany({
+          where: {
+            id: ent,
+            business_id: biz,
+            account_id: acct,
+            deleted_at: null,
+          },
+          data: {
+            deleted_at: now,
+            updated_at: now,
+          },
+        });
+
+        if (Number(deleted?.count ?? 0) !== 1) {
+          throw new Error("Entry could not be deleted.");
+        }
+
+        await logActivity(tx, {
+          businessId: biz,
+          actorUserId: sub,
+          scopeAccountId: acct,
+          eventType: "RECONCILE_MATCH_GROUP_VOIDED" as any,
+          payloadJson: { match_group_id: matchGroupId, reason, entry_id: ent, bank_transaction_id: bankTransactionId },
+        });
+
+        await logActivity(tx, {
+          businessId: biz,
+          actorUserId: sub,
+          scopeAccountId: acct,
+          eventType: "LEDGER_ENTRY_UNMATCH_AND_DELETE" as any,
+          payloadJson: { account_id: acct, entry_id: ent, match_group_id: matchGroupId, bank_transaction_id: bankTransactionId },
+        });
+      });
+    } catch (e: any) {
+      return json(409, {
+        ok: false,
+        code: "MATCHED_DELETE_FAILED",
+        error: e?.message ?? "Matched entry could not be unmatched and deleted.",
+      });
+    }
+
+    return json(200, {
+      ok: true,
+      deleted: true,
+      entry_id: ent,
+      match_group_id: matchGroupId,
+      voided_match_group_id: matchGroupId,
+      bank_transaction_unmatched: true,
+      entry: {
+        id: existing.id,
+        date: normalizeToYmd(existing.date),
+        payee: existing.payee ?? null,
+        amount_cents: centsToString(existing.amount_cents),
+        method: existing.method ?? null,
+        category_id: existing.category_id ?? null,
+      },
+      bank_transaction: {
+        id: bankRow.id,
+        date: normalizeToYmd(bankRow.posted_date),
+        name: bankRow.name ?? null,
+        amount_cents: centsToString(bankRow.amount_cents),
+      },
     });
   }
 

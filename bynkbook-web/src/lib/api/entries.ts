@@ -341,6 +341,50 @@ export async function deleteEntry(params: {
   return { deleted: !!res?.deleted || res?.ok === true };
 }
 
+export type UnmatchAndDeleteEntryResult = {
+  ok: boolean;
+  deleted: boolean;
+  entry_id: string;
+  match_group_id?: string | null;
+  voided_match_group_id?: string | null;
+  bank_transaction_unmatched?: boolean;
+  bank_transaction?: {
+    id?: string | null;
+    date?: string | null;
+    name?: string | null;
+    amount_cents?: string | null;
+  } | null;
+};
+
+export async function unmatchAndDeleteEntry(params: {
+  businessId: string;
+  accountId: string;
+  entryId: string;
+  reason?: string | null;
+}): Promise<UnmatchAndDeleteEntryResult> {
+  const { businessId, accountId, entryId, reason } = params;
+  const res: any = await apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/entries/${entryId}/unmatch-and-delete`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        confirmUnmatchAndDelete: true,
+        reason: reason ?? "Unmatch and delete from Ledger",
+      }),
+    }
+  );
+
+  return {
+    ok: !!res?.ok,
+    deleted: !!res?.deleted || res?.ok === true,
+    entry_id: asString(pick(res, ["entry_id", "entryId"])) ?? entryId,
+    match_group_id: asString(pick(res, ["match_group_id", "matchGroupId"])) ?? null,
+    voided_match_group_id: asString(pick(res, ["voided_match_group_id", "voidedMatchGroupId"])) ?? null,
+    bank_transaction_unmatched: !!res?.bank_transaction_unmatched,
+    bank_transaction: res?.bank_transaction ?? res?.bankTransaction ?? null,
+  };
+}
+
 export async function mergeEntry(params: {
   businessId: string;
   accountId: string;
