@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/app/page-header";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -627,16 +628,20 @@ export default function ReportsPageClient() {
               <>
                 <div className="space-y-1">
                   <div className="text-[11px] text-bb-text-muted">Range</div>
-                  <select
-                    className="h-7 w-[140px] text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
-                    value={rangeMode}
-                    onChange={(e) => setRangeMode(e.target.value as RangeMode)}
-                  >
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                    <option value="custom">Custom</option>
-                  </select>
+                  <Select value={rangeMode} onValueChange={(value) => setRangeMode(value as RangeMode)}>
+                    <SelectTrigger
+                      size="sm"
+                      className="h-7 w-[140px] border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="min-w-[180px] border-bb-border bg-bb-surface-card text-bb-text">
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {rangeMode === "monthly" ? (

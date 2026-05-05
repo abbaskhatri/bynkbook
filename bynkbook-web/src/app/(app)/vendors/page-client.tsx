@@ -8,6 +8,7 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { Building2, Loader2 } from "lucide-react";
 
@@ -312,15 +313,19 @@ export default function VendorsPageClient() {
 
       <div className="space-y-1">
         <div className="text-[11px] text-bb-text-muted">Sort</div>
-        <select
-          className="h-7 w-[180px] text-xs rounded-md border border-bb-input-border bg-bb-input-bg px-2"
-          value={sort}
-          onChange={(e) => setSort(e.target.value as SortKey)}
-        >
-          <option value="name_asc">Name A→Z</option>
-          <option value="name_desc">Name Z→A</option>
-          <option value="updated_desc">Recently updated</option>
-        </select>
+        <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
+          <SelectTrigger
+            size="sm"
+            className="h-7 w-[180px] border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="min-w-[210px] border-bb-border bg-bb-surface-card text-bb-text">
+            <SelectItem value="name_asc">Name A→Z</SelectItem>
+            <SelectItem value="name_desc">Name Z→A</SelectItem>
+            <SelectItem value="updated_desc">Recently updated</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={!businessId || vendorsLoading}>
@@ -513,19 +518,26 @@ export default function VendorsPageClient() {
 
           <div className="space-y-1">
             <div className="text-[11px] text-bb-text-muted">Default category (optional)</div>
-            <select
-              className="h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs"
-              value={defaultCategoryId}
-              onChange={(e) => setDefaultCategoryId(e.target.value)}
+            <Select
+              value={defaultCategoryId || "none"}
+              onValueChange={(value) => setDefaultCategoryId(value === "none" ? "" : value)}
               disabled={categoriesLoading && categoryRows.length === 0}
             >
-              <option value="">{categoriesLoading ? "Loading categories…" : "None"}</option>
-              {categoryRows.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                size="sm"
+                className="h-7 w-full border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="max-w-[28rem] min-w-[260px] border-bb-border bg-bb-surface-card text-bb-text">
+                <SelectItem value="none">{categoriesLoading ? "Loading categories…" : "None"}</SelectItem>
+                {categoryRows.map((c) => (
+                  <SelectItem key={c.id} value={c.id} title={c.name}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {categoriesLoading ? (
               <div className="inline-flex items-center gap-1 text-[11px] text-bb-text-muted">
                 <Loader2 className="h-3 w-3 animate-spin" />

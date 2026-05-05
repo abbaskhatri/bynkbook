@@ -3,7 +3,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ringFocus } from "@/components/primitives/tokens";
-import { ChevronDown, Loader2, Wallet } from "lucide-react";
+import { Loader2, Wallet } from "lucide-react";
 
 export function CapsuleSelect(props: {
   value: string;
@@ -54,10 +54,10 @@ export function CapsuleSelect(props: {
         {loading ? <Loader2 className="h-4 w-4 animate-spin opacity-60" /> : null}
       </SelectTrigger>
 
-      <SelectContent>
+      <SelectContent className="max-w-[28rem] min-w-[220px] border-bb-border bg-bb-surface-card text-bb-text">
         {includeAllOption ? <SelectItem value="all">{allLabel}</SelectItem> : null}
         {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
+          <SelectItem key={o.value} value={o.value} title={o.label}>
             {o.label}
           </SelectItem>
         ))}
