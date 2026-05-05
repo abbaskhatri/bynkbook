@@ -103,6 +103,15 @@ const DEFAULTS: Record<string, Record<string, PolicyValue>> = {
   },
 };
 
+export const ROLE_POLICY_ROLES = Object.freeze(Object.keys(DEFAULTS));
+export const ROLE_POLICY_KEYS = Object.freeze(Object.keys(DEFAULTS.OWNER));
+const ROLE_POLICY_KEY_SET = new Set<string>(ROLE_POLICY_KEYS);
+
+export function defaultRolePolicyFor(role: string): Record<string, PolicyValue> {
+  const R = String(role ?? "").toUpperCase();
+  return { ...(DEFAULTS[R] ?? DEFAULTS["MEMBER"]) };
+}
+
 /**
  * Map actionKey -> policy key (not endpoint-based).
  * Handlers provide actionKey + requiredLevel explicitly.
@@ -213,7 +222,7 @@ async function getBusinessAuthzMode(prisma: any, businessId: string): Promise<Au
 
 async function getPolicyForRole(prisma: any, businessId: string, role: string): Promise<Record<string, PolicyValue>> {
   const R = String(role ?? "").toUpperCase();
-  const fallback = DEFAULTS[R] ?? DEFAULTS["MEMBER"];
+  const fallback = defaultRolePolicyFor(R);
 
   const row = await prisma.businessRolePolicy.findFirst({
     where: { business_id: businessId, role: R },
@@ -225,6 +234,7 @@ async function getPolicyForRole(prisma: any, businessId: string, role: string): 
   const obj = row.policy_json as Record<string, any>;
   const merged: Record<string, PolicyValue> = { ...fallback };
   for (const [k, v] of Object.entries(obj)) {
+    if (!ROLE_POLICY_KEY_SET.has(k)) continue;
     merged[k] = normalizePolicyValue(v);
   }
   return merged;

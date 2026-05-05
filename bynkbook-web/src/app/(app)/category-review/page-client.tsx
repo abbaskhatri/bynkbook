@@ -305,7 +305,51 @@ export default function CategoryReviewPageClient() {
 
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
-  const [applySummary, setApplySummary] = useState<{ applied: number; blocked: number } | null>(null);
+  const [applySummary, setApplySummary] = useState<{
+    applied: number;
+    blocked: number;
+    blockedByCode: Record<string, number>;
+  } | null>(null);
+
+  function summarizeApplyResult(res: any) {
+    const blockedByCode =
+      res?.blockedByCode && typeof res.blockedByCode === "object"
+        ? Object.fromEntries(
+            Object.entries(res.blockedByCode).map(([code, count]) => [String(code), Number(count) || 0])
+          )
+        : {};
+
+    if (Object.keys(blockedByCode).length === 0 && Array.isArray(res?.results)) {
+      for (const row of res.results) {
+        if (row?.ok === true) continue;
+        const code = String(row?.code ?? "BLOCKED").trim() || "BLOCKED";
+        blockedByCode[code] = (blockedByCode[code] ?? 0) + 1;
+      }
+    }
+
+    return {
+      applied: Number(res?.applied ?? 0) || 0,
+      blocked: Number(res?.blocked ?? 0) || 0,
+      blockedByCode,
+    };
+  }
+
+  function applySummaryMessage(summary: { applied: number; blocked: number; blockedByCode: Record<string, number> }) {
+    const reasonLabels: Record<string, string> = {
+      CLOSED_PERIOD: "closed period",
+      INVALID_CATEGORY: "invalid category",
+      NOT_FOUND: "entry not found",
+      SUGGESTION_UNAVAILABLE: "suggestion unavailable",
+      UNSAFE_SUGGESTION: "needs review",
+      SUGGESTION_MISMATCH: "suggestion changed",
+      UPDATE_FAILED: "update failed",
+    };
+    const reasons = Object.entries(summary.blockedByCode)
+      .filter(([, count]) => count > 0)
+      .map(([code, count]) => `${count} ${reasonLabels[code] ?? code.toLowerCase().replace(/_/g, " ")}`);
+    const reasonText = reasons.length ? ` Reasons: ${reasons.join(", ")}.` : "";
+    return `Applied ${summary.applied}. Blocked ${summary.blocked}.${reasonText}`;
+  }
 
   function clearMutErr() {
     setMutErr(null);
@@ -833,19 +877,14 @@ export default function CategoryReviewPageClient() {
       if (!entry || entry.category_id) continue;
       if (!categoryNameById[category_id]) continue;
 
-      const list = Array.isArray(sugByEntryId[entryId]) ? sugByEntryId[entryId] : [];
-      const top = list[0] ?? null;
-      const suggested_category_id = String(top?.category_id ?? top?.categoryId ?? "").trim();
-
       out.push({
         entryId,
         category_id,
-        suggested_category_id: suggested_category_id || undefined,
       });
     }
 
     return out.slice(0, 200);
-  }, [selectedIds, manualCategoryByEntryId, visibleRows, categoryNameById, sugByEntryId]);
+  }, [selectedIds, manualCategoryByEntryId, visibleRows, categoryNameById]);
 
   const autoFixRows = useMemo(() => {
     return visibleRows
@@ -1016,8 +1055,9 @@ export default function CategoryReviewPageClient() {
         items: manuallySelectedApplyItems,
       });
 
-      const applied = Number(res?.applied ?? 0) || 0;
-      const blocked = Number(res?.blocked ?? 0) || 0;
+      const summary = summarizeApplyResult(res);
+      const applied = summary.applied;
+      const blocked = summary.blocked;
       const results = Array.isArray(res?.results) ? res.results : [];
       const successIds = new Set<string>();
 
@@ -1031,7 +1071,7 @@ export default function CategoryReviewPageClient() {
         for (const item of manuallySelectedApplyItems) successIds.add(item.entryId);
       }
 
-      setApplySummary({ applied, blocked });
+      setApplySummary(summary);
 
       if (successIds.size > 0) {
         qc.setQueryData(entriesKey, (current: any[] | undefined) => {
@@ -1147,11 +1187,11 @@ export default function CategoryReviewPageClient() {
         {applySummary ? (
           <div className="px-3 pb-2">
             <InlineBanner
-              title="Suggestions applied"
-              message={`Applied ${applySummary.applied}. Blocked ${applySummary.blocked}.`}
-              actionLabel={applySummary.blocked > 0 ? "Go to Close Periods" : null}
+              title="Categories applied"
+              message={applySummaryMessage(applySummary)}
+              actionLabel={(applySummary.blockedByCode.CLOSED_PERIOD ?? 0) > 0 ? "Go to Close Periods" : null}
               actionHref={
-                applySummary.blocked > 0
+                (applySummary.blockedByCode.CLOSED_PERIOD ?? 0) > 0
                   ? selectedBusinessId
                     ? `/closed-periods?businessId=${encodeURIComponent(selectedBusinessId)}&focus=reopen`
                     : "/closed-periods?focus=reopen"
@@ -1802,10 +1842,11 @@ export default function CategoryReviewPageClient() {
                         items: selectedApplyItems,
                       });
 
-                      const applied = Number(res?.applied ?? 0) || 0;
-                      const blocked = Number(res?.blocked ?? 0) || 0;
+                      const summary = summarizeApplyResult(res);
+                      const applied = summary.applied;
+                      const blocked = summary.blocked;
 
-                      setApplySummary({ applied, blocked });
+                      setApplySummary(summary);
 
                       const results = Array.isArray(res?.results) ? res.results : [];
                       const successIds = new Set<string>();

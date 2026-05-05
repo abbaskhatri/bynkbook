@@ -90,7 +90,7 @@ describe("P1 authorization gaps", () => {
     vi.resetModules();
     vi.doUnmock("./lib/authz");
 
-    const { ACTION_POLICY_KEY, actionWave } = await import("./lib/authz");
+    const { ACTION_POLICY_KEY, ROLE_POLICY_KEYS, ROLE_POLICY_ROLES, actionWave, defaultRolePolicyFor } = await import("./lib/authz");
     const srcDir = fileURLToPath(new URL(".", import.meta.url));
     const files: string[] = [];
 
@@ -153,6 +153,16 @@ describe("P1 authorization gaps", () => {
 
     expect(unmapped).toEqual([]);
     expect(unwaved).toEqual([]);
+
+    const rolePolicyKeySet = new Set<string>(ROLE_POLICY_KEYS);
+    const actionPolicyKeys = [...new Set(Object.values(ACTION_POLICY_KEY))];
+    expect(actionPolicyKeys.filter((key) => !rolePolicyKeySet.has(key))).toEqual([]);
+    expect(ROLE_POLICY_KEYS).toEqual(expect.arrayContaining(["roles_policy", "snapshots", "exports"]));
+
+    const canonicalKeys = [...ROLE_POLICY_KEYS].sort();
+    for (const role of ROLE_POLICY_ROLES) {
+      expect(Object.keys(defaultRolePolicyFor(role)).sort()).toEqual(canonicalKeys);
+    }
   });
 
   test("denies write-role account creation without OWNER/ADMIN account management permission", async () => {

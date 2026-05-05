@@ -28,6 +28,22 @@ function normalizeEmail(input: string) {
   return String(input ?? "").trim().toLowerCase();
 }
 
+function getAuthenticatedEmail(claims: any) {
+  const candidates = [
+    claims?.email,
+    claims?.["custom:email"],
+    claims?.username,
+    claims?.["cognito:username"],
+  ];
+
+  for (const candidate of candidates) {
+    const email = normalizeEmail(String(candidate ?? ""));
+    if (email.includes("@")) return email;
+  }
+
+  return "";
+}
+
 const ROLE_ALLOWLIST = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"]);
 function normalizeRole(input: string) {
   const role = String(input ?? "").trim().toUpperCase();
@@ -109,6 +125,23 @@ export async function handler(event: any) {
       return json(400, { ok: false, error: "Invite expired" });
     }
 
+    const emailClaim = getAuthenticatedEmail(claims);
+    const inviteEmail = normalizeEmail(invite.email ?? "");
+    if (!emailClaim) {
+      return json(403, {
+        ok: false,
+        error: "Authenticated user email is required to accept invite",
+        code: "INVITE_EMAIL_CLAIM_REQUIRED",
+      });
+    }
+    if (emailClaim && inviteEmail && emailClaim !== inviteEmail) {
+      return json(403, {
+        ok: false,
+        error: "Invite email does not match authenticated user",
+        code: "INVITE_EMAIL_MISMATCH",
+      });
+    }
+
     // Phase 7.2: log authz for onboarding, but NEVER policy-block invite accept
     // (authorizeWrite excludes team.invite.accept from enforcement by design)
     await authorizeWrite(prisma, {
@@ -149,7 +182,6 @@ export async function handler(event: any) {
     }
 
     // Create membership with invite role (validated at creation time)
-    const emailClaim = normalizeEmail((claims as any)?.email ?? "");
 
     await prisma.userBusinessRole.create({
       data: {

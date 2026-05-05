@@ -1,6 +1,12 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
-import { authorizeWrite } from "./lib/authz";
+import {
+  authorizeWrite,
+  defaultRolePolicyFor,
+  ROLE_POLICY_KEYS,
+  ROLE_POLICY_ROLES,
+  type PolicyValue,
+} from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -23,25 +29,9 @@ function getPath(event: any) {
   return String(event?.requestContext?.http?.path ?? "");
 }
 
-const ROLE_ALLOWLIST = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"]);
-const ACCESS_ALLOWLIST = new Set(["NONE", "VIEW", "FULL"]);
-
-// Strict allowlist of permission keys (UI matrix uses these)
-const PERM_KEYS = [
-  "dashboard",
-  "ledger",
-  "reconcile",
-  "issues",
-  "vendors",
-  "invoices",
-  "reports",
-  "settings",
-  "bank_connections",
-  "team_management",
-  "billing",
-  "ai_automation",
-] as const;
-const PERM_KEY_SET = new Set<string>(PERM_KEYS);
+const ROLE_ALLOWLIST = new Set(ROLE_POLICY_ROLES);
+const ACCESS_ALLOWLIST = new Set<PolicyValue>(["NONE", "VIEW", "FULL"]);
+const PERM_KEY_SET = new Set<string>(ROLE_POLICY_KEYS);
 
 const WRITE_ROLES = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
 function canWrite(role: string | null | undefined) {
@@ -65,23 +55,52 @@ function normalizeRole(input: string) {
   return r;
 }
 
-function validatePolicyJson(input: any) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+function normalizePolicyValue(input: any): PolicyValue | null {
+  const vv = String(input ?? "").trim().toUpperCase() as PolicyValue;
+  if (!ACCESS_ALLOWLIST.has(vv)) return null;
+  return vv;
+}
 
-  const out: Record<string, string> = {};
+function validatePolicyPatch(input: any): { ok: true; patch: Record<string, PolicyValue> } | { ok: false; error: string; code: string } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, error: "policy_json must be an object", code: "INVALID_POLICY_JSON" };
+  }
+
+  const patch: Record<string, PolicyValue> = {};
   for (const [k, v] of Object.entries(input)) {
-    if (!PERM_KEY_SET.has(k)) return null;
-    const vv = String(v ?? "").trim().toUpperCase();
-    if (!ACCESS_ALLOWLIST.has(vv)) return null;
+    if (!PERM_KEY_SET.has(k)) {
+      return { ok: false, error: `Unknown policy key: ${k}`, code: "UNKNOWN_POLICY_KEY" };
+    }
+    const vv = normalizePolicyValue(v);
+    if (!vv) {
+      return { ok: false, error: `Invalid policy value for ${k}`, code: "INVALID_POLICY_VALUE" };
+    }
+    patch[k] = vv;
+  }
+
+  return { ok: true, patch };
+}
+
+function storedPolicyOverrides(input: any): Record<string, PolicyValue> {
+  const out: Record<string, PolicyValue> = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) return out;
+
+  for (const [k, v] of Object.entries(input)) {
+    if (!PERM_KEY_SET.has(k)) continue;
+    const vv = normalizePolicyValue(v);
+    if (!vv) continue;
     out[k] = vv;
   }
 
-  // Ensure all known keys exist (fill missing as NONE)
-  for (const k of PERM_KEYS) {
-    if (!out[k]) out[k] = "NONE";
-  }
-
   return out;
+}
+
+function mergePolicy(targetRole: string, storedPolicy: any, patch: Record<string, PolicyValue>) {
+  return {
+    ...defaultRolePolicyFor(targetRole),
+    ...storedPolicyOverrides(storedPolicy),
+    ...patch,
+  };
 }
 
 export async function handler(event: any) {
@@ -148,32 +167,22 @@ export async function handler(event: any) {
       return json(400, { ok: false, error: "Invalid JSON body" });
     }
 
-    const policy = validatePolicyJson(body?.policy_json);
-    if (!policy) return json(400, { ok: false, error: "Invalid policy_json" });
+    const policyPatch = validatePolicyPatch(body?.policy_json);
+    if (!policyPatch.ok) {
+      return json(400, { ok: false, error: policyPatch.error, code: policyPatch.code });
+    }
 
     const existing = await prisma.businessRolePolicy.findFirst({
       where: { business_id: biz, role: targetRole },
-      select: { id: true },
+      select: { id: true, policy_json: true },
     });
 
-    let changedKeysCount = Object.keys(policy).length;
+    const previousEffectivePolicy = mergePolicy(targetRole, existing?.policy_json, {});
+    const policy = mergePolicy(targetRole, existing?.policy_json, policyPatch.patch);
 
-    if (existing?.id) {
-      try {
-        const prev = await prisma.businessRolePolicy.findFirst({
-          where: { id: existing.id },
-          select: { policy_json: true },
-        });
-
-        const prevObj = (prev?.policy_json ?? {}) as Record<string, any>;
-        let n = 0;
-        for (const k of Object.keys(policy)) {
-          if (String(prevObj[k] ?? "NONE").toUpperCase() !== String((policy as any)[k]).toUpperCase()) n++;
-        }
-        changedKeysCount = n;
-      } catch {
-        // ignore
-      }
+    let changedKeysCount = 0;
+    for (const key of ROLE_POLICY_KEYS) {
+      if (previousEffectivePolicy[key] !== policy[key]) changedKeysCount += 1;
     }
 
     const saved = existing

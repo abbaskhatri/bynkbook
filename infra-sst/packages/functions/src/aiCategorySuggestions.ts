@@ -879,6 +879,7 @@ export async function handler(event: any) {
   const accountId = String(body?.accountId ?? "").trim();
   const itemsIn: unknown[] = Array.isArray(body?.items) ? body.items : [];
   const limitPerItem = clampSuggestionLimit(body?.limitPerItem ?? 3);
+  const includeAiFallback = body?.includeAiFallback !== false;
 
   if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
   if (!itemsIn.length) {
@@ -920,6 +921,7 @@ export async function handler(event: any) {
     accountId,
     items,
     limitPerItem,
+    includeAiFallback,
   });
 
   return json(200, { ok: true, suggestionsById: computed.suggestionsById, meta: computed.meta });
