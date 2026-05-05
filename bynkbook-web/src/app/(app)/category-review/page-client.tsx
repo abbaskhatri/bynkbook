@@ -31,6 +31,7 @@ import { BusyButton } from "@/components/primitives/BusyButton";
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+import { CategoryCombobox, type CategoryComboboxOption } from "@/components/categories/category-combobox";
 
 import { Tags, Loader2 } from "lucide-react";
 
@@ -299,6 +300,7 @@ export default function CategoryReviewPageClient() {
   // Phase F2: suggestions (batch) + selection + bulk apply
   const [selectedSuggestionByEntryId, setSelectedSuggestionByEntryId] = useState<Record<string, string>>({});
   const [manualCategoryByEntryId, setManualCategoryByEntryId] = useState<Record<string, string>>({});
+  const [categoryDraftByEntryId, setCategoryDraftByEntryId] = useState<Record<string, string>>({});
   const [suggestionMapByEntryId, setSuggestionMapByEntryId] = useState<Record<string, any[]>>({});
   const [suggestionsRequestedKey, setSuggestionsRequestedKey] = useState<string | null>(null);
   const [suggestionRequestNonce, setSuggestionRequestNonce] = useState(0);
@@ -399,6 +401,10 @@ export default function CategoryReviewPageClient() {
     return m;
   }, [categories]);
 
+  const categoryComboboxOptions = useMemo(() => {
+    return categories.map((c) => ({ id: String(c.id), name: c.name }));
+  }, [categories]);
+
   // Filters (inputs)
   const [from, setFrom] = useState<string>("");
   const [to, setTo] = useState<string>("");
@@ -419,6 +425,7 @@ export default function CategoryReviewPageClient() {
     setSelectedIds(new Set());
     setFailedById({});
     setManualCategoryByEntryId({});
+    setCategoryDraftByEntryId({});
   }
 
   // Auto-run once so the list is visible by default (no blank state)
@@ -634,6 +641,7 @@ export default function CategoryReviewPageClient() {
     setFailedById({});
     setSelectedSuggestionByEntryId({});
     setManualCategoryByEntryId({});
+    setCategoryDraftByEntryId({});
   }
 
   useEffect(() => {
@@ -642,6 +650,7 @@ export default function CategoryReviewPageClient() {
     setFailedById({});
     setSelectedSuggestionByEntryId({});
     setManualCategoryByEntryId({});
+    setCategoryDraftByEntryId({});
     setApplyOpen(false);
     setExpandedAutoFixGroups({});
   }, [selectedBusinessId, selectedAccountId]);
@@ -798,6 +807,69 @@ export default function CategoryReviewPageClient() {
     } finally {
       setPendingIds((m) => {
         const next = { ...m };
+        delete next[entryId];
+        return next;
+      });
+    }
+  }
+
+  async function applyReviewedRowCategory(
+    entryId: string,
+    categoryId: string | null,
+    suggestedCategoryId?: string | null
+  ) {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (pendingIds[entryId]) return;
+
+    if (categoryId && !categoryNameById[String(categoryId)]) {
+      setFailedById((m) => ({ ...m, [entryId]: "Category is archived or invalid. Refresh categories." }));
+      return;
+    }
+
+    clearMutErr();
+
+    const hadAi = !!aiAppliedById[entryId];
+    const undoSnap = undoByEntryId[entryId] ?? null;
+
+    if (hadAi) {
+      setAiAppliedById((m) => {
+        const next = { ...m };
+        delete next[entryId];
+        return next;
+      });
+    }
+    if (undoSnap) {
+      setUndoByEntryId((m) => {
+        const next = { ...m };
+        delete next[entryId];
+        return next;
+      });
+      clearUndoTimer(entryId);
+    }
+
+    try {
+      await applyCategoryToEntry(entryId, categoryId, suggestedCategoryId ?? null);
+    } catch {
+      if (hadAi) setAiAppliedById((m) => ({ ...m, [entryId]: true }));
+      if (undoSnap) {
+        setUndoByEntryId((m) => ({ ...m, [entryId]: undoSnap }));
+        const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
+        if (remaining > 0) {
+          clearUndoTimer(entryId);
+          undoTimerByEntryIdRef.current[entryId] = window.setTimeout(() => {
+            setUndoByEntryId((m) => {
+              if (!m[entryId]) return m;
+              const next = { ...m };
+              delete next[entryId];
+              return next;
+            });
+            clearUndoTimer(entryId);
+          }, remaining);
+        }
+      }
+    } finally {
+      setCategoryDraftByEntryId((prev) => {
+        const next = { ...prev };
         delete next[entryId];
         return next;
       });
@@ -1459,6 +1531,12 @@ export default function CategoryReviewPageClient() {
                         const hasTopSuggestion = !e.category_id && !!topSuggestion && !!topSuggestedCategoryId;
                         const topSuggestionIsBulkSafe =
                           hasTopSuggestion && isBulkSafeCategorySuggestion(topSuggestion, 0);
+                        const categoryDraft = categoryDraftByEntryId[id];
+                        const currentCategoryName =
+                          !isOpening && e.category_id
+                            ? categoryNameById[String(e.category_id)] || String(e.category_name ?? "")
+                            : "";
+                        const categoryComboboxValue = categoryDraft ?? currentCategoryName;
 
                         return (
                           <tr key={id} className={`border-b border-border/60 align-top ${isSelected ? "bg-accent" : ""}`}>
@@ -1496,87 +1574,33 @@ export default function CategoryReviewPageClient() {
                             <td className="px-2 py-1.5 border-b border-border/60">
                               <div className="grid min-w-0 grid-cols-[minmax(150px,200px)_minmax(0,1fr)] items-start gap-1.5">
                                 <div className="flex min-w-[160px] max-w-[220px] flex-col gap-1">
-                                  <select
-                                    className={`h-6 w-full rounded-md border bg-card px-2 text-[11px] ${
+                                  <CategoryCombobox
+                                    options={categoryComboboxOptions}
+                                    value={isOpening ? "" : categoryComboboxValue}
+                                    placeholder="Uncategorized"
+                                    disabled={isOpening || !!pendingIds[id]}
+                                    allowClear={!isOpening && !!e.category_id}
+                                    inputClassName={`h-6 w-full rounded-md border bg-card px-2 text-[11px] text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60 ${
                                       hasTopSuggestion ? "border-bb-status-warning-border ring-1 ring-bb-status-warning-border/40" : "border-border"
                                     }`}
-                                    value={isOpening ? "" : (e.category_id ? String(e.category_id) : "")}
-                                    disabled={isOpening || !!pendingIds[id]}
-                                    onChange={async (ev) => {
+                                    onChange={(value) => {
                                       if (isOpening) return;
-                                      if (!selectedBusinessId || !selectedAccountId) return;
-
-                                      const v = ev.target.value;
-                                      const nextCategoryId = v ? v : null;
-                                      if (pendingIds[id]) return;
-
-                                      if (nextCategoryId && !categoryNameById[String(nextCategoryId)]) {
-                                        setFailedById((m) => ({ ...m, [id]: "Category is archived or invalid. Refresh categories." }));
-                                        return;
-                                      }
-
-                                      clearMutErr();
-
-                                      const hadAi = !!aiAppliedById[id];
-                                      const undoSnap = undoByEntryId[id] ?? null;
-
-                                      if (hadAi) {
-                                        setAiAppliedById((m) => {
-                                          const next = { ...m };
-                                          delete next[id];
-                                          return next;
-                                        });
-                                      }
-                                      if (undoSnap) {
-                                        setUndoByEntryId((m) => {
-                                          const next = { ...m };
-                                          delete next[id];
-                                          return next;
-                                        });
-                                        clearUndoTimer(id);
-                                      }
-
-                                      try {
-                                        await applyCategoryToEntry(
-                                          id,
-                                          nextCategoryId,
-                                          topSuggestedCategoryId || null
-                                        );
-                                      } catch {
-                                        if (hadAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                        if (undoSnap) {
-                                          setUndoByEntryId((m) => ({ ...m, [id]: undoSnap }));
-                                          const remaining = Math.max(0, (undoSnap.expiresAt ?? 0) - Date.now());
-                                          if (remaining > 0) {
-                                            clearUndoTimer(id);
-                                            undoTimerByEntryIdRef.current[id] = window.setTimeout(() => {
-                                              setUndoByEntryId((m) => {
-                                                if (!m[id]) return m;
-                                                const next = { ...m };
-                                                delete next[id];
-                                                return next;
-                                              });
-                                              clearUndoTimer(id);
-                                            }, remaining);
-                                          }
-                                        }
-                                      }
+                                      setCategoryDraftByEntryId((prev) => {
+                                        const next = { ...prev };
+                                        if (value) next[id] = value;
+                                        else delete next[id];
+                                        return next;
+                                      });
                                     }}
-                                  >
-                                    <option value="">Uncategorized</option>
-                                    {hasTopSuggestion ? (
-                                      <option value={topSuggestedCategoryId}>
-                                        {topSuggestedCategoryName || "Suggested category"} (suggested)
-                                      </option>
-                                    ) : null}
-                                    {categories
-                                      .filter((c) => !hasTopSuggestion || String(c.id) !== topSuggestedCategoryId)
-                                      .map((c) => (
-                                        <option key={String(c.id)} value={String(c.id)}>
-                                          {c.name}
-                                        </option>
-                                      ))}
-                                  </select>
+                                    onSelect={(option: CategoryComboboxOption) => {
+                                      const nextCategoryId = option.id ? String(option.id) : null;
+                                      void applyReviewedRowCategory(id, nextCategoryId, topSuggestedCategoryId || null);
+                                    }}
+                                    onClear={() => {
+                                      setCategoryDraftByEntryId((prev) => ({ ...prev, [id]: "" }));
+                                      void applyReviewedRowCategory(id, null, topSuggestedCategoryId || null);
+                                    }}
+                                  />
 
                                   {hasTopSuggestion ? (
                                     <div className="truncate text-[10px] text-muted-foreground">
