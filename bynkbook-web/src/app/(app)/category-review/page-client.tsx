@@ -109,12 +109,6 @@ function categorySuggestionReason(suggestion: any) {
   return String(suggestion?.reason ?? "").trim();
 }
 
-function categorySuggestionMetaText(suggestion: any) {
-  const confidence = categorySuggestionConfidence(suggestion?.confidence);
-  const sourceLabel = categorySuggestionSourceLabel(suggestion?.source);
-  return `${confidence}% • ${sourceLabel}`;
-}
-
 function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<string, string>) {
   const categoryId = String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
   const categoryName =
@@ -785,16 +779,19 @@ export default function CategoryReviewPageClient() {
         const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
         const top = suggestions[0] ?? null;
         const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+        const topCategoryName = categorySuggestionCategoryName(top, categoryNameById);
         const bulkSafeTopCategoryId = isBulkSafeCategorySuggestion(top, 0) ? topCategoryId : "";
 
         return {
           entry: e,
           suggestions,
           topCategoryId,
+          topCategoryName,
           selectedCategoryId: String(selectedSuggestionByEntryId[id] ?? bulkSafeTopCategoryId ?? "").trim(),
+          bulkSafe: !!topCategoryId && isBulkSafeCategorySuggestion(top, 0),
         };
       });
-  }, [visibleRows, selectedIds, sugByEntryId, selectedSuggestionByEntryId]);
+  }, [visibleRows, selectedIds, sugByEntryId, selectedSuggestionByEntryId, categoryNameById]);
 
   const [expandedAutoFixGroups, setExpandedAutoFixGroups] = useState<Record<string, boolean>>({});
 
@@ -816,21 +813,27 @@ export default function CategoryReviewPageClient() {
         categoryId: string;
         categoryName: string;
         count: number;
+        readyCount: number;
+        reviewCount: number;
         totalAmountCents: number;
         rows: typeof autoFixRows;
       }
     >();
 
     for (const row of autoFixRows) {
-      const categoryId = String(row.selectedCategoryId ?? "").trim();
+      const suggestedCategoryId = String(row.topCategoryId ?? "").trim();
+      const categoryId = suggestedCategoryId || String(row.selectedCategoryId ?? "").trim();
       const groupKey = categoryId || "__UNASSIGNED__";
       const categoryName = categoryId
-        ? categoryNameById.get(categoryId) ?? "Unknown category"
-        : "Unassigned";
+        ? (suggestedCategoryId ? row.topCategoryName : categoryNameById.get(categoryId)) || "Unknown category"
+        : "Unassigned / No strong suggestion";
+      const rowReady = !!row.bulkSafe && !!row.selectedCategoryId && row.selectedCategoryId === row.topCategoryId;
 
       const existing = groupsMap.get(groupKey);
       if (existing) {
         existing.count += 1;
+        if (rowReady) existing.readyCount += 1;
+        else existing.reviewCount += 1;
         existing.totalAmountCents += Number(row.entry?.amount_cents ?? 0);
         existing.rows.push(row);
       } else {
@@ -839,6 +842,8 @@ export default function CategoryReviewPageClient() {
           categoryId,
           categoryName,
           count: 1,
+          readyCount: rowReady ? 1 : 0,
+          reviewCount: rowReady ? 0 : 1,
           totalAmountCents: Number(row.entry?.amount_cents ?? 0),
           rows: [row],
         });
@@ -846,6 +851,8 @@ export default function CategoryReviewPageClient() {
     }
 
     return Array.from(groupsMap.values()).sort((a, b) => {
+      if (a.groupKey === "__UNASSIGNED__" && b.groupKey !== "__UNASSIGNED__") return 1;
+      if (b.groupKey === "__UNASSIGNED__" && a.groupKey !== "__UNASSIGNED__") return -1;
       const aAbs = Math.abs(a.totalAmountCents);
       const bAbs = Math.abs(b.totalAmountCents);
       if (bAbs !== aAbs) return bAbs - aAbs;
@@ -879,7 +886,10 @@ export default function CategoryReviewPageClient() {
     for (const e of visibleRows) {
       const id = String(e.id);
       if (!selectedIds.has(id)) continue;
-      const groupKey = String(next[id] ?? "").trim() || "__UNASSIGNED__";
+      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      const top = suggestions[0] ?? null;
+      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+      const groupKey = topCategoryId || String(next[id] ?? "").trim() || "__UNASSIGNED__";
       groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
     }
 
@@ -1080,7 +1090,10 @@ export default function CategoryReviewPageClient() {
                     const groupCounts = new Map<string, number>();
                     for (const e of visibleRows) {
                       const id = String(e.id);
-                      const groupKey = String(next[id] ?? "").trim() || "__UNASSIGNED__";
+                      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+                      const top = suggestions[0] ?? null;
+                      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+                      const groupKey = topCategoryId || String(next[id] ?? "").trim() || "__UNASSIGNED__";
                       groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
                     }
 
@@ -1181,13 +1194,12 @@ export default function CategoryReviewPageClient() {
               {tableUpdating ? <UpdatingOverlay /> : null}
               <div className={`min-h-0 h-full ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
                 <div className="h-full overflow-auto">
-                  <table className="w-full min-w-[760px] border-separate border-spacing-0">
+                  <table className="w-full min-w-[860px] table-fixed border-separate border-spacing-0">
                     <colgroup>
                       <col style={{ width: 36 }} />
-                      <col style={{ width: 98 }} />
+                      <col style={{ width: 260 }} />
+                      <col style={{ width: 112 }} />
                       <col />
-                      <col style={{ width: 120 }} />
-                      <col style={{ width: 360 }} />
                     </colgroup>
 
                     <thead className="sticky top-0 z-10 bg-card">
@@ -1202,7 +1214,6 @@ export default function CategoryReviewPageClient() {
                             />
                           </div>
                         </th>
-                        <th className="px-2 text-left text-[10px] font-semibold text-muted-foreground border-b border-border">Date</th>
                         <th className="px-2 text-left text-[10px] font-semibold text-muted-foreground border-b border-border">Payee</th>
                         <th className="px-2 text-right text-[10px] font-semibold text-muted-foreground border-b border-border">Amount</th>
                         <th className="px-2 text-left text-[10px] font-semibold text-muted-foreground border-b border-border">Category</th>
@@ -1231,8 +1242,8 @@ export default function CategoryReviewPageClient() {
 
                         return (
                           <tr key={id} className={`border-b border-border/60 align-top ${isSelected ? "bg-accent" : ""}`}>
-                            <td className="px-0 pt-2 text-center align-top border-b border-border/60">
-                              <div className="flex items-start justify-center">
+                            <td className="px-0 py-1.5 text-center align-top border-b border-border/60">
+                              <div className="flex items-start justify-center pt-0.5">
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4"
@@ -1242,27 +1253,28 @@ export default function CategoryReviewPageClient() {
                               </div>
                             </td>
 
-                            <td className="px-2 py-2 text-xs text-foreground whitespace-nowrap border-b border-border/60">
-                              {dateYmd}
-                            </td>
-
-                            <td className="px-2 py-2 border-b border-border/60">
-                              <div className="flex flex-col min-w-0">
-                                <div className="text-xs text-foreground truncate font-medium">{payee}</div>
-
+                            <td className="px-2 py-1.5 border-b border-border/60">
+                              <div className="flex min-w-0 flex-col gap-0.5">
+                                <div
+                                  className="max-h-8 overflow-hidden break-words text-xs font-medium leading-4 text-foreground"
+                                  title={payee}
+                                >
+                                  {payee || "—"}
+                                </div>
+                                <div className="text-[10px] leading-3 text-muted-foreground tabular-nums">{dateYmd}</div>
                               </div>
                             </td>
 
                             <td
-                              className={`px-2 py-2 text-xs text-right tabular-nums border-b border-border/60 ${
+                              className={`px-2 py-1.5 text-xs text-right tabular-nums whitespace-nowrap border-b border-border/60 ${
                                 Number(e.amount_cents) < 0 ? "text-bb-amount-negative" : "text-bb-amount-neutral"
                               }`}
                             >
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>
 
-                            <td className="px-2 py-2 border-b border-border/60">
-                              <div className="flex items-start justify-start gap-1.5 flex-wrap">
+                            <td className="px-2 py-1.5 border-b border-border/60">
+                              <div className="grid min-w-0 grid-cols-[minmax(150px,200px)_minmax(0,1fr)] items-start gap-1.5">
                                 <div className="flex min-w-[160px] max-w-[220px] flex-col gap-1">
                                   <select
                                     className={`h-6 w-full rounded-md border bg-card px-2 text-[11px] ${
@@ -1351,192 +1363,150 @@ export default function CategoryReviewPageClient() {
                                       Suggested: {topSuggestedCategoryName || "category"}
                                     </div>
                                   ) : null}
+
+                                  <div className="flex min-h-5 flex-wrap items-center gap-1">
+                                    {pendingIds[id] ? (
+                                      <span className="inline-flex items-center" title="Applying…">
+                                        <Loader2 className="h-3 w-3 text-muted-foreground/80 animate-spin" />
+                                      </span>
+                                    ) : null}
+
+                                    {failMsg ? <span className="text-[11px] text-bb-status-danger-fg">Failed</span> : null}
+
+                                    {aiAppliedById[id] ? (
+                                      <span className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center">
+                                        AI
+                                      </span>
+                                    ) : null}
+
+                                    {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
+                                      <button
+                                        type="button"
+                                        className="h-5 px-1.5 rounded-full border border-primary/20 bg-card text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
+                                        disabled={!!pendingIds[id]}
+                                        onClick={async () => {
+                                          if (pendingIds[id]) return;
+                                          const snapAi = !!aiAppliedById[id];
+                                          const snapUndo = undoByEntryId[id] ?? null;
+                                          if (!snapUndo) return;
+
+                                          clearMutErr();
+
+                                          try {
+                                            await applyCategoryToEntry(id, snapUndo.prevCategoryId);
+
+                                            setUndoByEntryId((m) => {
+                                              const next = { ...m };
+                                              delete next[id];
+                                              return next;
+                                            });
+                                            clearUndoTimer(id);
+
+                                            if (snapAi) {
+                                              setAiAppliedById((m) => {
+                                                const next = { ...m };
+                                                delete next[id];
+                                                return next;
+                                              });
+                                            }
+                                          } catch {
+                                            if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
+                                            if (snapUndo) {
+                                              setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
+                                            }
+                                          }
+                                        }}
+                                      >
+                                        Undo
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 </div>
 
-                                {pendingIds[id] ? (
-                                  <span className="inline-flex items-center" title="Applying…">
-                                    <Loader2 className="h-3 w-3 text-muted-foreground/80 animate-spin" />
-                                  </span>
-                                ) : null}
-
-                                {failMsg ? <span className="text-[11px] text-bb-status-danger-fg">Failed</span> : null}
-
-                                {aiAppliedById[id] ? (
-                                  <span className="h-5 px-1.5 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center">
-                                    AI
-                                  </span>
-                                ) : null}
-
-                                {undoByEntryId[id] && Date.now() < (undoByEntryId[id]?.expiresAt ?? 0) ? (
-                                  <button
-                                    type="button"
-                                    className="h-5 px-1.5 rounded-full border border-primary/20 bg-card text-primary text-[10px] inline-flex items-center hover:bg-primary/10 disabled:opacity-60"
-                                    disabled={!!pendingIds[id]}
-                                    onClick={async () => {
-                                      if (pendingIds[id]) return;
-                                      const snapAi = !!aiAppliedById[id];
-                                      const snapUndo = undoByEntryId[id] ?? null;
-                                      if (!snapUndo) return;
-
-                                      clearMutErr();
-
-                                      try {
-                                        await applyCategoryToEntry(id, snapUndo.prevCategoryId);
-
-                                        setUndoByEntryId((m) => {
-                                          const next = { ...m };
-                                          delete next[id];
-                                          return next;
-                                        });
-                                        clearUndoTimer(id);
-
-                                        if (snapAi) {
-                                          setAiAppliedById((m) => {
-                                            const next = { ...m };
-                                            delete next[id];
-                                            return next;
-                                          });
-                                        }
-                                      } catch {
-                                        if (snapAi) setAiAppliedById((m) => ({ ...m, [id]: true }));
-                                        if (snapUndo) {
-                                          setUndoByEntryId((m) => ({ ...m, [id]: snapUndo }));
-                                        }
-                                      }
-                                    }}
-                                  >
-                                    Undo
-                                  </button>
-                                ) : null}
-
                                 {!e.category_id ? (
-                                  <div className="flex min-w-0 items-center gap-1 overflow-hidden flex-wrap">
+                                  <div className="min-w-0">
                                     {(() => {
                                       const list = rowSuggestions.slice(0, 3);
-                                      const top = list.slice(0, 2);
-                                      const more = Math.max(0, list.length - top.length);
+                                      const top = list[0] ?? null;
+                                      const more = Math.max(0, list.length - (top ? 1 : 0));
 
                                       return (
                                         <>
-                                          {top.map((s: any, idx: number) => {
+                                          {top ? (() => {
+                                            const s = top;
                                             const catId = String(s?.category_id ?? s?.categoryId ?? "");
                                             const name = categorySuggestionCategoryName(s, categoryNameById) || "—";
                                             const conf = categorySuggestionConfidence(s?.confidence);
                                             const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
                                             const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                             const reasonText = categorySuggestionReason(s);
-                                            const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, idx === 0);
-                                            const isPrimaryReviewOnly = idx === 0 && !topSuggestionIsBulkSafe;
-
-                                            if (idx === 0) {
-                                              return (
-                                                <div
-                                                  key={`${id}:${catId || name}:${idx}`}
-                                                  className={`flex min-w-[190px] max-w-[280px] flex-col gap-1 rounded-md border px-2 py-1.5 ${
-                                                    isPrimaryReviewOnly
-                                                      ? "border-bb-status-warning-border bg-bb-status-warning-bg"
-                                                      : "border-primary/20 bg-primary/5"
-                                                  }`}
-                                                >
-                                                  <div className="flex min-w-0 items-center gap-1">
-                                                    <button
-                                                      type="button"
-                                                      className={`h-6 min-w-0 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center gap-1 disabled:opacity-60 ${buttonTone}`}
-                                                      title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
-                                                      disabled={!!pendingIds[id]}
-                                                      onClick={async () => {
-                                                        if (!catId) return;
-                                                        if (!selectedBusinessId || !selectedAccountId) return;
-                                                        if (pendingIds[id]) return;
-
-                                                        clearMutErr();
-                                                        const prevCategoryId = e.category_id ? String(e.category_id) : null;
-
-                                                        try {
-                                                          await applyCategoryToEntry(id, catId, catId);
-                                                          const isAiSuggestion = String(s?.source ?? "").trim().toUpperCase() === "AI";
-                                                          setAiAppliedById((m) => {
-                                                            const next = { ...m };
-                                                            if (isAiSuggestion) next[id] = true;
-                                                            else delete next[id];
-                                                            return next;
-                                                          });
-                                                          setUndoWindow(id, prevCategoryId, catId);
-                                                        } catch {}
-                                                      }}
-                                                    >
-                                                      <span className="truncate">Use {name}</span>
-                                                    </button>
-
-                                                    <button
-                                                      type="button"
-                                                      className="h-6 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
-                                                      disabled={!!pendingIds[id]}
-                                                      onClick={() => runWhy(id, s)}
-                                                    >
-                                                      Why?
-                                                    </button>
-                                                  </div>
-
-                                                  <div className="text-[10px] font-medium text-muted-foreground">
-                                                    {categorySuggestionMetaText(s)}
-                                                    {isPrimaryReviewOnly ? " • Needs review" : ""}
-                                                  </div>
-
-                                                  {reasonText ? (
-                                                    <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">
-                                                      {reasonText}
-                                                    </div>
-                                                  ) : null}
-                                                </div>
-                                              );
-                                            }
+                                            const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, true);
+                                            const isPrimaryReviewOnly = !topSuggestionIsBulkSafe;
 
                                             return (
-                                              <div key={`${id}:${catId || name}:${idx}`} className="flex items-center gap-1">
-                                                <button
-                                                  type="button"
-                                                  className={`h-5 px-1.5 rounded-full border text-[10px] inline-flex items-center gap-1 disabled:opacity-60 ${buttonTone}`}
-                                                  title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
-                                                  disabled={!!pendingIds[id]}
-                                                  onClick={async () => {
-                                                    if (!catId) return;
-                                                    if (!selectedBusinessId || !selectedAccountId) return;
-                                                    if (pendingIds[id]) return;
+                                              <div
+                                                key={`${id}:${catId || name}:top`}
+                                                className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1.5 gap-y-0.5 rounded-md border px-2 py-1 ${
+                                                  isPrimaryReviewOnly
+                                                    ? "border-bb-status-warning-border bg-bb-status-warning-bg"
+                                                    : "border-primary/20 bg-primary/5"
+                                                }`}
+                                                title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
+                                              >
+                                                <div className="min-w-0">
+                                                  <div className="truncate text-[11px] font-semibold text-foreground">
+                                                    Suggested: {name}
+                                                  </div>
+                                                  <div className="truncate text-[10px] leading-3 text-muted-foreground">
+                                                    {conf}% • {sourceLabel}
+                                                    {reasonText ? ` • ${reasonText}` : ""}
+                                                    {isPrimaryReviewOnly ? " • Needs review" : ""}
+                                                  </div>
+                                                </div>
 
-                                                    clearMutErr();
-                                                    const prevCategoryId = e.category_id ? String(e.category_id) : null;
+                                                <div className="flex items-center gap-1">
+                                                  <button
+                                                    type="button"
+                                                    className={`h-6 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
+                                                    disabled={!!pendingIds[id]}
+                                                    onClick={async () => {
+                                                      if (!catId) return;
+                                                      if (!selectedBusinessId || !selectedAccountId) return;
+                                                      if (pendingIds[id]) return;
 
-                                                    try {
-                                                      await applyCategoryToEntry(id, catId, catId);
-                                                      const isAiSuggestion = String(s?.source ?? "").trim().toUpperCase() === "AI";
-                                                      setAiAppliedById((m) => {
-                                                        const next = { ...m };
-                                                        if (isAiSuggestion) next[id] = true;
-                                                        else delete next[id];
-                                                        return next;
-                                                      });
-                                                      setUndoWindow(id, prevCategoryId, catId);
-                                                    } catch {}
-                                                  }}
-                                                >
-                                                  <span className="font-semibold truncate max-w-[88px]">{name}</span>
-                                                  <span>{conf}%</span>
-                                                </button>
+                                                      clearMutErr();
+                                                      const prevCategoryId = e.category_id ? String(e.category_id) : null;
 
-                                                <button
-                                                  type="button"
-                                                  className="h-5 px-1.5 rounded-full border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
-                                                  disabled={!!pendingIds[id]}
-                                                  onClick={() => runWhy(id, s)}
-                                                >
-                                                  Why?
-                                                </button>
+                                                      try {
+                                                        await applyCategoryToEntry(id, catId, catId);
+                                                        const isAiSuggestion = String(s?.source ?? "").trim().toUpperCase() === "AI";
+                                                        setAiAppliedById((m) => {
+                                                          const next = { ...m };
+                                                          if (isAiSuggestion) next[id] = true;
+                                                          else delete next[id];
+                                                          return next;
+                                                        });
+                                                        setUndoWindow(id, prevCategoryId, catId);
+                                                      } catch {}
+                                                    }}
+                                                  >
+                                                    Use
+                                                  </button>
+
+                                                  <button
+                                                    type="button"
+                                                    className="h-6 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
+                                                    disabled={!!pendingIds[id]}
+                                                    onClick={() => runWhy(id, s)}
+                                                  >
+                                                    Why?
+                                                  </button>
+                                                </div>
                                               </div>
                                             );
-                                          })}
+                                          })() : null}
 
-                                          {more > 0 ? <span className="text-[10px] text-muted-foreground/80">+{more}</span> : null}
+                                          {more > 0 ? <span className="mt-0.5 inline-block text-[10px] text-muted-foreground/80">+{more} more</span> : null}
                                           {!suggestionsLoadedForCurrentFilters ? (
                                             <span className="text-[10px] text-muted-foreground/80">Suggestions not loaded</span>
                                           ) : null}
@@ -1563,7 +1533,7 @@ export default function CategoryReviewPageClient() {
                                 ) : null}
 
                                 {whyEntryId === id ? (
-                                  <div className="mt-1 w-full rounded-md border border-border bg-card p-2">
+                                  <div className="col-span-2 mt-1 w-full rounded-md border border-border bg-card p-2">
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="text-[11px] font-semibold text-foreground">Suggestion rationale</div>
                                       <button
@@ -1751,6 +1721,16 @@ export default function CategoryReviewPageClient() {
                               <span className="inline-flex min-w-[24px] items-center justify-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground">
                                 {group.count}
                               </span>
+
+                              <span className="hidden rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary sm:inline-flex">
+                                {group.readyCount} ready
+                              </span>
+
+                              {group.reviewCount > 0 ? (
+                                <span className="hidden rounded-full border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-0.5 text-[10px] font-medium text-bb-status-warning-fg sm:inline-flex">
+                                  {group.reviewCount} review
+                                </span>
+                              ) : null}
                             </div>
 
                             <div className="shrink-0 text-right text-sm font-semibold text-foreground">
@@ -1775,10 +1755,10 @@ export default function CategoryReviewPageClient() {
                                 return (
                                   <div
                                     key={id}
-                                    className="grid grid-cols-[minmax(0,1.5fr)_100px_170px] items-start gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+                                    className="grid grid-cols-[minmax(0,1.5fr)_100px_180px] items-start gap-3 border-b border-border px-3 py-2 last:border-b-0"
                                   >
                                     <div className="min-w-0">
-                                      <div className="truncate text-xs font-medium text-foreground">
+                                      <div className="truncate text-xs font-medium text-foreground" title={String(e.payee ?? "")}>
                                         {String(e.payee ?? "—")}
                                       </div>
                                       <div className="mt-0.5 text-[10px] text-muted-foreground">
@@ -1790,7 +1770,7 @@ export default function CategoryReviewPageClient() {
                                         </div>
                                       ) : null}
                                       {topReason ? (
-                                        <div className="mt-1 text-[10px] text-muted-foreground">
+                                        <div className="mt-1 truncate text-[10px] text-muted-foreground" title={topReason}>
                                           {topReason}
                                         </div>
                                       ) : null}
