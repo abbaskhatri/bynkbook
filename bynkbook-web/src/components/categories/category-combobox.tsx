@@ -78,11 +78,13 @@ type CategoryComboboxProps = {
   categoryId?: string | null;
   onValueChange?: (value: string) => void;
   onChange?: (value: string, option: CategoryComboboxOption | null) => void;
+  onSelect?: (option: CategoryComboboxOption) => void;
   placeholder?: string;
   inputClassName?: string;
   allowCreate?: boolean;
   onCreate?: (name: string) => void | Promise<void>;
   allowClear?: boolean;
+  onClear?: () => void;
   onSubmit?: () => void;
   disabled?: boolean;
 };
@@ -97,11 +99,13 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
     categoryId,
     onValueChange,
     onChange,
+    onSelect,
     placeholder,
     inputClassName,
     allowCreate,
     onCreate,
     allowClear,
+    onClear,
     onSubmit,
     disabled,
   } = props;
@@ -148,6 +152,7 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
 
   const selectOption = (option: CategoryComboboxOption) => {
     setDisplayValue(option.name, option);
+    onSelect?.(option);
     setOpen(false);
     requestAnimationFrame(() => localInputRef.current?.focus());
   };
@@ -241,6 +246,7 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   setDisplayValue("", null);
+                  onClear?.();
                   setOpen(false);
                 }}
                 title="Uncategorized"
