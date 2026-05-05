@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
-import { updateEntry, type Entry } from "@/lib/api/entries";
+import { updateEntry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { applyCategoryBatch, aiSuggestCategory } from "@/lib/api/ai";
 import {
@@ -107,6 +107,10 @@ function categorySuggestionCategoryName(suggestion: any, categoryNameById: Recor
 
 function categorySuggestionReason(suggestion: any) {
   return String(suggestion?.reason ?? "").trim();
+}
+
+function hasSuggestionEntry(map: Record<string, any[]>, entryId: string) {
+  return Object.prototype.hasOwnProperty.call(map, entryId);
 }
 
 function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<string, string>) {
@@ -294,7 +298,10 @@ export default function CategoryReviewPageClient() {
 
   // Phase F2: suggestions (batch) + selection + bulk apply
   const [selectedSuggestionByEntryId, setSelectedSuggestionByEntryId] = useState<Record<string, string>>({});
+  const [manualCategoryByEntryId, setManualCategoryByEntryId] = useState<Record<string, string>>({});
+  const [suggestionMapByEntryId, setSuggestionMapByEntryId] = useState<Record<string, any[]>>({});
   const [suggestionsRequestedKey, setSuggestionsRequestedKey] = useState<string | null>(null);
+  const [suggestionRequestNonce, setSuggestionRequestNonce] = useState(0);
 
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -367,6 +374,7 @@ export default function CategoryReviewPageClient() {
     setApplied({ from, to, search, onlyUncategorized });
     setSelectedIds(new Set());
     setFailedById({});
+    setManualCategoryByEntryId({});
   }
 
   // Auto-run once so the list is visible by default (no blank state)
@@ -416,15 +424,6 @@ export default function CategoryReviewPageClient() {
     });
   }, [allEntries, applied]);
 
-  // Stable suggestion target key (prevents useEffect loops)
-  const suggestionTargetIds = useMemo(() => {
-    return (visibleRows ?? [])
-      .filter((r: any) => !r?.category_id)
-      .slice(0, 200)
-      .map((r: any) => String(r.id))
-      .join("|");
-  }, [visibleRows]);
-
   // -------------------------
   // Phase F2: batch suggestions (canonical query key; per-surface retry; no stuck loading)
   // -------------------------
@@ -442,28 +441,42 @@ export default function CategoryReviewPageClient() {
       }));
   }, [visibleRows]);
 
-  const suggestionTargetsKey = useMemo(() => {
-    return suggestionTargets.map((x) => x.id).join("|");
-  }, [suggestionTargets]);
+  const suggestionRequestTargets = useMemo(() => {
+    if (!suggestionsRequestedKey) return [];
+    const requestedIds = new Set(suggestionsRequestedKey.split("|").filter(Boolean));
+    return suggestionTargets.filter((x) => requestedIds.has(x.id));
+  }, [suggestionTargets, suggestionsRequestedKey]);
+
+  const missingSuggestionTargets = useMemo(() => {
+    return suggestionTargets.filter((x) => !hasSuggestionEntry(suggestionMapByEntryId, x.id));
+  }, [suggestionTargets, suggestionMapByEntryId]);
 
   const suggestionsLoadedForCurrentFilters =
-    suggestionTargets.length > 0 && suggestionsRequestedKey === suggestionTargetsKey;
+    suggestionTargets.length > 0 && missingSuggestionTargets.length === 0;
 
   useEffect(() => {
+    setSuggestionMapByEntryId({});
     setSuggestionsRequestedKey(null);
     setSelectedSuggestionByEntryId({});
+    setManualCategoryByEntryId({});
     setWhyEntryId(null);
     setWhyText(null);
     setWhyErr(null);
-  }, [selectedBusinessId, selectedAccountId, suggestionTargetsKey]);
+  }, [selectedBusinessId, selectedAccountId]);
 
   const suggestionsQ = useQuery({
-    queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId, suggestionTargetsKey],
+    queryKey: [
+      "aiCategorySuggestions",
+      selectedBusinessId,
+      selectedAccountId,
+      suggestionsRequestedKey,
+      suggestionRequestNonce,
+    ],
     enabled:
       !!selectedBusinessId &&
       !!selectedAccountId &&
-      suggestionTargets.length > 0 &&
-      suggestionsLoadedForCurrentFilters,
+      !!suggestionsRequestedKey &&
+      suggestionRequestTargets.length > 0,
 
     staleTime: 15_000,
     gcTime: 5 * 60_000,
@@ -471,18 +484,18 @@ export default function CategoryReviewPageClient() {
 
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId) return {} as Record<string, any[]>;
-      if (!suggestionTargets.length) return {} as Record<string, any[]>;
+      if (!suggestionRequestTargets.length) return {} as Record<string, any[]>;
 
       const res: any = await aiSuggestCategory({
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
-        items: suggestionTargets,
+        items: suggestionRequestTargets,
         limitPerItem: 3,
       });
 
       const next: Record<string, any[]> = {};
 
-      for (const it of suggestionTargets) {
+      for (const it of suggestionRequestTargets) {
         let s: any[] = [];
 
         if (Array.isArray(res?.suggestionsById?.[it.id])) {
@@ -506,22 +519,28 @@ export default function CategoryReviewPageClient() {
     },
   });
 
-  const sugByEntryId = (suggestionsQ.data ?? {}) as Record<string, any[]>;
-  const sugLoading = suggestionsLoadedForCurrentFilters && suggestionsQ.isFetching;
-  const sugUpdating = suggestionsLoadedForCurrentFilters && suggestionsQ.isFetching && !!suggestionsQ.data && Object.keys(suggestionsQ.data as any).length > 0;
+  useEffect(() => {
+    if (!suggestionsQ.data) return;
+    const nextData = suggestionsQ.data as Record<string, any[]>;
+    setSuggestionMapByEntryId((prev) => ({ ...prev, ...nextData }));
+  }, [suggestionsQ.data]);
+
+  const sugByEntryId = suggestionMapByEntryId;
+  const sugLoading = !!suggestionsRequestedKey && suggestionsQ.isFetching && !suggestionsLoadedForCurrentFilters;
+  const sugUpdating = !!suggestionsRequestedKey && suggestionsQ.isFetching && suggestionsLoadedForCurrentFilters;
 
   function loadSuggestionsForCurrentFilters() {
-    if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0 || sugLoading) return;
+    if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0 || sugLoading || sugUpdating) return;
 
     clearMutErr();
     setApplySummary(null);
 
-    if (suggestionsLoadedForCurrentFilters) {
-      void suggestionsQ.refetch();
-      return;
-    }
+    const requestTargets = suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets;
+    const requestKey = requestTargets.map((x) => x.id).join("|");
+    if (!requestKey) return;
 
-    setSuggestionsRequestedKey(suggestionTargetsKey);
+    setSuggestionsRequestedKey(requestKey);
+    setSuggestionRequestNonce((n) => n + 1);
   }
 
   // Selection state
@@ -570,6 +589,7 @@ export default function CategoryReviewPageClient() {
     setBulkCategoryId("__NONE__");
     setFailedById({});
     setSelectedSuggestionByEntryId({});
+    setManualCategoryByEntryId({});
   }
 
   useEffect(() => {
@@ -577,6 +597,7 @@ export default function CategoryReviewPageClient() {
     setBulkCategoryId("__NONE__");
     setFailedById({});
     setSelectedSuggestionByEntryId({});
+    setManualCategoryByEntryId({});
     setApplyOpen(false);
     setExpandedAutoFixGroups({});
   }, [selectedBusinessId, selectedAccountId]);
@@ -591,8 +612,7 @@ export default function CategoryReviewPageClient() {
   const tableUpdating =
     (entriesQ.isFetching && !!(entriesQ.data ?? []).length) ||
     sugUpdating ||
-    applyBusy ||
-    Object.keys(pendingIds).length > 0;
+    applyBusy;
 
   // F7a (session-local): AI badge + undo for suggestion-pill applies only when source is AI.
   const [aiAppliedById, setAiAppliedById] = useState<Record<string, boolean>>({});
@@ -660,11 +680,10 @@ export default function CategoryReviewPageClient() {
     const idx = prev.findIndex((x: any) => String(x.id) === entryId);
     const prevEntry = idx >= 0 ? prev[idx] : null;
 
-    // No cache write here: keep hook-owned cache authoritative to avoid mismatched query keys.
-    // We rely on targeted refetch after mutation.
+    // Patch only after the API succeeds so single-row applies feel immediate without rollback risk.
 
     try {
-      await updateEntry({
+      const updatedEntry = await updateEntry({
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
         entryId,
@@ -674,11 +693,41 @@ export default function CategoryReviewPageClient() {
         },
       });
 
-      // Refresh all ledger/account entry surfaces immediately.
-      await qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId], exact: false });
-      await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
-      await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+      qc.setQueryData(entriesKey, (current: any[] | undefined) => {
+        const rows = Array.isArray(current) ? current : prev;
+        return rows.map((row: any) =>
+          String(row.id) === entryId
+            ? {
+                ...row,
+                ...updatedEntry,
+                category_id: categoryId,
+                suggested_category_id: suggestedCategoryId ?? null,
+              }
+            : row
+        );
+      });
+
+      if (categoryId) {
+        setSelectedIds((prevIds) => {
+          const next = new Set(prevIds);
+          next.delete(entryId);
+          return next;
+        });
+        setSelectedSuggestionByEntryId((prevMap) => {
+          const next = { ...prevMap };
+          delete next[entryId];
+          return next;
+        });
+        setManualCategoryByEntryId((prevMap) => {
+          const next = { ...prevMap };
+          delete next[entryId];
+          return next;
+        });
+      }
+
+      // Keep the row fast locally; refresh dependent surfaces in the background.
+      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
@@ -752,6 +801,8 @@ export default function CategoryReviewPageClient() {
     const out: Array<{ entryId: string; category_id: string; suggested_category_id?: string }> = [];
 
     for (const entryId of Array.from(selectedIds)) {
+      if (manualCategoryByEntryId[entryId]) continue;
+
       const category_id = String(selectedSuggestionByEntryId[entryId] ?? "").trim();
       if (!category_id) continue;
 
@@ -769,7 +820,32 @@ export default function CategoryReviewPageClient() {
     }
 
     return out.slice(0, 200);
-  }, [selectedIds, selectedSuggestionByEntryId, sugByEntryId]);
+  }, [selectedIds, selectedSuggestionByEntryId, manualCategoryByEntryId, sugByEntryId]);
+
+  const manuallySelectedApplyItems = useMemo(() => {
+    const out: Array<{ entryId: string; category_id: string; suggested_category_id?: string }> = [];
+
+    for (const entryId of Array.from(selectedIds)) {
+      const category_id = String(manualCategoryByEntryId[entryId] ?? "").trim();
+      if (!category_id) continue;
+
+      const entry = visibleRows.find((e: any) => String(e.id) === entryId);
+      if (!entry || entry.category_id) continue;
+      if (!categoryNameById[category_id]) continue;
+
+      const list = Array.isArray(sugByEntryId[entryId]) ? sugByEntryId[entryId] : [];
+      const top = list[0] ?? null;
+      const suggested_category_id = String(top?.category_id ?? top?.categoryId ?? "").trim();
+
+      out.push({
+        entryId,
+        category_id,
+        suggested_category_id: suggested_category_id || undefined,
+      });
+    }
+
+    return out.slice(0, 200);
+  }, [selectedIds, manualCategoryByEntryId, visibleRows, categoryNameById, sugByEntryId]);
 
   const autoFixRows = useMemo(() => {
     return visibleRows
@@ -788,10 +864,11 @@ export default function CategoryReviewPageClient() {
           topCategoryId,
           topCategoryName,
           selectedCategoryId: String(selectedSuggestionByEntryId[id] ?? bulkSafeTopCategoryId ?? "").trim(),
+          manualCategoryId: String(manualCategoryByEntryId[id] ?? "").trim(),
           bulkSafe: !!topCategoryId && isBulkSafeCategorySuggestion(top, 0),
         };
       });
-  }, [visibleRows, selectedIds, sugByEntryId, selectedSuggestionByEntryId, categoryNameById]);
+  }, [visibleRows, selectedIds, sugByEntryId, selectedSuggestionByEntryId, manualCategoryByEntryId, categoryNameById]);
 
   const [expandedAutoFixGroups, setExpandedAutoFixGroups] = useState<Record<string, boolean>>({});
 
@@ -799,7 +876,8 @@ export default function CategoryReviewPageClient() {
     return autoFixRows.reduce((sum, row) => sum + Number(row.entry?.amount_cents ?? 0), 0);
   }, [autoFixRows]);
 
-  const autoFixReviewNeededCount = Math.max(0, autoFixRows.length - selectedApplyItems.length);
+  const autoFixReadyCount = selectedApplyItems.length + manuallySelectedApplyItems.length;
+  const autoFixReviewNeededCount = Math.max(0, autoFixRows.length - autoFixReadyCount);
 
   const autoFixGroups = useMemo(() => {
     const categoryNameById = new Map<string, string>(
@@ -822,12 +900,22 @@ export default function CategoryReviewPageClient() {
 
     for (const row of autoFixRows) {
       const suggestedCategoryId = String(row.topCategoryId ?? "").trim();
-      const categoryId = suggestedCategoryId || String(row.selectedCategoryId ?? "").trim();
-      const groupKey = categoryId || "__UNASSIGNED__";
-      const categoryName = categoryId
-        ? (suggestedCategoryId ? row.topCategoryName : categoryNameById.get(categoryId)) || "Unknown category"
-        : "Unassigned / No strong suggestion";
-      const rowReady = !!row.bulkSafe && !!row.selectedCategoryId && row.selectedCategoryId === row.topCategoryId;
+      const manualCategoryId = String(row.manualCategoryId ?? "").trim();
+      const selectedCategoryId = String(row.selectedCategoryId ?? "").trim();
+      const categoryId = manualCategoryId || suggestedCategoryId || selectedCategoryId;
+      const groupKey = manualCategoryId
+        ? `manual:${manualCategoryId}`
+        : suggestedCategoryId
+          ? `suggested:${suggestedCategoryId}`
+          : "__NO_STRONG_SUGGESTION__";
+      const categoryName = manualCategoryId
+        ? `Selected: ${categoryNameById.get(manualCategoryId) || "Unknown category"}`
+        : suggestedCategoryId
+          ? row.topCategoryName || categoryNameById.get(suggestedCategoryId) || "Unknown category"
+          : "No strong suggestion";
+      const rowReady =
+        !!manualCategoryId ||
+        (!!row.bulkSafe && !!row.selectedCategoryId && row.selectedCategoryId === row.topCategoryId);
 
       const existing = groupsMap.get(groupKey);
       if (existing) {
@@ -851,8 +939,10 @@ export default function CategoryReviewPageClient() {
     }
 
     return Array.from(groupsMap.values()).sort((a, b) => {
-      if (a.groupKey === "__UNASSIGNED__" && b.groupKey !== "__UNASSIGNED__") return 1;
-      if (b.groupKey === "__UNASSIGNED__" && a.groupKey !== "__UNASSIGNED__") return -1;
+      if (a.groupKey === "__NO_STRONG_SUGGESTION__" && b.groupKey !== "__NO_STRONG_SUGGESTION__") return 1;
+      if (b.groupKey === "__NO_STRONG_SUGGESTION__" && a.groupKey !== "__NO_STRONG_SUGGESTION__") return -1;
+      if (a.groupKey.startsWith("manual:") && !b.groupKey.startsWith("manual:")) return -1;
+      if (b.groupKey.startsWith("manual:") && !a.groupKey.startsWith("manual:")) return 1;
       const aAbs = Math.abs(a.totalAmountCents);
       const bAbs = Math.abs(b.totalAmountCents);
       if (bAbs !== aAbs) return bAbs - aAbs;
@@ -889,7 +979,12 @@ export default function CategoryReviewPageClient() {
       const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
       const top = suggestions[0] ?? null;
       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-      const groupKey = topCategoryId || String(next[id] ?? "").trim() || "__UNASSIGNED__";
+      const manualCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
+      const groupKey = manualCategoryId
+        ? `manual:${manualCategoryId}`
+        : topCategoryId
+          ? `suggested:${topCategoryId}`
+          : "__NO_STRONG_SUGGESTION__";
       groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
     }
 
@@ -906,6 +1001,85 @@ export default function CategoryReviewPageClient() {
     setApplySummary(null);
     clearMutErr();
     setApplyOpen(true);
+  }
+
+  async function applyManuallySelectedCategories() {
+    if (!selectedBusinessId || !selectedAccountId || manuallySelectedApplyItems.length === 0) return;
+
+    setApplyBusy(true);
+    clearMutErr();
+
+    try {
+      const res: any = await applyCategoryBatch({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        items: manuallySelectedApplyItems,
+      });
+
+      const applied = Number(res?.applied ?? 0) || 0;
+      const blocked = Number(res?.blocked ?? 0) || 0;
+      const results = Array.isArray(res?.results) ? res.results : [];
+      const successIds = new Set<string>();
+
+      for (const r of results) {
+        const id = String(r?.entryId ?? "");
+        if (!id) continue;
+        if (r?.ok === true) successIds.add(id);
+      }
+
+      if (successIds.size === 0 && applied === manuallySelectedApplyItems.length && blocked === 0) {
+        for (const item of manuallySelectedApplyItems) successIds.add(item.entryId);
+      }
+
+      setApplySummary({ applied, blocked });
+
+      if (successIds.size > 0) {
+        qc.setQueryData(entriesKey, (current: any[] | undefined) => {
+          const rows = Array.isArray(current) ? current : [];
+          return rows.map((row: any) => {
+            const id = String(row.id);
+            if (!successIds.has(id)) return row;
+            const nextCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
+            return {
+              ...row,
+              category_id: nextCategoryId || row.category_id,
+              category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
+            };
+          });
+        });
+
+        setSelectedSuggestionByEntryId((prev) => {
+          const next = { ...prev };
+          for (const id of Array.from(successIds)) delete next[id];
+          return next;
+        });
+
+        setManualCategoryByEntryId((prev) => {
+          const next = { ...prev };
+          for (const id of Array.from(successIds)) delete next[id];
+          return next;
+        });
+
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of Array.from(successIds)) next.delete(id);
+          return next;
+        });
+      }
+
+      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
+      }
+
+      if (blocked === 0) setApplyOpen(false);
+    } catch (e: any) {
+      applyMutationError(e, "Can’t apply selected categories");
+    } finally {
+      setApplyBusy(false);
+    }
   }
   return (
     <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
@@ -1050,6 +1224,7 @@ export default function CategoryReviewPageClient() {
                 disabled={
                   applyBusy ||
                   sugLoading ||
+                  sugUpdating ||
                   entriesQ.isLoading ||
                   suggestionTargets.length === 0 ||
                   !selectedBusinessId ||
@@ -1093,7 +1268,12 @@ export default function CategoryReviewPageClient() {
                       const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
                       const top = suggestions[0] ?? null;
                       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                      const groupKey = topCategoryId || String(next[id] ?? "").trim() || "__UNASSIGNED__";
+                      const manualCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
+                      const groupKey = manualCategoryId
+                        ? `manual:${manualCategoryId}`
+                        : topCategoryId
+                          ? `suggested:${topCategoryId}`
+                          : "__NO_STRONG_SUGGESTION__";
                       groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
                     }
 
@@ -1440,34 +1620,42 @@ export default function CategoryReviewPageClient() {
                                             const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
                                             const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                             const reasonText = categorySuggestionReason(s);
+                                            const shortReason = reasonText || sourceLabel;
                                             const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, true);
                                             const isPrimaryReviewOnly = !topSuggestionIsBulkSafe;
 
                                             return (
                                               <div
                                                 key={`${id}:${catId || name}:top`}
-                                                className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1.5 gap-y-0.5 rounded-md border px-2 py-1 ${
+                                                className={`flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 ${
                                                   isPrimaryReviewOnly
                                                     ? "border-bb-status-warning-border bg-bb-status-warning-bg"
                                                     : "border-primary/20 bg-primary/5"
                                                 }`}
                                                 title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
                                               >
-                                                <div className="min-w-0">
-                                                  <div className="truncate text-[11px] font-semibold text-foreground">
-                                                    Suggested: {name}
-                                                  </div>
-                                                  <div className="truncate text-[10px] leading-3 text-muted-foreground">
-                                                    {conf}% • {sourceLabel}
-                                                    {reasonText ? ` • ${reasonText}` : ""}
-                                                    {isPrimaryReviewOnly ? " • Needs review" : ""}
-                                                  </div>
-                                                </div>
+                                                <span className="min-w-0 max-w-[150px] truncate text-[10px] font-semibold text-foreground">
+                                                  Suggested: {name}
+                                                </span>
 
-                                                <div className="flex items-center gap-1">
+                                                <span className="shrink-0 rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                                  {conf}%
+                                                </span>
+
+                                                {isPrimaryReviewOnly ? (
+                                                  <span className="shrink-0 rounded-full border border-bb-status-warning-border bg-card px-1.5 py-0.5 text-[10px] font-medium text-bb-status-warning-fg">
+                                                    Review
+                                                  </span>
+                                                ) : null}
+
+                                                <span className="hidden min-w-0 max-w-[130px] truncate text-[10px] text-muted-foreground sm:inline">
+                                                  {shortReason}
+                                                </span>
+
+                                                <div className="ml-auto flex shrink-0 items-center gap-1">
                                                   <button
                                                     type="button"
-                                                    className={`h-6 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
+                                                    className={`h-5 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
                                                     disabled={!!pendingIds[id]}
                                                     onClick={async () => {
                                                       if (!catId) return;
@@ -1495,7 +1683,7 @@ export default function CategoryReviewPageClient() {
 
                                                   <button
                                                     type="button"
-                                                    className="h-6 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
+                                                    className="h-5 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
                                                     disabled={!!pendingIds[id]}
                                                     onClick={() => runWhy(id, s)}
                                                   >
@@ -1585,10 +1773,21 @@ export default function CategoryReviewPageClient() {
                 </Button>
 
                 <BusyButton
+                  variant="secondary"
+                  size="md"
+                  busy={applyBusy}
+                  busyLabel="Applying..."
+                  disabled={applyBusy || manuallySelectedApplyItems.length === 0}
+                  onClick={applyManuallySelectedCategories}
+                >
+                  {`Apply ${manuallySelectedApplyItems.length} selected categor${manuallySelectedApplyItems.length === 1 ? "y" : "ies"}`}
+                </BusyButton>
+
+                <BusyButton
                   variant="primary"
                   size="md"
                   busy={applyBusy}
-                  busyLabel="Applying…"
+                  busyLabel="Applying..."
                   disabled={applyBusy || selectedApplyItems.length === 0}
                   onClick={async () => {
                     if (!selectedBusinessId || !selectedAccountId) return;
@@ -1617,6 +1816,31 @@ export default function CategoryReviewPageClient() {
                         if (r?.ok === true) successIds.add(id);
                       }
 
+                      if (successIds.size === 0 && applied === selectedApplyItems.length && blocked === 0) {
+                        for (const item of selectedApplyItems) successIds.add(item.entryId);
+                      }
+
+                      if (successIds.size > 0) {
+                        const categoryByEntryId = new Map(
+                          selectedApplyItems.map((item) => [item.entryId, item.category_id])
+                        );
+
+                        qc.setQueryData(entriesKey, (current: any[] | undefined) => {
+                          const rows = Array.isArray(current) ? current : [];
+                          return rows.map((row: any) => {
+                            const id = String(row.id);
+                            if (!successIds.has(id)) return row;
+                            const nextCategoryId = String(categoryByEntryId.get(id) ?? "").trim();
+                            return {
+                              ...row,
+                              category_id: nextCategoryId || row.category_id,
+                              category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
+                              suggested_category_id: nextCategoryId || (row.suggested_category_id ?? null),
+                            };
+                          });
+                        });
+                      }
+
                       setSelectedSuggestionByEntryId((prev) => {
                         const next = { ...prev };
                         for (const id of Array.from(successIds)) {
@@ -1633,11 +1857,8 @@ export default function CategoryReviewPageClient() {
                         return next;
                       });
 
-                      await entriesQ.refetch?.();
-                      await qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId], exact: false });
-                      await qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
-                      await qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-                      await qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+                      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+                      void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
 
                       if (typeof window !== "undefined") {
                         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
@@ -1651,7 +1872,7 @@ export default function CategoryReviewPageClient() {
                     }
                   }}
                 >
-                  {`Apply ${selectedApplyItems.length} categor${selectedApplyItems.length === 1 ? "y" : "ies"}`}
+                  {`Auto Fix ${selectedApplyItems.length} categor${selectedApplyItems.length === 1 ? "y" : "ies"}`}
                 </BusyButton>
               </div>
             }
@@ -1665,7 +1886,7 @@ export default function CategoryReviewPageClient() {
 
                 <div>
                   <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ready</div>
-                  <div className="mt-0.5 text-lg font-semibold text-foreground">{selectedApplyItems.length}</div>
+                  <div className="mt-0.5 text-lg font-semibold text-foreground">{autoFixReadyCount}</div>
                 </div>
 
                 <div>
@@ -1684,11 +1905,11 @@ export default function CategoryReviewPageClient() {
               {autoFixReviewNeededCount > 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
                   {autoFixReviewNeededCount} need{autoFixReviewNeededCount === 1 ? "s" : ""} review.
-                  Suggestions below are not strong enough for Auto Fix but can be applied manually from the row suggestion action.
+                  Auto Fix only uses strong suggestions; selected dropdown categories use Apply selected categories.
                 </div>
               ) : (
                 <div className="text-[11px] text-muted-foreground">
-                  Strong suggestions are ready for Auto Fix. Review the grouped categories before applying.
+                  Strong suggestions are ready for Auto Fix. Selected dropdown categories stay separate.
                 </div>
               )}
 
@@ -1785,13 +2006,19 @@ export default function CategoryReviewPageClient() {
                                         className={`h-7 w-full rounded-md border bg-card px-2 text-[11px] ${
                                           topCategoryId ? "border-bb-status-warning-border ring-1 ring-bb-status-warning-border/40" : "border-border"
                                         }`}
-                                        value={row.selectedCategoryId}
+                                        value={row.manualCategoryId || row.selectedCategoryId}
                                         onChange={(ev) => {
                                           const nextValue = String(ev.target.value ?? "");
                                           setSelectedSuggestionByEntryId((prev) => ({
                                             ...prev,
                                             [id]: nextValue,
                                           }));
+                                          setManualCategoryByEntryId((prev) => {
+                                            const next = { ...prev };
+                                            if (nextValue) next[id] = nextValue;
+                                            else delete next[id];
+                                            return next;
+                                          });
                                         }}
                                       >
                                         <option value="">Choose category…</option>
