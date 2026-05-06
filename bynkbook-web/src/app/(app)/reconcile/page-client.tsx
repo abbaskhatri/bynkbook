@@ -22,7 +22,6 @@ import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { inputH7 } from "@/components/primitives/tokens";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AppDialog } from "@/components/primitives/AppDialog";
 import { BusyButton } from "@/components/primitives/BusyButton";
 import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { PillToggle } from "@/components/primitives/PillToggle";
@@ -74,6 +73,16 @@ const UploadsList = dynamic(
   () => import("@/components/uploads/UploadsList").then((mod) => mod.UploadsList),
   { loading: () => <div className="p-3 text-xs text-bb-text-muted">Loading history...</div> }
 );
+
+const DynamicAppDialog = dynamic(
+  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
+  { loading: () => null }
+);
+
+function AppDialog(props: any) {
+  if (!props.open) return null;
+  return <DynamicAppDialog {...props} />;
+}
 
 const AutoReconcileDialog = dynamic(
   () => import("@/components/reconcile/auto-reconcile-dialog").then((mod) => mod.AutoReconcileDialog),
