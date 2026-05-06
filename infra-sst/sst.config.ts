@@ -880,6 +880,18 @@ const issuesCountHandler = {
 
 api.route("GET /v1/businesses/{businessId}/issues/count", issuesCountHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
+// ---------- Attention Summary (M1 read-only aggregate) ----------
+const attentionSummaryHandler = {
+  ...issuesScanHandler,
+  handler: "packages/functions/src/attentionSummary.handler",
+} satisfies ApiHandler;
+
+api.route(
+  "GET /v1/businesses/{businessId}/accounts/{accountId}/attention-summary",
+  attentionSummaryHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
     // ---------- Entry Update ----------
     const entryUpdateHandler = {
       ...entryHandler,
