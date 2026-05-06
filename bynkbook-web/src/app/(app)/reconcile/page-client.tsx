@@ -37,9 +37,11 @@ import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, createMatch, createMatchBatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
 import {
+  getMatchGroupPlacementSummary,
   previewGeneratedEntryRevert,
   confirmGeneratedEntryRevert,
   type MatchGroupRevertPreview,
+  type MatchGroupPlacementSummary,
 } from "@/lib/api/match-groups";
 import { createMatchGroupsBatch } from "@/lib/api/match-groups";
 import { listMatchGroups } from "@/lib/api/match-groups";
@@ -681,6 +683,40 @@ function upsertMatchGroup(items: any[], group: any): any[] {
   return next;
 }
 
+function matchGroupsFromPlacementSummary(summary: MatchGroupPlacementSummary | null): any[] {
+  const groupsById = new Map<string, any>();
+
+  for (const link of summary?.activeBankLinks ?? []) {
+    const groupId = String(link?.match_group_id ?? "").trim();
+    const bankId = String(link?.bank_transaction_id ?? "").trim();
+    if (!groupId || !bankId) continue;
+
+    const group = groupsById.get(groupId) ?? { id: groupId, status: "ACTIVE", banks: [], entries: [] };
+    group.banks.push({
+      match_group_id: groupId,
+      bank_transaction_id: bankId,
+      matched_amount_cents: link.matched_amount_cents,
+    });
+    groupsById.set(groupId, group);
+  }
+
+  for (const link of summary?.activeEntryLinks ?? []) {
+    const groupId = String(link?.match_group_id ?? "").trim();
+    const entryId = String(link?.entry_id ?? "").trim();
+    if (!groupId || !entryId) continue;
+
+    const group = groupsById.get(groupId) ?? { id: groupId, status: "ACTIVE", banks: [], entries: [] };
+    group.entries.push({
+      match_group_id: groupId,
+      entry_id: entryId,
+      matched_amount_cents: link.matched_amount_cents,
+    });
+    groupsById.set(groupId, group);
+  }
+
+  return Array.from(groupsById.values());
+}
+
 function entriesSignature(items: any[]): string {
   const arr = Array.isArray(items) ? items : [];
   return String(arr.length);
@@ -1109,6 +1145,7 @@ export default function ReconcilePageClient() {
   const [matches, setMatches] = useState<any[]>([]);
   const [matchGroups, setMatchGroups] = useState<any[]>([]);
   const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
+  const [placementSummaryPartial, setPlacementSummaryPartial] = useState(false);
   const [allMatchGroups, setAllMatchGroups] = useState<any[]>([]);
   const [allMatchGroupsLoading, setAllMatchGroupsLoading] = useState(false);
   const [allMatchGroupsLoadedScope, setAllMatchGroupsLoadedScope] = useState("");
@@ -1118,6 +1155,7 @@ export default function ReconcilePageClient() {
     selectedBusinessId && selectedAccountId ? `${selectedBusinessId}:${selectedAccountId}` : "";
   const allMatchGroupsHydrated =
     !!allMatchGroupsScopeKey && allMatchGroupsLoadedScope === allMatchGroupsScopeKey;
+  const placementSummaryRequestSeqRef = useRef(0);
 
   // Real first-load truth hydration:
   // do not treat bank / match-group truth as ready until each source
@@ -1430,28 +1468,9 @@ export default function ReconcilePageClient() {
             }
           })();
 
-      const matchGroupsPromise = (async () => {
-        if (myEpoch === refreshEpochRef.current) setMatchGroupsLoading(true);
-        try {
-          const mg: any = await listMatchGroups({
-            businessId: selectedBusinessId,
-            accountId: selectedAccountId,
-            status: "active",
-          });
-          matchGroupItems = mg?.items ?? [];
-          if (myEpoch === refreshEpochRef.current) setMatchGroups(matchGroupItems);
-        } catch {
-          if (myEpoch === refreshEpochRef.current) setMatchGroups([]);
-          matchGroupItems = [];
-        } finally {
-          if (myEpoch === refreshEpochRef.current) {
-            setMatchGroupsLoading(false);
-            setMatchGroupsTruthHydrated(true);
-          }
-        }
-      })();
+      matchGroupItems = matchGroups;
 
-      await Promise.all([bankPromise, matchesPromise, matchGroupsPromise]);
+      await Promise.all([bankPromise, matchesPromise]);
 
       return { bank: bankItems, matches: matchItems, matchGroups: matchGroupItems };
     })();
@@ -1835,6 +1854,8 @@ export default function ReconcilePageClient() {
     // Reset first-load truth hydration for the new scope before fetching.
     setBankTruthHydrated(false);
     setMatchGroupsTruthHydrated(false);
+    setPlacementSummaryPartial(false);
+    setMatchGroups([]);
     setAllMatchGroups([]);
     setAllMatchGroupsLoadedScope("");
 
@@ -1961,6 +1982,58 @@ const isReconcileExemptEntry = (e: any) => {
     arr.sort(compareBankDateAsc);
     return arr;
   }, [bankTx]);
+
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (bankTxLoading || entriesQ.isLoading || entriesQ.isFetching) return;
+
+    const requestSeq = ++placementSummaryRequestSeqRef.current;
+    const bankTransactionIds = bankTxSorted.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean);
+    const entryIds = allEntriesSorted.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean);
+
+    let cancelled = false;
+    (async () => {
+      setMatchGroupsLoading(true);
+      try {
+        const summary = await getMatchGroupPlacementSummary({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+          bankTransactionIds,
+          entryIds,
+          from: from || undefined,
+          to: to || undefined,
+        });
+
+        if (cancelled || requestSeq !== placementSummaryRequestSeqRef.current) return;
+        setMatchGroups(matchGroupsFromPlacementSummary(summary));
+        setPlacementSummaryPartial(summary.partial === true);
+        setMatchGroupsTruthHydrated(true);
+      } catch {
+        if (cancelled || requestSeq !== placementSummaryRequestSeqRef.current) return;
+        setMatchGroups([]);
+        setPlacementSummaryPartial(true);
+        setMatchGroupsTruthHydrated(true);
+      } finally {
+        if (!cancelled && requestSeq === placementSummaryRequestSeqRef.current) {
+          setMatchGroupsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedBusinessId,
+    selectedAccountId,
+    bankTxLoading,
+    entriesQ.isLoading,
+    entriesQ.isFetching,
+    bankTxSorted,
+    allEntriesSorted,
+    from,
+    to,
+  ]);
 
   const bankTxNewestFirst = useMemo(() => {
     const arr = [...bankTxSorted];
@@ -2301,8 +2374,9 @@ const isReconcileExemptEntry = (e: any) => {
   // Issues (MatchGroups-only; full-match only)
   // -------------------------
   const activeGroups = useMemo(() => {
-    return (matchGroups ?? []).filter((g: any) => String(g?.status ?? "").toUpperCase() === "ACTIVE");
-  }, [matchGroups]);
+    const source = allMatchGroupsHydrated ? allMatchGroups : matchGroups;
+    return (source ?? []).filter((g: any) => String(g?.status ?? "").toUpperCase() === "ACTIVE");
+  }, [allMatchGroups, allMatchGroupsHydrated, matchGroups]);
 
   const voidedGroups = useMemo(() => {
     if (!allMatchGroupsHydrated) return [];
@@ -3044,13 +3118,15 @@ const displayBankActiveList = useMemo(() => {
           type="button"
           className={`h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
             }`}
-          disabled={!canWriteReconcileEffective || bankUnmatchedList.length === 0 || entriesExpectedList.length === 0}
+          disabled={!canWriteReconcileEffective || !bankTruthReady || !entriesTruthReady || displayBankUnmatchedList.length === 0 || displayEntriesExpectedList.length === 0}
           title={
             !canWriteReconcileEffective
               ? (reconcileWriteReason ?? noPermTitle)
-              : bankUnmatchedList.length === 0
+              : !bankTruthReady || !entriesTruthReady
+                ? "Loading placement"
+              : displayBankUnmatchedList.length === 0
                 ? "No unmatched bank transactions"
-              : entriesExpectedList.length === 0
+              : displayEntriesExpectedList.length === 0
                   ? "No expected entries"
                   : "Review match suggestions"
           }
@@ -3247,6 +3323,14 @@ const displayBankActiveList = useMemo(() => {
                 }
               />
             )}
+          </div>
+        ) : null}
+
+        {placementSummaryPartial ? (
+          <div className="px-3 pb-2">
+            <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] leading-4 text-bb-status-warning-fg">
+              Placement summary is partial for the loaded rows. Matched and unmatched counts reflect the rows currently loaded and the capped placement response.
+            </div>
           </div>
         ) : null}
 
@@ -4344,7 +4428,7 @@ const displayBankActiveList = useMemo(() => {
               {bankPanelShowStatusWhileRows ? (
                 <span className="text-[11px] text-bb-text-muted inline-flex items-center gap-1.5">
                   <TinySpinner />
-                  <span>{plaidSyncing ? "Syncing bank data…" : "Saving changes…"}</span>
+                  <span>{plaidSyncing ? "Syncing bank data…" : matchGroupsLoading ? "Loading placement…" : "Saving changes…"}</span>
                 </span>
               ) : null}
               <button

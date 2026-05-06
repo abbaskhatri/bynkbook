@@ -38,6 +38,180 @@ function canWrite(role: string | null) {
   return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
 }
 
+const PLACEMENT_SUMMARY_BANK_ID_MAX = 1000;
+const PLACEMENT_SUMMARY_ENTRY_ID_MAX = 500;
+
+function parseYmdParam(value: any, field: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { ok: true as const, value: null as string | null };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { ok: false as const, error: `${field} must be YYYY-MM-DD` };
+  }
+  const d = new Date(`${raw}T00:00:00Z`);
+  if (!Number.isFinite(d.getTime()) || d.toISOString().slice(0, 10) !== raw) {
+    return { ok: false as const, error: `${field} must be YYYY-MM-DD` };
+  }
+  return { ok: true as const, value: raw };
+}
+
+function boundedIdList(value: any, max: number) {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  let partial = source.length > max;
+
+  for (const item of source) {
+    const id = String(item ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    if (ids.length >= max) {
+      partial = true;
+      continue;
+    }
+    ids.push(id);
+  }
+
+  return { ids, partial };
+}
+
+function dateWindowWhere(field: string, from: string | null, to: string | null) {
+  if (!from && !to) return {};
+  return {
+    [field]: {
+      ...(from ? { gte: new Date(`${from}T00:00:00Z`) } : {}),
+      ...(to ? { lte: new Date(`${to}T00:00:00Z`) } : {}),
+    },
+  };
+}
+
+async function buildPlacementSummary(prisma: any, args: {
+  businessId: string;
+  accountId: string;
+  body: any;
+}) {
+  const bankInput = boundedIdList(
+    args.body?.bankTransactionIds ?? args.body?.bank_transaction_ids,
+    PLACEMENT_SUMMARY_BANK_ID_MAX
+  );
+  const entryInput = boundedIdList(
+    args.body?.entryIds ?? args.body?.entry_ids,
+    PLACEMENT_SUMMARY_ENTRY_ID_MAX
+  );
+
+  const from = parseYmdParam(args.body?.from, "from");
+  if (!from.ok) return { statusCode: 400, body: { ok: false, error: from.error } };
+
+  const to = parseYmdParam(args.body?.to, "to");
+  if (!to.ok) return { statusCode: 400, body: { ok: false, error: to.error } };
+
+  if (from.value && to.value && from.value > to.value) {
+    return { statusCode: 400, body: { ok: false, error: "from must be on or before to" } };
+  }
+
+  const partial = bankInput.partial || entryInput.partial;
+
+  const [validBankRows, validEntryRows] = await Promise.all([
+    bankInput.ids.length
+      ? prisma.bankTransaction.findMany({
+          where: {
+            business_id: args.businessId,
+            account_id: args.accountId,
+            id: { in: bankInput.ids },
+            is_removed: false,
+            ...dateWindowWhere("posted_date", from.value, to.value),
+          },
+          select: { id: true },
+        })
+      : [],
+    entryInput.ids.length
+      ? prisma.entry.findMany({
+          where: {
+            business_id: args.businessId,
+            account_id: args.accountId,
+            id: { in: entryInput.ids },
+            deleted_at: null,
+            ...dateWindowWhere("date", from.value, to.value),
+          },
+          select: { id: true },
+        })
+      : [],
+  ]);
+
+  const validBankIds = new Set(validBankRows.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
+  const validEntryIds = new Set(validEntryRows.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
+
+  const [candidateBankLinks, candidateEntryLinks] = await Promise.all([
+    validBankIds.size
+      ? prisma.matchGroupBank.findMany({
+          where: {
+            business_id: args.businessId,
+            account_id: args.accountId,
+            bank_transaction_id: { in: Array.from(validBankIds) },
+          },
+          select: { match_group_id: true, bank_transaction_id: true, matched_amount_cents: true },
+        })
+      : [],
+    validEntryIds.size
+      ? prisma.matchGroupEntry.findMany({
+          where: {
+            business_id: args.businessId,
+            account_id: args.accountId,
+            entry_id: { in: Array.from(validEntryIds) },
+          },
+          select: { match_group_id: true, entry_id: true, matched_amount_cents: true },
+        })
+      : [],
+  ]);
+
+  const candidateGroupIds = Array.from(
+    new Set(
+      [...candidateBankLinks, ...candidateEntryLinks]
+        .map((row: any) => String(row?.match_group_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const activeGroups = candidateGroupIds.length
+    ? await prisma.matchGroup.findMany({
+        where: {
+          id: { in: candidateGroupIds },
+          business_id: args.businessId,
+          account_id: args.accountId,
+          status: "ACTIVE",
+          voided_at: null,
+        },
+        select: { id: true },
+      })
+    : [];
+  const activeGroupIds = new Set(activeGroups.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
+
+  const activeBankLinks = candidateBankLinks
+    .filter((row: any) => activeGroupIds.has(String(row?.match_group_id ?? "")))
+    .map((row: any) => ({
+      bank_transaction_id: row.bank_transaction_id,
+      match_group_id: row.match_group_id,
+      matched_amount_cents: row.matched_amount_cents,
+    }));
+
+  const activeEntryLinks = candidateEntryLinks
+    .filter((row: any) => activeGroupIds.has(String(row?.match_group_id ?? "")))
+    .map((row: any) => ({
+      entry_id: row.entry_id,
+      match_group_id: row.match_group_id,
+      matched_amount_cents: row.matched_amount_cents,
+    }));
+
+  return {
+    statusCode: 200,
+    body: {
+      ok: true,
+      activeBankLinks,
+      activeEntryLinks,
+      partial,
+    },
+  };
+}
+
 function absBig(n: bigint) {
   return n < 0n ? -n : n;
 }
@@ -600,6 +774,22 @@ export async function handler(event: any) {
   const isVoid = path.includes("/match-groups/") && path.endsWith("/void");
   const isRevertPreview = method === "GET" && path.endsWith("/match-groups/revert-preview");
   const isRevertConfirm = method === "POST" && path.endsWith("/match-groups/revert");
+  const isPlacementSummary = method === "POST" && path.endsWith("/match-groups/placement-summary");
+
+  // -------------------------
+  // POST placement summary (read-only)
+  // -------------------------
+  if (isPlacementSummary) {
+    let body: any = {};
+    try {
+      body = event?.body ? JSON.parse(event.body) : {};
+    } catch {
+      return json(400, { ok: false, error: "Invalid JSON body" });
+    }
+
+    const summary = await buildPlacementSummary(prisma, { businessId, accountId, body });
+    return json(summary.statusCode, summary.body);
+  }
 
   // -------------------------
   // GET revert preview

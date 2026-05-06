@@ -28,6 +28,20 @@ function postRevertEvent(body: Record<string, any>, businessId = "biz-1", accoun
   };
 }
 
+function postPlacementSummaryEvent(body: Record<string, any>, businessId = "biz-1", accountId = "acct-1") {
+  return {
+    pathParameters: { businessId, accountId },
+    body: JSON.stringify(body),
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "actor" } } },
+      http: {
+        method: "POST",
+        path: `/v1/businesses/${businessId}/accounts/${accountId}/match-groups/placement-summary`,
+      },
+    },
+  };
+}
+
 function group(overrides: Record<string, any> = {}) {
   return {
     id: "mg-1",
@@ -92,6 +106,16 @@ function scalarMatches(value: any, expected: any) {
 function objectMatches(value: any, expected: any) {
   if (expected?.in && !expected.in.some((v: any) => scalarMatches(value, v))) return false;
   if ("not" in expected && scalarMatches(value, expected.not)) return false;
+  if ("gte" in expected) {
+    const left = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    const right = expected.gte instanceof Date ? expected.gte.getTime() : new Date(expected.gte).getTime();
+    if (Number.isFinite(left) && Number.isFinite(right) && left < right) return false;
+  }
+  if ("lte" in expected) {
+    const left = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    const right = expected.lte instanceof Date ? expected.lte.getTime() : new Date(expected.lte).getTime();
+    if (Number.isFinite(left) && Number.isFinite(right) && left > right) return false;
+  }
   return true;
 }
 
@@ -358,5 +382,114 @@ describe("match group generated-entry revert", () => {
     expect(entries.every((row) => row.deleted_at instanceof Date)).toBe(true);
     expect(prisma.entry.delete).not.toHaveBeenCalled();
     expect(prisma.entry.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("match group placement summary", () => {
+  test("returns active-only links and preserves many-to-one group links", async () => {
+    const { handler } = await loadHandler({
+      banks: [
+        bank({ id: "bank-1", amount_cents: -700n }),
+        bank({ id: "bank-2", amount_cents: -500n }),
+        bank({ id: "bank-void", amount_cents: -1200n }),
+      ],
+      entries: [
+        entry({ id: "entry-1", amount_cents: -700n }),
+        entry({ id: "entry-2", amount_cents: -500n }),
+        entry({ id: "entry-void", amount_cents: -1200n }),
+      ],
+      groups: [
+        group({ id: "mg-many", status: "ACTIVE", voided_at: null }),
+        group({ id: "mg-void", status: "VOIDED", voided_at: new Date("2026-04-21T12:00:00.000Z") }),
+      ],
+      groupBanks: [
+        { match_group_id: "mg-many", business_id: "biz-1", account_id: "acct-1", bank_transaction_id: "bank-1", matched_amount_cents: 700n },
+        { match_group_id: "mg-many", business_id: "biz-1", account_id: "acct-1", bank_transaction_id: "bank-2", matched_amount_cents: 500n },
+        { match_group_id: "mg-void", business_id: "biz-1", account_id: "acct-1", bank_transaction_id: "bank-void", matched_amount_cents: 1200n },
+      ],
+      groupEntries: [
+        { match_group_id: "mg-many", business_id: "biz-1", account_id: "acct-1", entry_id: "entry-1", matched_amount_cents: 700n },
+        { match_group_id: "mg-many", business_id: "biz-1", account_id: "acct-1", entry_id: "entry-2", matched_amount_cents: 500n },
+        { match_group_id: "mg-void", business_id: "biz-1", account_id: "acct-1", entry_id: "entry-void", matched_amount_cents: 1200n },
+      ],
+    });
+
+    const res = await handler(postPlacementSummaryEvent({
+      bankTransactionIds: ["bank-1", "bank-2", "bank-void"],
+      entryIds: ["entry-1", "entry-2", "entry-void"],
+      from: "2026-04-01",
+      to: "2026-04-30",
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.partial).toBe(false);
+    expect(body.activeBankLinks.map((row: any) => row.bank_transaction_id).sort()).toEqual(["bank-1", "bank-2"]);
+    expect(body.activeEntryLinks.map((row: any) => row.entry_id).sort()).toEqual(["entry-1", "entry-2"]);
+    expect(new Set(body.activeBankLinks.map((row: any) => row.match_group_id))).toEqual(new Set(["mg-many"]));
+    expect(new Set(body.activeEntryLinks.map((row: any) => row.match_group_id))).toEqual(new Set(["mg-many"]));
+  });
+
+  test("ignores ids outside the account or business scope", async () => {
+    const { handler } = await loadHandler({
+      banks: [
+        bank({ id: "bank-1" }),
+        bank({ id: "bank-other-account", account_id: "acct-2" }),
+        bank({ id: "bank-other-business", business_id: "biz-2" }),
+      ],
+      entries: [
+        entry({ id: "entry-1" }),
+        entry({ id: "entry-other-account", account_id: "acct-2" }),
+        entry({ id: "entry-other-business", business_id: "biz-2" }),
+      ],
+      groups: [group({ id: "mg-1" }), group({ id: "mg-other", account_id: "acct-2" })],
+      groupBanks: [
+        { match_group_id: "mg-1", business_id: "biz-1", account_id: "acct-1", bank_transaction_id: "bank-1", matched_amount_cents: 1200n },
+        { match_group_id: "mg-other", business_id: "biz-1", account_id: "acct-2", bank_transaction_id: "bank-other-account", matched_amount_cents: 1200n },
+        { match_group_id: "mg-other", business_id: "biz-2", account_id: "acct-1", bank_transaction_id: "bank-other-business", matched_amount_cents: 1200n },
+      ],
+      groupEntries: [
+        { match_group_id: "mg-1", business_id: "biz-1", account_id: "acct-1", entry_id: "entry-1", matched_amount_cents: 1200n },
+        { match_group_id: "mg-other", business_id: "biz-1", account_id: "acct-2", entry_id: "entry-other-account", matched_amount_cents: 1200n },
+        { match_group_id: "mg-other", business_id: "biz-2", account_id: "acct-1", entry_id: "entry-other-business", matched_amount_cents: 1200n },
+      ],
+    });
+
+    const res = await handler(postPlacementSummaryEvent({
+      bankTransactionIds: ["bank-1", "bank-other-account", "bank-other-business", "missing-bank"],
+      entryIds: ["entry-1", "entry-other-account", "entry-other-business", "missing-entry"],
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.activeBankLinks.map((row: any) => row.bank_transaction_id)).toEqual(["bank-1"]);
+    expect(body.activeEntryLinks.map((row: any) => row.entry_id)).toEqual(["entry-1"]);
+  });
+
+  test("empty id lists are safe", async () => {
+    const { handler } = await loadHandler({});
+
+    const res = await handler(postPlacementSummaryEvent({ bankTransactionIds: [], entryIds: [] }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toEqual({ ok: true, activeBankLinks: [], activeEntryLinks: [], partial: false });
+  });
+
+  test("oversized id lists return partial true with capped work", async () => {
+    const { handler, prisma } = await loadHandler({});
+
+    const res = await handler(postPlacementSummaryEvent({
+      bankTransactionIds: Array.from({ length: 1001 }, (_v, i) => `bank-${i}`),
+      entryIds: Array.from({ length: 501 }, (_v, i) => `entry-${i}`),
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.partial).toBe(true);
+    expect(body.activeBankLinks.map((row: any) => row.bank_transaction_id)).toEqual(["bank-1"]);
+    expect(body.activeEntryLinks.map((row: any) => row.entry_id)).toEqual(["entry-1"]);
+    expect(prisma.bankTransaction.findMany.mock.calls[0][0].where.id.in).toHaveLength(1000);
+    expect(prisma.entry.findMany.mock.calls[0][0].where.id.in).toHaveLength(500);
   });
 });
