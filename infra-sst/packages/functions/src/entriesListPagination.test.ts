@@ -53,10 +53,12 @@ function valueMatches(value: any, expected: any): boolean {
   if (expected && typeof expected === "object" && !(expected instanceof Date)) {
     if ("not" in expected) return value !== expected.not;
     if ("lt" in expected) return value < expected.lt;
-    if ("lte" in expected) return value <= expected.lte;
-    if ("gte" in expected) return value >= expected.gte;
+    if ("lte" in expected && !(value <= expected.lte)) return false;
+    if ("gte" in expected && !(value >= expected.gte)) return false;
+    if ("lte" in expected || "gte" in expected) return true;
     if (Array.isArray(expected.in)) return expected.in.includes(value);
     if ("contains" in expected) return String(value ?? "").toLowerCase().includes(String(expected.contains).toLowerCase());
+    if ("startsWith" in expected) return String(value ?? "").toLowerCase().startsWith(String(expected.startsWith).toLowerCase());
   }
   if (sameDate(value, expected)) return true;
   return value === expected;
@@ -70,6 +72,11 @@ function rowMatchesWhere(row: any, where: any): boolean {
     }
     if (key === "OR") {
       if (!(expected as any[]).some((part) => rowMatchesWhere(row, part))) return false;
+      continue;
+    }
+    if (key === "NOT") {
+      const parts = Array.isArray(expected) ? expected : [expected];
+      if (parts.some((part) => rowMatchesWhere(row, part))) return false;
       continue;
     }
     if (!valueMatches(row[key], expected)) return false;
@@ -213,6 +220,85 @@ describe("entries list pagination and canonical balances", () => {
     );
     expect(prisma.entry.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ business_id: businessId, account_id: accountId, deleted_at: null }),
+    });
+  });
+
+  test("uncategorized category review pages older rows with truthful count", async () => {
+    const categoryId = "cat-1";
+    const { handler } = await loadHandler([
+      entry({ id: "11111111-1111-4111-8111-111111111111", date: "2026-01-01", created_at: "2026-01-01T10:00:00.000Z", amount_cents: "-100" }),
+      entry({ id: "22222222-2222-4222-8222-222222222222", date: "2026-02-01", created_at: "2026-02-01T10:00:00.000Z", amount_cents: "-200", type: "TRANSFER" }),
+      entry({ id: "33333333-3333-4333-8333-333333333333", date: "2026-03-01", created_at: "2026-03-01T10:00:00.000Z", amount_cents: "300" }),
+      entry({ id: "44444444-4444-4444-8444-444444444444", date: "2026-04-01", created_at: "2026-04-01T10:00:00.000Z", amount_cents: "-400", category_id: categoryId }),
+      entry({ id: "55555555-5555-4555-8555-555555555555", date: "2026-05-01", created_at: "2026-05-01T10:00:00.000Z", amount_cents: "-500" }),
+      entry({ id: "66666666-6666-4666-8666-666666666666", date: "2026-06-01", created_at: "2026-06-01T10:00:00.000Z", amount_cents: "-600", payee: "Opening balance import" }),
+    ]);
+
+    const first = await handler(event({
+      limit: "2",
+      type: "EXPENSE,INCOME",
+      uncategorized: "true",
+      exclude_opening: "true",
+    }));
+    const firstBody = JSON.parse(first.body);
+
+    expect(first.statusCode).toBe(200);
+    expect(firstBody.entries.map((e: any) => e.id)).toEqual([
+      "55555555-5555-4555-8555-555555555555",
+      "33333333-3333-4333-8333-333333333333",
+    ]);
+    expect(firstBody.totalCount).toBe(3);
+    expect(firstBody.hasMore).toBe(true);
+    expect(firstBody.nextCursor).toEqual(expect.any(String));
+
+    const second = await handler(event({
+      limit: "2",
+      type: "EXPENSE,INCOME",
+      uncategorized: "true",
+      exclude_opening: "true",
+      cursor: firstBody.nextCursor,
+    }));
+    const secondBody = JSON.parse(second.body);
+
+    expect(secondBody.entries.map((e: any) => e.id)).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(secondBody.totalCount).toBe(3);
+    expect(secondBody.hasMore).toBe(false);
+    expect(secondBody.nextCursor).toBeNull();
+  });
+
+  test("uncategorized pagination preserves search and date filters", async () => {
+    const { handler, prisma } = await loadHandler([
+      entry({ id: "11111111-1111-4111-8111-111111111111", date: "2026-01-01", created_at: "2026-01-01T10:00:00.000Z", amount_cents: "-100", payee: "Coffee Jan" }),
+      entry({ id: "22222222-2222-4222-8222-222222222222", date: "2026-02-01", created_at: "2026-02-01T10:00:00.000Z", amount_cents: "-200", payee: "Coffee Feb" }),
+      entry({ id: "33333333-3333-4333-8333-333333333333", date: "2026-03-01", created_at: "2026-03-01T10:00:00.000Z", amount_cents: "-300", payee: "Office Mar" }),
+      entry({ id: "44444444-4444-4444-8444-444444444444", date: "2026-04-01", created_at: "2026-04-01T10:00:00.000Z", amount_cents: "-400", payee: "Coffee Apr" }),
+    ]);
+
+    const res = await handler(event({
+      limit: "10",
+      type: "EXPENSE,INCOME",
+      uncategorized: "true",
+      exclude_opening: "true",
+      search: "coffee",
+      date_from: "2026-02-01",
+      date_to: "2026-03-31",
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(body.entries.map((e: any) => e.id)).toEqual(["22222222-2222-4222-8222-222222222222"]);
+    expect(body.totalCount).toBe(1);
+    expect(prisma.entry.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        business_id: businessId,
+        account_id: accountId,
+        deleted_at: null,
+        category_id: null,
+        type: { in: ["EXPENSE", "INCOME"] },
+        date: {
+          gte: new Date("2026-02-01T00:00:00Z"),
+          lte: new Date("2026-03-31T00:00:00Z"),
+        },
+      }),
     });
   });
 });

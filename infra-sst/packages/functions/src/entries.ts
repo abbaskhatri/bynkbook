@@ -910,6 +910,8 @@ export async function handler(event: any) {
 
     const search = String(q.search ?? q.q ?? q.payee ?? "").trim();
     const categoryId = String(q.category_id ?? q.categoryId ?? "").trim();
+    const uncategorizedOnly = ["true", "1", "yes"].includes(String(q.uncategorized ?? "").trim().toLowerCase());
+    const excludeOpening = ["true", "1", "yes"].includes(String(q.exclude_opening ?? q.excludeOpening ?? "").trim().toLowerCase());
     const statusFilter = String(q.status ?? "").trim();
     const statusValues = statusFilter
       .split(",")
@@ -926,11 +928,18 @@ export async function handler(event: any) {
         ? { type: { in: String(q.type).split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) } }
         : {}),
       ...(q.vendorId ? { vendor_id: String(q.vendorId).trim() } : {}),
-      ...(categoryId ? { category_id: categoryId } : {}),
+      ...(uncategorizedOnly ? { category_id: null } : categoryId ? { category_id: categoryId } : {}),
       ...(statusValues.length
         ? { status: { in: statusValues } }
         : {}),
       ...(Object.keys(dateWhere).length ? { date: dateWhere } : {}),
+      ...(excludeOpening
+        ? {
+            NOT: [
+              { payee: { startsWith: "opening balance", mode: "insensitive" } },
+            ],
+          }
+        : {}),
       ...(search
         ? {
             OR: [

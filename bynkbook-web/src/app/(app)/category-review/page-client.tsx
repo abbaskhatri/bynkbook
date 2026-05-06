@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { useEntries } from "@/lib/queries/useEntries";
 import { issueCountKey } from "@/lib/queries/issueKeys";
-import { updateEntry } from "@/lib/api/entries";
+import { listEntriesPage, updateEntry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { applyCategoryBatch, aiSuggestCategory } from "@/lib/api/ai";
 import {
@@ -270,18 +269,75 @@ export default function CategoryReviewPageClient() {
     if (suggestionsLoadedForCurrentFilters) void suggestionsQ.refetch();
   }
 
-  // Entries (single fetch via hook; filters only apply after Run)
-  const entriesLimit = 2000;
+  // Filters (inputs)
+  const [from, setFrom] = useState<string>("");
+  const [to, setTo] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [onlyUncategorized, setOnlyUncategorized] = useState(true);
+
+  // Applied filters (set only on Run)
+  const [applied, setApplied] = useState({
+    from: "",
+    to: "",
+    search: "",
+    onlyUncategorized: true,
+  });
+
+  // Entries: backend-filtered, cursor-paged, newest to oldest.
+  const entriesPageLimit = 100;
   const entriesKey = useMemo(
-    () => ["entries", selectedBusinessId, selectedAccountId, entriesLimit, false] as const,
-    [selectedBusinessId, selectedAccountId, entriesLimit]
+    () =>
+      [
+        "categoryReviewEntries",
+        selectedBusinessId,
+        selectedAccountId,
+        entriesPageLimit,
+        applied.from,
+        applied.to,
+        applied.search.trim(),
+        applied.onlyUncategorized,
+      ] as const,
+    [
+      selectedBusinessId,
+      selectedAccountId,
+      entriesPageLimit,
+      applied.from,
+      applied.to,
+      applied.search,
+      applied.onlyUncategorized,
+    ]
   );
 
-  const entriesQ = useEntries({
-    businessId: selectedBusinessId,
-    accountId: selectedAccountId,
-    limit: entriesLimit,
-    includeDeleted: false,
+  const entriesQ = useInfiniteQuery({
+    queryKey: entriesKey,
+    enabled: !!selectedBusinessId && !!selectedAccountId,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => {
+      if (!selectedBusinessId || !selectedAccountId) {
+        return Promise.resolve({
+          items: [],
+          meta: { limit: entriesPageLimit, hasMore: false, nextCursor: null },
+        });
+      }
+
+      return listEntriesPage({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        limit: entriesPageLimit,
+        cursor: typeof pageParam === "string" ? pageParam : null,
+        includeDeleted: false,
+        type: "EXPENSE,INCOME",
+        search: applied.search.trim() || undefined,
+        date_from: applied.from || undefined,
+        date_to: applied.to || undefined,
+        uncategorized: applied.onlyUncategorized,
+        excludeOpening: true,
+      });
+    },
+    getNextPageParam: (lastPage) => (lastPage.meta.hasMore ? lastPage.meta.nextCursor ?? undefined : undefined),
+    staleTime: 30_000,
+    gcTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const bannerMsg =
@@ -412,20 +468,6 @@ export default function CategoryReviewPageClient() {
     return categories.map((c) => ({ id: String(c.id), name: c.name }));
   }, [categories]);
 
-  // Filters (inputs)
-  const [from, setFrom] = useState<string>("");
-  const [to, setTo] = useState<string>("");
-  const [search, setSearch] = useState("");
-  const [onlyUncategorized, setOnlyUncategorized] = useState(true);
-
-  // Applied filters (set only on Run)
-  const [applied, setApplied] = useState({
-    from: "",
-    to: "",
-    search: "",
-    onlyUncategorized: true,
-  });
-
   function runFilters() {
     setErr(null);
     setApplied({ from, to, search, onlyUncategorized });
@@ -433,6 +475,8 @@ export default function CategoryReviewPageClient() {
     setFailedById({});
     setManualCategoryByEntryId({});
     setCategoryDraftByEntryId({});
+    setSelectedSuggestionByEntryId({});
+    setSuggestionsRequestedKey(null);
   }
 
   // Auto-run once so the list is visible by default (no blank state)
@@ -445,7 +489,13 @@ export default function CategoryReviewPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entriesQ.isLoading]);
 
-  const allEntries = (entriesQ.data ?? []) as any[];
+  const entriesPages = entriesQ.data?.pages ?? [];
+  const allEntries = entriesPages.flatMap((page: any) => (Array.isArray(page?.items) ? page.items : []));
+
+  const entriesMeta = entriesPages[0]?.meta ?? null;
+  const lastEntriesMeta = entriesPages[entriesPages.length - 1]?.meta ?? null;
+  const totalCount = typeof entriesMeta?.totalCount === "number" ? entriesMeta.totalCount : undefined;
+  const hasMoreEntries = !!lastEntriesMeta?.hasMore;
 
   const visibleRows = useMemo(() => {
     const s = applied.search.trim().toLowerCase();
@@ -488,7 +538,6 @@ export default function CategoryReviewPageClient() {
   const suggestionTargets = useMemo(() => {
     return (visibleRows ?? [])
       .filter((r: any) => !r?.category_id)
-      .slice(0, 200)
       .map((r: any) => ({
         kind: "ENTRY" as const,
         id: String(r.id),
@@ -593,7 +642,7 @@ export default function CategoryReviewPageClient() {
     clearMutErr();
     setApplySummary(null);
 
-    const requestTargets = suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets;
+    const requestTargets = (suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets).slice(0, 200);
     const requestKey = requestTargets.map((x) => x.id).join("|");
     if (!requestKey) return;
 
@@ -670,7 +719,7 @@ export default function CategoryReviewPageClient() {
   const [failedById, setFailedById] = useState<Record<string, string>>({});
 
   const tableUpdating =
-    (entriesQ.isFetching && !!(entriesQ.data ?? []).length) ||
+    (entriesQ.isFetching && !entriesQ.isFetchingNextPage && allEntries.length > 0) ||
     sugUpdating ||
     applyBusy;
 
@@ -680,6 +729,44 @@ export default function CategoryReviewPageClient() {
     Record<string, { prevCategoryId: string | null; nextCategoryId: string | null; expiresAt: number }>
   >({});
   const undoTimerByEntryIdRef = useRef<Record<string, number>>({});
+
+  function updateCategoryReviewEntriesCache(updateRow: (row: any) => any) {
+    qc.setQueryData(entriesKey, (current: any) => {
+      if (!current || !Array.isArray(current.pages)) return current;
+
+      let totalDelta = 0;
+      const pages = current.pages.map((page: any) => {
+        const items = Array.isArray(page?.items) ? page.items : [];
+        const nextItems = items.map((row: any) => {
+          const nextRow = updateRow(row);
+          if (applied.onlyUncategorized) {
+            const wasUncategorized = !row?.category_id;
+            const isUncategorized = !nextRow?.category_id;
+            if (wasUncategorized && !isUncategorized) totalDelta -= 1;
+            if (!wasUncategorized && isUncategorized) totalDelta += 1;
+          }
+          return nextRow;
+        });
+        return { ...page, items: nextItems };
+      });
+
+      const nextPages = totalDelta
+        ? pages.map((page: any) => {
+            const meta = page?.meta;
+            if (!meta || typeof meta.totalCount !== "number") return page;
+            return {
+              ...page,
+              meta: {
+                ...meta,
+                totalCount: Math.max(0, meta.totalCount + totalDelta),
+              },
+            };
+          })
+        : pages;
+
+      return { ...current, pages: nextPages };
+    });
+  }
 
   const clearUndoTimer = (entryId: string) => {
     const t = undoTimerByEntryIdRef.current[entryId];
@@ -736,7 +823,7 @@ export default function CategoryReviewPageClient() {
       return next;
     });
 
-    const prev = (qc.getQueryData(entriesKey) as any[] | undefined) ?? [];
+    const prev = allEntries;
     const idx = prev.findIndex((x: any) => String(x.id) === entryId);
     const prevEntry = idx >= 0 ? prev[idx] : null;
 
@@ -753,9 +840,7 @@ export default function CategoryReviewPageClient() {
         },
       });
 
-      qc.setQueryData(entriesKey, (current: any[] | undefined) => {
-        const rows = Array.isArray(current) ? current : prev;
-        return rows.map((row: any) =>
+      updateCategoryReviewEntriesCache((row: any) =>
           String(row.id) === entryId
             ? {
                 ...row,
@@ -764,8 +849,7 @@ export default function CategoryReviewPageClient() {
                 suggested_category_id: suggestedCategoryId ?? null,
               }
             : row
-        );
-      });
+      );
 
       if (categoryId) {
         setSelectedIds((prevIds) => {
@@ -797,13 +881,7 @@ export default function CategoryReviewPageClient() {
     } catch (e: any) {
       // Revert this entry only
       if (idx >= 0 && prevEntry) {
-        const cur = (qc.getQueryData(entriesKey) as any[] | undefined) ?? [];
-        const j = cur.findIndex((x: any) => String(x.id) === entryId);
-        if (j >= 0) {
-          const next = cur.slice();
-          next[j] = prevEntry;
-          qc.setQueryData(entriesKey, next);
-        }
+        updateCategoryReviewEntriesCache((row: any) => (String(row.id) === entryId ? prevEntry : row));
       }
 
       const r = applyMutationError(e, "Can’t apply category");
@@ -897,7 +975,7 @@ export default function CategoryReviewPageClient() {
 
     const categoryId = bulkCategoryId === "__UNCATEGORIZED__" ? null : bulkCategoryId;
 
-    const ids = Array.from(selectedIds);
+    const ids = visibleRows.map((e: any) => String(e.id)).filter((id) => selectedIds.has(id));
     const BATCH = 8;
 
     const successes = new Set<string>();
@@ -925,6 +1003,8 @@ export default function CategoryReviewPageClient() {
     const out: Array<{ entryId: string; category_id: string; suggested_category_id?: string }> = [];
 
     for (const entryId of Array.from(selectedIds)) {
+      const entry = visibleRows.find((e: any) => String(e.id) === entryId);
+      if (!entry || entry.category_id) continue;
       if (manualCategoryByEntryId[entryId]) continue;
 
       const category_id = String(selectedSuggestionByEntryId[entryId] ?? "").trim();
@@ -944,7 +1024,7 @@ export default function CategoryReviewPageClient() {
     }
 
     return out.slice(0, 200);
-  }, [selectedIds, selectedSuggestionByEntryId, manualCategoryByEntryId, sugByEntryId]);
+  }, [selectedIds, selectedSuggestionByEntryId, manualCategoryByEntryId, sugByEntryId, visibleRows]);
 
   const manuallySelectedApplyItems = useMemo(() => {
     const out: Array<{ entryId: string; category_id: string; suggested_category_id?: string }> = [];
@@ -1154,18 +1234,15 @@ export default function CategoryReviewPageClient() {
       setApplySummary(summary);
 
       if (successIds.size > 0) {
-        qc.setQueryData(entriesKey, (current: any[] | undefined) => {
-          const rows = Array.isArray(current) ? current : [];
-          return rows.map((row: any) => {
-            const id = String(row.id);
-            if (!successIds.has(id)) return row;
-            const nextCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
-            return {
-              ...row,
-              category_id: nextCategoryId || row.category_id,
-              category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
-            };
-          });
+        updateCategoryReviewEntriesCache((row: any) => {
+          const id = String(row.id);
+          if (!successIds.has(id)) return row;
+          const nextCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
+          return {
+            ...row,
+            category_id: nextCategoryId || row.category_id,
+            category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
+          };
         });
 
         setSelectedSuggestionByEntryId((prev) => {
@@ -1202,6 +1279,24 @@ export default function CategoryReviewPageClient() {
       setApplyBusy(false);
     }
   }
+
+  const loadedCount = visibleRows.length;
+  const resultNoun = applied.onlyUncategorized ? "uncategorized entries" : "entries";
+  const filtersActive = !!applied.from || !!applied.to || !!applied.search.trim() || !applied.onlyUncategorized;
+  const countStatus = Number.isFinite(totalCount)
+    ? `Showing ${loadedCount} of ${totalCount} ${filtersActive ? "matching " : ""}${resultNoun}.`
+    : `Showing latest ${loadedCount} ${filtersActive ? "matching " : ""}${resultNoun}.`;
+  const paginationStatus = hasMoreEntries ? " Load more to review older rows." : "";
+  const filterStatus = filtersActive ? " Filters are applied on the backend." : "";
+  const reviewStatusText = `${countStatus}${paginationStatus}${filterStatus}`;
+  const suggestionsButtonLabel = sugLoading
+    ? "Loading suggestions"
+    : suggestionsLoadedForCurrentFilters
+      ? "Reload loaded-row suggestions"
+      : missingSuggestionTargets.length > 200
+        ? "Load next 200 suggestions"
+        : "Load suggestions for loaded rows";
+
   return (
     <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
@@ -1337,9 +1432,9 @@ export default function CategoryReviewPageClient() {
         <CHeader className="shrink-0 pb-2">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="inline-flex items-center gap-2">
-              Uncategorized
+              {applied.onlyUncategorized ? "Uncategorized" : "Review rows"}
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
-                {visibleRows.length}
+                {loadedCount}
               </span>
               {sugUpdating ? <span className="text-[11px] text-muted-foreground">Updating…</span> : null}
             </CardTitle>
@@ -1365,9 +1460,9 @@ export default function CategoryReviewPageClient() {
                     Loading suggestions
                   </span>
                 ) : suggestionsLoadedForCurrentFilters ? (
-                  "Reload suggestions"
+                  suggestionsButtonLabel
                 ) : (
-                  "Load suggestions"
+                  suggestionsButtonLabel
                 )}
               </Button>
 
@@ -1423,7 +1518,7 @@ export default function CategoryReviewPageClient() {
                   openAutoFixCategories();
                 }}
               >
-                Auto Fix Categories
+                Auto Fix loaded rows
               </Button>
 
               {selectedCount > 0 ? (
@@ -1455,7 +1550,7 @@ export default function CategoryReviewPageClient() {
                       }
                     }}
                   >
-                    Apply chosen category
+                    Apply to selected loaded rows
                   </Button>
 
                   <Button
@@ -1479,9 +1574,27 @@ export default function CategoryReviewPageClient() {
             </div>
           ) : null}
 
-          {!entriesQ.isLoading && visibleRows.length > 0 && suggestionTargets.length > 0 && !suggestionsLoadedForCurrentFilters && !sugLoading ? (
-            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              Suggestions are not loaded yet. Load suggestions when you’re ready to review.
+          {!entriesQ.isLoading ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{reviewStatusText}</span>
+              {hasMoreEntries ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  disabled={entriesQ.isFetchingNextPage || applyBusy}
+                  onClick={() => void entriesQ.fetchNextPage()}
+                >
+                  {entriesQ.isFetchingNextPage ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Loading older rows
+                    </span>
+                  ) : (
+                    "Load more"
+                  )}
+                </Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -1538,6 +1651,7 @@ export default function CategoryReviewPageClient() {
                         const payeeLower = String(e.payee ?? "").trim().toLowerCase();
                         const isOpening = typeUpper === "OPENING" || payeeLower.startsWith("opening balance");
                         const rowSuggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+                        const rowSuggestionsLoaded = hasSuggestionEntry(sugByEntryId, id);
                         const topSuggestion = rowSuggestions[0] ?? null;
                         const topSuggestedCategoryId = String(
                           topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
@@ -1774,11 +1888,11 @@ export default function CategoryReviewPageClient() {
                                           })() : null}
 
                                           {more > 0 ? <span className="mt-0.5 inline-block text-[10px] text-muted-foreground/80">+{more} more</span> : null}
-                                          {!suggestionsLoadedForCurrentFilters ? (
+                                          {!rowSuggestionsLoaded ? (
                                             <span className="text-[10px] text-muted-foreground/80">Suggestions not loaded</span>
                                           ) : null}
-                                          {suggestionsLoadedForCurrentFilters && sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-muted animate-pulse" /> : null}
-                                          {suggestionsLoadedForCurrentFilters && !sugLoading && suggestionsQ.error && !list.length ? (
+                                          {rowSuggestionsLoaded && sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-muted animate-pulse" /> : null}
+                                          {rowSuggestionsLoaded && !sugLoading && suggestionsQ.error && !list.length ? (
                                             <div className="inline-flex items-center gap-2 min-w-0">
                                               <span className="text-[10px] text-muted-foreground">Category suggestions unavailable</span>
                                               <button
@@ -1790,7 +1904,7 @@ export default function CategoryReviewPageClient() {
                                               </button>
                                             </div>
                                           ) : null}
-                                          {suggestionsLoadedForCurrentFilters && !sugLoading && !suggestionsQ.error && !list.length ? (
+                                          {rowSuggestionsLoaded && !sugLoading && !suggestionsQ.error && !list.length ? (
                                             <span className="text-[10px] text-muted-foreground/80">No category suggestions</span>
                                           ) : null}
                                         </>
@@ -1843,7 +1957,7 @@ export default function CategoryReviewPageClient() {
               if (applyBusy) return;
               setApplyOpen(false);
             }}
-            title="Auto Fix Categories"
+            title="Auto Fix Loaded Rows"
             size="lg"
             footer={
               <div className="flex items-center justify-end gap-2">
@@ -1905,19 +2019,16 @@ export default function CategoryReviewPageClient() {
                           selectedApplyItems.map((item) => [item.entryId, item.category_id])
                         );
 
-                        qc.setQueryData(entriesKey, (current: any[] | undefined) => {
-                          const rows = Array.isArray(current) ? current : [];
-                          return rows.map((row: any) => {
-                            const id = String(row.id);
-                            if (!successIds.has(id)) return row;
-                            const nextCategoryId = String(categoryByEntryId.get(id) ?? "").trim();
-                            return {
-                              ...row,
-                              category_id: nextCategoryId || row.category_id,
-                              category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
-                              suggested_category_id: nextCategoryId || (row.suggested_category_id ?? null),
-                            };
-                          });
+                        updateCategoryReviewEntriesCache((row: any) => {
+                          const id = String(row.id);
+                          if (!successIds.has(id)) return row;
+                          const nextCategoryId = String(categoryByEntryId.get(id) ?? "").trim();
+                          return {
+                            ...row,
+                            category_id: nextCategoryId || row.category_id,
+                            category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
+                            suggested_category_id: nextCategoryId || (row.suggested_category_id ?? null),
+                          };
                         });
                       }
 
@@ -1986,11 +2097,11 @@ export default function CategoryReviewPageClient() {
               {autoFixReviewNeededCount > 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
                   {autoFixReviewNeededCount} need{autoFixReviewNeededCount === 1 ? "s" : ""} review.
-                  Auto Fix only uses strong suggestions; selected dropdown categories use Apply selected categories.
+                  Auto Fix only uses strong suggestions on loaded selected rows; selected dropdown categories use Apply selected categories.
                 </div>
               ) : (
                 <div className="text-[11px] text-muted-foreground">
-                  Strong suggestions are ready for Auto Fix. Selected dropdown categories stay separate.
+                  Strong suggestions are ready for loaded selected rows. Selected dropdown categories stay separate.
                 </div>
               )}
 
