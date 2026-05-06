@@ -139,7 +139,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     pathname.startsWith("/privacy") ||
     pathname.startsWith("/terms");
 
-  const showChrome = !isAuthRoute;
+  const isMobileRoute = pathname === "/mobile" || pathname.startsWith("/mobile/");
+  const showChrome = !isAuthRoute && !isMobileRoute;
   const noPageScroll = pathname.startsWith("/ledger"); // ledger should not page-scroll
 
   async function onSignOut() {
@@ -232,9 +233,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     return list[0] ?? null;
   }, [bizIdFromUrl, businessesQ.data]);
 
-  const businessId = business?.id ?? bizIdFromUrl ?? "";
+  const businessId = showChrome ? business?.id ?? bizIdFromUrl ?? "" : "";
 
-  const accountsQ = useAccounts(businessId || null);
+  const accountsQ = useAccounts(showChrome ? businessId || null : null);
 
     // Activity cache must never leak across businesses.
   useEffect(() => {
@@ -319,7 +320,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   const effectiveAccountId = accountIdFromUrl ?? firstActiveAccountId ?? null;
   const currentAccountId = effectiveAccountId ?? "";
-  const issuesCountScopeKey = businessId && currentAccountId ? `${businessId}:${currentAccountId}` : "";
+  const issuesCountScopeKey = showChrome && businessId && currentAccountId ? `${businessId}:${currentAccountId}` : "";
   const [issuesCountReadyKey, setIssuesCountReadyKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -448,7 +449,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   // Sidebar Issues count (authoritative; server-derived)
   const issuesCountQ = useQuery({
     queryKey: issueCountKey(businessId, currentAccountId || "all", "OPEN"),
-    enabled: issuesCountReadyKey === issuesCountScopeKey && !!businessId && !!currentAccountId,
+    enabled: showChrome && issuesCountReadyKey === issuesCountScopeKey && !!businessId && !!currentAccountId,
     queryFn: () => getIssuesCount(businessId!, { status: "OPEN", accountId: currentAccountId! }),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
@@ -680,11 +681,13 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     }
   }
 
-  if (!showChrome) return <>{children}</>;
+  if (isAuthRoute) return <>{children}</>;
 
   if (!authChecked || !isAuthed) {
     return <AuthRedirectScreen />;
   }
+
+  if (isMobileRoute) return <>{children}</>;
 
   return (
     <div className="min-h-screen flex bg-background">

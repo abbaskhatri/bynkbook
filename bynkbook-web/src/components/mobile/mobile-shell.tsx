@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
+  FileText,
   Home,
   ReceiptText,
   Tags,
@@ -61,10 +61,10 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
       disabled: !businessId,
     },
     {
-      label: "Activity",
-      href: businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity",
-      icon: <Activity className="h-5 w-5" />,
-      active: false,
+      label: "Invoice",
+      href: withBusiness("/mobile/invoice", businessId, accountId),
+      icon: <FileText className="h-5 w-5" />,
+      active: pathname === "/mobile/invoice",
       disabled: !businessId,
     },
   ];
@@ -73,7 +73,7 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
     <div className="mx-auto min-h-[calc(100dvh-7rem)] w-full max-w-[480px] pb-24">
       {children}
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
         <div className="mx-auto grid max-w-[480px] grid-cols-5 gap-1">
           {items.map((item) => {
             const content = (
@@ -81,8 +81,8 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
                 className={cn(
                   "flex min-h-14 flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-medium",
                   item.active
-                    ? "bg-emerald-50 text-emerald-700"
-                    : "text-slate-600 hover:bg-slate-50",
+                    ? "bg-bb-nav-active-bg text-bb-nav-active-fg"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                   item.disabled ? "opacity-45" : ""
                 )}
               >

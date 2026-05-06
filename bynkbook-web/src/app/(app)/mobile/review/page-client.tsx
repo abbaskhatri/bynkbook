@@ -25,6 +25,7 @@ import { getIssuesCount } from "@/lib/api/issues";
 import { getCategories } from "@/lib/api/reports";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useIdleReady } from "@/lib/useIdleReady";
 
 function todayYmd() {
   const d = new Date();
@@ -107,6 +108,7 @@ export default function MobileReviewPageClient() {
   const range = useMemo(() => ({ from: firstOfMonthYmd(), to: todayYmd() }), []);
   const enabled = !!businessId;
   const accountEnabled = !!businessId && !!accountId;
+  const secondaryReady = useIdleReady(enabled, 1200);
 
   const categoriesQ = useQuery({
     queryKey: ["mobileReview", "categories", businessId, accountId, range.from, range.to],
@@ -136,7 +138,7 @@ export default function MobileReviewPageClient() {
   const apSummaryQ = useQuery({
     queryKey: ["mobileReview", "apSummary", businessId, range.to],
     queryFn: () => getVendorsApSummary({ businessId: businessId as string, asOf: range.to, limit: 200 }),
-    enabled,
+    enabled: secondaryReady,
     staleTime: 45_000,
     placeholderData: (prev) => prev,
   });
@@ -148,7 +150,7 @@ export default function MobileReviewPageClient() {
         limit: 1,
         accountId: accountId ?? undefined,
       }),
-    enabled,
+    enabled: secondaryReady,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -281,7 +283,15 @@ export default function MobileReviewPageClient() {
             disabled={!businessId}
           />
 
-          {apSummaryQ.isLoading ? (
+          {!secondaryReady ? (
+            <MobileTaskCard
+              title="Vendors and AP"
+              description="Open vendor AP balances after the primary review queues."
+              href={vendorsHref}
+              icon={<Users className="h-5 w-5" />}
+              disabled={!businessId}
+            />
+          ) : apSummaryQ.isLoading ? (
             <Skeleton className="h-[88px] w-full rounded-md" />
           ) : (
             <MobileTaskCard
@@ -296,7 +306,15 @@ export default function MobileReviewPageClient() {
             />
           )}
 
-          {activityQ.isLoading ? (
+          {!secondaryReady ? (
+            <MobileTaskCard
+              title="Recent activity"
+              description="Open the activity log for the latest workspace events."
+              href={activityHref}
+              icon={<Activity className="h-5 w-5" />}
+              disabled={!businessId}
+            />
+          ) : activityQ.isLoading ? (
             <Skeleton className="h-[88px] w-full rounded-md" />
           ) : (
             <MobileTaskCard
