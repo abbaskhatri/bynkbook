@@ -1285,21 +1285,28 @@ export default function LedgerPageClient() {
   // Paging
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [page, setPage] = useState(1);
+  const [loadedPageCount, setLoadedPageCount] = useState(1);
 
   const maxFetch = ENTRIES_API_MAX_LIMIT;
-  const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage * page), [rowsPerPage, page]);
+  const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage), [rowsPerPage]);
 
   const entriesKey = useMemo(
-    () => ["entries", selectedBusinessId, selectedAccountId, fetchLimit, showDeleted] as const,
-    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted]
+    () => ["entries", selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, "", "", loadedPageCount] as const,
+    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, loadedPageCount]
   );
 
   const entriesQ = useEntries({
     businessId: selectedBusinessId,
     accountId: selectedAccountId,
     limit: fetchLimit,
+    pageCount: loadedPageCount,
     includeDeleted: showDeleted,
   });
+
+  useEffect(() => {
+    setPage(1);
+    setLoadedPageCount(1);
+  }, [selectedBusinessId, selectedAccountId, showDeleted, rowsPerPage]);
 
   // ---------- Bundle F: Ledger anomalies (read-only) ----------
   const anomaliesQ = useQuery({
@@ -1601,7 +1608,11 @@ export default function LedgerPageClient() {
     return listDescAll.map((e) => {
       const isDeleted = !!e.deleted_at;
       const amt = toBigIntSafe(e.amount_cents);
-      const rowBal = balById.get(e.id);
+      const backendBal = (e as any).running_balance_cents;
+      const rowBal =
+        backendBal !== undefined && backendBal !== null && String(backendBal).trim() !== ""
+          ? toBigIntSafe(backendBal)
+          : balById.get(e.id);
       const cid = ((e as any).category_id ?? (e as any).categoryId ?? null) as string | null;
       const catName = ((e as any).category_name ?? (e as any).categoryName ?? null) as string | null;
       const vid = ((e as any).vendor_id ?? (e as any).vendorId ?? null) as string | null;
@@ -2056,22 +2067,50 @@ export default function LedgerPageClient() {
     return { income, expense, net, balanceCents: balCents, balanceStr: balStr };
   }, [pageRows]);
 
+  const entriesMeta = (entriesQ.data as any)?.meta as
+    | { totalCount?: number; hasMore?: boolean; nextCursor?: string | null; limit?: number }
+    | undefined;
   const loadedEntryCount = entriesQ.data?.length ?? 0;
-  const hasMoreOnServer = loadedEntryCount === fetchLimit && fetchLimit < maxFetch;
-  const loadedRowsHitApiCap = loadedEntryCount >= ENTRIES_API_MAX_LIMIT;
-  const canNext = endIdx < filteredRowsAll.length || hasMoreOnServer;
+  const totalEntryCount = typeof entriesMeta?.totalCount === "number" ? entriesMeta.totalCount : undefined;
+  const hasMoreOnServer = !!entriesMeta?.hasMore;
+  const canLoadMoreEntries = hasMoreOnServer && !entriesQ.isFetching;
+  const hasActiveLocalFilters =
+    !!debouncedPayee.trim() ||
+    filterType !== "ALL" ||
+    filterMethod !== "ALL" ||
+    filterCategory !== "ALL" ||
+    !!filterFrom ||
+    !!filterTo ||
+    !!filterAmountMin.trim() ||
+    !!filterAmountMax.trim() ||
+    !!filterAmountExact.trim();
+  const canNext = endIdx < filteredRowsAll.length;
   const canPrev = page > 1;
   const totalPages = Math.max(1, Math.ceil(filteredRowsAll.length / rowsPerPage));
-  const pageLabel =
-    hasMoreOnServer || loadedRowsHitApiCap
-      ? `Page ${page} of loaded ${totalPages}`
-      : undefined;
-  const loadedScopeNotice =
-    loadedRowsHitApiCap
-      ? `Ledger loaded the latest ${ENTRIES_API_MAX_LIMIT} entries for ${selectedAccount?.name ?? "the selected account"} because the entries API is capped. Filters, pages, and balances use loaded rows only.`
-      : hasMoreOnServer
-        ? `Ledger loaded ${loadedEntryCount} latest entries for ${selectedAccount?.name ?? "the selected account"}. More rows may exist; filters, pages, and balances use loaded rows only.`
-        : null;
+  const loadedCountLabel =
+    totalEntryCount !== undefined
+      ? `${loadedEntryCount} of ${totalEntryCount} loaded`
+      : `${loadedEntryCount} loaded`;
+  const pageLabel = hasMoreOnServer
+    ? `Page ${page} · ${loadedCountLabel}`
+    : `Page ${page} of ${totalPages} · ${loadedCountLabel}`;
+  const loadedScopeNotice = (() => {
+    if (hasMoreOnServer) {
+      return totalEntryCount !== undefined
+        ? `Showing ${loadedEntryCount} of ${totalEntryCount} entries. Load more to audit older rows.`
+        : `Showing latest ${loadedEntryCount} entries. Load more to audit older rows.`;
+    }
+
+    if (hasActiveLocalFilters && loadedEntryCount > filteredRowsAll.length) {
+      return `Filters are limiting this view to ${filteredRowsAll.length} of ${loadedEntryCount} loaded entries.`;
+    }
+
+    if (!hasMoreOnServer && loadedEntryCount === 0 && filteredRowsAll.length === 1 && filteredRowsAll[0]?.id === "opening_balance") {
+      return "Only Opening Balance is in this account after loading all entries.";
+    }
+
+    return null;
+  })();
 
   // Selection
   const checkboxClass =
@@ -5432,8 +5471,18 @@ export default function LedgerPageClient() {
         />
 
         {loadedScopeNotice ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            <span className="font-semibold">Loaded rows only.</span> {loadedScopeNotice}
+          <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
+            <span>{loadedScopeNotice}</span>
+            {hasMoreOnServer ? (
+              <button
+                type="button"
+                className="h-6 rounded-md border border-amber-300 bg-white px-2 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+                disabled={!canLoadMoreEntries}
+                onClick={() => setLoadedPageCount((n) => n + 1)}
+              >
+                {entriesQ.isFetching ? "Loading..." : "Load more entries"}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -5476,7 +5525,11 @@ export default function LedgerPageClient() {
                   setPage={setPage}
                   totalPages={totalPages}
                   pageLabel={pageLabel}
-                  paginationNote={loadedScopeNotice}
+                  paginationNote={undefined}
+                  loadMoreText={hasMoreOnServer ? "Load more entries" : undefined}
+                  canLoadMore={canLoadMoreEntries}
+                  isLoadingMore={entriesQ.isFetching}
+                  onLoadMore={() => setLoadedPageCount((n) => n + 1)}
                   canPrev={canPrev}
                   canNext={canNext}
                   incomeText={

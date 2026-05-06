@@ -40,6 +40,48 @@ function centsToString(value: any): string | null {
   return s || null;
 }
 
+function isOpeningLikePayee(payee: any): boolean {
+  const x = String(payee ?? "").trim().toLowerCase();
+  return x === "opening balance" || x === "opening balance (estimated)" || x.startsWith("opening balance");
+}
+
+function parseEntriesCursor(raw: any): { date: Date; created_at: Date; id: string } | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+
+  try {
+    const jsonText = Buffer.from(s, "base64url").toString("utf8");
+    const obj = JSON.parse(jsonText);
+    const date = new Date(String(obj?.date ?? ""));
+    const created_at = new Date(String(obj?.created_at ?? ""));
+    const id = String(obj?.id ?? "").trim();
+    if (!id || Number.isNaN(date.getTime()) || Number.isNaN(created_at.getTime())) return null;
+    return { date, created_at, id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeEntriesCursor(row: any): string | null {
+  const id = String(row?.id ?? "").trim();
+  if (!id) return null;
+  return Buffer.from(
+    JSON.stringify({
+      date: new Date(row.date).toISOString(),
+      created_at: new Date(row.created_at).toISOString(),
+      id,
+    })
+  ).toString("base64url");
+}
+
+function entrySortKey(row: any) {
+  return [
+    new Date(row?.date).getTime(),
+    new Date(row?.created_at).getTime(),
+    String(row?.id ?? ""),
+  ] as const;
+}
+
 async function requireMembership(prisma: any, businessId: string, userId: string) {
   const row = await prisma.userBusinessRole.findFirst({
     where: { business_id: businessId, user_id: userId },
@@ -859,31 +901,103 @@ export async function handler(event: any) {
     const includeDeleted = q.include_deleted === "true";
     const limitRaw = q.limit ?? "200";
     const limit = Math.max(1, Math.min(200, Number(limitRaw) || 200));
+    const cursor = parseEntriesCursor(q.cursor);
 
-    const rows = await prisma.entry.findMany({
-      where: {
-        business_id: biz,
-        account_id: acct,
-        ...(includeDeleted ? {} : { deleted_at: null }),
+    const dateWhere = {
+      ...(q.date_from ? { gte: new Date(String(q.date_from).trim() + "T00:00:00Z") } : {}),
+      ...(q.date_to ? { lte: new Date(String(q.date_to).trim() + "T00:00:00Z") } : {}),
+    };
 
-        // Optional filters (used by Vendors/AP payment picker; always index-friendly)
-        ...(q.type
-          ? { type: { in: String(q.type).split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) } }
-          : {}),
-        ...(q.vendorId ? { vendor_id: String(q.vendorId).trim() } : {}),
-        ...(q.date_from ? { date: { gte: new Date(String(q.date_from).trim() + "T00:00:00Z") } } : {}),
-        ...(q.date_to
-          ? {
-              date: {
-                ...(q.date_from ? { gte: new Date(String(q.date_from).trim() + "T00:00:00Z") } : {}),
-                lte: new Date(String(q.date_to).trim() + "T00:00:00Z"),
-              },
-            }
-          : {}),
-      },
-      orderBy: [{ date: "desc" }, { created_at: "desc" }],
-      take: limit,
+    const search = String(q.search ?? q.q ?? q.payee ?? "").trim();
+    const categoryId = String(q.category_id ?? q.categoryId ?? "").trim();
+    const statusFilter = String(q.status ?? "").trim();
+    const statusValues = statusFilter
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+
+    const whereBase: any = {
+      business_id: biz,
+      account_id: acct,
+      ...(includeDeleted ? {} : { deleted_at: null }),
+
+      // Optional filters (used by Vendors/AP payment picker and Ledger; always scoped)
+      ...(q.type
+        ? { type: { in: String(q.type).split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) } }
+        : {}),
+      ...(q.vendorId ? { vendor_id: String(q.vendorId).trim() } : {}),
+      ...(categoryId ? { category_id: categoryId } : {}),
+      ...(statusValues.length
+        ? { status: { in: statusValues } }
+        : {}),
+      ...(Object.keys(dateWhere).length ? { date: dateWhere } : {}),
+      ...(search
+        ? {
+            OR: [
+              { payee: { contains: search, mode: "insensitive" } },
+              { memo: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const where = cursor
+      ? {
+          AND: [
+            whereBase,
+            {
+              OR: [
+                { date: { lt: cursor.date } },
+                { date: cursor.date, created_at: { lt: cursor.created_at } },
+                { date: cursor.date, created_at: cursor.created_at, id: { lt: cursor.id } },
+              ],
+            },
+          ],
+        }
+      : whereBase;
+
+    const [rowsPlusOne, totalCount, accountForBalance, allActiveRows] = await Promise.all([
+      prisma.entry.findMany({
+        where,
+        orderBy: [{ date: "desc" }, { created_at: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      }),
+      prisma.entry.count({ where: whereBase }),
+      prisma.account.findFirst({
+        where: { id: acct, business_id: biz },
+        select: { opening_balance_cents: true },
+      }),
+      prisma.entry.findMany({
+        where: {
+          business_id: biz,
+          account_id: acct,
+          deleted_at: null,
+        },
+        select: { id: true, date: true, created_at: true, amount_cents: true, payee: true },
+        orderBy: [{ date: "asc" }, { created_at: "asc" }, { id: "asc" }],
+      }),
+    ]);
+
+    const hasMore = rowsPlusOne.length > limit;
+    const rows = hasMore ? rowsPlusOne.slice(0, limit) : rowsPlusOne;
+    const nextCursor = hasMore && rows.length ? encodeEntriesCursor(rows[rows.length - 1]) : null;
+
+    const hasRealOpening = allActiveRows.some((r: any) => isOpeningLikePayee(r?.payee));
+    let running = hasRealOpening ? 0n : BigInt(String(accountForBalance?.opening_balance_cents ?? 0));
+    const runningBalanceByEntryId = new Map<string, bigint>();
+
+    const activeSorted = allActiveRows.slice().sort((a: any, b: any) => {
+      const ak = entrySortKey(a);
+      const bk = entrySortKey(b);
+      if (ak[0] !== bk[0]) return ak[0] - bk[0];
+      if (ak[1] !== bk[1]) return ak[1] - bk[1];
+      return ak[2] < bk[2] ? -1 : ak[2] > bk[2] ? 1 : 0;
     });
+
+    for (const row of activeSorted) {
+      running += BigInt(String(row?.amount_cents ?? 0));
+      runningBalanceByEntryId.set(String(row.id), running);
+    }
 
     // Durable transfer display fields (no frontend session maps):
     // IMPORTANT: derive other account from the transfer record (not from entry legs),
@@ -987,52 +1101,60 @@ export async function handler(event: any) {
       for (const v of vendors) vendorNameById.set(String(v.id), String(v.name));
     }
 
-    return json(200, {
-      ok: true,
-      entries: rows.map((e: any) => {
-        const tid = e.transfer_id ? String(e.transfer_id) : null;
-        const transferDisplay = tid ? transferDisplayById.get(tid) : null;
+    const entriesOut = rows.map((e: any) => {
+      const tid = e.transfer_id ? String(e.transfer_id) : null;
+      const transferDisplay = tid ? transferDisplayById.get(tid) : null;
 
-        return {
-          id: e.id,
-          business_id: e.business_id,
-          account_id: e.account_id,
-          date: e.date,
-          payee: e.payee,
-          memo: e.memo,
-          amount_cents: String(e.amount_cents),
-          type: e.type,
-          method: e.method,
-          status: e.status,
+      return {
+        id: e.id,
+        business_id: e.business_id,
+        account_id: e.account_id,
+        date: e.date,
+        payee: e.payee,
+        memo: e.memo,
+        amount_cents: String(e.amount_cents),
+        type: e.type,
+        method: e.method,
+        status: e.status,
 
-          // Payment marker
-          entry_kind: (e as any).entry_kind ?? "GENERAL",
+        // Payment marker
+        entry_kind: (e as any).entry_kind ?? "GENERAL",
 
-          // Categories
-          category_id: e.category_id,
-          category_name: e.category_id
-            ? categoryNameById.get(String(e.category_id)) ?? null
+        // Categories
+        category_id: e.category_id,
+        category_name: e.category_id
+          ? categoryNameById.get(String(e.category_id)) ?? null
+          : null,
+
+        // Vendor link (persisted)
+        vendor_id: (e as any).vendor_id ?? null,
+        vendor_name: (e as any).vendor_id ? (vendorNameById.get(String((e as any).vendor_id)) ?? null) : null,
+
+        // Transfers (DURABLE, BACKEND-DERIVED)
+        transfer_id: e.transfer_id,
+        transfer_other_account_name: transferDisplay?.other_account_name ?? null,
+        transfer_other_account_id: transferDisplay?.other_account_id ?? null,
+        transfer_direction:
+          e.transfer_id
+            ? (BigInt(String(e.amount_cents)) < 0n ? "OUT" : "IN")
             : null,
 
-          // Vendor link (persisted)
-          vendor_id: (e as any).vendor_id ?? null,
-          vendor_name: (e as any).vendor_id ? (vendorNameById.get(String((e as any).vendor_id)) ?? null) : null,
+        is_adjustment: e.is_adjustment,
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+        deleted_at: e.deleted_at,
+        running_balance_cents: e.deleted_at ? null : centsToString(runningBalanceByEntryId.get(String(e.id))),
+      };
+    });
 
-          // Transfers (DURABLE, BACKEND-DERIVED)
-          transfer_id: e.transfer_id,
-          transfer_other_account_name: transferDisplay?.other_account_name ?? null,
-          transfer_other_account_id: transferDisplay?.other_account_id ?? null,
-          transfer_direction:
-            e.transfer_id
-              ? (BigInt(String(e.amount_cents)) < 0n ? "OUT" : "IN")
-              : null,
-
-          is_adjustment: e.is_adjustment,
-          created_at: e.created_at,
-          updated_at: e.updated_at,
-          deleted_at: e.deleted_at,
-        };
-      })
+    return json(200, {
+      ok: true,
+      entries: entriesOut,
+      items: entriesOut,
+      totalCount,
+      hasMore,
+      nextCursor,
+      limit,
     });
   }
 
