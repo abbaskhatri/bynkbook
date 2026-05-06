@@ -455,6 +455,7 @@ const matchGroupsHandler = {
 
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/match-groups", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/match-groups/revert-preview", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/placement-summary", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/batch", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/match-groups/revert", matchGroupsHandler, { auth: { jwt: { authorizer: authorizer.id } } });

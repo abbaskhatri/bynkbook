@@ -76,6 +76,21 @@ export type MatchGroupRevertPreview = {
   actions: Array<{ type: string; [key: string]: unknown }>;
 };
 
+export type MatchGroupPlacementSummary = {
+  ok: true;
+  activeBankLinks: Array<{
+    bank_transaction_id: string;
+    match_group_id: string;
+    matched_amount_cents: string;
+  }>;
+  activeEntryLinks: Array<{
+    entry_id: string;
+    match_group_id: string;
+    matched_amount_cents: string;
+  }>;
+  partial: boolean;
+};
+
 export async function listMatchGroups(args: {
   businessId: string;
   accountId: string;
@@ -85,6 +100,27 @@ export async function listMatchGroups(args: {
 
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/match-groups?status=${encodeURIComponent(status)}`, {
     method: "GET",
+  });
+}
+
+export async function getMatchGroupPlacementSummary(args: {
+  businessId: string;
+  accountId: string;
+  bankTransactionIds?: string[];
+  entryIds?: string[];
+  from?: string;
+  to?: string;
+}): Promise<MatchGroupPlacementSummary> {
+  const { businessId, accountId, bankTransactionIds, entryIds, from, to } = args;
+
+  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/match-groups/placement-summary`, {
+    method: "POST",
+    body: JSON.stringify({
+      bankTransactionIds: bankTransactionIds ?? [],
+      entryIds: entryIds ?? [],
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+    }),
   });
 }
 
