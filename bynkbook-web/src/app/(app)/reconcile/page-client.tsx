@@ -61,6 +61,13 @@ import { aiSuggestReconcileBank, aiSuggestReconcileEntry } from "@/lib/api/ai";
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
 
+type BankTab = "unmatched" | "matched";
+type RefreshBankAndMatchesOptions = {
+  preserveOnEmpty?: boolean;
+  skipLegacyMatches?: boolean;
+  statuses?: BankTab[];
+};
+
 const PlaidConnectButton = dynamic(
   () => import("@/components/plaid/PlaidConnectButton").then((mod) => mod.PlaidConnectButton),
   { loading: () => null }
@@ -733,6 +740,18 @@ function mergeBankTransactions(...lists: any[][]): any[] {
   return Array.from(m.values());
 }
 
+function tagBankTransactionsForStatus(items: any[], status: BankTab): any[] {
+  return (items ?? []).map((row: any) => ({
+    ...row,
+    __reconcile_loaded_status: status,
+  }));
+}
+
+function replaceBankTransactionsForStatus(prev: any[], status: BankTab, nextItems: any[]): any[] {
+  const kept = (prev ?? []).filter((row: any) => row?.__reconcile_loaded_status !== status);
+  return mergeBankTransactions(kept, tagBankTransactionsForStatus(nextItems, status));
+}
+
 function compareEntryDateAsc(a: any, b: any) {
   const da = ymdToTime(String(a?.date ?? ""));
   const db = ymdToTime(String(b?.date ?? ""));
@@ -1095,19 +1114,43 @@ export default function ReconcilePageClient() {
 
   // Tabs (Phase 4D polish)
   const [expectedTab, setExpectedTab] = useState<"expected" | "matched">("expected");
-  const [bankTab, setBankTab] = useState<"unmatched" | "matched">("unmatched");
+  const [bankTab, setBankTab] = useState<BankTab>("unmatched");
 
   // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
   const PAGE_CHUNK = 200;
   const ENTRIES_API_LIMIT = 200;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
-  const BANK_TRANSACTION_STATUSES: BankTransactionStatusFilter[] = ["unmatched", "matched"];
 
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
   const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
 
   const [bankUnmatchedVisibleN, setBankUnmatchedVisibleN] = useState(PAGE_CHUNK);
   const [bankMatchedVisibleN, setBankMatchedVisibleN] = useState(PAGE_CHUNK);
+  const bankScopeKey =
+    selectedBusinessId && selectedAccountId
+      ? `${selectedBusinessId}:${selectedAccountId}:${from || ""}:${to || ""}`
+      : "";
+  const [bankLoadedScopeByStatus, setBankLoadedScopeByStatus] = useState<Record<BankTab, string>>({
+    unmatched: "",
+    matched: "",
+  });
+  const [bankLoadingByStatus, setBankLoadingByStatus] = useState<Record<BankTab, boolean>>({
+    unmatched: false,
+    matched: false,
+  });
+  const bankStatusLoaded = useMemo(
+    () => ({
+      unmatched: !!bankScopeKey && bankLoadedScopeByStatus.unmatched === bankScopeKey,
+      matched: !!bankScopeKey && bankLoadedScopeByStatus.matched === bankScopeKey,
+    }),
+    [bankScopeKey, bankLoadedScopeByStatus]
+  );
+  const loadedBankStatuses = useMemo(() => {
+    const statuses: BankTab[] = [];
+    if (bankStatusLoaded.unmatched) statuses.push("unmatched");
+    if (bankStatusLoaded.matched) statuses.push("matched");
+    return statuses;
+  }, [bankStatusLoaded]);
   const [bankNextCursorByStatus, setBankNextCursorByStatus] = useState<Record<BankTransactionStatusFilter, string | null>>({
     all: null,
     unmatched: null,
@@ -1369,7 +1412,7 @@ export default function ReconcilePageClient() {
   // -------------------------
   const refreshEpochRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<any> | null>(null);
-  const refreshQueuedOptsRef = useRef<{ preserveOnEmpty?: boolean } | null>(null);
+  const refreshQueuedOptsRef = useRef<RefreshBankAndMatchesOptions | null>(null);
 
   function newestPostedDate(items: any[]): string {
     let max = "";
@@ -1380,7 +1423,7 @@ export default function ReconcilePageClient() {
     return max;
   }
 
-  async function refreshBankAndMatches(opts?: { preserveOnEmpty?: boolean; skipLegacyMatches?: boolean }) {
+  async function refreshBankAndMatches(opts?: RefreshBankAndMatchesOptions) {
     if (!selectedBusinessId || !selectedAccountId) {
       return { bank: [] as any[], matches: [] as any[], matchGroups: [] as any[] };
     }
@@ -1402,9 +1445,24 @@ export default function ReconcilePageClient() {
     const run = (async () => {
       const bankPromise = (async () => {
         if (myEpoch === refreshEpochRef.current) setBankTxLoading(true);
+        const statusesToLoad = Array.from(
+          new Set<BankTab>(
+            opts?.statuses?.length
+              ? opts.statuses
+              : loadedBankStatuses.length
+                ? loadedBankStatuses
+                : [bankTab]
+          )
+        );
         try {
+          setBankLoadingByStatus((prev) => {
+            const next = { ...prev };
+            for (const status of statusesToLoad) next[status] = true;
+            return next;
+          });
+
           const results = await Promise.all(
-            BANK_TRANSACTION_STATUSES.map((status) =>
+            statusesToLoad.map((status) =>
               listBankTransactions({
                 businessId: selectedBusinessId,
                 accountId: selectedAccountId,
@@ -1416,26 +1474,35 @@ export default function ReconcilePageClient() {
             )
           );
 
-          const byStatus: Record<BankTransactionStatusFilter, any[]> = {
-            all: [],
-            unmatched: results[0]?.items ?? [],
-            matched: results[1]?.items ?? [],
-          };
-          const next = mergeBankTransactions(byStatus.unmatched, byStatus.matched);
+          const nextByStatus = new Map<BankTab, any[]>();
+          statusesToLoad.forEach((status, index) => {
+            nextByStatus.set(status, results[index]?.items ?? []);
+          });
+          const next = statusesToLoad.flatMap((status) => nextByStatus.get(status) ?? []);
           bankItems = next;
 
           if (myEpoch === refreshEpochRef.current) {
             setBankTx((prev) => {
-              if (opts?.preserveOnEmpty && next.length === 0 && prev.length > 0) return prev;
-              return next;
+              let merged = prev;
+              for (const status of statusesToLoad) {
+                const statusItems = nextByStatus.get(status) ?? [];
+                const previousStatusCount = merged.filter((row: any) => row?.__reconcile_loaded_status === status).length;
+                if (opts?.preserveOnEmpty && statusItems.length === 0 && previousStatusCount > 0) continue;
+                merged = replaceBankTransactionsForStatus(merged, status, statusItems);
+              }
+              return merged;
             });
             setBankNextCursorByStatus((prev) => {
-              if (opts?.preserveOnEmpty && next.length === 0 && bankTxLenRef.current > 0) return prev;
-              return {
-                all: null,
-                unmatched: results[0]?.nextCursor ?? null,
-                matched: results[1]?.nextCursor ?? null,
-              };
+              const nextCursors = { ...prev, all: null };
+              statusesToLoad.forEach((status, index) => {
+                nextCursors[status] = results[index]?.nextCursor ?? null;
+              });
+              return nextCursors;
+            });
+            setBankLoadedScopeByStatus((prev) => {
+              const nextScopes = { ...prev };
+              for (const status of statusesToLoad) nextScopes[status] = bankScopeKey;
+              return nextScopes;
             });
           }
         } catch {
@@ -1443,9 +1510,15 @@ export default function ReconcilePageClient() {
             setBankTx((prev) => (opts?.preserveOnEmpty ? prev : []));
             if (!opts?.preserveOnEmpty) {
               setBankNextCursorByStatus({ all: null, unmatched: null, matched: null });
+              setBankLoadedScopeByStatus({ unmatched: "", matched: "" });
             }
           }
         } finally {
+          setBankLoadingByStatus((prev) => {
+            const next = { ...prev };
+            for (const status of statusesToLoad) next[status] = false;
+            return next;
+          });
           if (myEpoch === refreshEpochRef.current) {
             setBankTxLoading(false);
             setBankTruthHydrated(true);
@@ -1538,7 +1611,7 @@ export default function ReconcilePageClient() {
   async function loadMoreBankTransactions() {
     if (!selectedBusinessId || !selectedAccountId) return;
 
-    const status: BankTransactionStatusFilter = bankTab === "matched" ? "matched" : "unmatched";
+    const status: BankTab = bankTab === "matched" ? "matched" : "unmatched";
     const cursor = bankNextCursorByStatus[status];
     if (!cursor) return;
 
@@ -1555,7 +1628,7 @@ export default function ReconcilePageClient() {
       });
 
       const nextItems = res?.items ?? [];
-      setBankTx((prev) => mergeBankTransactions(prev, nextItems));
+      setBankTx((prev) => mergeBankTransactions(prev, tagBankTransactionsForStatus(nextItems, status)));
       setBankNextCursorByStatus((prev) => ({
         ...prev,
         [status]: res?.nextCursor ?? null,
@@ -1855,9 +1928,14 @@ export default function ReconcilePageClient() {
     setBankTruthHydrated(false);
     setMatchGroupsTruthHydrated(false);
     setPlacementSummaryPartial(false);
+    setBankTx([]);
+    setBankTruthSnapshot(null);
     setMatchGroups([]);
     setAllMatchGroups([]);
     setAllMatchGroupsLoadedScope("");
+    setBankLoadedScopeByStatus({ unmatched: "", matched: "" });
+    setBankLoadingByStatus({ unmatched: false, matched: false });
+    setBankNextCursorByStatus({ all: null, unmatched: null, matched: null });
 
     // One targeted refresh on mount / scope change (prevents “needs manual refresh” after navigation)
     void qc.invalidateQueries({
@@ -1868,14 +1946,28 @@ export default function ReconcilePageClient() {
         q.queryKey[2] === selectedAccountId,
     });
 
-    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true });
+    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["unmatched"] });
   }, [selectedBusinessId, selectedAccountId, from, to]);
+
+  useEffect(() => {
+    if (bankTab !== "matched") return;
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (bankStatusLoaded.matched || bankLoadingByStatus.matched) return;
+    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
+  }, [bankTab, selectedBusinessId, selectedAccountId, bankStatusLoaded.matched, bankLoadingByStatus.matched]);
 
   useEffect(() => {
     const needsAllMatchGroups = openReconciliationHistory || openIssuesHub || openIssuesList || openExportHub;
     if (!needsAllMatchGroups) return;
     void loadAllMatchGroups();
   }, [openReconciliationHistory, openIssuesHub, openIssuesList, openExportHub, loadAllMatchGroups]);
+
+  useEffect(() => {
+    if (!openExportHub) return;
+    if (bankTab !== "matched") return;
+    if (bankStatusLoaded.matched || bankLoadingByStatus.matched) return;
+    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
+  }, [openExportHub, bankTab, bankStatusLoaded.matched, bankLoadingByStatus.matched]);
 
   // Phase 6B: Load snapshot list when dialog opens
   useEffect(() => {
@@ -2517,12 +2609,10 @@ const isReconcileExemptEntry = (e: any) => {
     amountAbsCents: bigint; // positive
   };
 
-  const reconAuditAll = useMemo(() => {
+  const buildReconAuditEvents = useCallback((groups: any[]) => {
     const out: ReconAuditEvent[] = [];
 
-    if (!allMatchGroupsHydrated) return out;
-
-    for (const g of allMatchGroups ?? []) {
+    for (const g of groups ?? []) {
       if (!g?.id) continue;
 
       const gid = String(g.id);
@@ -2569,7 +2659,12 @@ const isReconcileExemptEntry = (e: any) => {
     });
 
     return out.slice(0, 500);
-  }, [allMatchGroups, allMatchGroupsHydrated]);
+  }, []);
+
+  const reconAuditAll = useMemo(() => {
+    if (!allMatchGroupsHydrated) return [] as ReconAuditEvent[];
+    return buildReconAuditEvents(allMatchGroups);
+  }, [allMatchGroups, allMatchGroupsHydrated, buildReconAuditEvents]);
 
   const reconAuditCounts = useMemo(() => {
     let matchN = 0;
@@ -2925,8 +3020,12 @@ const isReconcileExemptEntry = (e: any) => {
     matchGroupsTruthHydrated &&
     !matchGroupsLoading;
 
+  const activeBankStatusLoaded = bankStatusLoaded[bankTab];
+  const activeBankStatusLoading = bankLoadingByStatus[bankTab];
+
   const bankTruthReady =
     bankTruthHydrated &&
+    activeBankStatusLoaded &&
     matchGroupsTruthHydrated &&
     !bankTxLoading &&
     !matchGroupsLoading;
@@ -2970,18 +3069,26 @@ const isReconcileExemptEntry = (e: any) => {
     ? matchedCount
     : (entriesTruthSnapshot?.matchedCount ?? 0);
 
-  const displayBankUnmatchedList = bankTruthReady
+  const displayBankUnmatchedList = bankStatusLoaded.unmatched && bankTruthReady
     ? bankUnmatchedList
-    : (bankTruthSnapshot?.unmatchedList ?? []);
-  const displayBankMatchedList = bankTruthReady
+    : bankStatusLoaded.unmatched
+      ? (bankTruthSnapshot?.unmatchedList ?? [])
+      : [];
+  const displayBankMatchedList = bankStatusLoaded.matched && bankTruthReady
     ? bankMatchedList
-    : (bankTruthSnapshot?.matchedList ?? []);
-  const displayBankUnmatchedCount = bankTruthReady
+    : bankStatusLoaded.matched
+      ? (bankTruthSnapshot?.matchedList ?? [])
+      : [];
+  const displayBankUnmatchedCount = bankStatusLoaded.unmatched && bankTruthReady
     ? bankUnmatchedCount
-    : (bankTruthSnapshot?.unmatchedCount ?? 0);
-  const displayBankMatchedCount = bankTruthReady
+    : bankStatusLoaded.unmatched
+      ? (bankTruthSnapshot?.unmatchedCount ?? 0)
+      : 0;
+  const displayBankMatchedCount = bankStatusLoaded.matched && bankTruthReady
     ? bankMatchedCount
-    : (bankTruthSnapshot?.matchedCount ?? 0);
+    : bankStatusLoaded.matched
+      ? (bankTruthSnapshot?.matchedCount ?? 0)
+      : 0;
 
 const displayEntriesActiveList = useMemo(() => {
   return expectedTab === "expected"
@@ -2999,10 +3106,17 @@ const displayBankActiveList = useMemo(() => {
   const bankPanelHasRows = displayBankActiveList.length > 0;
   const bankPanelHasSettledSnapshot = !!bankTruthSnapshot && (bankTruthHydrated || matchGroupsTruthHydrated);
   const bankPanelShowInitialLoading =
+    (!activeBankStatusLoaded && activeBankStatusLoading) ||
     bankTruthBlocking ||
     (!bankTruthReady && !bankPanelHasRows && !bankPanelHasSettledSnapshot) ||
     (bankUpdating && !bankPanelHasRows && !bankPanelHasSettledSnapshot);
+  const bankPanelShowDeferredLoad =
+    !activeBankStatusLoaded &&
+    !activeBankStatusLoading &&
+    !bankPanelHasRows &&
+    bankTab === "matched";
   const bankPanelShowEmpty =
+    !bankPanelShowDeferredLoad &&
     (bankTruthReady || bankPanelHasSettledSnapshot) &&
     !bankPanelHasRows &&
     !bankTruthBlocking;
@@ -3034,6 +3148,17 @@ const displayBankActiveList = useMemo(() => {
     return { unmatchedN, partialN: 0, matchedN, remainingAbsTotal };
   }, [bankTxSorted, remainingAbsByBankTxnId]);
 
+  const bankMatchedLoadedLabel = bankStatusLoaded.matched
+    ? String(bankStateSummary.matchedN)
+    : bankLoadingByStatus.matched
+      ? "loading"
+      : "not loaded";
+  const bankLoadedStateCopy = bankStatusLoaded.matched
+    ? "Loaded: unmatched and matched rows. Search filters loaded rows."
+    : bankLoadingByStatus.matched
+      ? "Loaded: unmatched rows. Matched rows are loading."
+      : "Loaded: unmatched rows. Matched rows load when opened.";
+
   const entryStateSummary = useMemo(() => {
     return {
       expectedN: displayExpectedCount,
@@ -3055,8 +3180,8 @@ const displayBankActiveList = useMemo(() => {
   const issuesTotalLabel = allMatchGroupsHydrated
     ? String(issuesCounts.total)
     : allMatchGroupsLoading
-      ? "Loading"
-      : String(issuesCounts.notInView);
+      ? "loading"
+      : `${issuesCounts.notInView} loaded`;
   const issuesVoidHeavyLabel = allMatchGroupsHydrated
     ? String(issuesCounts.voidHeavy)
     : allMatchGroupsLoading
@@ -3200,7 +3325,7 @@ const displayBankActiveList = useMemo(() => {
       <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-x-6 gap-y-2 text-xs">
           <div className="leading-tight">
-            <div className="text-bb-text-muted">Remaining to reconcile</div>
+            <div className="text-bb-text-muted">Remaining loaded</div>
             <div className="font-semibold text-bb-text tabular-nums inline-flex items-center gap-2">
               {formatUsdFromCents(bankStateSummary.remainingAbsTotal)}
               {refreshBusy ? <TinySpinner /> : null}
@@ -3210,7 +3335,7 @@ const displayBankActiveList = useMemo(() => {
           <div className="leading-tight">
             <div className="text-bb-text-muted">Bank status</div>
             <div className="font-semibold text-bb-text">
-              U {bankStateSummary.unmatchedN} • P {bankStateSummary.partialN} • M {bankStateSummary.matchedN}
+              U {bankStateSummary.unmatchedN} • P {bankStateSummary.partialN} • M {bankMatchedLoadedLabel}
             </div>
           </div>
 
@@ -4443,10 +4568,20 @@ const displayBankActiveList = useMemo(() => {
                 type="button"
                 className={`h-7 px-3 text-xs rounded-md border ${bankTab === "matched" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
                   }`}
-                onClick={() => setBankTab("matched")}
+                onClick={() => {
+                  setBankTab("matched");
+                  if (!bankStatusLoaded.matched && !bankLoadingByStatus.matched) {
+                    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
+                  }
+                }}
               >
-                Matched ({displayBankMatchedCount})
+                {bankStatusLoaded.matched
+                  ? `Matched (${displayBankMatchedCount})`
+                  : bankLoadingByStatus.matched
+                    ? "Matched (loading)"
+                    : "Matched"}
               </button>
+              <span className="text-[11px] text-bb-text-muted">{bankLoadedStateCopy}</span>
             </div>
           </div>
 
@@ -4466,6 +4601,19 @@ const displayBankActiveList = useMemo(() => {
                       : "No matched bank transactions in this period"
                   }
                 />
+              ) : bankPanelShowDeferredLoad ? (
+                <div className="h-full min-h-[240px] flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="text-xs text-bb-text-muted">Matched bank transactions are not loaded yet.</div>
+                    <button
+                      type="button"
+                      className="mt-3 h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
+                      onClick={() => void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] })}
+                    >
+                      Load matched transactions
+                    </button>
+                  </div>
+                </div>
               ) : bankPanelShowRows ? (
                 <>
                   <table className="w-full min-w-[640px] table-fixed border-collapse">
@@ -4530,8 +4678,14 @@ const displayBankActiveList = useMemo(() => {
 
                       const deEmphasis = bankTab === "matched" ? " text-bb-text-muted" : "";
 
-                      const openAuditForBankTxn = () => {
-                        const ev0 = (reconAuditAll ?? []).find((e: any) =>
+                      const openAuditForBankTxn = async () => {
+                        let auditEvents = reconAuditAll ?? [];
+                        if (!allMatchGroupsHydrated) {
+                          const groups = await loadAllMatchGroups();
+                          auditEvents = buildReconAuditEvents(groups);
+                        }
+
+                        const ev0 = (auditEvents ?? []).find((e: any) =>
                           Array.isArray(e.bankTxnIds) && e.bankTxnIds.some((id: any) => String(id) === String(t.id))
                         );
                         if (ev0) {
@@ -4554,7 +4708,7 @@ const displayBankActiveList = useMemo(() => {
                             rowTone +
                             (bankTab === "matched" ? " opacity-[0.96] cursor-pointer hover:bg-bb-table-row-hover" : "")
                           }
-                          onClick={bankTab === "matched" && isMatched ? openAuditForBankTxn : undefined}
+                          onClick={bankTab === "matched" && isMatched ? () => void openAuditForBankTxn() : undefined}
                           title={bankTab === "matched" ? "View audit detail" : undefined}
                         >
                           <td className={tdClass}>
@@ -4631,7 +4785,7 @@ const displayBankActiveList = useMemo(() => {
                                   className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                   onClick={(ev) => {
                                     ev.stopPropagation();
-                                    openAuditForBankTxn();
+                                    void openAuditForBankTxn();
                                   }}
                                   title="Revert (view audit)"
                                   aria-label="Revert (view audit)"
@@ -4730,7 +4884,7 @@ const displayBankActiveList = useMemo(() => {
                                       className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                       onClick={(ev) => {
                                         ev.stopPropagation();
-                                        openAuditForBankTxn();
+                                        void openAuditForBankTxn();
                                       }}
                                       title="Revert (view audit)"
                                       aria-label="Revert (view audit)"
@@ -6183,6 +6337,9 @@ const displayBankActiveList = useMemo(() => {
           <div className="mt-2 max-h-[64vh] overflow-y-auto overflow-x-auto">
             {matchesLoading || allMatchGroupsLoading || !allMatchGroupsHydrated ? (
               <div className="p-2">
+                <div className="mb-2 text-[11px] text-bb-text-muted">
+                  Reconciliation history loads when opened.
+                </div>
                 <Skeleton className="h-24 w-full" />
               </div>
             ) : reconAuditVisible.length === 0 ? (
@@ -6731,7 +6888,11 @@ const displayBankActiveList = useMemo(() => {
           </div>
 
           <div className="mt-2 text-[11px] text-bb-text-muted">
-            Read-only diagnostics derived from current view.
+            {allMatchGroupsHydrated
+              ? "Read-only diagnostics for the loaded history."
+              : allMatchGroupsLoading
+                ? "Loading full issue diagnostics."
+                : "Current-view diagnostics shown; full diagnostics load when opened."}
           </div>
         </div>
       </AppDialog>
@@ -6902,11 +7063,14 @@ const displayBankActiveList = useMemo(() => {
                 className={["h-20 w-full rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2", ringFocus].join(" ")}
                 disabled={
                   !canWriteReconcileEffective ||
+                  (bankTab === "matched" && (!bankStatusLoaded.matched || bankLoadingByStatus.matched)) ||
                   (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
                 }
                 title={
                   !canWriteReconcileEffective
                     ? (reconcileWriteReason ?? noPermTitle)
+                    : bankTab === "matched" && (!bankStatusLoaded.matched || bankLoadingByStatus.matched)
+                      ? "Matched transactions are loading"
                     : (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length === 0
                       ? "No bank transactions to export"
                       : "Export bank transactions (CSV)"
@@ -6919,7 +7083,11 @@ const displayBankActiveList = useMemo(() => {
                 <Download className="h-6 w-6 text-bb-text" />
                 <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Bank txns</span>
                 <span className="text-[11px] text-bb-text-muted">
-                  {(bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length}
+                  {bankTab === "matched" && !bankStatusLoaded.matched
+                    ? bankLoadingByStatus.matched
+                      ? "Loading"
+                      : "Not loaded"
+                    : (bankTab === "unmatched" ? bankUnmatchedList : bankMatchedList).length}
                 </span>
               </button>
             </HintWrap>
@@ -6929,18 +7097,26 @@ const displayBankActiveList = useMemo(() => {
             <button
               type="button"
               className={["h-20 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1.5 px-3 py-2 sm:col-span-2", ringFocus].join(" ")}
-              disabled={reconAuditVisible.length === 0}
-              title={reconAuditVisible.length === 0 ? "No audit events to export" : "Export audit events (CSV) — respects current filters"}
+              disabled={!allMatchGroupsHydrated || allMatchGroupsLoading || reconAuditVisible.length === 0}
+              title={
+                !allMatchGroupsHydrated || allMatchGroupsLoading
+                  ? "Audit events load when Export opens"
+                  : reconAuditVisible.length === 0
+                    ? "No audit events to export"
+                    : "Export audit events (CSV) — respects current filters"
+              }
               onClick={() => exportAuditEventsCsv()}
             >
               <ClipboardList className="h-6 w-6 text-bb-text" />
               <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Audit events</span>
-              <span className="text-[11px] text-bb-text-muted">{reconAuditVisible.length}</span>
+              <span className="text-[11px] text-bb-text-muted">
+                {allMatchGroupsHydrated ? reconAuditVisible.length : allMatchGroupsLoading ? "Loading" : "Not loaded"}
+              </span>
             </button>
           </div>
 
           <div className="mt-2 text-[11px] text-bb-text-muted">
-            CSV exports reflect current account scope and active filters.
+            CSV exports reflect current scope and loaded filters; audit history loads when Export opens.
           </div>
         </div>
       </AppDialog>
