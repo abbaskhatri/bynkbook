@@ -33,6 +33,7 @@ import {
 import { getIssuesCount } from "@/lib/api/issues";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { useIdleReady } from "@/lib/useIdleReady";
 
 function todayYmd() {
   const d = new Date();
@@ -117,6 +118,7 @@ export default function MobilePageClient() {
   const range = useMemo(() => ({ from: firstOfMonthYmd(), to: todayYmd() }), []);
   const enabled = !!businessId;
   const accountEnabled = !!businessId && !!accountId;
+  const secondaryReady = useIdleReady(enabled, 1200);
 
   const accountsSummaryQ = useQuery({
     queryKey: ["mobileHome", "accountsSummary", businessId, range.to],
@@ -126,7 +128,7 @@ export default function MobilePageClient() {
         accountId: "all",
         includeArchived: false,
       }),
-    enabled,
+    enabled: secondaryReady,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -140,7 +142,7 @@ export default function MobilePageClient() {
         accountId: "all",
         ytd: false,
       }),
-    enabled,
+    enabled: secondaryReady,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -173,7 +175,7 @@ export default function MobilePageClient() {
   const apSummaryQ = useQuery({
     queryKey: ["mobileHome", "apSummary", businessId, range.to],
     queryFn: () => getVendorsApSummary({ businessId: businessId as string, asOf: range.to, limit: 500 }),
-    enabled,
+    enabled: secondaryReady,
     staleTime: 45_000,
     placeholderData: (prev) => prev,
   });
@@ -185,7 +187,7 @@ export default function MobilePageClient() {
         limit: 3,
         accountId: accountId ?? undefined,
       }),
-    enabled,
+    enabled: secondaryReady,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -279,8 +281,63 @@ export default function MobilePageClient() {
           <InlineBanner title="Mobile home is partially unavailable" message={bannerMessage} />
         ) : null}
 
-        <div className="grid grid-cols-1 gap-3">
-          {accountsSummaryQ.isLoading ? (
+        <section className="space-y-3">
+          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Tasks
+          </div>
+          <MobileTaskCard
+            title="Category Review"
+            description="Review uncategorized entries for the selected account."
+            href={categoryHref}
+            metric={categoriesQ.isLoading ? "..." : String(uncategorizedCount)}
+            icon={<Tags className="h-5 w-5" />}
+            tone={uncategorizedCount > 0 ? "warning" : "neutral"}
+            disabled={!accountId}
+          />
+          <MobileTaskCard
+            title="Issues"
+            description="Open duplicate and stale check review for this account."
+            href={issuesHref}
+            metric={issuesCountQ.isLoading ? "..." : String(openIssues)}
+            icon={<AlertTriangle className="h-5 w-5" />}
+            tone={openIssues > 0 ? "danger" : "neutral"}
+            disabled={!accountId}
+          />
+          <MobileTaskCard
+            title="Receipt Upload"
+            description="Take a photo or choose a receipt file for review-only upload."
+            href={receiptHref}
+            icon={<ReceiptText className="h-5 w-5" />}
+            disabled={!businessId}
+          />
+          <MobileTaskCard
+            title="Invoice Upload"
+            description="Capture invoice files for review only. No vendor or AP bill is created automatically."
+            href={invoiceHref}
+            icon={<FileText className="h-5 w-5" />}
+            disabled={!businessId}
+          />
+          <MobileTaskCard
+            title="Vendors and AP"
+            description={
+              apSummaryQ.data
+                ? `Open AP vendors. ${formatUsdFromCents(apTotalOpenCents)} outstanding across ${apOpenVendorCount} vendor${
+                    apOpenVendorCount === 1 ? "" : "s"
+                  }.`
+                : "Open AP vendor balances and invoice review."
+            }
+            href={vendorsHref}
+            metric={apSummaryQ.data ? String(apOpenVendorCount) : undefined}
+            icon={<Users className="h-5 w-5" />}
+            disabled={!businessId}
+          />
+        </section>
+
+        <section className="grid grid-cols-1 gap-3">
+          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Snapshot
+          </div>
+          {!secondaryReady || accountsSummaryQ.isLoading ? (
             <Skeleton className="h-[118px] w-full rounded-md" />
           ) : (
             <MobileSummaryCard
@@ -294,7 +351,7 @@ export default function MobilePageClient() {
             />
           )}
 
-          {pnlQ.isLoading ? (
+          {!secondaryReady || pnlQ.isLoading ? (
             <Skeleton className="h-[132px] w-full rounded-md" />
           ) : (
             <section className="rounded-md border border-border bg-card p-4 shadow-sm">
@@ -335,54 +392,6 @@ export default function MobilePageClient() {
               </div>
             </section>
           )}
-        </div>
-
-        <section className="space-y-3">
-          <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Tasks
-          </div>
-          <MobileTaskCard
-            title="Category Review"
-            description="Review uncategorized entries for the selected account."
-            href={categoryHref}
-            metric={categoriesQ.isLoading ? "..." : String(uncategorizedCount)}
-            icon={<Tags className="h-5 w-5" />}
-            tone={uncategorizedCount > 0 ? "warning" : "neutral"}
-            disabled={!accountId}
-          />
-          <MobileTaskCard
-            title="Issues"
-            description="Open duplicate and stale check review for this account."
-            href={issuesHref}
-            metric={issuesCountQ.isLoading ? "..." : String(openIssues)}
-            icon={<AlertTriangle className="h-5 w-5" />}
-            tone={openIssues > 0 ? "danger" : "neutral"}
-            disabled={!accountId}
-          />
-          <MobileTaskCard
-            title="Receipt Upload"
-            description="Take a photo or choose a receipt file for review-only upload."
-            href={receiptHref}
-            icon={<ReceiptText className="h-5 w-5" />}
-            disabled={!businessId}
-          />
-          <MobileTaskCard
-            title="Invoice Upload"
-            description="Capture invoice files for review only. No vendor or AP bill is created automatically."
-            href={invoiceHref}
-            icon={<FileText className="h-5 w-5" />}
-            disabled={!businessId}
-          />
-          <MobileTaskCard
-            title="Vendors and AP"
-            description={`Open AP vendors. ${formatUsdFromCents(apTotalOpenCents)} outstanding across ${apOpenVendorCount} vendor${
-              apOpenVendorCount === 1 ? "" : "s"
-            }.`}
-            href={vendorsHref}
-            metric={apSummaryQ.isLoading ? "..." : String(apOpenVendorCount)}
-            icon={<Users className="h-5 w-5" />}
-            disabled={!businessId}
-          />
         </section>
 
         <section className="rounded-md border border-border bg-card p-4 shadow-sm">
@@ -401,7 +410,7 @@ export default function MobilePageClient() {
           </div>
 
           <div className="mt-4 space-y-2">
-            {activityQ.isLoading ? (
+            {!secondaryReady || activityQ.isLoading ? (
               <>
                 <Skeleton className="h-12 w-full rounded-md" />
                 <Skeleton className="h-12 w-full rounded-md" />
