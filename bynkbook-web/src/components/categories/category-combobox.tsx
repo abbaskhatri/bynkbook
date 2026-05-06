@@ -85,6 +85,7 @@ type CategoryComboboxProps = {
   onCreate?: (name: string) => void | Promise<void>;
   allowClear?: boolean;
   onClear?: () => void;
+  clearLabel?: string;
   onSubmit?: () => void;
   disabled?: boolean;
 };
@@ -106,6 +107,7 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
     onCreate,
     allowClear,
     onClear,
+    clearLabel = "Uncategorized",
     onSubmit,
     disabled,
   } = props;
@@ -249,9 +251,9 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
                   onClear?.();
                   setOpen(false);
                 }}
-                title="Uncategorized"
+                title={clearLabel}
               >
-                Uncategorized
+                {clearLabel}
               </button>
             ) : null}
 

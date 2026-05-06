@@ -7,8 +7,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
+import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { resolveIssue, type EntryIssueRow } from "@/lib/api/issues";
 import { mergeEntry } from "@/lib/api/entries";
@@ -357,18 +357,20 @@ export function FixIssueDialog(props: {
           <div className="flex items-center gap-2">
             <div className="text-sm text-bb-text w-28">Category</div>
             <div className="flex-1">
-              <Select value={pickedCategoryId} onValueChange={setPickedCategoryId}>
-                <SelectTrigger className="h-8">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent align="start">
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CategoryCombobox
+                options={categories}
+                categoryId={pickedCategoryId || null}
+                placeholder="Select category"
+                inputClassName="h-8 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text placeholder:text-bb-text-muted"
+                onChange={(value, option) => {
+                  if (option?.id) {
+                    setPickedCategoryId(String(option.id));
+                    return;
+                  }
+
+                  if (!value || pickedCategoryId) setPickedCategoryId("");
+                }}
+              />
             </div>
           </div>
         ) : null}
