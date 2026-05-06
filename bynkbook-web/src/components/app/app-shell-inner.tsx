@@ -29,9 +29,9 @@ import {
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
-import { getIssuesCount } from "@/lib/api/issues";
+import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { getConfiguredAppEnvironment } from "@/lib/appEnvironment";
-import { issueCountKey } from "@/lib/queries/issueKeys";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -370,6 +370,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     return firstActiveAccountId ?? "";
   }, [businessId, effectiveAccountId, accountsQ.data, firstActiveAccountId]);
 
+  const attentionAccountId =
+    currentAccountId && currentAccountId !== "all" ? currentAccountId : navAccountId;
+
   const account = useMemo(() => {
     const list = accountsQ.data ?? [];
     const id = effectiveAccountId ?? "";
@@ -448,15 +451,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   // Sidebar Issues count (authoritative; server-derived)
   const issuesCountQ = useQuery({
-    queryKey: issueCountKey(businessId, currentAccountId || "all", "OPEN"),
-    enabled: showChrome && issuesCountReadyKey === issuesCountScopeKey && !!businessId && !!currentAccountId,
-    queryFn: () => getIssuesCount(businessId!, { status: "OPEN", accountId: currentAccountId! }),
+    queryKey: attentionSummaryKey(businessId, attentionAccountId || "all"),
+    enabled: showChrome && issuesCountReadyKey === issuesCountScopeKey && !!businessId && !!attentionAccountId,
+    queryFn: () => getAttentionSummary({ businessId: businessId!, accountId: attentionAccountId! }),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
-  const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.count ?? 0) || 0);
+  const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.issue_count ?? 0) || 0);
 
   async function ensureActivityFresh(force = false) {
     if (!businessId) return;

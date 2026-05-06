@@ -27,10 +27,10 @@ import { getActivity } from "@/lib/api/activity";
 import { getVendorsApSummary } from "@/lib/api/ap";
 import {
   getAccountsSummary,
-  getCategories,
   getPnlSummary,
 } from "@/lib/api/reports";
-import { getIssuesCount } from "@/lib/api/issues";
+import { getAttentionSummary } from "@/lib/api/attentionSummary";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useIdleReady } from "@/lib/useIdleReady";
@@ -147,24 +147,11 @@ export default function MobilePageClient() {
     placeholderData: (prev) => prev,
   });
 
-  const categoriesQ = useQuery({
-    queryKey: ["mobileHome", "categories", businessId, accountId, range.from, range.to],
+  const attentionSummaryQ = useQuery({
+    queryKey: attentionSummaryKey(businessId, accountId),
     queryFn: () =>
-      getCategories(businessId as string, {
-        from: range.from,
-        to: range.to,
-        accountId: accountId as string,
-      }),
-    enabled: accountEnabled,
-    staleTime: 45_000,
-    placeholderData: (prev) => prev,
-  });
-
-  const issuesCountQ = useQuery({
-    queryKey: ["mobileHome", "issuesCount", businessId, accountId, "OPEN"],
-    queryFn: () =>
-      getIssuesCount(businessId as string, {
-        status: "OPEN",
+      getAttentionSummary({
+        businessId: businessId as string,
         accountId: accountId as string,
       }),
     enabled: accountEnabled,
@@ -202,15 +189,8 @@ export default function MobilePageClient() {
     return total.toString();
   }, [accountsSummaryQ.data]);
 
-  const uncategorizedCount = useMemo(() => {
-    const row = (categoriesQ.data?.rows ?? []).find((item) => {
-      const label = String(item.category ?? "").toLowerCase();
-      return item.category_id === null || label.includes("uncategorized");
-    });
-    return Number(row?.count ?? 0) || 0;
-  }, [categoriesQ.data]);
-
-  const openIssues = Number(issuesCountQ.data?.count ?? 0) || 0;
+  const uncategorizedCount = Number(attentionSummaryQ.data?.uncategorized_count ?? 0) || 0;
+  const openIssues = Number(attentionSummaryQ.data?.issue_count ?? 0) || 0;
   const apVendors = apSummaryQ.data?.vendors ?? [];
   const apOpenVendorCount = apVendors.filter((vendor) => {
     try {
@@ -240,7 +220,7 @@ export default function MobilePageClient() {
   const bannerMessage =
     businessesQ.error || accountsQ.error
       ? "Mobile home could not load workspace context."
-      : accountsSummaryQ.error || pnlQ.error || categoriesQ.error || issuesCountQ.error || apSummaryQ.error || activityQ.error
+      : accountsSummaryQ.error || pnlQ.error || attentionSummaryQ.error || apSummaryQ.error || activityQ.error
         ? "Some mobile cards could not refresh. Existing desktop pages are unchanged."
         : null;
 
@@ -289,7 +269,7 @@ export default function MobilePageClient() {
             title="Category Review"
             description="Review uncategorized entries for the selected account."
             href={categoryHref}
-            metric={categoriesQ.isLoading ? "..." : String(uncategorizedCount)}
+            metric={attentionSummaryQ.isLoading ? "..." : String(uncategorizedCount)}
             icon={<Tags className="h-5 w-5" />}
             tone={uncategorizedCount > 0 ? "warning" : "neutral"}
             disabled={!accountId}
@@ -298,7 +278,7 @@ export default function MobilePageClient() {
             title="Issues"
             description="Open duplicate and stale check review for this account."
             href={issuesHref}
-            metric={issuesCountQ.isLoading ? "..." : String(openIssues)}
+            metric={attentionSummaryQ.isLoading ? "..." : String(openIssues)}
             icon={<AlertTriangle className="h-5 w-5" />}
             tone={openIssues > 0 ? "danger" : "neutral"}
             disabled={!accountId}

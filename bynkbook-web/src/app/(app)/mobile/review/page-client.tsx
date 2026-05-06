@@ -21,8 +21,8 @@ import { MobileTaskCard } from "@/components/mobile/mobile-task-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getActivity } from "@/lib/api/activity";
 import { getVendorsApSummary } from "@/lib/api/ap";
-import { getIssuesCount } from "@/lib/api/issues";
-import { getCategories } from "@/lib/api/reports";
+import { getAttentionSummary } from "@/lib/api/attentionSummary";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useIdleReady } from "@/lib/useIdleReady";
@@ -110,24 +110,11 @@ export default function MobileReviewPageClient() {
   const accountEnabled = !!businessId && !!accountId;
   const secondaryReady = useIdleReady(enabled, 1200);
 
-  const categoriesQ = useQuery({
-    queryKey: ["mobileReview", "categories", businessId, accountId, range.from, range.to],
+  const attentionSummaryQ = useQuery({
+    queryKey: attentionSummaryKey(businessId, accountId),
     queryFn: () =>
-      getCategories(businessId as string, {
-        from: range.from,
-        to: range.to,
-        accountId: accountId as string,
-      }),
-    enabled: accountEnabled,
-    staleTime: 45_000,
-    placeholderData: (prev) => prev,
-  });
-
-  const issuesCountQ = useQuery({
-    queryKey: ["mobileReview", "issuesCount", businessId, accountId, "OPEN"],
-    queryFn: () =>
-      getIssuesCount(businessId as string, {
-        status: "OPEN",
+      getAttentionSummary({
+        businessId: businessId as string,
         accountId: accountId as string,
       }),
     enabled: accountEnabled,
@@ -155,15 +142,8 @@ export default function MobileReviewPageClient() {
     placeholderData: (prev) => prev,
   });
 
-  const uncategorizedCount = useMemo(() => {
-    const row = (categoriesQ.data?.rows ?? []).find((item) => {
-      const label = String(item.category ?? "").toLowerCase();
-      return item.category_id === null || label.includes("uncategorized");
-    });
-    return Number(row?.count ?? 0) || 0;
-  }, [categoriesQ.data]);
-
-  const openIssues = Number(issuesCountQ.data?.count ?? 0) || 0;
+  const uncategorizedCount = Number(attentionSummaryQ.data?.uncategorized_count ?? 0) || 0;
+  const openIssues = Number(attentionSummaryQ.data?.issue_count ?? 0) || 0;
   const apVendors = apSummaryQ.data?.vendors ?? [];
   const apOpenVendorCount = apVendors.filter((vendor) => {
     try {
@@ -195,7 +175,7 @@ export default function MobileReviewPageClient() {
   const bannerMessage =
     businessesQ.error || accountsQ.error
       ? "Mobile review could not load workspace context."
-      : categoriesQ.error || issuesCountQ.error || apSummaryQ.error || activityQ.error
+      : attentionSummaryQ.error || apSummaryQ.error || activityQ.error
         ? "Some review cards could not refresh. Existing desktop pages are unchanged."
         : null;
 
@@ -240,7 +220,7 @@ export default function MobileReviewPageClient() {
           <div className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Queues
           </div>
-          {categoriesQ.isLoading ? (
+          {attentionSummaryQ.isLoading ? (
             <Skeleton className="h-[88px] w-full rounded-md" />
           ) : (
             <MobileTaskCard
@@ -254,7 +234,7 @@ export default function MobileReviewPageClient() {
             />
           )}
 
-          {issuesCountQ.isLoading ? (
+          {attentionSummaryQ.isLoading ? (
             <Skeleton className="h-[88px] w-full rounded-md" />
           ) : (
             <MobileTaskCard

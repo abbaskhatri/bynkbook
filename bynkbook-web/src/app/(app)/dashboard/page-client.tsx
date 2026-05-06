@@ -10,8 +10,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
-import { getIssuesCount } from "@/lib/api/issues";
-import { issueCountKey } from "@/lib/queries/issueKeys";
+import { getAttentionSummary } from "@/lib/api/attentionSummary";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 
 import { aiExplainReport, aiAnomalies, aiChatAggregates } from "@/lib/api/ai";
 
@@ -433,6 +433,16 @@ export default function DashboardPageClient() {
     return `/issues?${params.toString()}`;
   }, [selectedBusinessId, issuesAccountScopeId]);
 
+  const categoryReviewHref = useMemo(() => {
+    if (!selectedBusinessId) return "/category-review";
+
+    const params = new URLSearchParams();
+    params.set("businessId", selectedBusinessId);
+    if (issuesAccountScopeId) params.set("accountId", issuesAccountScopeId);
+
+    return `/category-review?${params.toString()}`;
+  }, [selectedBusinessId, issuesAccountScopeId]);
+
   // Keep-last-good: preserve previous data while fetching new period.
   const pnlQ = useQuery({
     queryKey: ["dashboardExec", "pnlSummary", selectedBusinessId, accountScopeId, range.from, range.to, range.mode,],
@@ -470,15 +480,18 @@ export default function DashboardPageClient() {
     placeholderData: (prev) => prev,
   });
 
-  const issuesCountQ = useQuery({
-    queryKey: issueCountKey(selectedBusinessId, issuesAccountScopeId, "OPEN"),
-    queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: issuesAccountScopeId }),
+  const attentionSummaryQ = useQuery({
+    queryKey: attentionSummaryKey(selectedBusinessId, issuesAccountScopeId),
+    queryFn: () => getAttentionSummary({ businessId: selectedBusinessId as string, accountId: issuesAccountScopeId }),
     enabled: dashEnabled && !!issuesAccountScopeId,
     staleTime: 20_000,
     placeholderData: (prev) => prev,
   });
 
-  const openIssuesN = Number((issuesCountQ.data as any)?.count ?? 0) || 0;
+  const attentionLoading = attentionSummaryQ.isLoading && !attentionSummaryQ.data;
+  const openIssuesN = Number(attentionSummaryQ.data?.issue_count ?? 0) || 0;
+  const uncategorizedN = Number(attentionSummaryQ.data?.uncategorized_count ?? 0) || 0;
+  const nextActionsN = openIssuesN + uncategorizedN;
 
   // Always fetch "all accounts" summary (for account picker options + business cash balance)
   const accountsAllQ = useQuery({
@@ -1571,7 +1584,7 @@ export default function DashboardPageClient() {
                 </div>
 
                 <div className="text-xs font-medium rounded-full border border-bb-border px-2 py-0.5 text-foreground/80 bg-bb-surface-card">
-                  {openIssuesN} open
+                  {attentionLoading ? <Skeleton className="h-3 w-10" /> : `${nextActionsN} open`}
                 </div>
               </div>
             </CHeader>
@@ -1588,7 +1601,9 @@ export default function DashboardPageClient() {
                       <AlertTriangle className="h-4 w-4 text-bb-status-danger-fg" strokeWidth={2} />
                     </div>
                     <div>
-                      <div className="font-medium text-sm text-foreground">{openIssuesN} Open Issues</div>
+                      <div className="font-medium text-sm text-foreground">
+                        {attentionLoading ? <Skeleton className="h-4 w-24" /> : `${openIssuesN} Open Issues`}
+                      </div>
                       <div className="text-xs text-muted-foreground">Review and resolve</div>
                     </div>
                   </div>
@@ -1596,7 +1611,7 @@ export default function DashboardPageClient() {
 
                 <button
                   type="button"
-                  onClick={() => router.push("/category-review")}
+                  onClick={() => router.push(categoryReviewHref)}
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
                 >
                   <div className="flex items-center gap-3">
@@ -1604,7 +1619,9 @@ export default function DashboardPageClient() {
                       <Tag className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2} />
                     </div>
                     <div>
-                      <div className="font-medium text-sm text-foreground">Category Review</div>
+                      <div className="font-medium text-sm text-foreground">
+                        {attentionLoading ? <Skeleton className="h-4 w-32" /> : `${uncategorizedN} Uncategorized`}
+                      </div>
                       <div className="text-xs text-muted-foreground">Assign categories</div>
                     </div>
                   </div>
