@@ -443,6 +443,16 @@ export default function DashboardPageClient() {
     return `/category-review?${params.toString()}`;
   }, [selectedBusinessId, issuesAccountScopeId]);
 
+  const reconcileHref = useMemo(() => {
+    if (!selectedBusinessId) return "/reconcile";
+
+    const params = new URLSearchParams();
+    params.set("businessId", selectedBusinessId);
+    if (issuesAccountScopeId) params.set("accountId", issuesAccountScopeId);
+
+    return `/reconcile?${params.toString()}`;
+  }, [selectedBusinessId, issuesAccountScopeId]);
+
   // Keep-last-good: preserve previous data while fetching new period.
   const pnlQ = useQuery({
     queryKey: ["dashboardExec", "pnlSummary", selectedBusinessId, accountScopeId, range.from, range.to, range.mode,],
@@ -491,7 +501,8 @@ export default function DashboardPageClient() {
   const attentionLoading = attentionSummaryQ.isLoading && !attentionSummaryQ.data;
   const openIssuesN = Number(attentionSummaryQ.data?.issue_count ?? 0) || 0;
   const uncategorizedN = Number(attentionSummaryQ.data?.uncategorized_count ?? 0) || 0;
-  const nextActionsN = openIssuesN + uncategorizedN;
+  const bankUnmatchedN = Number(attentionSummaryQ.data?.bank_unmatched_count ?? 0) || 0;
+  const nextActionsN = openIssuesN + uncategorizedN + bankUnmatchedN;
 
   // Always fetch "all accounts" summary (for account picker options + business cash balance)
   const accountsAllQ = useQuery({
@@ -1623,6 +1634,24 @@ export default function DashboardPageClient() {
                         {attentionLoading ? <Skeleton className="h-4 w-32" /> : `${uncategorizedN} Uncategorized`}
                       </div>
                       <div className="text-xs text-muted-foreground">Assign categories</div>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push(reconcileHref)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-bb-status-warning-bg flex items-center justify-center">
+                      <Landmark className="h-4 w-4 text-bb-status-warning-fg" strokeWidth={2} />
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm text-foreground">
+                        {attentionLoading ? <Skeleton className="h-4 w-32" /> : `${bankUnmatchedN} Bank Unmatched`}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Review bank activity</div>
                     </div>
                   </div>
                 </button>

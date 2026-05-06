@@ -191,6 +191,7 @@ export default function MobilePageClient() {
 
   const uncategorizedCount = Number(attentionSummaryQ.data?.uncategorized_count ?? 0) || 0;
   const openIssues = Number(attentionSummaryQ.data?.issue_count ?? 0) || 0;
+  const bankUnmatchedCount = Number(attentionSummaryQ.data?.bank_unmatched_count ?? 0) || 0;
   const apVendors = apSummaryQ.data?.vendors ?? [];
   const apOpenVendorCount = apVendors.filter((vendor) => {
     try {
@@ -212,6 +213,7 @@ export default function MobilePageClient() {
 
   const categoryHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
   const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
+  const reconcileHref = hrefWith({ path: "/reconcile", businessId, accountId });
   const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
   const invoiceHref = hrefWith({ path: "/mobile/invoice", businessId, accountId });
   const vendorsHref = hrefWith({ path: "/mobile/vendors", businessId, accountId });
@@ -281,6 +283,15 @@ export default function MobilePageClient() {
             metric={attentionSummaryQ.isLoading ? "..." : String(openIssues)}
             icon={<AlertTriangle className="h-5 w-5" />}
             tone={openIssues > 0 ? "danger" : "neutral"}
+            disabled={!accountId}
+          />
+          <MobileTaskCard
+            title="Bank Reconcile"
+            description="Review unmatched bank transactions for the selected account."
+            href={reconcileHref}
+            metric={attentionSummaryQ.isLoading ? "..." : String(bankUnmatchedCount)}
+            icon={<Landmark className="h-5 w-5" />}
+            tone={bankUnmatchedCount > 0 ? "warning" : "neutral"}
             disabled={!accountId}
           />
           <MobileTaskCard

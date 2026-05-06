@@ -17,6 +17,7 @@ async function loadHandler(options: {
   role?: string | null;
   account?: any;
   issueRows?: any[];
+  bankUnmatchedRows?: any[];
   uncategorizedCount?: number;
 } = {}) {
   vi.resetModules();
@@ -38,7 +39,13 @@ async function loadHandler(options: {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
-    $queryRaw: vi.fn(async () => options.issueRows ?? [{ issue_count: 0 }]),
+    $queryRaw: vi.fn(async (strings: any) => {
+      const queryText = String(strings);
+      if (queryText.includes("FROM bank_transaction bt")) {
+        return options.bankUnmatchedRows ?? [{ bank_unmatched_count: 0 }];
+      }
+      return options.issueRows ?? [{ issue_count: 0 }];
+    }),
   };
 
   vi.doMock("./lib/db", () => ({
@@ -47,6 +54,27 @@ async function loadHandler(options: {
 
   const mod = await import("./attentionSummary");
   return { handler: mod.handler, prisma };
+}
+
+type RawQueryCall = { text: string; values: any[] };
+
+function rawQueryCalls(prisma: any): RawQueryCall[] {
+  return (prisma.$queryRaw as any).mock.calls.map((call: any[]) => ({
+    text: String(call[0]),
+    values: call.slice(1),
+  }));
+}
+
+function bankUnmatchedQuery(prisma: any) {
+  const call = rawQueryCalls(prisma).find((item: RawQueryCall) => item.text.includes("FROM bank_transaction bt"));
+  expect(call).toBeTruthy();
+  return call as RawQueryCall;
+}
+
+function issueQuery(prisma: any) {
+  const call = rawQueryCalls(prisma).find((item: RawQueryCall) => item.text.includes("FROM entry_issues i"));
+  expect(call).toBeTruthy();
+  return call as RawQueryCall;
 }
 
 afterEach(() => {
@@ -58,6 +86,7 @@ describe("attention summary", () => {
   test("returns scoped actionable issue and uncategorized counts", async () => {
     const { handler, prisma } = await loadHandler({
       issueRows: [{ issue_count: 3 }],
+      bankUnmatchedRows: [{ bank_unmatched_count: 5 }],
       uncategorizedCount: 7,
     });
 
@@ -67,6 +96,7 @@ describe("attention summary", () => {
       ok: true,
       issue_count: 3,
       uncategorized_count: 7,
+      bank_unmatched_count: 5,
     });
 
     expect(prisma.userBusinessRole.findFirst).toHaveBeenCalledWith({
@@ -107,9 +137,7 @@ describe("attention summary", () => {
     const res = await handler(event());
     expect(res.statusCode).toBe(200);
 
-    const rawCall = (prisma.$queryRaw as any).mock.calls[0] as any[];
-    const queryText = String(rawCall[0]);
-    const queryValues = rawCall.slice(1);
+    const { text: queryText, values: queryValues } = issueQuery(prisma);
     expect(queryText).toContain("i.status = 'OPEN'");
     expect(queryText).toContain("i.issue_type = ANY");
     expect(queryValues).toContainEqual(["DUPLICATE", "STALE_CHECK"]);
@@ -148,11 +176,100 @@ describe("attention summary", () => {
     expect(prisma.entryIssue.updateMany).not.toHaveBeenCalled();
   });
 
-  test("omits bank_unmatched_count in M1", async () => {
-    const { handler } = await loadHandler();
+  test("bank_unmatched_count counts scoped active unmatched bank transactions", async () => {
+    const { handler, prisma } = await loadHandler({
+      bankUnmatchedRows: [{ bank_unmatched_count: 6 }],
+    });
 
     const res = await handler(event());
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).not.toHaveProperty("bank_unmatched_count");
+    expect(JSON.parse(res.body)).toMatchObject({ bank_unmatched_count: 6 });
+
+    const { text: queryText, values: queryValues } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("SELECT COUNT(*)::int AS bank_unmatched_count");
+    expect(queryText).toContain("FROM bank_transaction bt");
+    expect(queryText).toContain("bt.business_id =");
+    expect(queryText).toContain("bt.account_id =");
+    expect(queryValues).toContain("11111111-1111-4111-8111-111111111111");
+    expect(queryValues).toContain("22222222-2222-4222-8222-222222222222");
+  });
+
+  test("bank_unmatched_count excludes is_removed bank transactions", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+
+    const { text: queryText } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("bt.is_removed = false");
+  });
+
+  test("bank_unmatched_count excludes active MatchGroup-linked bank transactions", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+
+    const { text: queryText } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("NOT EXISTS");
+    expect(queryText).toContain("FROM match_group_bank mgb");
+    expect(queryText).toContain("INNER JOIN match_group mg");
+    expect(queryText).toContain("mgb.bank_transaction_id = bt.id");
+    expect(queryText).toContain("mg.status = 'ACTIVE'");
+  });
+
+  test("bank_unmatched_count includes voided or inactive MatchGroup-linked bank transactions", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+
+    const { text: queryText } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("mg.status = 'ACTIVE'");
+    expect(queryText).not.toContain("mg.status <> 'ACTIVE'");
+    expect(queryText).not.toContain("mg.voided_at IS NULL");
+  });
+
+  test("bank_unmatched_count excludes unvoided legacy BankMatch transactions", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+
+    const { text: queryText } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("FROM bank_match bm");
+    expect(queryText).toContain("bm.bank_transaction_id = bt.id");
+    expect(queryText).toContain("bm.voided_at IS NULL");
+  });
+
+  test("bank_unmatched_count includes voided legacy BankMatch transactions", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+
+    const { text: queryText } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("bm.voided_at IS NULL");
+    expect(queryText).not.toContain("bm.voided_at IS NOT NULL");
+  });
+
+  test("bank_unmatched_count preserves cross-business and account isolation", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(event({
+      businessId: "33333333-3333-4333-8333-333333333333",
+      accountId: "44444444-4444-4444-8444-444444444444",
+    }));
+    expect(res.statusCode).toBe(200);
+
+    const { text: queryText, values: queryValues } = bankUnmatchedQuery(prisma);
+    expect(queryText).toContain("bt.business_id =");
+    expect(queryText).toContain("bt.account_id =");
+    expect(queryText).toContain("mgb.business_id = bt.business_id");
+    expect(queryText).toContain("mgb.account_id = bt.account_id");
+    expect(queryText).toContain("bm.business_id = bt.business_id");
+    expect(queryText).toContain("bm.account_id = bt.account_id");
+    expect(queryValues).toContain("33333333-3333-4333-8333-333333333333");
+    expect(queryValues).toContain("44444444-4444-4444-8444-444444444444");
   });
 });

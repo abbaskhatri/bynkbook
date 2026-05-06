@@ -27,7 +27,12 @@ function getClaims(event: any) {
 }
 
 function toCount(rows: any[]): number {
-  const raw = rows?.[0]?.count ?? rows?.[0]?.issue_count ?? rows?.[0]?.uncategorized_count ?? 0;
+  const raw =
+    rows?.[0]?.count ??
+    rows?.[0]?.issue_count ??
+    rows?.[0]?.uncategorized_count ??
+    rows?.[0]?.bank_unmatched_count ??
+    0;
   if (typeof raw === "bigint") return Number(raw);
   return Number(raw ?? 0) || 0;
 }
@@ -98,6 +103,38 @@ async function countUncategorizedEntries(prisma: any, businessId: string, accoun
   return Number(count) || 0;
 }
 
+async function countBankUnmatchedTransactions(prisma: any, businessId: string, accountId: string) {
+  const rows: any[] = await prisma.$queryRaw`
+    SELECT COUNT(*)::int AS bank_unmatched_count
+    FROM bank_transaction bt
+    WHERE bt.business_id = ${businessId}::uuid
+      AND bt.account_id = ${accountId}::uuid
+      AND bt.is_removed = false
+      AND NOT EXISTS (
+        SELECT 1
+        FROM match_group_bank mgb
+        INNER JOIN match_group mg
+          ON mg.id = mgb.match_group_id
+         AND mg.business_id = mgb.business_id
+         AND mg.account_id = mgb.account_id
+        WHERE mgb.business_id = bt.business_id
+          AND mgb.account_id = bt.account_id
+          AND mgb.bank_transaction_id = bt.id
+          AND mg.status = 'ACTIVE'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM bank_match bm
+        WHERE bm.business_id = bt.business_id
+          AND bm.account_id = bt.account_id
+          AND bm.bank_transaction_id = bt.id
+          AND bm.voided_at IS NULL
+      )
+  `;
+
+  return toCount(rows);
+}
+
 export async function handler(event: any) {
   try {
     const method = event?.requestContext?.http?.method;
@@ -120,15 +157,17 @@ export async function handler(event: any) {
     const okAcct = await requireAccountInBusiness(prisma, biz, acct);
     if (!okAcct) return json(404, { ok: false, error: "Account not found" });
 
-    const [issueCount, uncategorizedCount] = await Promise.all([
+    const [issueCount, uncategorizedCount, bankUnmatchedCount] = await Promise.all([
       countActionableIssues(prisma, biz, acct),
       countUncategorizedEntries(prisma, biz, acct),
+      countBankUnmatchedTransactions(prisma, biz, acct),
     ]);
 
     return json(200, {
       ok: true,
       issue_count: issueCount,
       uncategorized_count: uncategorizedCount,
+      bank_unmatched_count: bankUnmatchedCount,
     });
   } catch (err: any) {
     return json(500, {
