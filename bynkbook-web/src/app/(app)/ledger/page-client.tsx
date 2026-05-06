@@ -45,12 +45,14 @@ import { getCategorySuggestions } from "@/lib/api/ai";
 import { aiSuggestCategory } from "@/lib/api/ai";
 import { listClosedPeriods } from "@/lib/api/closedPeriods";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
-import { getBusinessIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
+import { getIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
+import { issueCountKey } from "@/lib/queries/issueKeys";
 import { listMatchGroups } from "@/lib/api/match-groups";
 
 import { aiExplainEntry, aiAnomalies, aiMerchantNormalize } from "@/lib/api/ai";
 
 import { PageHeader } from "@/components/app/page-header";
+import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
@@ -1365,11 +1367,11 @@ export default function LedgerPageClient() {
 
   // Issues: backend truth (open issues + header button)
   const issuesCountQ = useQuery({
-    queryKey: ["issuesCount", selectedBusinessId],
-    enabled: !!selectedBusinessId,
+    queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"),
+    enabled: !!selectedBusinessId && !!selectedAccountId,
     queryFn: async () => {
-      if (!selectedBusinessId) return { ok: true as const, total_open: 0, by_account: {} as Record<string, number> };
-      return getBusinessIssuesCount({ businessId: selectedBusinessId });
+      if (!selectedBusinessId || !selectedAccountId) return { ok: true as const, count: 0 };
+      return getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId });
     },
   });
 
@@ -1385,11 +1387,8 @@ export default function LedgerPageClient() {
   const openIssues = issuesListQ.data?.issues ?? [];
 
   const openIssueCountForAccount = useMemo(() => {
-    const by = issuesCountQ.data?.by_account;
-    if (by && selectedAccountId) return Number(by[selectedAccountId] ?? 0) || 0;
-    // fallback to list count (account scoped)
-    return openIssues.length;
-  }, [issuesCountQ.data, openIssues.length, selectedAccountId]);
+    return Number(issuesCountQ.data?.count ?? openIssues.length) || 0;
+  }, [issuesCountQ.data, openIssues.length]);
 
   // Totals scope (all-time for Phase 3)
   const from = allTimeStartYmd();
@@ -2484,6 +2483,10 @@ export default function LedgerPageClient() {
         queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
         exact: false,
       });
+      void qc.invalidateQueries({
+        queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"),
+        exact: false,
+      });
 
       // Persist last scan timestamp (UI-only)
       const nowIso = new Date().toISOString();
@@ -2787,11 +2790,7 @@ export default function LedgerPageClient() {
 
       // Fast refresh issues (once): so icons update immediately
       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
-
-      // Best-effort scan so DUP/STALE issues appear without manual scan
-      // (silent; errors ignored)
-      void scanIssues();
+      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
 
       // Keep coalesced refresh too (safe)
       scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "create");
@@ -2901,6 +2900,11 @@ export default function LedgerPageClient() {
 
       if (shouldRefreshCategorySuggestions) {
         void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId, selectedAccountId], exact: false });
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updates, "category_id")) {
+        void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+        void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
       }
 
       // Update footer totals promptly (cheap query; no entries refetch storm)
@@ -3020,9 +3024,6 @@ export default function LedgerPageClient() {
       const tOk = performance.now();
       perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-      // Recompute issue groups after deletion (best-effort)
-      setTimeout(() => void scanIssues(), 1500);
-
       scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "delete");
 
       // If transfer, also clear cached entries for other accounts (cross-account atomic UX)
@@ -3068,9 +3069,8 @@ export default function LedgerPageClient() {
       scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "matchedUnmatchDelete");
       void qc.invalidateQueries({ queryKey: ["matchGroups", selectedBusinessId, selectedAccountId], exact: false });
       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
       void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
-      setTimeout(() => void scanIssues(), 1500);
     },
   });
 
@@ -3143,7 +3143,8 @@ export default function LedgerPageClient() {
       const tOk = performance.now();
       perfLog(`${mark} server success after ${(tOk - t0).toFixed(1)}ms`);
 
-      void scanIssues();
+      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
 
       scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "restore");
 
@@ -4006,7 +4007,7 @@ export default function LedgerPageClient() {
 
       // Refresh issues immediately (so missing icon disappears)
       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
 
       cancelQuickCat();
     } catch (e: any) {
@@ -5262,7 +5263,13 @@ export default function LedgerPageClient() {
           <PageHeader
             icon={<BookOpen className="h-4 w-4" />}
             title="Ledger"
-            afterTitle={accountCapsuleEl}
+            afterTitle={
+              <AccountingScopePills
+                businessName={selectedBusinessName}
+                businessLoading={businessesQ.isLoading}
+                accountControl={accountCapsuleEl}
+              />
+            }
             right={
               <div className="flex items-center gap-2">
                 {uncategorizedCount > 0 ? (
@@ -5499,7 +5506,7 @@ export default function LedgerPageClient() {
           if (selectedBusinessId && selectedAccountId) {
             void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
             void qc.invalidateQueries({ queryKey: entriesKey, exact: false });
-            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId], exact: false });
+            void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
           }
         }}
       />

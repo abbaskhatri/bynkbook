@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
+import { issueCountKey } from "@/lib/queries/issueKeys";
 import { updateEntry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { applyCategoryBatch, aiSuggestCategory } from "@/lib/api/ai";
@@ -17,6 +18,7 @@ import {
 } from "@/lib/categorySuggestions";
 
 import { PageHeader } from "@/components/app/page-header";
+import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -177,6 +179,11 @@ export default function CategoryReviewPageClient() {
   const accountsQ = useAccounts(selectedBusinessId);
 
   const [err, setErr] = useState<string | null>(null);
+
+  const selectedBusinessName = useMemo(() => {
+    const b = (businessesQ.data ?? []).find((row: any) => String(row.id) === String(selectedBusinessId));
+    return String(b?.name ?? "Business");
+  }, [businessesQ.data, selectedBusinessId]);
 
   const selectedAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
@@ -780,6 +787,7 @@ export default function CategoryReviewPageClient() {
 
       // Keep the row fast locally; refresh dependent surfaces in the background.
       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
       void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
 
       if (typeof window !== "undefined") {
@@ -1180,6 +1188,7 @@ export default function CategoryReviewPageClient() {
       }
 
       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
       void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
 
       if (typeof window !== "undefined") {
@@ -1201,7 +1210,13 @@ export default function CategoryReviewPageClient() {
           <PageHeader
             icon={<Tags className="h-4 w-4" />}
             title="Category Review"
-            afterTitle={capsule}
+            afterTitle={
+              <AccountingScopePills
+                businessName={selectedBusinessName}
+                businessLoading={businessesQ.isLoading}
+                accountControl={capsule}
+              />
+            }
             right={null}
           />
         </div>
@@ -1923,6 +1938,7 @@ export default function CategoryReviewPageClient() {
                       });
 
                       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+                      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
                       void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
 
                       if (typeof window !== "undefined") {

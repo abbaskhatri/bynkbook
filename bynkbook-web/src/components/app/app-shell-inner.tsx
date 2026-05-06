@@ -30,6 +30,8 @@ import {
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getIssuesCount } from "@/lib/api/issues";
+import { getConfiguredAppEnvironment } from "@/lib/appEnvironment";
+import { issueCountKey } from "@/lib/queries/issueKeys";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -77,17 +79,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const router = useRouter();
   const qc = useQueryClient();
 
-  const apiBase =
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "";
-
-  const envLabel = useMemo(() => {
-    const host = apiBase.toLowerCase();
-    // DEV heuristics: execute-api host or explicit dev subdomain
-    if (host.includes("execute-api") || host.includes("api-dev") || host.includes("-dev")) return "DEV";
-    return "PROD";
-  }, [apiBase]);
+  const appEnv = useMemo(() => getConfiguredAppEnvironment(), []);
 
   const currentUrl = useMemo(() => {
     const qs = sp.toString();
@@ -455,7 +447,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   // Sidebar Issues count (authoritative; server-derived)
   const issuesCountQ = useQuery({
-    queryKey: ["issuesCount", businessId, currentAccountId || "all", "OPEN"],
+    queryKey: issueCountKey(businessId, currentAccountId || "all", "OPEN"),
     enabled: issuesCountReadyKey === issuesCountScopeKey && !!businessId && !!currentAccountId,
     queryFn: () => getIssuesCount(businessId!, { status: "OPEN", accountId: currentAccountId! }),
     staleTime: 60_000,
@@ -786,6 +778,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
                 />
               </div>
+            ) : null}
+
+            {appEnv.label !== "PROD" ? (
+              <span
+                title={`Environment: ${appEnv.label} (${appEnv.source}${appEnv.explicit ? "" : " fallback"})`}
+                className="hidden sm:inline-flex h-7 items-center rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 text-[11px] font-semibold text-bb-status-warning-fg"
+              >
+                {appEnv.label}
+              </span>
             ) : null}
 
             <div className="relative" ref={activityRef}>

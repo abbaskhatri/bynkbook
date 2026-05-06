@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+import { issueCountKey } from "@/lib/queries/issueKeys";
 
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 
@@ -253,6 +254,10 @@ export default function IssuesPageClient() {
       // Targeted invalidation only
       void qc.invalidateQueries({
         queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
+        exact: false,
+      });
+      void qc.invalidateQueries({
+        queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"),
         exact: false,
       });
 
@@ -1092,7 +1097,7 @@ export default function IssuesPageClient() {
           if (selectedBusinessId && selectedAccountId) {
             await Promise.all([
               qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
-              qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId, selectedAccountId, "OPEN"], exact: false }),
+              qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
               qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false }),
             ]);
           }
@@ -1131,7 +1136,7 @@ export default function IssuesPageClient() {
           clearSelection();
           if (selectedBusinessId && selectedAccountId) {
             void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-            void qc.invalidateQueries({ queryKey: ["issuesCount", selectedBusinessId, selectedAccountId, "OPEN"], exact: false });
+            void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
             void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
           }
         }}

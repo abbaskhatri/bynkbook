@@ -11,6 +11,7 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getIssuesCount } from "@/lib/api/issues";
+import { issueCountKey } from "@/lib/queries/issueKeys";
 
 import { aiExplainReport, aiAnomalies, aiChatAggregates } from "@/lib/api/ai";
 
@@ -470,7 +471,7 @@ export default function DashboardPageClient() {
   });
 
   const issuesCountQ = useQuery({
-    queryKey: ["dashboardExec", "issuesCount", selectedBusinessId, issuesAccountScopeId, "OPEN", "issuesPageVisible"],
+    queryKey: issueCountKey(selectedBusinessId, issuesAccountScopeId, "OPEN"),
     queryFn: () => getIssuesCount(selectedBusinessId as string, { status: "OPEN", accountId: issuesAccountScopeId }),
     enabled: dashEnabled && !!issuesAccountScopeId,
     staleTime: 20_000,
