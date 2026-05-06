@@ -9,10 +9,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
+import { issueCountKey } from "@/lib/queries/issueKeys";
+import { getConfiguredAppEnvironment, type AppEnvironmentLabel } from "@/lib/appEnvironment";
 import { apiFetch } from "@/lib/api/client";
 import { listCategories } from "@/lib/api/categories";
 
 import { PageHeader } from "@/components/app/page-header";
+import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { StatusChip } from "@/components/primitives/StatusChip";
@@ -112,7 +115,7 @@ function safeHost(u: string): string {
   }
 }
 
-function EnvBadge({ label, tooltip }: { label: "DEV" | "PROD"; tooltip: string }) {
+function EnvBadge({ label, tooltip }: { label: AppEnvironmentLabel; tooltip: string }) {
   const cls =
     label === "PROD"
       ? "bg-primary/10 text-primary border-primary/20"
@@ -726,25 +729,13 @@ export default function ReconcilePageClient() {
   // ENV badge + API host tooltip (prevents “wrong backend” confusion)
   const apiBase = useMemo(() => getApiBaseFromEnv(), []);
   const apiHost = useMemo(() => safeHost(apiBase), [apiBase]);
+  const appEnv = useMemo(() => getConfiguredAppEnvironment(), []);
 
-  const envLabel = useMemo<"DEV" | "PROD">(() => {
-    // Stable domains
-    if (apiHost === "api.bynkbook.com") return "PROD";
-    if (apiHost === "api-dev.bynkbook.com") return "DEV";
-
-    // Known execute-api ids (your current stacks)
-    if (apiHost.includes("actwy6st05")) return "PROD";
-    if (apiHost.includes("1ozvddx28a")) return "DEV";
-    if (apiHost.includes("lmvoixj337")) return "DEV";
-
-    // If it’s an execute-api host and we don't recognize it, treat as DEV (safer)
-    if (apiHost.includes("execute-api")) return "DEV";
-    return "DEV";
-  }, [apiHost]);
+  const envLabel = appEnv.label;
 
   const envTooltip = useMemo(() => {
-    return `ENV: ${envLabel}\nAPI host: ${apiHost || "(unset)"}\nAPI base: ${apiBase || "(unset)"}`;
-  }, [envLabel, apiHost, apiBase]);
+    return `ENV: ${envLabel}\nSource: ${appEnv.source}${appEnv.explicit ? "" : " fallback"}\nAPI host: ${apiHost || "(unset)"}\nAPI base: ${apiBase || "(unset)"}`;
+  }, [envLabel, appEnv.source, appEnv.explicit, apiHost, apiBase]);
 
   // Layout: keep only table bodies scrolling
   const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
@@ -1670,31 +1661,8 @@ export default function ReconcilePageClient() {
 
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["entryIssues", businessId, accountId], exact: false }),
-      qc.invalidateQueries({ queryKey: ["issuesCount", businessId, accountId], exact: false }),
+      qc.invalidateQueries({ queryKey: issueCountKey(businessId, accountId, "OPEN"), exact: false }),
     ]);
-
-    try {
-      await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/issues/scan`, {
-        method: "POST",
-        body: JSON.stringify({
-          includeMissingCategory: false,
-          dryRun: false,
-        }),
-      });
-
-      try {
-        localStorage.setItem(issueScanStorageKey(businessId, accountId), new Date().toISOString());
-      } catch {
-        // ignore
-      }
-    } catch {
-      clearIssueScanThrottle(businessId, accountId);
-    } finally {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["entryIssues", businessId, accountId], exact: false }),
-        qc.invalidateQueries({ queryKey: ["issuesCount", businessId, accountId], exact: false }),
-      ]);
-    }
   }
 
   function refreshAllDebounced() {
@@ -2007,6 +1975,11 @@ const isReconcileExemptEntry = (e: any) => {
     const a = (accountsQ.data ?? []).find((row: any) => String(row.id) === String(selectedAccountId));
     return String(a?.name ?? "");
   }, [accountsQ.data, selectedAccountId]);
+
+  const selectedBusinessName = useMemo(() => {
+    const b = (businessesQ.data ?? []).find((row: any) => String(row.id) === String(selectedBusinessId));
+    return String(b?.name ?? "Business");
+  }, [businessesQ.data, selectedBusinessId]);
 
   // MatchGroups lookup maps (read-only for now; used in next step to flip matched state)
   const matchGroupHasAdjustment = (g: any): boolean => {
@@ -3227,7 +3200,18 @@ const displayBankActiveList = useMemo(() => {
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
       <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
-          <PageHeader icon={<GitMerge className="h-4 w-4" />} title="Reconcile" afterTitle={accountCapsule} right={headerRight} />
+          <PageHeader
+            icon={<GitMerge className="h-4 w-4" />}
+            title="Reconcile"
+            afterTitle={
+              <AccountingScopePills
+                businessName={selectedBusinessName}
+                businessLoading={businessesQ.isLoading}
+                accountControl={accountCapsule}
+              />
+            }
+            right={headerRight}
+          />
         </div>
 
         <div className="mt-2 h-px bg-bb-border" />
