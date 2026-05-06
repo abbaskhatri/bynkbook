@@ -136,6 +136,7 @@ function ClosePeriodDialog(props: any) {
 // ================================
 const ZERO = BigInt(0);
 const HUNDRED = BigInt(100);
+const ENTRIES_API_MAX_LIMIT = 200;
 
 function daysUntilYmd(ymd: string): number | null {
   const s = String(ymd || "").slice(0, 10);
@@ -1285,7 +1286,7 @@ export default function LedgerPageClient() {
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [page, setPage] = useState(1);
 
-  const maxFetch = 500;
+  const maxFetch = ENTRIES_API_MAX_LIMIT;
   const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage * page), [rowsPerPage, page]);
 
   const entriesKey = useMemo(
@@ -2055,10 +2056,22 @@ export default function LedgerPageClient() {
     return { income, expense, net, balanceCents: balCents, balanceStr: balStr };
   }, [pageRows]);
 
-  const hasMoreOnServer = (entriesQ.data?.length ?? 0) === fetchLimit && fetchLimit < maxFetch;
+  const loadedEntryCount = entriesQ.data?.length ?? 0;
+  const hasMoreOnServer = loadedEntryCount === fetchLimit && fetchLimit < maxFetch;
+  const loadedRowsHitApiCap = loadedEntryCount >= ENTRIES_API_MAX_LIMIT;
   const canNext = endIdx < filteredRowsAll.length || hasMoreOnServer;
   const canPrev = page > 1;
   const totalPages = Math.max(1, Math.ceil(filteredRowsAll.length / rowsPerPage));
+  const pageLabel =
+    hasMoreOnServer || loadedRowsHitApiCap
+      ? `Page ${page} of loaded ${totalPages}`
+      : undefined;
+  const loadedScopeNotice =
+    loadedRowsHitApiCap
+      ? `Ledger loaded the latest ${ENTRIES_API_MAX_LIMIT} entries for ${selectedAccount?.name ?? "the selected account"} because the entries API is capped. Filters, pages, and balances use loaded rows only.`
+      : hasMoreOnServer
+        ? `Ledger loaded ${loadedEntryCount} latest entries for ${selectedAccount?.name ?? "the selected account"}. More rows may exist; filters, pages, and balances use loaded rows only.`
+        : null;
 
   // Selection
   const checkboxClass =
@@ -5417,6 +5430,12 @@ export default function LedgerPageClient() {
               : null
           }
         />
+
+        {loadedScopeNotice ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <span className="font-semibold">Loaded rows only.</span> {loadedScopeNotice}
+          </div>
+        ) : null}
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
@@ -5456,6 +5475,8 @@ export default function LedgerPageClient() {
                   page={page}
                   setPage={setPage}
                   totalPages={totalPages}
+                  pageLabel={pageLabel}
+                  paginationNote={loadedScopeNotice}
                   canPrev={canPrev}
                   canNext={canNext}
                   incomeText={

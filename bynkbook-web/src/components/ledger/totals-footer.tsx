@@ -20,6 +20,8 @@ export function TotalsFooter(props: {
   setPage: (n: number) => void;
 
   totalPages: number;
+  pageLabel?: ReactNode;
+  paginationNote?: ReactNode;
   canPrev: boolean;
   canNext: boolean;
 
@@ -34,6 +36,8 @@ export function TotalsFooter(props: {
     page,
     setPage,
     totalPages,
+    pageLabel,
+    paginationNote,
     canPrev,
     canNext,
     incomeText,
@@ -65,7 +69,6 @@ export function TotalsFooter(props: {
             <SelectItem value="50">50</SelectItem>
             <SelectItem value="100">100</SelectItem>
             <SelectItem value="200">200</SelectItem>
-            <SelectItem value="500">500</SelectItem>
           </SelectContent>
         </Select>
 
@@ -79,8 +82,8 @@ export function TotalsFooter(props: {
           <ChevronLeft className="h-4 w-4" />
         </Button>
 
-        <div className="min-w-[92px] text-center text-xs">
-          Page {page} of {totalPages}
+        <div className="min-w-[116px] text-center text-xs">
+          {pageLabel ?? <>Page {page} of {totalPages}</>}
         </div>
 
         <Button
@@ -92,6 +95,12 @@ export function TotalsFooter(props: {
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
+
+        {paginationNote ? (
+          <div className="max-w-[360px] truncate text-[11px] text-amber-700" title={typeof paginationNote === "string" ? paginationNote : undefined}>
+            {paginationNote}
+          </div>
+        ) : null}
       </div>
 
       {/* Right: totals */}
