@@ -14,6 +14,7 @@ import { ringFocus } from "@/components/primitives/tokens";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { Building2, Loader2 } from "lucide-react";
 
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
@@ -2556,18 +2557,23 @@ export default function VendorDetailPageClient() {
 
             <div className="space-y-1">
               <div className="text-[11px] text-bb-text-muted">Default category</div>
-              <select
-                className="h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs"
-                value={defaultCategoryId}
-                onChange={(e) => setDefaultCategoryId(e.target.value)}
-              >
-                <option value="">None</option>
-                {categoryRows.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <CategoryCombobox
+                options={categoryRows}
+                categoryId={defaultCategoryId || null}
+                placeholder="None"
+                allowClear={!!defaultCategoryId}
+                clearLabel="None"
+                inputClassName={`h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text placeholder:text-bb-text-muted ${ringFocus}`}
+                onChange={(value, option) => {
+                  if (option?.id) {
+                    setDefaultCategoryId(String(option.id));
+                    return;
+                  }
+
+                  if (!value || defaultCategoryId) setDefaultCategoryId("");
+                }}
+                onClear={() => setDefaultCategoryId("")}
+              />
             </div>
           </div>
         </AppDialog>

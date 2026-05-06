@@ -9,6 +9,7 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { Building2, Loader2 } from "lucide-react";
 
@@ -518,26 +519,24 @@ export default function VendorsPageClient() {
 
           <div className="space-y-1">
             <div className="text-[11px] text-bb-text-muted">Default category (optional)</div>
-            <Select
-              value={defaultCategoryId || "none"}
-              onValueChange={(value) => setDefaultCategoryId(value === "none" ? "" : value)}
+            <CategoryCombobox
+              options={categoryRows}
+              categoryId={defaultCategoryId || null}
+              placeholder={categoriesLoading ? "Loading categories…" : "None"}
               disabled={categoriesLoading && categoryRows.length === 0}
-            >
-              <SelectTrigger
-                size="sm"
-                className="h-7 w-full border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="max-w-[28rem] min-w-[260px] border-bb-border bg-bb-surface-card text-bb-text">
-                <SelectItem value="none">{categoriesLoading ? "Loading categories…" : "None"}</SelectItem>
-                {categoryRows.map((c) => (
-                  <SelectItem key={c.id} value={c.id} title={c.name}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              allowClear={!!defaultCategoryId}
+              clearLabel="None"
+              inputClassName="h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text placeholder:text-bb-text-muted disabled:cursor-not-allowed disabled:opacity-60"
+              onChange={(value, option) => {
+                if (option?.id) {
+                  setDefaultCategoryId(String(option.id));
+                  return;
+                }
+
+                if (!value || defaultCategoryId) setDefaultCategoryId("");
+              }}
+              onClear={() => setDefaultCategoryId("")}
+            />
             {categoriesLoading ? (
               <div className="inline-flex items-center gap-1 text-[11px] text-bb-text-muted">
                 <Loader2 className="h-3 w-3 animate-spin" />
