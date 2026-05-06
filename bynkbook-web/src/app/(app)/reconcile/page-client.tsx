@@ -1063,6 +1063,7 @@ export default function ReconcilePageClient() {
 
   // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
   const PAGE_CHUNK = 200;
+  const ENTRIES_API_LIMIT = 200;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
   const BANK_TRANSACTION_STATUSES: BankTransactionStatusFilter[] = ["unmatched", "matched"];
 
@@ -1087,7 +1088,13 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Data queries
   // -------------------------
-  const entriesQ = useEntries({ businessId: selectedBusinessId, accountId: selectedAccountId, limit: 1000 });
+  const entriesQ = useEntries({
+    businessId: selectedBusinessId,
+    accountId: selectedAccountId,
+    limit: ENTRIES_API_LIMIT,
+    date_from: from || undefined,
+    date_to: to || undefined,
+  });
 
   const [bankTxLoading, setBankTxLoading] = useState(false);
   const [bankTx, setBankTx] = useState<any[]>([]);
@@ -1956,6 +1963,9 @@ const isReconcileExemptEntry = (e: any) => {
 
   // Keep raw entries; tab-level filtering decides visibility (Expected hides Adjusted-unmatched)
   const allEntries = entriesQ.data ?? [];
+  const entriesLoadedCount = allEntries.length;
+  const entriesHitApiLimit = entriesLoadedCount >= ENTRIES_API_LIMIT;
+  const entriesScopeLabel = from || to ? "for this date range" : "for this account";
 
   const allEntriesSorted = useMemo(() => {
     const arr = [...allEntries];
@@ -3909,6 +3919,12 @@ const displayBankActiveList = useMemo(() => {
                 Matched ({displayMatchedCount})
               </button>
             </div>
+
+            {entriesHitApiLimit ? (
+              <div className="mt-2 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] leading-4 text-bb-status-warning-fg">
+                Loaded {entriesLoadedCount} ledger entries {entriesScopeLabel}. The entries API returns at most {ENTRIES_API_LIMIT}, so Expected/Matched counts and matching choices only reflect loaded rows. Narrow the date range or account to load a smaller set; search filters loaded rows only.
+              </div>
+            ) : null}
 
             {bankTab === "unmatched" && selectedBankTxnIds.size > 0 ? (
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">

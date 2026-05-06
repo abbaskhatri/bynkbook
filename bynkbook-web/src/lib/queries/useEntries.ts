@@ -6,17 +6,21 @@ export function useEntries(params: {
   accountId: string | null;
   limit: number;
   includeDeleted?: boolean;
+  date_from?: string;
+  date_to?: string;
 }) {
-  const { businessId, accountId, limit, includeDeleted } = params;
+  const { businessId, accountId, limit, includeDeleted, date_from, date_to } = params;
 
   return useQuery({
-    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted],
+    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, date_from ?? "", date_to ?? ""],
     queryFn: () =>
       listEntries({
         businessId: businessId as string,
         accountId: accountId as string,
         limit,
         includeDeleted: !!includeDeleted,
+        date_from,
+        date_to,
       }),
     enabled: !!businessId && !!accountId,
 
