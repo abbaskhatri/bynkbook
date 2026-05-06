@@ -45,7 +45,9 @@ import { getCategorySuggestions } from "@/lib/api/ai";
 import { aiSuggestCategory } from "@/lib/api/ai";
 import { listClosedPeriods } from "@/lib/api/closedPeriods";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
-import { getIssuesCount, listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
+import { listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
+import { getAttentionSummary } from "@/lib/api/attentionSummary";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { listMatchGroups } from "@/lib/api/match-groups";
 
@@ -1402,12 +1404,15 @@ export default function LedgerPageClient() {
 
   // Issues: backend truth (open issues + header button)
   const issuesCountQ = useQuery({
-    queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"),
+    queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId),
     enabled: !!selectedBusinessId && !!selectedAccountId,
     queryFn: async () => {
-      if (!selectedBusinessId || !selectedAccountId) return { ok: true as const, count: 0 };
-      return getIssuesCount(selectedBusinessId, { status: "OPEN", accountId: selectedAccountId });
+      if (!selectedBusinessId || !selectedAccountId) {
+        return { ok: true as const, issue_count: 0, uncategorized_count: 0 };
+      }
+      return getAttentionSummary({ businessId: selectedBusinessId, accountId: selectedAccountId });
     },
+    placeholderData: (prev) => prev,
   });
 
   const issuesListQ = useQuery({
@@ -1422,8 +1427,8 @@ export default function LedgerPageClient() {
   const openIssues = issuesListQ.data?.issues ?? [];
 
   const openIssueCountForAccount = useMemo(() => {
-    return Number(issuesCountQ.data?.count ?? openIssues.length) || 0;
-  }, [issuesCountQ.data, openIssues.length]);
+    return Number(issuesCountQ.data?.issue_count ?? 0) || 0;
+  }, [issuesCountQ.data]);
 
   // Totals scope (all-time for Phase 3)
   const from = allTimeStartYmd();
