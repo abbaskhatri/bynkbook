@@ -44,19 +44,89 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/app/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AppDialog } from "@/components/primitives/AppDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader as THead, TableRow } from "@/components/ui/table";
 import { Check, Monitor, Moon, Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off, Sun } from "lucide-react";
 import { inputH7, ringFocus, selectTriggerClass, tabButtonClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
-import { PillToggle } from "@/components/primitives/PillToggle";
 import { useThemePreference, type ThemePreference } from "@/lib/theme";
 
 const PlaidConnectButton = dynamic(
   () => import("@/components/plaid/PlaidConnectButton").then((mod) => mod.PlaidConnectButton),
   { loading: () => null }
 );
+
+const DynamicAppDialog = dynamic(
+  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
+  { loading: () => null }
+);
+
+function AppDialog(props: any) {
+  if (!props.open) return null;
+  return <DynamicAppDialog {...props} />;
+}
+
+const DynamicTable = dynamic(
+  () => import("@/components/ui/table").then((mod) => mod.Table),
+  { loading: () => null }
+);
+
+function Table(props: any) {
+  return <DynamicTable {...props} />;
+}
+
+const DynamicTHead = dynamic(
+  () => import("@/components/ui/table").then((mod) => mod.TableHeader),
+  { loading: () => null }
+);
+
+function THead(props: any) {
+  return <DynamicTHead {...props} />;
+}
+
+const DynamicTableBody = dynamic(
+  () => import("@/components/ui/table").then((mod) => mod.TableBody),
+  { loading: () => null }
+);
+
+function TableBody(props: any) {
+  return <DynamicTableBody {...props} />;
+}
+
+const DynamicTableCell = dynamic(
+  () => import("@/components/ui/table").then((mod) => mod.TableCell),
+  { loading: () => null }
+);
+
+function TableCell(props: any) {
+  return <DynamicTableCell {...props} />;
+}
+
+const DynamicTableHead = dynamic(
+  () => import("@/components/ui/table").then((mod) => mod.TableHead),
+  { loading: () => null }
+);
+
+function TableHead(props: any) {
+  return <DynamicTableHead {...props} />;
+}
+
+const DynamicTableRow = dynamic(
+  () => import("@/components/ui/table").then((mod) => mod.TableRow),
+  { loading: () => null }
+);
+
+function TableRow(props: any) {
+  return <DynamicTableRow {...props} />;
+}
+
+const DynamicPillToggle = dynamic(
+  () => import("@/components/primitives/PillToggle").then((mod) => mod.PillToggle),
+  { loading: () => null }
+);
+
+function PillToggle(props: any) {
+  return <DynamicPillToggle {...props} />;
+}
 
 function todayYmd() {
   const d = new Date();
@@ -1785,7 +1855,7 @@ export default function SettingsPageClient() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <PillToggle checked={bkAutoSuggest} onCheckedChange={(next) => setBkAutoSuggest(next)} />
+                    <PillToggle checked={bkAutoSuggest} onCheckedChange={(next: boolean) => setBkAutoSuggest(next)} />
                   </div>
                 </div>
               </div>

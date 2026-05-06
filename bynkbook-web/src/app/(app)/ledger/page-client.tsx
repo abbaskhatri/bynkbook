@@ -56,7 +56,6 @@ import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
-import { FixIssueDialog } from "@/components/ledger/fix-issue-dialog";
 import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
@@ -77,8 +76,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AppDialog } from "@/components/primitives/AppDialog";
-import { ClosePeriodDialog } from "@/components/ledger/close-period-dialog";
 
 import {
   AlertTriangle,
@@ -103,6 +100,36 @@ const UploadPanel = dynamic(
   () => import("@/components/uploads/UploadPanel").then((mod) => mod.UploadPanel),
   { loading: () => null }
 );
+
+const DynamicAppDialog = dynamic(
+  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
+  { loading: () => null }
+);
+
+function AppDialog(props: any) {
+  if (!props.open) return null;
+  return <DynamicAppDialog {...props} />;
+}
+
+const DynamicFixIssueDialog = dynamic(
+  () => import("@/components/ledger/fix-issue-dialog").then((mod) => mod.FixIssueDialog),
+  { loading: () => null }
+);
+
+function FixIssueDialog(props: any) {
+  if (!props.open) return null;
+  return <DynamicFixIssueDialog {...props} />;
+}
+
+const DynamicClosePeriodDialog = dynamic(
+  () => import("@/components/ledger/close-period-dialog").then((mod) => mod.ClosePeriodDialog),
+  { loading: () => null }
+);
+
+function ClosePeriodDialog(props: any) {
+  if (!props.open) return null;
+  return <DynamicClosePeriodDialog {...props} />;
+}
 
 // ================================
 // SECTION: Helpers
@@ -5478,7 +5505,7 @@ export default function LedgerPageClient() {
 
       <FixIssueDialog
         open={!!fixDialog && fixDialog?.kind !== "MISSING_CATEGORY"}
-        onOpenChange={(open) => {
+        onOpenChange={(open: boolean) => {
           if (!open) setFixDialog(null);
         }}
         businessId={selectedBusinessId ?? ""}
