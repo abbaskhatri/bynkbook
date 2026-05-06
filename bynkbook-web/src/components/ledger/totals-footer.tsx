@@ -22,6 +22,10 @@ export function TotalsFooter(props: {
   totalPages: number;
   pageLabel?: ReactNode;
   paginationNote?: ReactNode;
+  loadMoreText?: ReactNode;
+  onLoadMore?: () => void;
+  canLoadMore?: boolean;
+  isLoadingMore?: boolean;
   canPrev: boolean;
   canNext: boolean;
 
@@ -38,6 +42,10 @@ export function TotalsFooter(props: {
     totalPages,
     pageLabel,
     paginationNote,
+    loadMoreText,
+    onLoadMore,
+    canLoadMore,
+    isLoadingMore,
     canPrev,
     canNext,
     incomeText,
@@ -100,6 +108,17 @@ export function TotalsFooter(props: {
           <div className="max-w-[360px] truncate text-[11px] text-amber-700" title={typeof paginationNote === "string" ? paginationNote : undefined}>
             {paginationNote}
           </div>
+        ) : null}
+
+        {loadMoreText ? (
+          <Button
+            variant="outline"
+            className="h-7 rounded-md px-2 text-xs"
+            disabled={!canLoadMore || isLoadingMore}
+            onClick={() => onLoadMore?.()}
+          >
+            {loadMoreText}
+          </Button>
         ) : null}
       </div>
 

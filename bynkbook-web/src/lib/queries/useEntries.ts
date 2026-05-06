@@ -5,19 +5,21 @@ export function useEntries(params: {
   businessId: string | null;
   accountId: string | null;
   limit: number;
+  pageCount?: number;
   includeDeleted?: boolean;
   date_from?: string;
   date_to?: string;
 }) {
-  const { businessId, accountId, limit, includeDeleted, date_from, date_to } = params;
+  const { businessId, accountId, limit, pageCount, includeDeleted, date_from, date_to } = params;
 
   return useQuery({
-    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, date_from ?? "", date_to ?? ""],
+    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, date_from ?? "", date_to ?? "", pageCount ?? 1],
     queryFn: () =>
       listEntries({
         businessId: businessId as string,
         accountId: accountId as string,
         limit,
+        pageCount: pageCount ?? 1,
         includeDeleted: !!includeDeleted,
         date_from,
         date_to,

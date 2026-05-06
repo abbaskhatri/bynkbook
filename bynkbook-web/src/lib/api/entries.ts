@@ -32,11 +32,21 @@ export type Entry = {
   transfer_direction?: "IN" | "OUT" | null;
 
   is_adjustment?: boolean;
+  running_balance_cents?: string | null;
 
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export type ListEntriesMeta = {
+  totalCount?: number;
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  limit: number;
+};
+
+export type EntryList = Entry[] & { meta?: ListEntriesMeta };
 
 function pick(obj: any, keys: string[]) {
   for (const k of keys) {
@@ -147,6 +157,9 @@ function normalizeEntry(raw: any): Entry {
     String(is_adjustment_raw ?? "").toLowerCase() === "true"
   );
 
+  const running_balance_cents =
+    asString(pick(raw, ["running_balance_cents", "runningBalanceCents"])) ?? null;
+
   const deleted_at = asString(pick(raw, ["deleted_at", "deletedAt"])) ?? null;
   const created_at = asString(pick(raw, ["created_at", "createdAt"])) ?? new Date().toISOString();
   const updated_at = asString(pick(raw, ["updated_at", "updatedAt"])) ?? created_at;
@@ -176,29 +189,38 @@ function normalizeEntry(raw: any): Entry {
     transfer_other_account_name,
     transfer_direction,
     is_adjustment,
+    running_balance_cents,
     deleted_at,
     created_at,
     updated_at,
   };
 }
 
-export async function listEntries(params: {
+export async function listEntriesPage(params: {
   businessId: string;
   accountId: string;
   limit: number;
+  cursor?: string | null;
   includeDeleted?: boolean;
   type?: string; // e.g. "EXPENSE" or "EXPENSE,INCOME"
   vendorId?: string;
+  categoryId?: string;
+  status?: string;
+  search?: string;
   date_from?: string;
   date_to?: string;
-}): Promise<Entry[]> {
-  const { businessId, accountId, limit, includeDeleted } = params;
+}): Promise<{ items: Entry[]; meta: ListEntriesMeta }> {
+  const { businessId, accountId, limit, cursor, includeDeleted } = params;
 
   const qs = new URLSearchParams();
   qs.set("limit", String(Math.max(1, Math.min(200, limit))));
+  if (cursor) qs.set("cursor", cursor);
   if (includeDeleted) qs.set("include_deleted", "true");
   if (params.type) qs.set("type", params.type);
   if (params.vendorId) qs.set("vendorId", params.vendorId);
+  if (params.categoryId) qs.set("categoryId", params.categoryId);
+  if (params.status) qs.set("status", params.status);
+  if (params.search) qs.set("search", params.search);
   if (params.date_from) qs.set("date_from", params.date_from);
   if (params.date_to) qs.set("date_to", params.date_to);
 
@@ -206,8 +228,56 @@ export async function listEntries(params: {
 
   const res: any = await apiFetch(url);
 
-  const rows = res?.entries ?? [];
-  return Array.isArray(rows) ? rows.map(normalizeEntry) : [];
+  const rows = res?.items ?? res?.entries ?? [];
+  const items = Array.isArray(rows) ? rows.map(normalizeEntry) : [];
+
+  return {
+    items,
+    meta: {
+      totalCount: typeof res?.totalCount === "number" ? res.totalCount : undefined,
+      hasMore: typeof res?.hasMore === "boolean" ? res.hasMore : undefined,
+      nextCursor: typeof res?.nextCursor === "string" ? res.nextCursor : null,
+      limit: Number(res?.limit ?? limit),
+    },
+  };
+}
+
+export async function listEntries(params: {
+  businessId: string;
+  accountId: string;
+  limit: number;
+  pageCount?: number;
+  includeDeleted?: boolean;
+  type?: string; // e.g. "EXPENSE" or "EXPENSE,INCOME"
+  vendorId?: string;
+  categoryId?: string;
+  status?: string;
+  search?: string;
+  date_from?: string;
+  date_to?: string;
+}): Promise<EntryList> {
+  const pageCount = Math.max(1, Math.floor(params.pageCount ?? 1));
+  const perPageLimit = Math.max(1, Math.min(200, params.limit));
+  const all: EntryList = [] as EntryList;
+  let cursor: string | null = null;
+  let meta: ListEntriesMeta = { limit: perPageLimit, hasMore: false, nextCursor: null };
+
+  for (let page = 0; page < pageCount; page++) {
+    const res = await listEntriesPage({ ...params, limit: perPageLimit, cursor });
+    all.push(...res.items);
+    meta = res.meta;
+    cursor = res.meta.nextCursor ?? null;
+    if (!res.meta.hasMore || !cursor) break;
+  }
+
+  all.meta = {
+    ...meta,
+    hasMore: !!meta.hasMore,
+    nextCursor: cursor,
+    limit: perPageLimit,
+  };
+
+  return all;
 }
 
 export async function createEntry(params: {
