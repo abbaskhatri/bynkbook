@@ -59,3 +59,7 @@ docs/**/apigw*.json
 docs/**/payload*.json
 docs/**/out*.json
 docs/**/debug*
+
+# Local Playwright auth/session files
+bynkbook-web/auth/
+.qa/
