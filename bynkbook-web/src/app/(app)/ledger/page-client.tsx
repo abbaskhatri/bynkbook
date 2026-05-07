@@ -197,6 +197,8 @@ type LedgerRangeValue = {
   to: string;
 };
 
+type LedgerViewMode = "chronological" | "needsReconcile";
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -1271,6 +1273,8 @@ export default function LedgerPageClient() {
   const [ledgerActionBusy, setLedgerActionBusy] = useState<"export" | "print" | null>(null);
 
   // Filters + toggle
+  const [ledgerViewMode, setLedgerViewMode] = useState<LedgerViewMode>("chronological");
+  const isNeedsReconcileView = ledgerViewMode === "needsReconcile";
   const [searchPayee, setSearchPayee] = useState("");
   const [debouncedPayee, setDebouncedPayee] = useState("");
   const deletedToggleKey = useMemo(() => {
@@ -1378,6 +1382,10 @@ export default function LedgerPageClient() {
     setPage(1);
     setLoadedPageCount(1);
   }, [selectedBusinessId, selectedAccountId, showDeleted, rowsPerPage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [ledgerViewMode]);
 
   // ---------- Bundle F: Ledger anomalies (read-only) ----------
   const anomaliesQ = useQuery({
@@ -2004,9 +2012,45 @@ export default function LedgerPageClient() {
     });
   }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
 
+  const reconcileQueueExpectedRows = useMemo(() => {
+    return filteredRowsAll.filter((r) => {
+      if (r.isDeleted) return false;
+      if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
+      if (String(r.rawStatus ?? "").toUpperCase() !== "EXPECTED") return false;
+      return true;
+    });
+  }, [filteredRowsAll]);
+
+  const reconcileQueuePartialRows = useMemo(() => {
+    return filteredRowsAll.filter((r) => {
+      if (r.isDeleted) return false;
+      if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
+      if (String(r.rawStatus ?? "").toUpperCase() !== "PARTIAL") return false;
+      return true;
+    });
+  }, [filteredRowsAll]);
+
+  const reconcileQueueDeletedRows = useMemo(() => {
+    if (!showDeleted) return [] as typeof filteredRowsAll;
+    return filteredRowsAll.filter((r) => {
+      if (!r.isDeleted) return false;
+      if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
+      return true;
+    });
+  }, [filteredRowsAll, showDeleted]);
+
+  const reconcileQueueRowsAll = useMemo(() => {
+    return [
+      ...reconcileQueueExpectedRows,
+      ...reconcileQueuePartialRows,
+      ...reconcileQueueDeletedRows,
+    ];
+  }, [reconcileQueueExpectedRows, reconcileQueuePartialRows, reconcileQueueDeletedRows]);
+
+  const displayRowsAll = isNeedsReconcileView ? reconcileQueueRowsAll : filteredRowsAll;
   const startIdx = (page - 1) * rowsPerPage;
   const endIdx = page * rowsPerPage;
-  const pageRows = filteredRowsAll.slice(startIdx, endIdx);
+  const pageRows = displayRowsAll.slice(startIdx, endIdx);
 
   // Stable key for suggestion targets (prevents effect loops)
   const ledgerSuggestionTargetIds = useMemo(() => {
@@ -2131,6 +2175,10 @@ export default function LedgerPageClient() {
 
     const net = income + expense;
 
+    if (isNeedsReconcileView) {
+      return { income, expense, net, balanceCents: ZERO, balanceStr: "—" };
+    }
+
     // Balance: first visible non-deleted row's running balance
     const top =
       pageRows.find(
@@ -2146,7 +2194,7 @@ export default function LedgerPageClient() {
     const balStr = top ? top.balanceStr : "—";
 
     return { income, expense, net, balanceCents: balCents, balanceStr: balStr };
-  }, [pageRows]);
+  }, [pageRows, isNeedsReconcileView]);
 
   const entriesMeta = (entriesQ.data as any)?.meta as
     | { totalCount?: number; hasMore?: boolean; nextCursor?: string | null; limit?: number }
@@ -2165,9 +2213,9 @@ export default function LedgerPageClient() {
     !!filterAmountMin.trim() ||
     !!filterAmountMax.trim() ||
     !!filterAmountExact.trim();
-  const canNext = endIdx < filteredRowsAll.length;
+  const canNext = endIdx < displayRowsAll.length;
   const canPrev = page > 1;
-  const totalPages = Math.max(1, Math.ceil(filteredRowsAll.length / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / rowsPerPage));
   const loadedCountLabel =
     totalEntryCount !== undefined
       ? `${loadedEntryCount} of ${totalEntryCount} loaded`
@@ -2176,6 +2224,13 @@ export default function LedgerPageClient() {
     ? `Page ${page} · ${loadedCountLabel}`
     : `Page ${page} of ${totalPages} · ${loadedCountLabel}`;
   const loadedScopeNotice = (() => {
+    if (isNeedsReconcileView) {
+      if (hasMoreOnServer) {
+        return "Showing reconcile queue from loaded rows. Load more to find older expected/partial entries.";
+      }
+      return "All loaded entries checked for reconcile queue.";
+    }
+
     if (hasMoreOnServer) {
       return totalEntryCount !== undefined
         ? `Showing ${loadedEntryCount} of ${totalEntryCount} entries. Load more to audit older rows.`
@@ -2194,6 +2249,11 @@ export default function LedgerPageClient() {
   })();
   const footerScopeNote = (() => {
     const deletedNote = showDeleted ? " Deleted rows excluded." : "";
+
+    if (isNeedsReconcileView) {
+      const deletedQueueNote = reconcileQueueDeletedRows.length > 0 ? ` Deleted audit rows shown: ${reconcileQueueDeletedRows.length}.` : "";
+      return `Expected ${reconcileQueueExpectedRows.length} · Partial ${reconcileQueuePartialRows.length} · Total amount shown ${formatUsdFromCents(footerTotals.net)}.${deletedQueueNote}`;
+    }
 
     if (!hasMoreOnServer && totalEntryCount !== undefined && loadedEntryCount >= totalEntryCount) {
       return `Loaded all ${totalEntryCount} entries; totals reflect this page.${deletedNote}`;
@@ -3559,21 +3619,32 @@ export default function LedgerPageClient() {
   const num = "text-right tabular-nums tracking-tight";
   const center = "text-center";
 
-  const cols = [
-    <col key="c0" style={{ width: "24px" }} />,
-    <col key="c1" style={{ width: "90px" }} />,   // date
-    <col key="c2" style={{ width: "64px" }} />,   // ref
-    <col key="c3" style={{ width: "auto", minWidth: "150px" }} />, // payee flex
-    <col key="c4" style={{ width: "68px" }} />,   // type
-    <col key="c5" style={{ width: "72px" }} />,   // method
-    <col key="c6" style={{ width: "94px" }} />,  // category
-    <col key="c7" style={{ width: "84px" }} />,   // amount
-    <col key="c8" style={{ width: "84px" }} />,   // balance
-    <col key="c9" style={{ width: "102px" }} />,  // status
-    <col key="c10" style={{ width: "20px" }} />,  // dup icon
-    <col key="c11" style={{ width: "20px" }} />,  // cat icon
-    <col key="c12" style={{ width: "92px" }} />,  // actions
-  ];
+  const cols = useMemo(() => {
+    const base = [
+      <col key="c0" style={{ width: "24px" }} />,
+      <col key="c1" style={{ width: "90px" }} />,   // date
+      <col key="c2" style={{ width: "64px" }} />,   // ref
+      <col key="c3" style={{ width: "auto", minWidth: "150px" }} />, // payee flex
+      <col key="c4" style={{ width: "68px" }} />,   // type
+      <col key="c5" style={{ width: "72px" }} />,   // method
+      <col key="c6" style={{ width: "94px" }} />,  // category
+      <col key="c7" style={{ width: "84px" }} />,   // amount
+    ];
+
+    const tail = [
+      <col key="c9" style={{ width: "102px" }} />,  // status
+      <col key="c10" style={{ width: "20px" }} />,  // dup icon
+      <col key="c11" style={{ width: "20px" }} />,  // cat icon
+      <col key="c12" style={{ width: "92px" }} />,  // actions
+    ];
+
+    if (isNeedsReconcileView) return [...base, ...tail];
+    return [
+      ...base,
+      <col key="c8" style={{ width: "84px" }} />,   // balance
+      ...tail,
+    ];
+  }, [isNeedsReconcileView]);
 
   const headerRow = useMemo(() => (
     <tr className="h-[28px] border-b border-bb-border bg-bb-table-header">
@@ -3593,14 +3664,14 @@ export default function LedgerPageClient() {
       <th className={th}>Method</th>
       <th className={th}>Category</th>
       <th className={th + " " + num}>Amount</th>
-      <th className={th + " " + num}>Balance</th>
+      {!isNeedsReconcileView ? <th className={th + " " + num}>Balance</th> : null}
       <th className={th + " " + center}>Status</th>
       {/* No "Dup/Cat" header text */}
       <th className={th + " " + center + " px-0.5"} aria-label="Duplicate issues"></th>
       <th className={th + " " + center + " px-0.5"} aria-label="Missing category issues"></th>
       <th className={th + " " + center}>Actions</th>
     </tr>
-  ), [allPageSelected]);
+  ), [allPageSelected, isNeedsReconcileView]);
 
   const addRow = (
     <tr>
@@ -3784,7 +3855,9 @@ export default function LedgerPageClient() {
       </td>
 
       {/* Balance */}
-      <td className={td + " " + num + " text-bb-text-subtle"}>—</td>
+      {!isNeedsReconcileView ? (
+        <td className={td + " " + num + " text-bb-text-subtle"}>—</td>
+      ) : null}
 
       {/* Status */}
       <td className={td + " " + center}></td>
@@ -3825,6 +3898,31 @@ export default function LedgerPageClient() {
       <div className="flex items-center gap-2 min-w-0">
         {/* Left cluster: search + filters (can shrink) */}
         <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 py-1 pl-1">
+          <div className="inline-flex h-7 shrink-0 items-center rounded-md border border-bb-border bg-bb-table-header p-0.5">
+            {([
+              { value: "chronological", label: "Chronological" },
+              { value: "needsReconcile", label: "Needs Reconcile" },
+            ] as Array<{ value: LedgerViewMode; label: string }>).map((option) => {
+              const active = ledgerViewMode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={[
+                    "h-6 rounded px-2 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-bb-surface-card text-bb-text shadow-sm"
+                      : "text-bb-text-muted hover:bg-bb-table-row-hover hover:text-bb-text",
+                  ].join(" ")}
+                  onClick={() => setLedgerViewMode(option.value)}
+                  aria-pressed={active}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+
           <input
             className={[inputH7, "w-[220px] min-w-0"].join(" ")}
             placeholder="Search payee..."
@@ -4077,6 +4175,7 @@ export default function LedgerPageClient() {
     filterAmountMin,
     filterAmountMax,
     filterAmountExact,
+    ledgerViewMode,
     selectedCount,
     allPageSelected,
     scanBusy,
@@ -4292,14 +4391,16 @@ export default function LedgerPageClient() {
         <td className={tdSk}>{sk("w-20")}</td>
         <td className={tdSk}>{sk("w-24")}</td>
         <td className={tdSk + " text-right"}>{sk("w-20 ml-auto")}</td>
-        <td className={tdSk + " text-right"}>{sk("w-20 ml-auto")}</td>
+        {!isNeedsReconcileView ? (
+          <td className={tdSk + " text-right"}>{sk("w-20 ml-auto")}</td>
+        ) : null}
         <td className={tdSk + " text-center"}>{sk("w-16 mx-auto")}</td>
         <td className={tdSk + " text-center"}>{sk("w-4 mx-auto")}</td>
         <td className={tdSk + " text-center"}>{sk("w-4 mx-auto")}</td>
         <td className={tdSk + " text-right"}>{sk("w-16 ml-auto")}</td>
       </tr>
     ));
-  }, []);
+  }, [isNeedsReconcileView]);
   const bodyRows = useMemo(() => {
 
     return pageRows.map((r) => {
@@ -4909,9 +5010,11 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Balance */}
-          <td className={td + " " + num + " " + deletedText + (r.balanceNeg ? " text-bb-amount-negative" : "")}>
-            {r.balanceStr}
-          </td>
+          {!isNeedsReconcileView ? (
+            <td className={td + " " + num + " " + deletedText + (r.balanceNeg ? " text-bb-amount-negative" : "")}>
+              {r.balanceStr}
+            </td>
+          ) : null}
 
           {/* Status */}
           <td className={td + " " + center}>
@@ -5094,6 +5197,23 @@ export default function LedgerPageClient() {
                             Explain
                           </button>
 
+                          {selectedBusinessId && selectedAccountId && ["EXPECTED", "PARTIAL"].includes(String(r.rawStatus ?? "").toUpperCase()) ? (
+                            <button
+                              type="button"
+                              className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2"
+                              onMouseDown={(ev) => {
+                                ev.preventDefault();
+                                setMenuOpenId(null);
+                                router.push(
+                                  `/reconcile?businessId=${encodeURIComponent(selectedBusinessId)}&accountId=${encodeURIComponent(selectedAccountId)}`
+                                );
+                              }}
+                            >
+                              <BookOpen className="h-3.5 w-3.5" />
+                              Open in Reconcile
+                            </button>
+                          ) : null}
+
                           <button
                             type="button"
                             className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2 disabled:opacity-50"
@@ -5236,6 +5356,8 @@ export default function LedgerPageClient() {
     deletingId,
     deleteMut.isPending,
     categoryComboboxOptions,
+    isNeedsReconcileView,
+    router,
   ]);
 
 
@@ -5648,6 +5770,13 @@ export default function LedgerPageClient() {
           }
         />
 
+        {isNeedsReconcileView ? (
+          <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-bb-border bg-bb-surface-card px-3 py-1.5 text-xs text-bb-text-muted">
+            <span className="font-medium text-bb-text">Work queue view.</span>
+            <span>Ledger order and running balances remain chronological.</span>
+          </div>
+        ) : null}
+
         {loadedScopeNotice ? (
           <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
             <span>{loadedScopeNotice}</span>
@@ -5695,7 +5824,7 @@ export default function LedgerPageClient() {
           body={entriesQ.isLoading ? skeletonBodyRows : bodyRows}
           footer={
             <tr>
-              <td colSpan={13} className="p-0 border-t border-bb-border bg-bb-table-header">
+              <td colSpan={isNeedsReconcileView ? 12 : 13} className="p-0 border-t border-bb-border bg-bb-table-header">
                 <TotalsFooter
                   rowsPerPage={rowsPerPage}
                   setRowsPerPage={setRowsPerPage}
@@ -5710,9 +5839,9 @@ export default function LedgerPageClient() {
                   onLoadMore={() => setLoadedPageCount((n) => n + 1)}
                   canPrev={canPrev}
                   canNext={canNext}
-                  totalsScopeLabel="Page totals"
+                  totalsScopeLabel={isNeedsReconcileView ? "Queue totals" : "Page totals"}
                   totalsScopeNote={footerScopeNote}
-                  balanceLabel="Ending balance shown"
+                  balanceLabel={isNeedsReconcileView ? "Running balance" : "Ending balance shown"}
                   incomeText={
                     entriesQ.isLoading ? (
                       "…"
@@ -5741,7 +5870,9 @@ export default function LedgerPageClient() {
                     )
                   }
                   balanceText={
-                    entriesQ.isLoading ? (
+                    isNeedsReconcileView ? (
+                      <span className="text-bb-text-muted">Hidden</span>
+                    ) : entriesQ.isLoading ? (
                       "…"
                     ) : footerTotals.balanceStr === "—" ? (
                       "—"
