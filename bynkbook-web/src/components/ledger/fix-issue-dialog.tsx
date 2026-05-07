@@ -44,6 +44,11 @@ export function FixIssueDialog(props: {
 
   categories: Array<{ id: string; name: string }>;
 
+  contextLoading?: boolean;
+  contextError?: string | null;
+  contextIncomplete?: boolean;
+  onRetryContext?: () => void;
+
   onDidMutate?: () => void; // refresh hooks in Ledger
 }) {
   const {
@@ -56,6 +61,10 @@ export function FixIssueDialog(props: {
     issues,
     rowsById,
     categories,
+    contextLoading = false,
+    contextError = null,
+    contextIncomplete = false,
+    onRetryContext,
     onDidMutate,
   } = props;
 
@@ -171,6 +180,11 @@ export function FixIssueDialog(props: {
   }, [kind, issues, relevant.issueIds]);
 
   const duplicateMentionsMatch = duplicateIssueDetails.toLowerCase().includes("matched");
+  const duplicateContextBlocked = kind === "DUPLICATE" && (contextLoading || contextIncomplete);
+  const duplicateContextMessage =
+    kind === "DUPLICATE" && contextIncomplete
+      ? "Full duplicate context is not available yet. Review is limited to currently loaded rows."
+      : null;
 
   async function doResolve(
     action: "LEGITIMIZE" | "ACK_STALE" | "FIX_MISSING_CATEGORY",
@@ -178,6 +192,11 @@ export function FixIssueDialog(props: {
   ) {
     if (!kind || !entryId) return;
     setErr(null);
+
+    if (kind === "DUPLICATE" && duplicateContextBlocked) {
+      setErr("Load the full duplicate context before resolving this issue.");
+      return;
+    }
 
     if (action === "FIX_MISSING_CATEGORY" && !pickedCategoryId) {
       setErr("Pick a category first.");
@@ -268,7 +287,7 @@ export function FixIssueDialog(props: {
                 <Button
                   variant="outline"
                   onClick={() => doResolve("LEGITIMIZE", "legitimize")}
-                  disabled={busy || relevant.issueIds.length === 0}
+                  disabled={busy || duplicateContextBlocked || relevant.issueIds.length === 0}
                 >
                   {activeAction === "legitimize" ? (
                     <span className="inline-flex items-center gap-2">
@@ -288,6 +307,10 @@ export function FixIssueDialog(props: {
                     }
                     if (mergeSurvivorId === mergeDuplicateId) {
                       setErr("Survivor and duplicate must be different.");
+                      return;
+                    }
+                    if (duplicateContextBlocked) {
+                      setErr("Load the full duplicate context before merging.");
                       return;
                     }
 
@@ -335,7 +358,7 @@ export function FixIssueDialog(props: {
                       setActiveAction(null);
                     }
                   }}
-                  disabled={busy || relevant.entryIds.length < 2}
+                  disabled={busy || duplicateContextBlocked || relevant.entryIds.length < 2}
                 >
                   {activeAction === "merge" ? (
                     <span className="inline-flex items-center gap-2">
@@ -353,6 +376,32 @@ export function FixIssueDialog(props: {
       }
     >
       <div className="space-y-3">
+        {contextLoading || contextError || duplicateContextMessage ? (
+          <div className="rounded-md border border-bb-border bg-bb-table-header px-3 py-2 text-xs text-bb-text">
+            {contextLoading ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading issue details…
+              </span>
+            ) : contextError ? (
+              <span className="inline-flex items-center justify-between gap-3">
+                <span>{contextError}</span>
+                {onRetryContext ? (
+                  <button
+                    type="button"
+                    className="font-medium text-bb-text hover:underline"
+                    onClick={onRetryContext}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </span>
+            ) : (
+              duplicateContextMessage
+            )}
+          </div>
+        ) : null}
+
         {kind === "MISSING_CATEGORY" ? (
           <div className="flex items-center gap-2">
             <div className="text-sm text-bb-text w-28">Category</div>

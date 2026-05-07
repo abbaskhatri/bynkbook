@@ -53,6 +53,17 @@ import { listMatchGroups } from "@/lib/api/match-groups";
 
 import { aiExplainEntry, aiAnomalies, aiMerchantNormalize } from "@/lib/api/ai";
 
+type FixIssueKind = "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+type FixIssueDialogRow = {
+  id: string;
+  date: string;
+  payee: string;
+  amountStr: string;
+  methodDisplay: string;
+  category: string;
+  categoryId: string | null;
+};
+
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
@@ -401,6 +412,52 @@ function titleCase(s: string) {
   const t = (s || "").trim().toLowerCase();
   if (!t) return "";
   return t.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function issueSnapshotToFixIssueRow(issue: EntryIssueRow): FixIssueDialogRow | null {
+  const id = String(issue.entry_id ?? "").trim();
+  if (!id) return null;
+
+  return {
+    id,
+    date: String(issue.entry_date ?? ""),
+    payee: String(issue.entry_payee ?? ""),
+    amountStr:
+      issue.entry_amount_cents === undefined || issue.entry_amount_cents === null
+        ? "—"
+        : formatUsdFromCents(toBigIntSafe(issue.entry_amount_cents)),
+    methodDisplay: titleCase(String(issue.entry_method ?? "")),
+    category: String(issue.entry_category_name ?? ""),
+    categoryId: issue.entry_category_id ?? null,
+  };
+}
+
+function isFixIssueContextIncomplete(
+  kind: FixIssueKind | null | undefined,
+  entryId: string | null | undefined,
+  issues: EntryIssueRow[],
+  rowsById: Record<string, FixIssueDialogRow>
+) {
+  if (!kind || !entryId) return false;
+
+  const base = issues.find((x) => x.entry_id === entryId && x.issue_type === kind);
+  if (!base) return true;
+
+  if (kind !== "DUPLICATE") return !rowsById[entryId];
+
+  const groupKey = String(base.group_key ?? "").trim();
+  if (!groupKey) return !rowsById[entryId];
+
+  const peerEntryIds = Array.from(
+    new Set(
+      issues
+        .filter((x) => x.issue_type === "DUPLICATE" && x.group_key === groupKey)
+        .map((x) => String(x.entry_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  return peerEntryIds.length < 2 || peerEntryIds.some((id) => !rowsById[id]);
 }
 
 function statusTone(
@@ -4044,10 +4101,98 @@ export default function LedgerPageClient() {
 
     | {
       id: string;
-      kind: "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
+      kind: FixIssueKind;
     }
     | null
   >(null);
+
+  const localFixIssueRowsById = useMemo<Record<string, FixIssueDialogRow>>(() => {
+    return Object.fromEntries(
+      rowModels.map((r) => [
+        r.id,
+        {
+          id: r.id,
+          date: r.date,
+          payee: r.payee,
+          amountStr: r.amountStr,
+          methodDisplay: r.methodDisplay,
+          category: r.category || "",
+          categoryId: r.categoryId,
+        },
+      ])
+    );
+  }, [rowModels]);
+
+  const baseFixIssueRowsById = useMemo<Record<string, FixIssueDialogRow>>(() => {
+    const rows: Record<string, FixIssueDialogRow> = { ...localFixIssueRowsById };
+    for (const issue of openIssues) {
+      const row = issueSnapshotToFixIssueRow(issue);
+      if (row && !rows[row.id]) rows[row.id] = row;
+    }
+    return rows;
+  }, [localFixIssueRowsById, openIssues]);
+
+  const localFixIssueContextIncomplete = useMemo(() => {
+    return isFixIssueContextIncomplete(fixDialog?.kind, fixDialog?.id, openIssues, baseFixIssueRowsById);
+  }, [fixDialog?.kind, fixDialog?.id, openIssues, baseFixIssueRowsById]);
+
+  const fixIssueContextQ = useQuery({
+    queryKey: ["entryIssues", selectedBusinessId, selectedAccountId, "fixIssueContext", fixDialog?.id, fixDialog?.kind],
+    enabled:
+      !!selectedBusinessId &&
+      !!selectedAccountId &&
+      !!fixDialog?.id &&
+      fixDialog?.kind !== "MISSING_CATEGORY" &&
+      localFixIssueContextIncomplete,
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      if (!selectedBusinessId || !selectedAccountId || !fixDialog?.id) {
+        return { ok: true as const, issues: [] as EntryIssueRow[] };
+      }
+
+      return listAccountIssues({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        status: "OPEN",
+        entryIds: [fixDialog.id],
+      });
+    },
+  });
+
+  const fixIssueFallbackIssues = fixIssueContextQ.data?.issues ?? [];
+
+  const fixIssueDialogIssues = useMemo(() => {
+    const byId = new Map<string, EntryIssueRow>();
+    for (const issue of openIssues) {
+      const id = String(issue.id ?? "").trim();
+      if (id) byId.set(id, issue);
+    }
+    for (const issue of fixIssueFallbackIssues) {
+      const id = String(issue.id ?? "").trim();
+      if (id && !byId.has(id)) byId.set(id, issue);
+    }
+    return Array.from(byId.values());
+  }, [openIssues, fixIssueFallbackIssues]);
+
+  const fixIssueRowsById = useMemo<Record<string, FixIssueDialogRow>>(() => {
+    const rows: Record<string, FixIssueDialogRow> = { ...baseFixIssueRowsById };
+    for (const issue of fixIssueFallbackIssues) {
+      const row = issueSnapshotToFixIssueRow(issue);
+      if (row && !rows[row.id]) rows[row.id] = row;
+    }
+    return rows;
+  }, [baseFixIssueRowsById, fixIssueFallbackIssues]);
+
+  const fixIssueDialogContextIncomplete = useMemo(() => {
+    return isFixIssueContextIncomplete(fixDialog?.kind, fixDialog?.id, fixIssueDialogIssues, fixIssueRowsById);
+  }, [fixDialog?.kind, fixDialog?.id, fixIssueDialogIssues, fixIssueRowsById]);
+
+  const fixIssueDialogContextError =
+    fixIssueContextQ.isError && localFixIssueContextIncomplete
+      ? "Couldn’t load full issue context. Keep reviewing currently loaded rows, or retry before resolving."
+      : null;
 
   // Quick-fix: Missing Category inline (no dialog)
   const [quickCatEntryId, setQuickCatEntryId] = useState<string | null>(null);
@@ -5610,22 +5755,15 @@ export default function LedgerPageClient() {
         accountId={selectedAccountId ?? ""}
         kind={fixDialog?.kind ?? null}
         entryId={fixDialog?.id ?? null}
-        issues={openIssues}
-        rowsById={Object.fromEntries(
-          rowModels.map((r) => [
-            r.id,
-            {
-              id: r.id,
-              date: r.date,
-              payee: r.payee,
-              amountStr: r.amountStr,
-              methodDisplay: r.methodDisplay,
-              category: r.category || "",
-              categoryId: r.categoryId,
-            },
-          ])
-        )}
+        issues={fixIssueDialogIssues}
+        rowsById={fixIssueRowsById}
         categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
+        contextLoading={fixIssueContextQ.isFetching && fixIssueDialogContextIncomplete}
+        contextError={fixIssueDialogContextError}
+        contextIncomplete={fixIssueDialogContextIncomplete}
+        onRetryContext={() => {
+          void fixIssueContextQ.refetch();
+        }}
         onDidMutate={() => {
           // refresh issues + entries after resolution
           if (selectedBusinessId && selectedAccountId) {
