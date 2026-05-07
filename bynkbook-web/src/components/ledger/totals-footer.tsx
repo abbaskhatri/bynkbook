@@ -33,6 +33,9 @@ export function TotalsFooter(props: {
   expenseText: ReactNode;
   netText: ReactNode;
   balanceText: ReactNode;
+  totalsScopeLabel?: ReactNode;
+  totalsScopeNote?: ReactNode;
+  balanceLabel?: ReactNode;
 }) {
   const {
     rowsPerPage,
@@ -52,12 +55,15 @@ export function TotalsFooter(props: {
     expenseText,
     netText,
     balanceText,
+    totalsScopeLabel,
+    totalsScopeNote,
+    balanceLabel,
   } = props;
 
   const navBtnClass = iconButtonH7;
 
   return (
-    <div className="flex items-center justify-between px-3 py-2 text-xs text-bb-text-muted">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2 text-xs text-bb-text-muted">
       {/* Left: rows + paging */}
       <div className="flex items-center gap-2">
         <span>Rows:</span>
@@ -123,7 +129,23 @@ export function TotalsFooter(props: {
       </div>
 
       {/* Right: totals */}
-      <div className="flex items-center gap-6 text-xs tabular-nums">
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs tabular-nums">
+        {totalsScopeLabel ? (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-semibold text-bb-text">
+              {totalsScopeLabel}
+            </span>
+            {totalsScopeNote ? (
+              <span
+                className="max-w-[320px] truncate text-[11px] text-bb-text-muted"
+                title={typeof totalsScopeNote === "string" ? totalsScopeNote : undefined}
+              >
+                {totalsScopeNote}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div>
           <span className="mr-1">Income:</span>
           <span className="font-semibold text-bb-text">{incomeText}</span>
@@ -140,7 +162,7 @@ export function TotalsFooter(props: {
         </div>
 
         <div>
-          <span className="mr-1">Balance:</span>
+          <span className="mr-1">{balanceLabel ?? "Balance"}:</span>
           <span className="font-semibold">{balanceText}</span>
         </div>
       </div>

@@ -2192,6 +2192,15 @@ export default function LedgerPageClient() {
 
     return null;
   })();
+  const footerScopeNote = (() => {
+    const deletedNote = showDeleted ? " Deleted rows excluded." : "";
+
+    if (!hasMoreOnServer && totalEntryCount !== undefined && loadedEntryCount >= totalEntryCount) {
+      return `Loaded all ${totalEntryCount} entries; totals reflect this page.${deletedNote}`;
+    }
+
+    return `Totals reflect rows on this page, not the full ledger.${deletedNote}`;
+  })();
 
   // Selection
   const checkboxClass =
@@ -5701,6 +5710,9 @@ export default function LedgerPageClient() {
                   onLoadMore={() => setLoadedPageCount((n) => n + 1)}
                   canPrev={canPrev}
                   canNext={canNext}
+                  totalsScopeLabel="Page totals"
+                  totalsScopeNote={footerScopeNote}
+                  balanceLabel="Ending balance shown"
                   incomeText={
                     entriesQ.isLoading ? (
                       "…"
