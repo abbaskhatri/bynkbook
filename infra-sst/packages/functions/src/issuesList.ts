@@ -63,6 +63,51 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
+const ENTRY_IDS_LIMIT = 200;
+
+const issueSelect = {
+  id: true,
+  entry_id: true,
+  issue_type: true,
+  status: true,
+  severity: true,
+  group_key: true,
+  details: true,
+  detected_at: true,
+  resolved_at: true,
+  created_at: true,
+  updated_at: true,
+} as const;
+
+function parseEntryIds(qs: any): string[] | null {
+  const raw = qs?.entryIds ?? qs?.entry_ids;
+  if (raw === undefined || raw === null) return null;
+
+  const parts = Array.isArray(raw)
+    ? raw.flatMap((v) => String(v ?? "").split(","))
+    : String(raw).split(",");
+
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const part of parts) {
+    const id = String(part ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= ENTRY_IDS_LIMIT) break;
+  }
+
+  return ids;
+}
+
+function sortIssues(rows: any[]) {
+  return rows.sort((a, b) => {
+    const at = a?.detected_at ? new Date(a.detected_at).getTime() : 0;
+    const bt = b?.detected_at ? new Date(b.detected_at).getTime() : 0;
+    return bt - at;
+  });
+}
+
 export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   if (method !== "GET") return json(405, { ok: false, error: "Method not allowed" });
@@ -80,6 +125,7 @@ export async function handler(event: any) {
   const status = (qs.status || "OPEN").toString().toUpperCase();
   const allowed = new Set(["OPEN", "RESOLVED", "ALL"]);
   if (!allowed.has(status)) return json(400, { ok: false, error: "Invalid status" });
+  const requestedEntryIds = parseEntryIds(qs);
 
   const prisma = await getPrisma();
 
@@ -92,32 +138,88 @@ export async function handler(event: any) {
   const where: any = { business_id: biz, account_id: acct };
   if (status !== "ALL") where.status = status;
 
-  // Deleted entries must never appear as issues.
-  // Filter out issues whose entry has been soft-deleted.
-  const deleted = await prisma.entry.findMany({
-    where: { business_id: biz, account_id: acct, deleted_at: { not: null } },
-    select: { id: true },
-  });
-  const deletedIds = deleted.map((d: any) => d.id);
-  if (deletedIds.length) where.entry_id = { notIn: deletedIds };
+  let rows: any[];
 
-  let rows = await prisma.entryIssue.findMany({
-    where,
-    orderBy: [{ detected_at: "desc" }],
-    select: {
-      id: true,
-      entry_id: true,
-      issue_type: true,
-      status: true,
-      severity: true,
-      group_key: true,
-      details: true,
-      detected_at: true,
-      resolved_at: true,
-      created_at: true,
-      updated_at: true,
-    },
-  });
+  if (requestedEntryIds) {
+    const activeRequestedEntries = requestedEntryIds.length
+      ? await prisma.entry.findMany({
+        where: {
+          business_id: biz,
+          account_id: acct,
+          id: { in: requestedEntryIds },
+          deleted_at: null,
+        },
+        select: { id: true },
+      })
+      : [];
+
+    const scopedEntryIds = activeRequestedEntries.map((e: any) => e.id);
+    if (scopedEntryIds.length === 0) {
+      return json(200, { ok: true, status, issues: [] });
+    }
+
+    const initialRows = await prisma.entryIssue.findMany({
+      where: { ...where, entry_id: { in: scopedEntryIds } },
+      orderBy: [{ detected_at: "desc" }],
+      select: issueSelect,
+    });
+
+    const rowsById = new Map<string, any>();
+    for (const row of initialRows) rowsById.set(String(row.id), row);
+
+    const duplicateGroupKeys = Array.from(
+      new Set(
+        initialRows
+          .filter((r: any) => r.issue_type === "DUPLICATE" && String(r.group_key ?? "").trim())
+          .map((r: any) => String(r.group_key))
+      )
+    );
+
+    if (duplicateGroupKeys.length > 0) {
+      const peerRows = await prisma.entryIssue.findMany({
+        where: {
+          ...where,
+          issue_type: "DUPLICATE",
+          group_key: { in: duplicateGroupKeys },
+        },
+        orderBy: [{ detected_at: "desc" }],
+        select: issueSelect,
+      });
+
+      for (const row of peerRows) rowsById.set(String(row.id), row);
+    }
+
+    const candidateEntryIds = Array.from(new Set(Array.from(rowsById.values()).map((r: any) => r.entry_id).filter(Boolean)));
+    const activeEntries = candidateEntryIds.length
+      ? await prisma.entry.findMany({
+        where: {
+          business_id: biz,
+          account_id: acct,
+          id: { in: candidateEntryIds },
+          deleted_at: null,
+        },
+        select: { id: true },
+      })
+      : [];
+    const activeEntryIds = new Set(activeEntries.map((e: any) => String(e.id)));
+
+    rows = sortIssues(Array.from(rowsById.values()).filter((r: any) => activeEntryIds.has(String(r.entry_id))));
+  } else {
+    // Deleted entries must never appear as issues.
+    // Filter out issues whose entry has been soft-deleted.
+    const deleted = await prisma.entry.findMany({
+      where: { business_id: biz, account_id: acct, deleted_at: { not: null } },
+      select: { id: true },
+    });
+    const deletedIds = deleted.map((d: any) => d.id);
+    if (deletedIds.length) where.entry_id = { notIn: deletedIds };
+
+    rows = await prisma.entryIssue.findMany({
+      where,
+      orderBy: [{ detected_at: "desc" }],
+      select: issueSelect,
+    });
+  }
 
   // If a DUPLICATE group no longer has >= 2 active entries (e.g., one was soft-deleted),
   // do not show a duplicate issue for the remaining entry.
@@ -133,13 +235,13 @@ export async function handler(event: any) {
     return (dupCounts.get(k) || 0) >= 2;
   });
 
-  const entryIds = Array.from(new Set(rows.map((r) => r.entry_id).filter(Boolean)));
-  const entries = entryIds.length
+  const snapshotEntryIds = Array.from(new Set(rows.map((r) => r.entry_id).filter(Boolean)));
+  const entries = snapshotEntryIds.length
     ? await prisma.entry.findMany({
       where: {
         business_id: biz,
         account_id: acct,
-        id: { in: entryIds },
+        id: { in: snapshotEntryIds },
         deleted_at: null,
       },
       select: {

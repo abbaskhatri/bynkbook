@@ -101,10 +101,19 @@ export async function listAccountIssues(params: {
   accountId: string;
   status?: "OPEN" | "RESOLVED";
   limit?: number;
+  entryIds?: string[];
 }): Promise<{ ok: true; issues: EntryIssueRow[] }> {
-  const { businessId, accountId, status = "OPEN", limit = 200 } = params;
+  const { businessId, accountId, status = "OPEN", limit = 200, entryIds } = params;
+  const qs = new URLSearchParams();
+  qs.set("status", status);
+  qs.set("limit", String(limit));
+  if (entryIds) {
+    const ids = Array.from(new Set(entryIds.map((id) => String(id).trim()).filter(Boolean)));
+    qs.set("entryIds", ids.join(","));
+  }
+
   return apiFetch(
-    `/v1/businesses/${businessId}/accounts/${accountId}/issues?status=${encodeURIComponent(status)}&limit=${limit}`,
+    `/v1/businesses/${businessId}/accounts/${accountId}/issues?${qs.toString()}`,
     { method: "GET" }
   );
 }
