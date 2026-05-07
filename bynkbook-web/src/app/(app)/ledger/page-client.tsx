@@ -1305,6 +1305,18 @@ export default function LedgerPageClient() {
     includeDeleted: showDeleted,
   });
 
+  const issueEntryIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of entriesQ.data ?? []) {
+      const id = String(entry?.id ?? "").trim();
+      if (!id || id === "opening_balance" || id.startsWith("temp_")) continue;
+      ids.add(id);
+    }
+    return Array.from(ids).sort();
+  }, [entriesQ.data]);
+
+  const issueEntryIdsSignature = useMemo(() => issueEntryIds.join(","), [issueEntryIds]);
+
   useEffect(() => {
     setPage(1);
     setLoadedPageCount(1);
@@ -1416,11 +1428,18 @@ export default function LedgerPageClient() {
   });
 
   const issuesListQ = useQuery({
-    queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
-    enabled: !!selectedBusinessId && !!selectedAccountId,
+    queryKey: ["entryIssues", selectedBusinessId, selectedAccountId, issueEntryIdsSignature],
+    enabled: !!selectedBusinessId && !!selectedAccountId && !entriesQ.isLoading,
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId) return { ok: true as const, issues: [] as EntryIssueRow[] };
-      return listAccountIssues({ businessId: selectedBusinessId, accountId: selectedAccountId, status: "OPEN", limit: 300 });
+      if (issueEntryIds.length === 0) return { ok: true as const, issues: [] as EntryIssueRow[] };
+      return listAccountIssues({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        status: "OPEN",
+        limit: 300,
+        entryIds: issueEntryIds,
+      });
     },
   });
 
