@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Building2, Landmark } from "lucide-react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { AlertTriangle, Building2, Landmark, Loader2 } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
@@ -95,32 +95,50 @@ export default function MobileIssuesPageClient() {
     return activeAccounts.find((item) => item.id === accountId) ?? activeAccounts[0] ?? null;
   }, [accountId, activeAccounts]);
 
-  const issuesQ = useQuery({
+  const issuesQ = useInfiniteQuery({
     queryKey: ["mobileIssues", businessId, accountId, "OPEN"],
-    queryFn: () =>
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
       listAccountIssues({
         businessId: businessId as string,
         accountId: accountId as string,
         status: "OPEN",
         limit: 50,
+        cursor: pageParam,
       }),
+    getNextPageParam: (lastPage) => (
+      lastPage.hasMore && lastPage.nextCursor ? lastPage.nextCursor : undefined
+    ),
     enabled: !!businessId && !!accountId,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
   });
 
+  const loadedIssueRows = useMemo(() => {
+    const out: EntryIssueRow[] = [];
+    const seen = new Set<string>();
+    for (const page of issuesQ.data?.pages ?? []) {
+      for (const issue of page.issues ?? []) {
+        const key = String(issue.id ?? "");
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(issue);
+      }
+    }
+    return out;
+  }, [issuesQ.data]);
+
   const issues = useMemo(
     () =>
-      (issuesQ.data?.issues ?? [])
+      loadedIssueRows
         .filter((issue) => isIssuesPageIssueType(issue.issue_type))
         .sort((a, b) => {
           const aDate = String(a.entry_date ?? a.detected_at ?? "");
           const bDate = String(b.entry_date ?? b.detected_at ?? "");
           return bDate.localeCompare(aDate);
-        })
-        .slice(0, 40),
-    [issuesQ.data]
+        }),
+    [loadedIssueRows]
   );
 
   const reviewHref = hrefWith({ path: "/mobile/review", businessId, accountId });
@@ -173,7 +191,7 @@ export default function MobileIssuesPageClient() {
             <div>
               <div className="text-sm font-semibold text-foreground">Open issue cards</div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Showing up to {issues.length} duplicate or stale-check issues.
+                Showing {issues.length} loaded duplicate or stale-check issues.
               </div>
             </div>
             <Link
@@ -263,6 +281,24 @@ export default function MobileIssuesPageClient() {
               );
             })
           )}
+
+          {(issuesQ.hasNextPage || issuesQ.isFetchingNextPage) && !issuesQ.isLoading && !issuesQ.isError ? (
+            <button
+              type="button"
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50 disabled:opacity-60"
+              onClick={() => void issuesQ.fetchNextPage()}
+              disabled={issuesQ.isFetchingNextPage}
+            >
+              {issuesQ.isFetchingNextPage ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading…
+                </span>
+              ) : (
+                "Load more"
+              )}
+            </button>
+          ) : null}
         </section>
       </div>
     </MobileShell>

@@ -64,6 +64,8 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
 }
 
 const ENTRY_IDS_LIMIT = 200;
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
 
 const issueSelect = {
   id: true,
@@ -100,11 +102,58 @@ function parseEntryIds(qs: any): string[] | null {
   return ids;
 }
 
+function parseLimit(qs: any): number {
+  const raw = qs?.limit;
+  const n = Number.parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
+  return Math.min(Math.max(n, 1), MAX_LIMIT);
+}
+
+type IssueCursor = {
+  detectedAt: string;
+  id: string;
+};
+
+function encodeCursor(row: any): string | null {
+  const detectedAt = row?.detected_at ? new Date(row.detected_at).toISOString() : null;
+  const id = String(row?.id ?? "").trim();
+  if (!detectedAt || !id) return null;
+  return Buffer.from(JSON.stringify({ detectedAt, id })).toString("base64url");
+}
+
+function parseCursor(qs: any): IssueCursor | null {
+  const raw = String(qs?.cursor ?? "").trim();
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    const detectedAt = String(parsed?.detectedAt ?? "").trim();
+    const id = String(parsed?.id ?? "").trim();
+    const t = Date.parse(detectedAt);
+    if (!detectedAt || !id || !Number.isFinite(t)) return null;
+    return { detectedAt: new Date(t).toISOString(), id };
+  } catch {
+    return null;
+  }
+}
+
+function cursorWhere(cursor: IssueCursor | null) {
+  if (!cursor) return {};
+  const detectedAt = new Date(cursor.detectedAt);
+  return {
+    OR: [
+      { detected_at: { lt: detectedAt } },
+      { detected_at: detectedAt, id: { lt: cursor.id } },
+    ],
+  };
+}
+
 function sortIssues(rows: any[]) {
   return rows.sort((a, b) => {
     const at = a?.detected_at ? new Date(a.detected_at).getTime() : 0;
     const bt = b?.detected_at ? new Date(b.detected_at).getTime() : 0;
-    return bt - at;
+    if (at !== bt) return bt - at;
+    return String(b?.id ?? "").localeCompare(String(a?.id ?? ""));
   });
 }
 
@@ -126,6 +175,8 @@ export async function handler(event: any) {
   const allowed = new Set(["OPEN", "RESOLVED", "ALL"]);
   if (!allowed.has(status)) return json(400, { ok: false, error: "Invalid status" });
   const requestedEntryIds = parseEntryIds(qs);
+  const limit = parseLimit(qs);
+  const cursor = parseCursor(qs);
 
   const prisma = await getPrisma();
 
@@ -139,6 +190,8 @@ export async function handler(event: any) {
   if (status !== "ALL") where.status = status;
 
   let rows: any[];
+  let hasMore = false;
+  let nextCursor: string | null = null;
 
   if (requestedEntryIds) {
     const activeRequestedEntries = requestedEntryIds.length
@@ -155,7 +208,7 @@ export async function handler(event: any) {
 
     const scopedEntryIds = activeRequestedEntries.map((e: any) => e.id);
     if (scopedEntryIds.length === 0) {
-      return json(200, { ok: true, status, issues: [] });
+      return json(200, { ok: true, status, issues: [], hasMore: false, nextCursor: null });
     }
 
     const initialRows = await prisma.entryIssue.findMany({
@@ -214,11 +267,42 @@ export async function handler(event: any) {
     const deletedIds = deleted.map((d: any) => d.id);
     if (deletedIds.length) where.entry_id = { notIn: deletedIds };
 
-    rows = await prisma.entryIssue.findMany({
-      where,
-      orderBy: [{ detected_at: "desc" }],
+    const seedRows = await prisma.entryIssue.findMany({
+      where: { ...where, ...cursorWhere(cursor) },
+      orderBy: [{ detected_at: "desc" }, { id: "desc" }],
+      take: limit + 1,
       select: issueSelect,
     });
+
+    const pageSeedRows = seedRows.slice(0, limit);
+    const rowsById = new Map<string, any>();
+    for (const row of pageSeedRows) rowsById.set(String(row.id), row);
+
+    const duplicateGroupKeys = Array.from(
+      new Set(
+        pageSeedRows
+          .filter((r: any) => r.issue_type === "DUPLICATE" && String(r.group_key ?? "").trim())
+          .map((r: any) => String(r.group_key))
+      )
+    );
+
+    if (duplicateGroupKeys.length > 0) {
+      const peerRows = await prisma.entryIssue.findMany({
+        where: {
+          ...where,
+          issue_type: "DUPLICATE",
+          group_key: { in: duplicateGroupKeys },
+        },
+        orderBy: [{ detected_at: "desc" }, { id: "desc" }],
+        select: issueSelect,
+      });
+
+      for (const row of peerRows) rowsById.set(String(row.id), row);
+    }
+
+    rows = sortIssues(Array.from(rowsById.values()));
+    hasMore = seedRows.length > limit;
+    nextCursor = hasMore ? encodeCursor(pageSeedRows[pageSeedRows.length - 1]) : null;
   }
 
   // If a DUPLICATE group no longer has >= 2 active entries (e.g., one was soft-deleted),
@@ -274,5 +358,11 @@ export async function handler(event: any) {
     };
   });
 
-  return json(200, { ok: true, status, issues: withEntrySnapshots });
+  return json(200, {
+    ok: true,
+    status,
+    issues: withEntrySnapshots,
+    hasMore,
+    nextCursor,
+  });
 }

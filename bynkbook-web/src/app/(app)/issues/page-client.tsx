@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession } from "aws-amplify/auth";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
+import { listAccountIssues } from "@/lib/api/issues";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
@@ -295,46 +296,25 @@ export default function IssuesPageClient() {
   // ================================
   // Stage B issues query
   // ================================
-  const issuesQ = useQuery({
+  const issuesQ = useInfiniteQuery({
     queryKey: ["entryIssues", selectedBusinessId, selectedAccountId, filterStatus],
     enabled: !!selectedBusinessId && !!selectedAccountId,
+    initialPageParam: null as string | null,
     staleTime: 10_000,
     refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const session = await fetchAuthSession();
-      const token = session.tokens?.accessToken?.toString();
-      if (!token) throw new Error("Missing access token");
-
-      const base =
-        process.env.NEXT_PUBLIC_API_URL ||
-        process.env.NEXT_PUBLIC_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_ENDPOINT ||
-        "";
-
-      if (!base) throw new Error("Missing API base URL (set NEXT_PUBLIC_API_URL)");
-
+    queryFn: async ({ pageParam }) => {
       const statusParam = filterStatus === "ALL" ? "ALL" : "OPEN";
-      const url = `${base}/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues?status=${statusParam}`;
-
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
+      return listAccountIssues({
+        businessId: selectedBusinessId as string,
+        accountId: selectedAccountId as string,
+        status: statusParam,
+        limit: 50,
+        cursor: pageParam,
       });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Issues fetch failed: ${res.status} ${text}`);
-      }
-
-      return (await res.json()) as {
-        ok: boolean;
-        status: string;
-        issues: ApiIssue[];
-      };
     },
+    getNextPageParam: (lastPage) => (
+      lastPage.hasMore && lastPage.nextCursor ? lastPage.nextCursor : undefined
+    ),
   });
 
   const bannerMsg =
@@ -378,7 +358,21 @@ export default function IssuesPageClient() {
     return { msg: String(msg), isClosed: false };
   }
 
-  const openIssues = (issuesQ.data?.issues ?? []).map((it) => ({
+  const loadedApiIssues = useMemo(() => {
+    const out: ApiIssue[] = [];
+    const seen = new Set<string>();
+    for (const page of issuesQ.data?.pages ?? []) {
+      for (const issue of page.issues ?? []) {
+        const key = String(issue.id ?? "");
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(issue as ApiIssue);
+      }
+    }
+    return out;
+  }, [issuesQ.data]);
+
+  const openIssues = loadedApiIssues.map((it) => ({
     id: it.id,
     business_id: selectedBusinessId ?? "",
     account_id: selectedAccountId ?? "",
@@ -393,7 +387,7 @@ export default function IssuesPageClient() {
 
   // Map API issues to UI rows (exclude missing category on Issues page)
   const issues = useMemo(() => {
-    const apiIssues = issuesQ.data?.issues ?? [];
+    const apiIssues = loadedApiIssues;
     const out: IssueRow[] = [];
 
     for (const it of apiIssues) {
@@ -435,7 +429,7 @@ export default function IssuesPageClient() {
     });
 
     return out;
-  }, [issuesQ.data]);
+  }, [loadedApiIssues]);
 
   const filteredIssues = useMemo(() => {
     const q = debouncedPayee.trim().toLowerCase();
@@ -825,13 +819,13 @@ export default function IssuesPageClient() {
 
         <div className="px-3 py-2 flex items-center gap-4 text-xs text-muted-foreground">
           <span>
-            Open: <span className="font-medium text-foreground">{kpi.openTotal}</span>
+            Loaded open: <span className="font-medium text-foreground">{kpi.openTotal}</span>
           </span>
           <span>
-            Duplicates: <span className="font-medium text-foreground">{kpi.dup}</span>
+            Loaded duplicates: <span className="font-medium text-foreground">{kpi.dup}</span>
           </span>
           <span>
-            Stale: <span className="font-medium text-foreground">{kpi.stale}</span>
+            Loaded stale: <span className="font-medium text-foreground">{kpi.stale}</span>
           </span>
 
           {scanErr ? <span className="text-bb-status-danger-fg ml-2">{scanErr}</span> : null}
@@ -1080,6 +1074,28 @@ export default function IssuesPageClient() {
                     </tr>
                   );
                 })}
+
+                {(issuesQ.hasNextPage || issuesQ.isFetchingNextPage) && !issuesQ.isLoading && !issuesQ.isError ? (
+                  <tr>
+                    <td colSpan={8} className="p-3 text-center">
+                      <Button
+                        variant="outline"
+                        className="h-8 px-3 text-xs"
+                        onClick={() => void issuesQ.fetchNextPage()}
+                        disabled={issuesQ.isFetchingNextPage}
+                      >
+                        {issuesQ.isFetchingNextPage ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Loading…
+                          </span>
+                        ) : (
+                          "Load more"
+                        )}
+                      </Button>
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -1115,7 +1131,7 @@ export default function IssuesPageClient() {
         entryId={fixDialog?.id ?? null}
         issues={openIssues as any}
         rowsById={Object.fromEntries(
-          (issuesQ.data?.issues ?? []).map((it) => {
+          loadedApiIssues.map((it) => {
             const amt = toBigIntSafe(it.entry_amount_cents);
             return [
               it.entry_id,
