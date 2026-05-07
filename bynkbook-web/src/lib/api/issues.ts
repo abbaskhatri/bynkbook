@@ -96,21 +96,41 @@ export function isIssuesPageIssueType(issueType: unknown): issueType is IssuesPa
   return t === "DUPLICATE" || t === "STALE_CHECK";
 }
 
-export async function listAccountIssues(params: {
-  businessId: string;
-  accountId: string;
-  status?: "OPEN" | "RESOLVED";
+export type ListAccountIssuesResponse = {
+  ok: true;
+  issues: EntryIssueRow[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+};
+
+export function buildAccountIssuesQuery(params: {
+  status?: "OPEN" | "RESOLVED" | "ALL";
   limit?: number;
+  cursor?: string | null;
   entryIds?: string[];
-}): Promise<{ ok: true; issues: EntryIssueRow[] }> {
-  const { businessId, accountId, status = "OPEN", limit = 200, entryIds } = params;
+}) {
+  const { status = "OPEN", limit, cursor, entryIds } = params;
   const qs = new URLSearchParams();
   qs.set("status", status);
-  qs.set("limit", String(limit));
+  if (limit !== undefined) qs.set("limit", String(limit));
+  if (cursor) qs.set("cursor", cursor);
   if (entryIds) {
     const ids = Array.from(new Set(entryIds.map((id) => String(id).trim()).filter(Boolean)));
     qs.set("entryIds", ids.join(","));
   }
+  return qs;
+}
+
+export async function listAccountIssues(params: {
+  businessId: string;
+  accountId: string;
+  status?: "OPEN" | "RESOLVED" | "ALL";
+  limit?: number;
+  cursor?: string | null;
+  entryIds?: string[];
+}): Promise<ListAccountIssuesResponse> {
+  const { businessId, accountId, status = "OPEN", limit, cursor, entryIds } = params;
+  const qs = buildAccountIssuesQuery({ status, limit, cursor, entryIds });
 
   return apiFetch(
     `/v1/businesses/${businessId}/accounts/${accountId}/issues?${qs.toString()}`,

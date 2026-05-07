@@ -104,17 +104,48 @@ function matchesValue(actual: any, expected: any): boolean {
     if ("in" in expected) return expected.in.map(String).includes(String(actual));
     if ("notIn" in expected) return !expected.notIn.map(String).includes(String(actual));
     if ("not" in expected) return expected.not === null ? actual !== null : actual !== expected.not;
+    if ("lt" in expected) {
+      const at = new Date(actual).getTime();
+      const et = new Date(expected.lt).getTime();
+      if (Number.isFinite(at) && Number.isFinite(et)) return at < et;
+      return String(actual) < String(expected.lt);
+    }
   }
 
   if (expected === null) return actual === null;
+  if (actual instanceof Date || expected instanceof Date) {
+    return new Date(actual).getTime() === new Date(expected).getTime();
+  }
   return String(actual) === String(expected);
 }
 
 function rowMatchesWhere(row: any, where: Record<string, any> = {}) {
   for (const [key, expected] of Object.entries(where)) {
+    if (key === "OR" && Array.isArray(expected)) {
+      if (!expected.some((clause) => rowMatchesWhere(row, clause))) return false;
+      continue;
+    }
     if (!matchesValue(row[key], expected)) return false;
   }
   return true;
+}
+
+function sortRows(rows: any[], orderBy: any[] | undefined) {
+  const order = Array.isArray(orderBy) && orderBy.length
+    ? orderBy
+    : [{ detected_at: "desc" }];
+
+  return [...rows].sort((a, b) => {
+    for (const item of order) {
+      const [field, direction] = Object.entries(item)[0] as [string, string];
+      const av = a[field] instanceof Date ? a[field].getTime() : String(a[field] ?? "");
+      const bv = b[field] instanceof Date ? b[field].getTime() : String(b[field] ?? "");
+      if (av === bv) continue;
+      const cmp = av < bv ? -1 : 1;
+      return direction === "desc" ? -cmp : cmp;
+    }
+    return 0;
+  });
 }
 
 function project(row: any, select: Record<string, boolean> | undefined) {
@@ -137,9 +168,11 @@ async function loadHandler(options: { issues?: any[]; entries?: any[] } = {}) {
     },
     entryIssue: {
       findMany: vi.fn(async (args: any) =>
-        issueRows
-          .filter((row) => rowMatchesWhere(row, args?.where ?? {}))
-          .sort((a, b) => new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime())
+        sortRows(
+          issueRows.filter((row) => rowMatchesWhere(row, args?.where ?? {})),
+          args?.orderBy
+        )
+          .slice(0, typeof args?.take === "number" ? args.take : undefined)
           .map((row) => project(row, args?.select))
       ),
     },
@@ -174,7 +207,7 @@ describe("issues list", () => {
 
     const body = JSON.parse(res.body);
     expect(body.issues).toHaveLength(3);
-    expect(body.issues[0]).toMatchObject({
+    expect(body.issues.find((row: any) => row.id === "issue-1")).toMatchObject({
       id: "issue-1",
       entry_id: "entry-1",
       entry_date: "2026-04-01",
@@ -188,9 +221,153 @@ describe("issues list", () => {
     });
     expect(prisma.entry.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        id: { in: ["entry-1", "entry-2", "entry-3"] },
+        id: { in: expect.arrayContaining(["entry-1", "entry-2", "entry-3"]) },
       }),
     }));
+  });
+
+  test("first page returns limit rows with hasMore and nextCursor", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({ id: "issue-3", entry_id: "entry-3", detected_at: new Date("2026-04-25T03:00:00.000Z") }),
+        issue({ id: "issue-2", entry_id: "entry-2", detected_at: new Date("2026-04-25T02:00:00.000Z") }),
+        issue({ id: "issue-1", entry_id: "entry-1", detected_at: new Date("2026-04-25T01:00:00.000Z") }),
+      ],
+    });
+
+    const res = await handler(event("OPEN", { limit: "2" }));
+    expect(res.statusCode).toBe(200);
+
+    const body = JSON.parse(res.body);
+    expect(body.issues.map((row: any) => row.id)).toEqual(["issue-3", "issue-2"]);
+    expect(body.hasMore).toBe(true);
+    expect(typeof body.nextCursor).toBe("string");
+  });
+
+  test("next page returns older rows from the cursor", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({ id: "issue-3", entry_id: "entry-3", detected_at: new Date("2026-04-25T03:00:00.000Z") }),
+        issue({ id: "issue-2", entry_id: "entry-2", detected_at: new Date("2026-04-25T02:00:00.000Z") }),
+        issue({ id: "issue-1", entry_id: "entry-1", detected_at: new Date("2026-04-25T01:00:00.000Z") }),
+      ],
+    });
+
+    const first = await handler(event("OPEN", { limit: "2" }));
+    const firstBody = JSON.parse(first.body);
+    const second = await handler(event("OPEN", { limit: "2", cursor: firstBody.nextCursor }));
+    expect(second.statusCode).toBe(200);
+
+    const secondBody = JSON.parse(second.body);
+    expect(secondBody.issues.map((row: any) => row.id)).toEqual(["issue-1"]);
+    expect(secondBody.hasMore).toBe(false);
+    expect(secondBody.nextCursor).toBeNull();
+  });
+
+  test("invalid and too-large limits are normalized safely", async () => {
+    const manyIssues = Array.from({ length: 102 }, (_, i) =>
+      issue({
+        id: `issue-${String(i + 1).padStart(3, "0")}`,
+        entry_id: `entry-${String(i + 1).padStart(3, "0")}`,
+        detected_at: new Date(Date.UTC(2026, 3, 25, 12, 0, 0 - i)),
+      })
+    );
+    const manyEntries = manyIssues.map((row) => entry({ id: row.entry_id }));
+    const { handler, prisma } = await loadHandler({ issues: manyIssues, entries: manyEntries });
+
+    const invalid = await handler(event("OPEN", { limit: "nope" }));
+    expect(JSON.parse(invalid.body).issues).toHaveLength(50);
+    expect(prisma.entryIssue.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 51 }));
+
+    const tooLarge = await handler(event("OPEN", { limit: "1000" }));
+    const body = JSON.parse(tooLarge.body);
+    expect(body.issues).toHaveLength(100);
+    expect(body.hasMore).toBe(true);
+    expect(prisma.entryIssue.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 101 }));
+  });
+
+  test("duplicate group crossing the seed page boundary returns active peer issues", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({
+          id: "issue-3",
+          entry_id: "entry-3",
+          issue_type: "DUPLICATE",
+          group_key: "dup-boundary",
+          detected_at: new Date("2026-04-25T03:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-2",
+          entry_id: "entry-2",
+          issue_type: "STALE_CHECK",
+          group_key: null,
+          detected_at: new Date("2026-04-25T02:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-1",
+          entry_id: "entry-1",
+          issue_type: "DUPLICATE",
+          group_key: "dup-boundary",
+          detected_at: new Date("2026-04-25T01:00:00.000Z"),
+        }),
+      ],
+    });
+
+    const res = await handler(event("OPEN", { limit: "1" }));
+    expect(res.statusCode).toBe(200);
+
+    const body = JSON.parse(res.body);
+    expect(body.issues.map((row: any) => row.id)).toEqual(["issue-3", "issue-1"]);
+    expect(body.hasMore).toBe(true);
+  });
+
+  test("duplicate group with deleted peer does not surface incomplete invalid group", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({
+          id: "issue-active",
+          entry_id: "entry-1",
+          issue_type: "DUPLICATE",
+          group_key: "dup-deleted",
+          detected_at: new Date("2026-04-25T03:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-deleted",
+          entry_id: "entry-deleted",
+          issue_type: "DUPLICATE",
+          group_key: "dup-deleted",
+          detected_at: new Date("2026-04-25T02:00:00.000Z"),
+        }),
+      ],
+      entries: [
+        entry({ id: "entry-1" }),
+        entry({ id: "entry-deleted", deleted_at: new Date("2026-04-25T00:00:00.000Z") }),
+      ],
+    });
+
+    const res = await handler(event("OPEN", { limit: "1" }));
+    expect(res.statusCode).toBe(200);
+
+    const body = JSON.parse(res.body);
+    expect(body.issues).toEqual([]);
+    expect(body.hasMore).toBe(false);
+  });
+
+  test("status filtering is preserved for paginated account-wide lists", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({ id: "issue-open", entry_id: "entry-1", status: "OPEN", issue_type: "STALE_CHECK" }),
+        issue({ id: "issue-resolved", entry_id: "entry-2", status: "RESOLVED", issue_type: "STALE_CHECK" }),
+      ],
+    });
+
+    const res = await handler(event("RESOLVED", { limit: "10" }));
+    expect(res.statusCode).toBe(200);
+
+    const body = JSON.parse(res.body);
+    expect(body.status).toBe("RESOLVED");
+    expect(body.issues.map((row: any) => row.id)).toEqual(["issue-resolved"]);
+    expect(body.hasMore).toBe(false);
   });
 
   test("entryIds filters to requested active scoped entry ids", async () => {
@@ -207,6 +384,8 @@ describe("issues list", () => {
 
     const body = JSON.parse(res.body);
     expect(body.issues.map((row: any) => row.id).sort()).toEqual(["issue-3", "issue-4"]);
+    expect(body.hasMore).toBe(false);
+    expect(body.nextCursor).toBeNull();
   });
 
   test("entryIds outside the business/account are ignored safely", async () => {
