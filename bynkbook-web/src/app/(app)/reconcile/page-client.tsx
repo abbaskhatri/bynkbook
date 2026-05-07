@@ -67,6 +67,14 @@ type RefreshBankAndMatchesOptions = {
   skipLegacyMatches?: boolean;
   statuses?: BankTab[];
 };
+type CountProbeResult = { count: number; capped: boolean };
+type BankUnmatchedScopeCounts = {
+  scopeKey: string;
+  allTime: CountProbeResult | null;
+  dateRange: CountProbeResult | null;
+  loading: boolean;
+  error: string | null;
+};
 
 const PlaidConnectButton = dynamic(
   () => import("@/components/plaid/PlaidConnectButton").then((mod) => mod.PlaidConnectButton),
@@ -1120,6 +1128,7 @@ export default function ReconcilePageClient() {
   const PAGE_CHUNK = 200;
   const ENTRIES_API_LIMIT = 200;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
+  const BANK_COUNT_PROBE_MAX_PAGES = 20;
 
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
   const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
@@ -1157,6 +1166,13 @@ export default function ReconcilePageClient() {
     matched: null,
   });
   const [bankLoadingMore, setBankLoadingMore] = useState(false);
+  const [bankUnmatchedScopeCounts, setBankUnmatchedScopeCounts] = useState<BankUnmatchedScopeCounts>({
+    scopeKey: "",
+    allTime: null,
+    dateRange: null,
+    loading: false,
+    error: null,
+  });
 
   // B2: Bulk create entries from selected bank txns (unmatched tab)
   const [selectedBankTxnIds, setSelectedBankTxnIds] = useState<Set<string>>(new Set());
@@ -1637,6 +1653,101 @@ export default function ReconcilePageClient() {
       setBankLoadingMore(false);
     }
   }
+
+  const countUnmatchedBankTransactionsForScope = useCallback(async (args: {
+    businessId: string;
+    accountId: string;
+    from?: string;
+    to?: string;
+  }): Promise<CountProbeResult> => {
+    let cursor: string | null = null;
+    let count = 0;
+
+    for (let page = 0; page < BANK_COUNT_PROBE_MAX_PAGES; page++) {
+      const res = await listBankTransactions({
+        businessId: args.businessId,
+        accountId: args.accountId,
+        from: args.from || undefined,
+        to: args.to || undefined,
+        status: "unmatched",
+        limit: BANK_TRANSACTION_PAGE_LIMIT,
+        cursor,
+      });
+
+      count += Array.isArray(res?.items) ? res.items.length : 0;
+      cursor = res?.nextCursor ?? null;
+      if (!cursor) return { count, capped: false };
+    }
+
+    return { count, capped: true };
+  }, [BANK_COUNT_PROBE_MAX_PAGES, BANK_TRANSACTION_PAGE_LIMIT]);
+
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId) {
+      setBankUnmatchedScopeCounts({
+        scopeKey: "",
+        allTime: null,
+        dateRange: null,
+        loading: false,
+        error: null,
+      });
+      return;
+    }
+
+    const scopeKey = `${selectedBusinessId}:${selectedAccountId}:${from || ""}:${to || ""}`;
+    let cancelled = false;
+
+    setBankUnmatchedScopeCounts({
+      scopeKey,
+      allTime: null,
+      dateRange: null,
+      loading: true,
+      error: null,
+    });
+
+    (async () => {
+      try {
+        const allTimePromise = countUnmatchedBankTransactionsForScope({
+          businessId: selectedBusinessId,
+          accountId: selectedAccountId,
+        });
+
+        const dateRangePromise =
+          from || to
+            ? countUnmatchedBankTransactionsForScope({
+                businessId: selectedBusinessId,
+                accountId: selectedAccountId,
+                from,
+                to,
+              })
+            : allTimePromise;
+
+        const [allTime, dateRange] = await Promise.all([allTimePromise, dateRangePromise]);
+        if (cancelled) return;
+
+        setBankUnmatchedScopeCounts({
+          scopeKey,
+          allTime,
+          dateRange,
+          loading: false,
+          error: null,
+        });
+      } catch (e: any) {
+        if (cancelled) return;
+        setBankUnmatchedScopeCounts({
+          scopeKey,
+          allTime: null,
+          dateRange: null,
+          loading: false,
+          error: e?.message ?? "Unable to load unmatched count",
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBusinessId, selectedAccountId, from, to, countUnmatchedBankTransactionsForScope]);
 
   // One debounced refresh after any mutation (no storms)
   const [refreshBusy, setRefreshBusy] = useState(false);
@@ -2998,6 +3109,28 @@ const isReconcileExemptEntry = (e: any) => {
     return out;
   }, [bankTxNewestFirst, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankMatchedVisibleN]);
 
+  const bankUnmatchedLoadedRowsNoSearch = useMemo(() => {
+    let count = 0;
+    for (const t of bankTxSorted) {
+      const id = String(t.id ?? "");
+      if (!id) continue;
+      if (optimisticHiddenBankTxnIds.has(id)) continue;
+      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) continue;
+      count++;
+    }
+    return count;
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+
+  const bankMatchedLoadedRowsNoSearch = useMemo(() => {
+    let count = 0;
+    for (const t of bankTxSorted) {
+      const id = String(t.id ?? "");
+      if (!id) continue;
+      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) count++;
+    }
+    return count;
+  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+
   // Counts (uncapped) for tab labels
   const { bankUnmatchedCount, bankMatchedCount } = useMemo(() => {
     let u = 0;
@@ -3124,6 +3257,102 @@ const displayBankActiveList = useMemo(() => {
   const bankPanelShowStatusWhileRows =
     (bankPanelShowRows || bankPanelShowEmpty) && (bankTruthSettling || bankUpdating);
 
+  const dateRangeActive = !!(from || to);
+  const dateRangeText = dateRangeActive ? `${from || "start"} to ${to || "today"}` : "All dates";
+  const bankScopeCountsReady =
+    bankUnmatchedScopeCounts.scopeKey === bankScopeKey &&
+    !bankUnmatchedScopeCounts.loading &&
+    !bankUnmatchedScopeCounts.error;
+  const formatProbeCount = (probe: CountProbeResult | null) => {
+    if (bankUnmatchedScopeCounts.loading && bankUnmatchedScopeCounts.scopeKey === bankScopeKey) return "Loading";
+    if (!probe || bankUnmatchedScopeCounts.scopeKey !== bankScopeKey) return "Not loaded yet";
+    return `${probe.count}${probe.capped ? "+" : ""}`;
+  };
+  const bankAllTimeUnmatchedLabel = formatProbeCount(bankUnmatchedScopeCounts.allTime);
+  const bankRangeUnmatchedLabel = formatProbeCount(bankUnmatchedScopeCounts.dateRange);
+  const bankUnmatchedOutsideDateRange =
+    dateRangeActive && bankScopeCountsReady && bankUnmatchedScopeCounts.allTime && bankUnmatchedScopeCounts.dateRange
+      ? Math.max(0, bankUnmatchedScopeCounts.allTime.count - bankUnmatchedScopeCounts.dateRange.count)
+      : null;
+  const activeBankLoadedRowsCount =
+    bankTab === "unmatched" ? bankUnmatchedLoadedRowsNoSearch : bankMatchedLoadedRowsNoSearch;
+  const activeBankLoadedRowsLabel = activeBankStatusLoaded
+    ? `${activeBankLoadedRowsCount}${activeBankNextCursor ? "+" : ""}`
+    : activeBankStatusLoading
+      ? "Loading"
+      : "Not loaded yet";
+  const activeBankVisibleFilteredLabel = activeBankStatusLoaded
+    ? String(bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount)
+    : activeBankStatusLoading
+      ? "Loading"
+      : "Not loaded yet";
+  const activeBankHiddenBySearch =
+    searchQ && activeBankStatusLoaded
+      ? Math.max(0, activeBankLoadedRowsCount - (bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount))
+      : 0;
+  const bankUnmatchedTabLabel = bankStatusLoaded.unmatched
+    ? `Unmatched (${displayBankUnmatchedCount})`
+    : bankLoadingByStatus.unmatched
+      ? "Unmatched (loading)"
+      : "Unmatched (Not loaded yet)";
+  const bankMatchedTabLabel = bankStatusLoaded.matched
+    ? `Matched (${displayBankMatchedCount})`
+    : bankLoadingByStatus.matched
+      ? "Matched (loading)"
+      : "Matched (Not loaded yet)";
+  const bankEmptyStateLabel = (() => {
+    if (bankTab === "matched" && !bankStatusLoaded.matched) {
+      return "Matched transactions are loaded when opened.";
+    }
+
+    if (bankTab === "matched") {
+      if (activeBankHiddenBySearch > 0) {
+        return `${activeBankHiddenBySearch} matched bank transactions are hidden by search. Clear search to see them.`;
+      }
+      return "No matched bank transactions in this date range.";
+    }
+
+    if (!bankStatusLoaded.unmatched) return "Not loaded yet.";
+
+    if (activeBankHiddenBySearch > 0) {
+      return `${activeBankHiddenBySearch} unmatched bank transactions exist outside this search. Clear search to see them.`;
+    }
+
+    if (dateRangeActive && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0) {
+      return `${bankUnmatchedOutsideDateRange}${bankUnmatchedScopeCounts.allTime?.capped ? "+" : ""} unmatched bank transactions exist outside this filter. Clear filters or widen date range.`;
+    }
+
+    if (bankScopeCountsReady && bankUnmatchedScopeCounts.dateRange?.count === 0) {
+      return "No unmatched bank transactions in this date range.";
+    }
+
+    if (activeBankNextCursor) {
+      return "More unmatched bank transactions are available in this date range. Load more bank transactions.";
+    }
+
+    return dateRangeActive
+      ? "No unmatched bank transactions in this date range."
+      : "No unmatched bank transactions for this account.";
+  })();
+  const expectedTabLabel = entriesTruthReady
+    ? `Expected (${displayExpectedCount})`
+    : entriesTruthSnapshot
+      ? `Expected (${displayExpectedCount})`
+      : entriesQ.isLoading
+        ? "Expected (loading)"
+        : "Expected (Not loaded yet)";
+  const matchedEntriesTabLabel = entriesTruthReady
+    ? `Matched (${displayMatchedCount})`
+    : entriesTruthSnapshot
+      ? `Matched (${displayMatchedCount})`
+      : entriesQ.isLoading
+        ? "Matched (loading)"
+        : "Matched (Not loaded yet)";
+  const entriesEmptyStateLabel =
+    expectedTab === "expected"
+      ? (dateRangeActive ? "No expected entries in this date range." : "No expected entries for this account.")
+      : (dateRangeActive ? "No matched entries in this date range." : "No matched entries for this account.");
+
   // -------------------------
   // Phase 5E: State summary (read-only, instant-fast)
   // -------------------------
@@ -3148,16 +3377,15 @@ const displayBankActiveList = useMemo(() => {
     return { unmatchedN, partialN: 0, matchedN, remainingAbsTotal };
   }, [bankTxSorted, remainingAbsByBankTxnId]);
 
-  const bankMatchedLoadedLabel = bankStatusLoaded.matched
-    ? String(bankStateSummary.matchedN)
-    : bankLoadingByStatus.matched
-      ? "loading"
-      : "not loaded";
-  const bankLoadedStateCopy = bankStatusLoaded.matched
-    ? "Loaded: unmatched and matched rows. Search filters loaded rows."
-    : bankLoadingByStatus.matched
-      ? "Loaded: unmatched rows. Matched rows are loading."
-      : "Loaded: unmatched rows. Matched rows load when opened.";
+  const bankLoadedStateCopy = !bankStatusLoaded.unmatched
+    ? bankLoadingByStatus.unmatched
+      ? "Unmatched rows are loading. Matched transactions are loaded when opened."
+      : "Unmatched rows are not loaded yet. Matched transactions are loaded when opened."
+    : bankStatusLoaded.matched
+      ? "Loaded rows are date-scoped. Search filters visible rows."
+      : bankLoadingByStatus.matched
+        ? "Unmatched rows loaded. Matched rows are loading."
+        : "Unmatched rows loaded. Matched transactions are loaded when opened.";
 
   const entryStateSummary = useMemo(() => {
     return {
@@ -3333,9 +3561,12 @@ const displayBankActiveList = useMemo(() => {
           </div>
 
           <div className="leading-tight">
-            <div className="text-bb-text-muted">Bank status</div>
+            <div className="text-bb-text-muted">Bank unmatched</div>
             <div className="font-semibold text-bb-text">
-              U {bankStateSummary.unmatchedN} • P {bankStateSummary.partialN} • M {bankMatchedLoadedLabel}
+              All-time {bankAllTimeUnmatchedLabel} • Range {bankRangeUnmatchedLabel}
+            </div>
+            <div className="text-[11px] text-bb-text-muted">
+              Loaded {bankStatusLoaded.unmatched ? `${bankUnmatchedLoadedRowsNoSearch}${bankNextCursorByStatus.unmatched ? "+" : ""}` : bankLoadingByStatus.unmatched ? "Loading" : "Not loaded yet"} • Visible {bankStatusLoaded.unmatched ? displayBankUnmatchedCount : bankLoadingByStatus.unmatched ? "Loading" : "Not loaded yet"}
             </div>
           </div>
 
@@ -4110,7 +4341,7 @@ const displayBankActiveList = useMemo(() => {
                   }`}
                 onClick={() => setExpectedTab("expected")}
               >
-                Expected ({displayExpectedCount})
+                {expectedTabLabel}
               </button>
               <button
                 type="button"
@@ -4118,8 +4349,13 @@ const displayBankActiveList = useMemo(() => {
                   }`}
                 onClick={() => setExpectedTab("matched")}
               >
-                Matched ({displayMatchedCount})
+                {matchedEntriesTabLabel}
               </button>
+            </div>
+
+            <div className="mt-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1.5 text-[11px] leading-4 text-bb-text-muted">
+              <span className="font-semibold text-bb-text">Ledger scope:</span>{" "}
+              All-time account count Not loaded yet • Current date range {entriesLoadedCount}{entriesHitApiLimit ? "+" : ""} loaded • Loaded rows {entriesLoadedCount}{entriesHitApiLimit ? "+" : ""} • Visible filtered rows {expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}
             </div>
 
             {entriesHitApiLimit ? (
@@ -4254,7 +4490,7 @@ const displayBankActiveList = useMemo(() => {
                   <Skeleton className="h-24 w-full" />
                 </div>
               ) : displayEntriesActiveList.length === 0 ? (
-                <EmptyState label={expectedTab === "expected" ? "No expected entries in this period" : "No matched entries in this period"} />
+                <EmptyState label={entriesEmptyStateLabel} />
               ) : (
                 <>
                   <table className="w-full min-w-[620px] table-fixed border-collapse">
@@ -4562,7 +4798,7 @@ const displayBankActiveList = useMemo(() => {
                   }`}
                 onClick={() => setBankTab("unmatched")}
               >
-                Unmatched ({displayBankUnmatchedCount})
+                {bankUnmatchedTabLabel}
               </button>
               <button
                 type="button"
@@ -4575,13 +4811,19 @@ const displayBankActiveList = useMemo(() => {
                   }
                 }}
               >
-                {bankStatusLoaded.matched
-                  ? `Matched (${displayBankMatchedCount})`
-                  : bankLoadingByStatus.matched
-                    ? "Matched (loading)"
-                    : "Matched"}
+                {bankMatchedTabLabel}
               </button>
               <span className="text-[11px] text-bb-text-muted">{bankLoadedStateCopy}</span>
+            </div>
+            <div className="mt-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1.5 text-[11px] leading-4 text-bb-text-muted">
+              <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
+              All-time account {bankTab === "unmatched" ? bankAllTimeUnmatchedLabel : "Not loaded yet"} • Current date range {bankTab === "unmatched" ? bankRangeUnmatchedLabel : "Not loaded yet"} ({dateRangeText}) • Loaded rows {activeBankLoadedRowsLabel} • Visible filtered rows {activeBankVisibleFilteredLabel}
+              {activeBankHiddenBySearch > 0 ? (
+                <span> • {activeBankHiddenBySearch} hidden by search</span>
+              ) : null}
+              {bankTab === "unmatched" && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0 ? (
+                <span> • {bankUnmatchedOutsideDateRange}{bankUnmatchedScopeCounts.allTime?.capped ? "+" : ""} outside date range</span>
+              ) : null}
             </div>
           </div>
 
@@ -4595,16 +4837,12 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               ) : bankPanelShowEmpty ? (
                 <EmptyState
-                  label={
-                    bankTab === "unmatched"
-                      ? "No bank transactions in this period"
-                      : "No matched bank transactions in this period"
-                  }
+                  label={bankEmptyStateLabel}
                 />
               ) : bankPanelShowDeferredLoad ? (
                 <div className="h-full min-h-[240px] flex items-center justify-center">
                   <div className="text-center">
-                    <div className="text-xs text-bb-text-muted">Matched bank transactions are not loaded yet.</div>
+                    <div className="text-xs text-bb-text-muted">Matched transactions are loaded when opened.</div>
                     <button
                       type="button"
                       className="mt-3 h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
