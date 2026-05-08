@@ -17,7 +17,7 @@ import { tabButtonClass } from "@/components/primitives/tokens";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
-import { FileText, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, Landmark } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Info, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, Landmark } from "lucide-react";
 
 import {
   getPnlSummary,
@@ -244,7 +244,7 @@ function hasMultiMonthSeries(monthly: Array<{ month: string }>) {
 }
 
 function NoTrendNote() {
-  return <div className="text-xs text-bb-text-muted">No multi-month trend for this range.</div>;
+  return <div className="text-xs text-bb-text-muted">No trend for the selected range.</div>;
 }
 
 function ReportFootnote({ lines }: { lines: string[] }) {
@@ -277,6 +277,17 @@ function parseCents(value: unknown) {
 
 function hasNonZeroCents(values: unknown[]) {
   return values.some((value) => parseCents(value) !== 0n);
+}
+
+function absCents(value: unknown) {
+  const n = parseCents(value);
+  return n < 0n ? -n : n;
+}
+
+function sumCents(values: unknown[]) {
+  let total = 0n;
+  for (const value of values) total += parseCents(value);
+  return total;
 }
 
 function pnlHasLedgerActivity(pnl: any) {
@@ -368,15 +379,157 @@ function ReportLoadingState({ title, scope }: { title: string; scope: ReportScop
 }
 
 function ReportEmptyState({ currentScope, shownScope }: { currentScope: ReportScope | null; shownScope: ReportScope | null }) {
+  const scope = shownScope ?? currentScope;
+  const accountScoped = Boolean(scope && scope.accountId !== "all");
+
   return (
     <div className="space-y-3">
       <ReportScopeSummary currentScope={currentScope} shownScope={shownScope} />
       <div className="rounded-md border border-bb-border bg-bb-surface-soft p-3">
-        <div className="text-sm font-semibold text-bb-text">No ledger activity found for this range.</div>
-        <div className="mt-1 text-xs text-bb-text-muted">Try another date range or account scope.</div>
+        <div className="text-sm font-semibold text-bb-text">
+          {accountScoped ? "No activity for this account and range." : "No ledger activity in this range."}
+        </div>
+        <div className="mt-1 text-xs text-bb-text-muted">
+          {accountScoped ? "Switch accounts or widen the date range." : "Widen the date range if activity should appear here."}
+        </div>
       </div>
     </div>
   );
+}
+
+type ReportCalloutTone = "default" | "success" | "warning" | "danger" | "info";
+
+type ReportCallout = {
+  key: string;
+  tone: ReportCalloutTone;
+  label: string;
+  value?: string;
+};
+
+function reportCalloutClass(tone: ReportCalloutTone) {
+  if (tone === "success") return "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg";
+  if (tone === "warning") return "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg";
+  if (tone === "danger") return "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg";
+  if (tone === "info") return "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg";
+  return "border-bb-border bg-bb-surface-soft text-bb-text-muted";
+}
+
+function ReportDecisionCallouts({ callouts }: { callouts: ReportCallout[] }) {
+  if (callouts.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+      {callouts.map((callout) => {
+        const Icon = callout.tone === "success" ? CheckCircle2 : callout.tone === "warning" || callout.tone === "danger" ? AlertTriangle : Info;
+        return (
+          <div
+            key={callout.key}
+            className={`flex min-h-10 items-center gap-2 rounded-md border px-2.5 py-2 text-xs ${reportCalloutClass(callout.tone)}`}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="truncate font-medium">{callout.label}</div>
+              {callout.value ? <div className="mt-0.5 truncate text-[11px] opacity-85">{callout.value}</div> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function inactivePeriodCount(rows: any[], valueKeys: string[]) {
+  return (rows ?? []).filter((row) => valueKeys.every((key) => parseCents(row?.[key]) === 0n)).length;
+}
+
+function buildReportCallouts({
+  pnl,
+  cashflow,
+  categories,
+  apAging,
+  mode,
+}: {
+  pnl?: any;
+  cashflow?: any;
+  categories?: any;
+  apAging?: any;
+  mode: "overview" | "monthly" | "pnl" | "cashflow";
+}) {
+  const callouts: ReportCallout[] = [];
+
+  if ((mode === "overview" || mode === "monthly" || mode === "pnl") && pnl?.period) {
+    const net = parseCents(pnl.period.net_cents);
+    if (net > 0n) {
+      callouts.push({ key: "net-positive", tone: "success", label: "Net income is positive", value: formatUsdAccountingFromCents(String(net)).text });
+    } else if (net < 0n) {
+      callouts.push({ key: "net-negative", tone: "danger", label: "Net income is negative", value: formatUsdAccountingFromCents(String(net)).text });
+    } else {
+      callouts.push({ key: "net-zero", tone: "default", label: "Net income is break-even", value: formatUsdAccountingFromCents(String(net)).text });
+    }
+  }
+
+  if (mode === "cashflow" && cashflow?.totals) {
+    const net = parseCents(cashflow.totals.net_cents);
+    callouts.push({
+      key: net < 0n ? "cash-net-negative" : net > 0n ? "cash-net-positive" : "cash-net-zero",
+      tone: net < 0n ? "danger" : net > 0n ? "success" : "default",
+      label: net < 0n ? "Net cash flow is negative" : net > 0n ? "Net cash flow is positive" : "Net cash flow is flat",
+      value: formatUsdAccountingFromCents(String(net)).text,
+    });
+  }
+
+  const categoryRows = categories?.rows ?? [];
+  const uncategorized = categoryRows.find((row: any) => row?.category_id === null || String(row?.category ?? "").trim().toLowerCase() === "uncategorized");
+  if (uncategorized && absCents(uncategorized.amount_cents) > 0n) {
+    callouts.push({
+      key: "uncategorized",
+      tone: "warning",
+      label: "Uncategorized expenses exist",
+      value: formatUsdAccountingFromCents(String(uncategorized.amount_cents ?? "0")).text,
+    });
+  }
+
+  const nonZeroCategories = categoryRows
+    .map((row: any) => ({ amount: absCents(row?.amount_cents), label: String(row?.category ?? "Category") }))
+    .filter((row: any) => row.amount > 0n)
+    .sort((a: any, b: any) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));
+  const totalCategoryAbs = sumCents(nonZeroCategories.map((row: any) => row.amount));
+  const topTwoAbs = sumCents(nonZeroCategories.slice(0, 2).map((row: any) => row.amount));
+  if (nonZeroCategories.length >= 3 && totalCategoryAbs > 0n && topTwoAbs * 100n >= totalCategoryAbs * 70n) {
+    const pct = Number((topTwoAbs * 1000n) / totalCategoryAbs) / 10;
+    callouts.push({
+      key: "category-concentration",
+      tone: "info",
+      label: "Expenses concentrated in top categories",
+      value: `Top 2: ${pct.toFixed(1)}%`,
+    });
+  }
+
+  const apTotal = sumCents((apAging?.rows ?? []).map((row: any) => row?.total_cents));
+  if (apTotal > 0n) {
+    callouts.push({
+      key: "ap-exposure",
+      tone: "warning",
+      label: "AP exposure exists",
+      value: formatUsdAccountingFromCents(String(apTotal)).text,
+    });
+  }
+
+  const pnlRows = pnl?.monthly ?? [];
+  const cashRows = cashflow?.monthly ?? [];
+  if ((mode === "overview" || mode === "monthly" || mode === "pnl") && pnlRows.length > 1) {
+    const inactive = inactivePeriodCount(pnlRows, ["income_cents", "expense_cents", "net_cents"]);
+    if (inactive > 0) callouts.push({ key: "pnl-missing-periods", tone: "default", label: "Some periods have no P&L activity", value: `${inactive} of ${pnlRows.length}` });
+  } else if (mode === "cashflow" && cashRows.length > 1) {
+    const inactive = inactivePeriodCount(cashRows, ["cash_in_cents", "cash_out_cents", "net_cents"]);
+    if (inactive > 0) callouts.push({ key: "cash-missing-periods", tone: "default", label: "Some periods have no cash activity", value: `${inactive} of ${cashRows.length}` });
+  } else if ((mode === "overview" || mode === "monthly" || mode === "pnl") && pnlRows.length === 1) {
+    callouts.push({ key: "single-period", tone: "default", label: "Trend is thin for this range", value: "Single period" });
+  } else if (mode === "cashflow" && cashRows.length === 1) {
+    callouts.push({ key: "single-period", tone: "default", label: "Trend is thin for this range", value: "Single period" });
+  }
+
+  return callouts.slice(0, 5);
 }
 
 export default function ReportsPageClient() {
@@ -629,6 +782,9 @@ export default function ReportsPageClient() {
         setCashEndingCents(sumBalances(endAcct?.rows ?? []));
         setCashEndingPrevCents(sumBalances(endPrevAcct?.rows ?? []));
 
+        setCategories(cats);
+        setApAging(ap);
+
         const catRows = (cats?.rows ?? []).map((r: any) => ({ label: String(r.category ?? "Category"), cents: String(r.amount_cents ?? "0") }));
         setTopCats(topNByAbs(catRows, 5));
 
@@ -741,6 +897,23 @@ export default function ReportsPageClient() {
   const cashflowReady = Boolean(cashflow);
   const cashflowHasActivity = cashflowHasLedgerActivity(cashflow);
   const cashflowShouldPrepare = !cashflowReady && loading;
+
+  const overviewCallouts = useMemo(
+    () => buildReportCallouts({ pnl, cashflow, categories, apAging, mode: "overview" }),
+    [apAging, cashflow, categories, pnl]
+  );
+  const monthlyCallouts = useMemo(
+    () => buildReportCallouts({ pnl, cashflow, categories, apAging, mode: "monthly" }),
+    [apAging, cashflow, categories, pnl]
+  );
+  const pnlCallouts = useMemo(
+    () => buildReportCallouts({ pnl, cashflow, categories, apAging, mode: "pnl" }),
+    [apAging, cashflow, categories, pnl]
+  );
+  const cashflowCallouts = useMemo(
+    () => buildReportCallouts({ pnl, cashflow, categories, apAging, mode: "cashflow" }),
+    [apAging, cashflow, categories, pnl]
+  );
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
@@ -939,6 +1112,7 @@ export default function ReportsPageClient() {
               ) : (
                 <>
                   <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+                  <ReportDecisionCallouts callouts={overviewCallouts} />
 
                   {/* KPI strip (Income / Expenses / Net) */}
                   <div className="grid grid-cols-3 gap-3">
@@ -1102,6 +1276,7 @@ export default function ReportsPageClient() {
               ) : (
                 <>
                   <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+                  <ReportDecisionCallouts callouts={monthlyCallouts} />
 
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-bb-border p-3">
@@ -1194,6 +1369,7 @@ export default function ReportsPageClient() {
               ) : (
                 <>
                   <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+                  <ReportDecisionCallouts callouts={pnlCallouts} />
 
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-bb-border p-3">
@@ -1390,6 +1566,7 @@ export default function ReportsPageClient() {
               ) : (
                 <>
                   <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+                  <ReportDecisionCallouts callouts={cashflowCallouts} />
 
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-bb-border p-3">
