@@ -16,8 +16,6 @@ import { tabButtonClass } from "@/components/primitives/tokens";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
-import { InlineBanner } from "@/components/app/inline-banner";
-import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { FileText, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, Landmark } from "lucide-react";
 
@@ -259,6 +257,128 @@ function ReportFootnote({ lines }: { lines: string[] }) {
   );
 }
 
+type ReportScope = {
+  businessId: string;
+  businessName: string;
+  accountId: string;
+  accountLabel: string;
+  from: string;
+  to: string;
+  ytd: boolean;
+};
+
+function parseCents(value: unknown) {
+  try {
+    return BigInt(String(value ?? "0"));
+  } catch {
+    return 0n;
+  }
+}
+
+function hasNonZeroCents(values: unknown[]) {
+  return values.some((value) => parseCents(value) !== 0n);
+}
+
+function pnlHasLedgerActivity(pnl: any) {
+  if (!pnl) return false;
+  const period = pnl.period ?? {};
+  const incomeCount = Number(period.income_count ?? 0);
+  const expenseCount = Number(period.expense_count ?? 0);
+  if (incomeCount + expenseCount > 0) return true;
+
+  return hasNonZeroCents([
+    period.income_cents,
+    period.expense_cents,
+    period.net_cents,
+    ...(pnl.monthly ?? []).flatMap((row: any) => [row.income_cents, row.expense_cents, row.net_cents]),
+  ]);
+}
+
+function cashflowHasLedgerActivity(cashflow: any) {
+  if (!cashflow) return false;
+  const totals = cashflow.totals ?? {};
+  return hasNonZeroCents([
+    totals.cash_in_cents,
+    totals.cash_out_cents,
+    totals.net_cents,
+    ...(cashflow.monthly ?? []).flatMap((row: any) => [row.cash_in_cents, row.cash_out_cents, row.net_cents]),
+  ]);
+}
+
+function formatScope(scope: ReportScope) {
+  return `${scope.businessName} · ${scope.accountLabel} · ${scope.from} to ${scope.to}${scope.ytd ? " · YTD" : ""}`;
+}
+
+function scopeMatchesCurrent(scope: ReportScope | null, currentScope: ReportScope | null) {
+  if (!scope || !currentScope) return true;
+  return (
+    scope.businessId === currentScope.businessId &&
+    scope.accountId === currentScope.accountId &&
+    scope.from === currentScope.from &&
+    scope.to === currentScope.to &&
+    scope.ytd === currentScope.ytd
+  );
+}
+
+function ReportScopeSummary({
+  currentScope,
+  shownScope,
+}: {
+  currentScope: ReportScope | null;
+  shownScope: ReportScope | null;
+}) {
+  const stale = !scopeMatchesCurrent(shownScope, currentScope);
+  const scope = shownScope ?? currentScope;
+  if (!scope) return null;
+
+  return (
+    <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs text-bb-text-muted">
+      <div>
+        <span className="font-semibold text-bb-text">{shownScope ? "Showing results for" : "Selected scope"}:</span>{" "}
+        {formatScope(scope)}
+      </div>
+      {stale && currentScope ? (
+        <div className="mt-1 text-bb-status-warning-fg">
+          Selected filters are now {formatScope(currentScope)}. Run the report to refresh results.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReportLoadingState({ title, scope }: { title: string; scope: ReportScope | null }) {
+  return (
+    <div className="space-y-3" aria-busy="true">
+      <ReportScopeSummary currentScope={scope} shownScope={null} />
+      <div className="rounded-md border border-bb-border bg-bb-surface-soft p-3">
+        <div className="text-sm font-semibold text-bb-text">Preparing {title}...</div>
+        <div className="mt-1 text-xs text-bb-text-muted">Fetching report data for the selected range. This may take a moment.</div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-[74px] rounded-md border border-bb-border bg-bb-surface-soft" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <ReportsChartFallback />
+        <ReportsChartFallback />
+      </div>
+    </div>
+  );
+}
+
+function ReportEmptyState({ currentScope, shownScope }: { currentScope: ReportScope | null; shownScope: ReportScope | null }) {
+  return (
+    <div className="space-y-3">
+      <ReportScopeSummary currentScope={currentScope} shownScope={shownScope} />
+      <div className="rounded-md border border-bb-border bg-bb-surface-soft p-3">
+        <div className="text-sm font-semibold text-bb-text">No ledger activity found for this range.</div>
+        <div className="mt-1 text-xs text-bb-text-muted">Try another date range or account scope.</div>
+      </div>
+    </div>
+  );
+}
+
 export default function ReportsPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -284,6 +404,12 @@ export default function ReportsPageClient() {
     const b = list.find((x: any) => x?.id === businessId);
     return b?.name ?? "Business";
   }, [businessId, businessesQ.data]);
+
+  const selectedAccountLabel = useMemo(() => {
+    if (selectedAccountId === "all") return "All accounts";
+    const account = activeAccountOptions.find((a: any) => a?.id === selectedAccountId);
+    return account?.name ? `Account: ${account.name}` : "Selected account";
+  }, [activeAccountOptions, selectedAccountId]);
 
   const [tab, setTab] = useState<TabKey>("overview"); // Default tab: Financial Overview
 
@@ -324,7 +450,28 @@ export default function ReportsPageClient() {
 
   const accountId = selectedAccountId;
 
+  const selectedScope = useMemo<ReportScope | null>(() => {
+    if (!businessId || !from || !to) return null;
+    return {
+      businessId,
+      businessName: activeBusinessName ?? "Business",
+      accountId,
+      accountLabel: selectedAccountLabel,
+      from,
+      to,
+      ytd,
+    };
+  }, [accountId, activeBusinessName, businessId, from, selectedAccountLabel, to, ytd]);
+
+  const defaultReportScopeReady = Boolean(
+    selectedScope &&
+    !businessesQ.isLoading &&
+    (selectedAccountId === "all" || !accountsQ.isLoading)
+  );
+
   const [loading, setLoading] = useState(false);
+  const [hasRequestedReport, setHasRequestedReport] = useState(false);
+  const [lastRunScope, setLastRunScope] = useState<ReportScope | null>(null);
 
   // Phase 1 Stabilization:
   // - Loading token prevents overlapping async flows from clearing each other’s busy state
@@ -340,6 +487,7 @@ export default function ReportsPageClient() {
   }
 
   const runEpochRef = useRef(0);
+  const autoRunStartedRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
 
   const bannerMsg =
@@ -377,15 +525,24 @@ export default function ReportsPageClient() {
   }, [to]);
 
   async function run() {
-    if (!businessId) return;
+    if (!businessId || !selectedScope) return;
+
+    const runBusinessId = businessId;
+    const runAccountId = accountId;
+    const runFrom = from;
+    const runTo = to;
+    const runYtd = ytd;
+    const runTab = tab;
+    const runScope = selectedScope;
 
     const myEpoch = ++runEpochRef.current;
     const loadingToken = beginLoading();
+    setHasRequestedReport(true);
     setErr(null);
 
     try {
-      if (tab === "overview" || tab === "monthly" || tab === "pnl") {
-        const prev = priorRangeForCurrent(rangeMode, from, to, ym, year, weekFrom, customFrom, customTo, ytd);
+      if (runTab === "overview" || runTab === "monthly" || runTab === "pnl") {
+        const prev = priorRangeForCurrent(rangeMode, runFrom, runTo, ym, year, weekFrom, customFrom, customTo, runYtd);
 
         const [
           resPnl,
@@ -397,18 +554,19 @@ export default function ReportsPageClient() {
           endAcct,
           endPrevAcct,
         ] = await Promise.all([
-          getPnlSummary(businessId, { from, to, accountId, ytd }),
-          getPnlSummary(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
-          getCashflowSeries(businessId, { from, to, accountId, ytd }),
-          getCashflowSeries(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
-          getCategories(businessId, { from, to, accountId }),
-          getApAging(businessId, { asOf: to }),
-          getAccountsSummary(businessId, { asOf: to, accountId, includeArchived: false }),
-          getAccountsSummary(businessId, { asOf: prev.to, accountId, includeArchived: false }),
+          getPnlSummary(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId, ytd: runYtd }),
+          getPnlSummary(runBusinessId, { from: prev.from, to: prev.to, accountId: runAccountId, ytd: prev.ytd }),
+          getCashflowSeries(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId, ytd: runYtd }),
+          getCashflowSeries(runBusinessId, { from: prev.from, to: prev.to, accountId: runAccountId, ytd: prev.ytd }),
+          getCategories(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId }),
+          getApAging(runBusinessId, { asOf: runTo }),
+          getAccountsSummary(runBusinessId, { asOf: runTo, accountId: runAccountId, includeArchived: false }),
+          getAccountsSummary(runBusinessId, { asOf: prev.to, accountId: runAccountId, includeArchived: false }),
         ]);
 
         if (myEpoch !== runEpochRef.current) return;
 
+        setLastRunScope(runScope);
         setPnl(resPnl);
         setPnlPrev(resPnlPrev);
 
@@ -442,20 +600,21 @@ export default function ReportsPageClient() {
         return;
       }
 
-      if (tab === "cashflow") {
-        const prev = priorRangeForCurrent(rangeMode, from, to, ym, year, weekFrom, customFrom, customTo, ytd);
+      if (runTab === "cashflow") {
+        const prev = priorRangeForCurrent(rangeMode, runFrom, runTo, ym, year, weekFrom, customFrom, customTo, runYtd);
 
         const [res, resPrev, cats, ap, endAcct, endPrevAcct] = await Promise.all([
-          getCashflowSeries(businessId, { from, to, accountId, ytd }),
-          getCashflowSeries(businessId, { from: prev.from, to: prev.to, accountId, ytd: prev.ytd }),
-          getCategories(businessId, { from, to, accountId }),
-          getApAging(businessId, { asOf: to }),
-          getAccountsSummary(businessId, { asOf: to, accountId, includeArchived: false }),
-          getAccountsSummary(businessId, { asOf: prev.to, accountId, includeArchived: false }),
+          getCashflowSeries(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId, ytd: runYtd }),
+          getCashflowSeries(runBusinessId, { from: prev.from, to: prev.to, accountId: runAccountId, ytd: prev.ytd }),
+          getCategories(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId }),
+          getApAging(runBusinessId, { asOf: runTo }),
+          getAccountsSummary(runBusinessId, { asOf: runTo, accountId: runAccountId, includeArchived: false }),
+          getAccountsSummary(runBusinessId, { asOf: prev.to, accountId: runAccountId, includeArchived: false }),
         ]);
 
         if (myEpoch !== runEpochRef.current) return;
 
+        setLastRunScope(runScope);
         setCashflow(res);
         setCashflowPrev(resPrev);
 
@@ -563,6 +722,25 @@ export default function ReportsPageClient() {
       setYtd(false);
     }
   }, [rangeMode]);
+
+  useEffect(() => {
+    if (autoRunStartedRef.current || tab !== "overview" || !businessId || !selectedScope || !defaultReportScopeReady) return;
+    autoRunStartedRef.current = true;
+    void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId, defaultReportScopeReady, selectedScope, tab]);
+
+  const overviewReady = Boolean(pnl && cashflow);
+  const overviewHasActivity = pnlHasLedgerActivity(pnl) || cashflowHasLedgerActivity(cashflow);
+  const overviewShouldPrepare = !overviewReady && (loading || (!hasRequestedReport && Boolean(selectedScope)));
+
+  const pnlReady = Boolean(pnl);
+  const pnlHasActivity = pnlHasLedgerActivity(pnl);
+  const pnlShouldPrepare = !pnlReady && loading;
+
+  const cashflowReady = Boolean(cashflow);
+  const cashflowHasActivity = cashflowHasLedgerActivity(cashflow);
+  const cashflowShouldPrepare = !cashflowReady && loading;
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
@@ -736,7 +914,7 @@ export default function ReportsPageClient() {
             right={
               <>
                 <Button className="h-7 px-3 text-xs" onClick={run} disabled={!businessId || loading}>
-                  {loading ? "Running…" : "Run report"}
+                  {loading ? (pnl || cashflow ? "Refreshing..." : "Preparing...") : "Run report"}
                 </Button>
                 {err ? <div className="text-xs text-bb-status-danger-fg ml-2">{err}</div> : null}
               </>
@@ -752,10 +930,16 @@ export default function ReportsPageClient() {
             </CardHeader>
 
             <CardContent className="space-y-3 text-sm">
-              {!pnl || !cashflow ? (
-                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
+              {overviewShouldPrepare ? (
+                <ReportLoadingState title="Financial Overview" scope={selectedScope} />
+              ) : !overviewReady ? (
+                <div className="text-sm text-bb-text-muted">Select a business and account scope to prepare Financial Overview.</div>
+              ) : !overviewHasActivity ? (
+                <ReportEmptyState currentScope={selectedScope} shownScope={lastRunScope} />
               ) : (
                 <>
+                  <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+
                   {/* KPI strip (Income / Expenses / Net) */}
                   <div className="grid grid-cols-3 gap-3">
                     {/* Income */}
@@ -908,9 +1092,17 @@ export default function ReportsPageClient() {
 
             <CardContent className="space-y-3 text-sm">
               {!pnl || !cashflow ? (
-                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
+                loading ? (
+                  <ReportLoadingState title="Monthly Review" scope={selectedScope} />
+                ) : (
+                  <div className="text-sm text-bb-text-muted">Run the report to prepare Monthly Review.</div>
+                )
+              ) : !overviewHasActivity ? (
+                <ReportEmptyState currentScope={selectedScope} shownScope={lastRunScope} />
               ) : (
                 <>
+                  <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-bb-border p-3">
                       <div className="text-xs text-bb-text-muted">Income</div>
@@ -993,10 +1185,16 @@ export default function ReportsPageClient() {
               <div className="text-[11px] text-bb-text-muted">
                 Income and Expenses (ledger effective date). Net = Income − Expenses.
               </div>
-              {!pnl ? (
-                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
+              {pnlShouldPrepare ? (
+                <ReportLoadingState title="Profit & Loss" scope={selectedScope} />
+              ) : !pnlReady ? (
+                <div className="text-sm text-bb-text-muted">Run the report to prepare Profit &amp; Loss.</div>
+              ) : !pnlHasActivity ? (
+                <ReportEmptyState currentScope={selectedScope} shownScope={lastRunScope} />
               ) : (
                 <>
+                  <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-bb-border p-3">
                       <div className="text-xs text-bb-text-muted">Income</div>
@@ -1183,10 +1381,16 @@ export default function ReportsPageClient() {
               <div className="text-[11px] text-bb-text-muted">
                 Cash In/Out movements (ledger effective date). Line shows cumulative net cash change over the range.
               </div>
-              {!cashflow ? (
-                <div className="text-sm text-bb-text-muted">Run the report to view results.</div>
+              {cashflowShouldPrepare ? (
+                <ReportLoadingState title="Cash Flow" scope={selectedScope} />
+              ) : !cashflowReady ? (
+                <div className="text-sm text-bb-text-muted">Run the report to prepare Cash Flow.</div>
+              ) : !cashflowHasActivity ? (
+                <ReportEmptyState currentScope={selectedScope} shownScope={lastRunScope} />
               ) : (
                 <>
+                  <ReportScopeSummary currentScope={selectedScope} shownScope={lastRunScope} />
+
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-bb-border p-3">
                       <div className="text-xs text-bb-text-muted">Cash In</div>
