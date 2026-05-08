@@ -83,6 +83,22 @@ function parsedSummary(parsed: Record<string, unknown> | null | undefined) {
   return parts.length ? parts.join(" · ") : null;
 }
 
+function statusLabel(item: {
+  status: string;
+  progress: number;
+  parsedStatus?: string | null;
+  error?: string;
+}) {
+  if (item.status === "FAILED") return item.error ?? "Upload failed";
+  if (item.status === "UPLOADING") return `Uploading - ${item.progress}%`;
+  if (item.status === "UPLOADED") return "Uploaded - processing";
+  if (item.status === "COMPLETED") {
+    if (item.parsedStatus === "FAILED") return "Saved for review - extraction failed";
+    return "Saved for review";
+  }
+  return item.status;
+}
+
 export default function MobileReceiptPageClient() {
   const sp = useSearchParams();
   const businessesQ = useBusinesses();
@@ -236,7 +252,7 @@ export default function MobileReceiptPageClient() {
               prefetch
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
-              Queue
+              Review
             </Link>
           </div>
         </section>
@@ -249,7 +265,8 @@ export default function MobileReceiptPageClient() {
           <div className="flex gap-3">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-bb-status-success-fg" />
             <div className="space-y-2 text-sm leading-5 text-bb-status-success-fg">
-              <p>Receipts are uploaded for review. This will not create a ledger entry automatically.</p>
+              <p>Receipts are saved for review first. No ledger entry is created automatically.</p>
+              <p>Create a ledger entry later only after reviewing the extracted receipt details.</p>
               <p>For multiple-page receipts, upload a PDF or add images as separate receipt files for now.</p>
             </div>
           </div>
@@ -434,15 +451,17 @@ export default function MobileReceiptPageClient() {
                         {item.file.name}
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
-                        {failed ? item.error ?? "Upload failed" : item.status}
-                        {item.status === "UPLOADING" ? ` · ${item.progress}%` : ""}
+                        {statusLabel(item)}
                       </div>
                       {summary ? (
                         <div className="mt-2 text-sm leading-5 text-muted-foreground">{summary}</div>
                       ) : null}
                       {item.status === "COMPLETED" ? (
-                        <div className="mt-2 text-sm leading-5 text-bb-status-success-fg">
-                          Saved for review only. No ledger entry was created.
+                        <div className="mt-2 space-y-2 text-sm leading-5 text-bb-status-success-fg">
+                          <div>Saved for review only. No ledger entry was created.</div>
+                          <Link href={reviewHref} prefetch className="inline-flex font-medium underline underline-offset-4">
+                            Open review queue
+                          </Link>
                         </div>
                       ) : null}
                     </div>

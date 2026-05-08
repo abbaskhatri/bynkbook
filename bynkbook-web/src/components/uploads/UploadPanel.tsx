@@ -83,6 +83,66 @@ function uploadReason(it: any) {
   return "";
 }
 
+function uploadBillId(it: any) {
+  return (it?.completedMeta as any)?.bill_id ?? (it?.completedMeta as any)?.meta?.bill_id ?? null;
+}
+
+function uploadLifecycleStatus(type: UploadType, it: any, parsedStatus: string, duplicateCode: string) {
+  if (it.status === "FAILED") return duplicateCode === "DUPLICATE_UPLOAD" ? "Duplicate upload" : "Failed";
+  if (it.status === "UPLOADING") return "Uploading";
+  if (it.status === "UPLOADED") return "Uploaded - processing";
+  if (parsedStatus === "PARSING") return "Uploaded - processing";
+
+  const billId = uploadBillId(it);
+  if (type === "INVOICE" && billId) return "Draft bill created for review";
+  if (parsedStatus === "PARSED") {
+    if (type === "INVOICE") return "Parsed - ready for AP review";
+    if (type === "RECEIPT") return "Parsed - ready for review";
+    return "Parsed";
+  }
+  if (parsedStatus === "NEEDS_REVIEW") return "Needs review";
+  if (parsedStatus === "FAILED") return duplicateCode === "DUPLICATE_UPLOAD" ? "Duplicate upload" : "Failed";
+  return "Uploaded";
+}
+
+function uploadLifecycleDetail(type: UploadType, it: any, parsedStatus: string, duplicateCode: string) {
+  const billId = uploadBillId(it);
+
+  if (type === "INVOICE") {
+    if (billId) return "Draft bill created for review. No ledger/payment entry is created until you approve/post it.";
+    if (duplicateCode === "DUPLICATE_UPLOAD") return "A matching upload already exists; no new bill or ledger entry was posted.";
+    if (parsedStatus === "PARSED") return "Parsed upload saved. Open Vendor/AP review to create or approve the draft bill.";
+    if (parsedStatus === "NEEDS_REVIEW") return "Review the parsed fields before creating a draft bill.";
+    if (parsedStatus === "FAILED") return "Uploaded file saved; extraction needs review before any draft bill can be created.";
+    return "Uploaded file saved. Processing may continue before AP review.";
+  }
+
+  if (type === "RECEIPT") {
+    const entryState = it.uploadId ? it.entryCreateStatus?.[it.uploadId]?.state : null;
+    if (entryState === "created") return "Ledger entry created by your action.";
+    if (entryState === "already") return "A ledger entry already exists for this receipt.";
+    if (parsedStatus === "PARSED") return "Parsed receipt saved for review. Select it and choose Create ledger entries when ready.";
+    if (parsedStatus === "NEEDS_REVIEW") return "Review the parsed receipt before creating a ledger entry.";
+    if (parsedStatus === "FAILED") return "Uploaded file saved; extraction needs review before any ledger entry can be created.";
+    return "Uploaded file saved. No ledger entry has been created.";
+  }
+
+  return "";
+}
+
+function uploadFileLifecycleText(type: UploadType, it: any) {
+  const duplicateCode =
+    (it?.completedMeta as any)?.error_code ??
+    (it?.completedMeta as any)?.meta?.error_code ??
+    "";
+  const parsedStatus =
+    it.status === "COMPLETED" && !it.parsedStatus
+      ? "PARSING"
+      : it.parsedStatus || "SKIPPED";
+
+  return uploadLifecycleStatus(type, it, parsedStatus, String(duplicateCode));
+}
+
 function VendorPicker(props: {
   businessId: string;
   value: VendorLite | null;
@@ -396,7 +456,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
               onClick={onClose}
               disabled={controller.hasActiveUploads}
             >
-              Upload
+              {controller.items.length ? "Done" : "Close"}
             </Button>
           </div>
         </div>
@@ -488,9 +548,9 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                 <div className="text-sm font-semibold text-bb-text">Upload summary</div>
                 <div className="text-xs text-bb-text-muted">
                   {type === "INVOICE"
-                    ? "Invoices are extracted automatically. Bills are created automatically when parsing succeeds."
+                    ? "Invoices are saved for review first. No ledger/payment entry is created until you approve/post it."
                     : type === "RECEIPT"
-                      ? "Receipts extracted from uploaded files."
+                      ? "Receipts are saved as uploaded files first. Create ledger entries only after review."
                       : "Uploaded files."}
                 </div>
               </div>
@@ -534,69 +594,12 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                 <thead className="bg-bb-surface-soft text-bb-text">
                   {type === "INVOICE" ? (
                     <tr className="border-b border-bb-border">
-                      <th className="px-3 py-2 text-center font-semibold">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border border-bb-input-border"
-                          checked={
-                            controller.items
-                              .filter((it) => {
-                                if (!it.uploadId) return false;
-                                const cents =
-                                  (it.parsed as any)?.amount_cents ??
-                                  (it.completedMeta as any)?.parsed?.amount_cents ??
-                                  null;
-                                return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
-                              })
-                              .every((it) => !!selectedForEntry[it.uploadId as string]) &&
-                            controller.items.some((it) => {
-                              if (!it.uploadId) return false;
-                              const cents =
-                                (it.parsed as any)?.amount_cents ??
-                                (it.completedMeta as any)?.parsed?.amount_cents ??
-                                null;
-                              return typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
-                            })
-                          }
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setSelectedForEntry((prev) => {
-                              const next = { ...prev };
-                              for (const it of controller.items) {
-                                if (!it.uploadId) continue;
-                                if (it.parsedStatus !== "PARSED") continue;
-                                next[it.uploadId] = checked;
-                              }
-                              return next;
-                            });
-
-                            // When selecting, auto-fill entry date with today if missing
-                            if (checked) {
-                              const today = new Date().toISOString().slice(0, 10);
-                              setEntryDateByUploadId((prev) => {
-                                const next = { ...prev };
-                                for (const it of controller.items) {
-                                  if (!it.uploadId) continue;
-                                  const cents =
-                                    (it.parsed as any)?.amount_cents ??
-                                    (it.completedMeta as any)?.parsed?.amount_cents ??
-                                    null;
-                                  const eligible = it.status === "COMPLETED" && typeof cents === "number" && Number.isFinite(cents) && cents !== 0;
-                                  if (!eligible) continue;
-                                  if (!next[it.uploadId]) next[it.uploadId] = today;
-                                }
-                                return next;
-                              });
-                            }
-                          }}
-                          title="Select all parsed invoices"
-                        />
-                      </th>
+                      <th className="px-3 py-2 text-center font-semibold"></th>
 
                       <th className="px-3 py-2 text-left font-semibold">Vendor</th>
                       <th className="px-3 py-2 text-left font-semibold">Invoice #</th>
                       <th className="px-3 py-2 text-left font-semibold">Invoice date</th>
-                      <th className="px-3 py-2 text-left font-semibold">Entry date</th>
+                      <th className="px-3 py-2 text-left font-semibold">Next action</th>
                       <th className="px-3 py-2 text-left font-semibold">Due</th>
                       <th className="px-3 py-2 text-right font-semibold">Total</th>
                       <th className="px-3 py-2 text-left font-semibold">Status</th>
@@ -652,21 +655,22 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                       (it.completedMeta as any)?.meta?.duplicate ??
                       null;
 
-                    const statusLabel =
-                      status === "PARSING"
-                        ? "Parsing…"
-                        : status === "PARSED"
-                          ? "Parsed"
-                          : status === "NEEDS_REVIEW"
-                            ? "Needs review"
-                            : status === "FAILED"
-                              ? (duplicateCode === "DUPLICATE_UPLOAD" ? "Duplicate upload" : "Failed")
-                              : "Uploaded";
+                    const billId = uploadBillId(it);
+                    const statusLabel = uploadLifecycleStatus(type, it, status, duplicateCode);
+                    const lifecycleDetail = uploadLifecycleDetail(
+                      type,
+                      {
+                        ...it,
+                        entryCreateStatus,
+                      },
+                      status,
+                      duplicateCode,
+                    );
 
                     return (
                       <tr key={it.id}>
                         <td className="px-3 py-2 text-center">
-                          {it.uploadId ? (() => {
+                          {type === "RECEIPT" && it.uploadId ? (() => {
                             const cents =
                               (it.parsed as any)?.amount_cents ??
                               (it.completedMeta as any)?.parsed?.amount_cents ??
@@ -677,7 +681,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 ? "Still retrieving…"
                                 : !eligible
                                   ? "Missing extracted total"
-                                  : "Create entry for this receipt";
+                                  : "Create ledger entry for this receipt";
                             return (
                               <input
                                 type="checkbox"
@@ -709,21 +713,15 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                             <td className="px-3 py-2 text-bb-text">{docDate || "—"}</td>
 
                             <td className="px-3 py-2 text-bb-text">
-                              {it.uploadId ? (
-                                <div className="w-[170px]">
-                                  <AppDatePicker
-                                    value={entryDateByUploadId[it.uploadId] || ""}
-                                    onChange={(next) => {
-                                      const id = it.uploadId!;
-                                      setEntryDateByUploadId((m) => ({ ...m, [id]: next }));
-                                    }}
-                                    disabled={!selectedForEntry[it.uploadId]}
-                                    allowClear
-                                  />
-                                </div>
-                              ) : (
-                                "—"
-                              )}
+                              {billId
+                                ? "Review draft bill"
+                                : status === "PARSED"
+                                  ? "Open Vendor/AP review"
+                                  : status === "NEEDS_REVIEW"
+                                    ? "Review parsed fields"
+                                    : status === "FAILED"
+                                      ? "Fix upload or retry"
+                                      : "Wait for processing"}
                             </td>
 
                             <td className="px-3 py-2 text-bb-text">{dueDate || "—"}</td>
@@ -758,13 +756,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 >
                                   {statusLabel}
                                   {(() => {
-                                    const autoBillId =
-                                      (it.completedMeta as any)?.bill_id ??
-                                      (it.completedMeta as any)?.meta?.bill_id ??
-                                      null;
-
-                                    if (autoBillId) {
-                                      return <span className="ml-2 text-[11px] text-primary">Bill created</span>;
+                                    if (billId) {
+                                      return <span className="ml-2 text-[11px] text-primary">Ready for approval</span>;
                                     }
 
                                     if (duplicateCode === "DUPLICATE_UPLOAD") {
@@ -792,6 +785,10 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 {uploadReason(it) ? (
                                   <div className="mt-1 truncate text-[11px] leading-4 text-bb-text-muted" title={uploadReason(it)}>
                                     {uploadReason(it)}
+                                  </div>
+                                ) : lifecycleDetail ? (
+                                  <div className="mt-1 truncate text-[11px] leading-4 text-bb-text-muted" title={lifecycleDetail}>
+                                    {lifecycleDetail}
                                   </div>
                                 ) : null}
                               </div>
@@ -834,16 +831,25 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
                                 {it.uploadId ? (
                                   entryCreateStatus[it.uploadId]?.state === "creating" ? (
-                                    <span className="ml-2 text-[11px] text-bb-text-muted">Creating…</span>
+                                    <span className="ml-2 text-[11px] text-bb-text-muted">Creating ledger entry…</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "created" ? (
-                                    <span className="ml-2 text-[11px] text-primary">Created</span>
+                                    <span className="ml-2 text-[11px] text-primary">Ledger entry created</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "already" ? (
-                                    <span className="ml-2 text-[11px] text-bb-text-muted">Already exists</span>
+                                    <span className="ml-2 text-[11px] text-bb-text-muted">Ledger entry already exists</span>
                                   ) : entryCreateStatus[it.uploadId]?.state === "failed" ? (
                                     <span className="ml-2 text-[11px] text-bb-status-danger-fg">Failed</span>
                                   ) : null
                                 ) : null}
                               </span>
+                              {uploadReason(it) ? (
+                                <div className="mt-1 truncate text-[11px] leading-4 text-bb-text-muted" title={uploadReason(it)}>
+                                  {uploadReason(it)}
+                                </div>
+                              ) : lifecycleDetail ? (
+                                <div className="mt-1 truncate text-[11px] leading-4 text-bb-text-muted" title={lifecycleDetail}>
+                                  {lifecycleDetail}
+                                </div>
+                              ) : null}
                             </td>
                           </>
                         ) : (
@@ -916,7 +922,8 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
             {type === "RECEIPT" && ctx?.businessId ? (
               <div className="px-3 py-2 border-t border-bb-border flex items-center justify-between">
                 <div className="text-xs text-bb-text-muted">
-                  {controller.items.filter((it) => it.uploadId && selectedForEntry[it.uploadId]).length} selected
+                  {controller.items.filter((it) => it.uploadId && selectedForEntry[it.uploadId]).length} selected.
+                  {" "}Next: review parsed receipts, then create ledger entries when ready.
                 </div>
 
                 {(() => {
@@ -981,10 +988,33 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh"));
                       }}
                     >
-                      Create entries
+                      Create ledger entries
                     </Button>
                   );
                 })()}
+              </div>
+            ) : null}
+
+            {type === "INVOICE" && ctx?.businessId ? (
+              <div className="px-3 py-2 border-t border-bb-border flex items-center justify-between gap-3">
+                <div className="text-xs text-bb-text-muted">
+                  Next: open Vendor/AP review to review draft bills or create a bill from a parsed upload.
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-3 text-xs"
+                  onClick={() => {
+                    const businessId = ctx.businessId?.trim();
+                    if (!businessId) return;
+                    const vendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
+                    window.location.href = vendorId
+                      ? `/vendors/${encodeURIComponent(vendorId)}?businessId=${encodeURIComponent(businessId)}`
+                      : `/vendors?businessId=${encodeURIComponent(businessId)}`;
+                  }}
+                >
+                  Open Vendor/AP review
+                </Button>
               </div>
             ) : null}
 
@@ -1024,7 +1054,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                         {it.status === "UPLOADED" || it.status === "COMPLETED" ? (
                           <div className="inline-flex items-center gap-1 text-xs text-primary">
                             <CheckCircle2 className="h-4 w-4" />
-                            {it.completedMeta ? "Uploaded" : "Ready"}
+                            {uploadFileLifecycleText(type, it)}
                           </div>
                         ) : it.status === "FAILED" ? (
                           <div className="inline-flex items-center gap-1 text-xs text-bb-status-danger-fg">

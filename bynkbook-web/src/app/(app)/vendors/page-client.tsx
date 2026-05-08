@@ -278,6 +278,7 @@ export default function VendorsPageClient() {
                   type="button"
                   className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                   onClick={() => setOpenUpload(true)}
+                  title="Upload invoices for review first; no ledger/payment entry is created until approval/posting."
                 >
                   Upload Invoice
                 </button>

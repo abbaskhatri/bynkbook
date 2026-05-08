@@ -169,7 +169,7 @@ function getInvoiceUploadStatus(upload: any) {
   const parsedStatus = String(meta?.parsed_status ?? "").toUpperCase();
   const duplicateCode = String(meta?.error_code ?? "").toUpperCase();
 
-  if (meta?.bill_id) return { label: "Bill created", tone: "success" as const };
+  if (meta?.bill_id) return { label: "Draft bill created for review", tone: "success" as const };
   if (duplicateCode === "DUPLICATE_UPLOAD") return { label: "Duplicate upload", tone: "neutral" as const };
   if (parsedStatus === "PARSED") return { label: "Parsed", tone: "success" as const };
   if (parsedStatus === "NEEDS_REVIEW") return { label: "Needs review", tone: "warn" as const };
@@ -184,7 +184,7 @@ function getInvoiceUploadDetail(upload: any) {
   const parsedStatus = String(meta?.parsed_status ?? "").toUpperCase();
   const duplicateCode = String(meta?.error_code ?? "").toUpperCase();
 
-  if (meta?.bill_id) return "Bill created automatically from this invoice.";
+  if (meta?.bill_id) return "Draft bill created for review. No ledger/payment entry is created until you approve/post it.";
   if (duplicateCode === "DUPLICATE_UPLOAD") return "A matching completed upload already exists, so the existing upload was reused.";
   if (parsedStatus === "FAILED") return String(parsed?.error ?? "Parsing failed. Retry parse or upload a clearer invoice file.");
 
@@ -197,12 +197,12 @@ function getInvoiceUploadDetail(upload: any) {
     if (!parsed?.doc_date || Number(parsed?.doc_date_conf ?? 0) < 50) missing.push("invoice date");
 
     if (missing.length > 0) {
-      return `Needs review: confirm ${missing.join(", ")} before a bill can be created.`;
+      return `Needs review: confirm ${missing.join(", ")} before a draft bill can be created.`;
     }
-    return "Needs review before a bill can be created.";
+    return "Needs review before a draft bill can be created.";
   }
 
-  if (parsedStatus === "PARSED") return "Parsed successfully.";
+  if (parsedStatus === "PARSED") return "Parsed upload saved. Create or review a draft bill before approval/posting.";
   return "";
 }
 
@@ -740,6 +740,7 @@ export default function VendorDetailPageClient() {
                   type="button"
                   className={["h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                   onClick={() => setOpenUpload(true)}
+                  title="Upload invoices for review first; no ledger/payment entry is created until approval/posting."
                 >
                   Upload Invoice
                 </button>
@@ -785,9 +786,9 @@ export default function VendorDetailPageClient() {
                       setErr(e?.message ?? "Backfill failed");
                     }
                   }}
-                  title="Create bills from older invoice uploads (idempotent)"
+                  title="Create draft bills from older invoice uploads (idempotent; no ledger/payment entries)"
                 >
-                  Backfill bills
+                  Backfill draft bills
                 </button>
 
                 <button
@@ -1302,6 +1303,9 @@ export default function VendorDetailPageClient() {
         <div className={uploadsUpdating ? "pointer-events-none select-none blur-[1px]" : ""}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Invoices</CardTitle>
+            <div className="text-xs text-bb-text-muted">
+              Invoices are saved for review first. No ledger/payment entry is created until you approve/post it.
+            </div>
           </CardHeader>
 
           <CardContent>
@@ -1394,7 +1398,7 @@ export default function VendorDetailPageClient() {
                                         setErr(appErrorMessageOrNull(e) ?? "Retry parse failed.");
                                       }
                                     }}
-                                    title="Retry invoice parse and bill creation"
+                                    title="Retry invoice parse and draft bill creation"
                                   >
                                     Retry parse
                                   </button>
@@ -1411,9 +1415,9 @@ export default function VendorDetailPageClient() {
                                       setBillSourceUpload(u);
                                       setBillDialogOpen(true);
                                     }}
-                                    title="Create bill from this uploaded invoice"
+                                    title="Create draft bill from this uploaded invoice"
                                   >
-                                    Create bill
+                                    Create draft bill
                                   </button>
                                 ) : null}
 
@@ -1463,7 +1467,7 @@ export default function VendorDetailPageClient() {
             setBillEditId(null);
             setBillSourceUpload(null);
           }}
-          title={billEditId ? "Edit bill" : billSourceUpload ? "Create bill from upload" : "New bill"}
+          title={billEditId ? "Edit bill" : billSourceUpload ? "Create draft bill from upload" : "New bill"}
           size="sm"
           footer={
             <div className="flex items-center justify-end gap-2">
