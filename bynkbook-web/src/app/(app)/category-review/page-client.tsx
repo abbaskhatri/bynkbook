@@ -155,6 +155,8 @@ function categorySuggestionButtonClass(rawTier: unknown, isPrimary: boolean) {
   return "border-border bg-card text-foreground hover:bg-muted/50";
 }
 
+type CategoryReviewEntriesPage = Awaited<ReturnType<typeof listEntriesPage>>;
+
 export default function CategoryReviewPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -312,12 +314,12 @@ export default function CategoryReviewPageClient() {
     queryKey: entriesKey,
     enabled: !!selectedBusinessId && !!selectedAccountId,
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => {
+    queryFn: async ({ pageParam }): Promise<CategoryReviewEntriesPage> => {
       if (!selectedBusinessId || !selectedAccountId) {
-        return Promise.resolve({
+        return {
           items: [],
           meta: { limit: entriesPageLimit, hasMore: false, nextCursor: null },
-        });
+        };
       }
 
       return listEntriesPage({
@@ -776,26 +778,6 @@ export default function CategoryReviewPageClient() {
     }
   };
 
-  const setUndoWindow = (entryId: string, prevCategoryId: string | null, nextCategoryId: string | null) => {
-    clearUndoTimer(entryId);
-    const expiresAt = Date.now() + 10_000;
-
-    setUndoByEntryId((m) => ({
-      ...m,
-      [entryId]: { prevCategoryId, nextCategoryId, expiresAt },
-    }));
-
-    undoTimerByEntryIdRef.current[entryId] = window.setTimeout(() => {
-      setUndoByEntryId((m) => {
-        if (!m[entryId]) return m;
-        const next = { ...m };
-        delete next[entryId];
-        return next;
-      });
-      clearUndoTimer(entryId);
-    }, 10_000);
-  };
-
   // Clean up timers on unmount
   useEffect(() => {
     return () => {
@@ -807,7 +789,7 @@ export default function CategoryReviewPageClient() {
     };
   }, []);
 
-  // Per-row category changes apply immediately (dropdown onChange + suggestion pill click)
+  // Per-row category changes apply immediately from the combobox. Suggestion row selection stays local until batch apply.
 
   async function applyCategoryToEntry(
     entryId: string,
@@ -968,6 +950,35 @@ export default function CategoryReviewPageClient() {
     setWhyText(categorySuggestionWhyText(suggestion, categoryNameById));
   }
 
+  function selectSuggestedCategoryForReview(entryId: string, categoryId: string, categoryName: string) {
+    if (!categoryId) return;
+
+    clearMutErr();
+    setApplySummary(null);
+    setFailedById((m) => {
+      const next = { ...m };
+      delete next[entryId];
+      return next;
+    });
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.add(entryId);
+      return next;
+    });
+    setSelectedSuggestionByEntryId((prev) => ({
+      ...prev,
+      [entryId]: categoryId,
+    }));
+    setManualCategoryByEntryId((prev) => ({
+      ...prev,
+      [entryId]: categoryId,
+    }));
+    setCategoryDraftByEntryId((prev) => ({
+      ...prev,
+      [entryId]: categoryName || categoryNameById[categoryId] || "",
+    }));
+  }
+
   async function runApplySelectedConfirmed() {
     if (bulkCategoryId === "__NONE__") return;
 
@@ -1077,6 +1088,21 @@ export default function CategoryReviewPageClient() {
 
   const autoFixReadyCount = selectedApplyItems.length + manuallySelectedApplyItems.length;
   const autoFixReviewNeededCount = Math.max(0, autoFixRows.length - autoFixReadyCount);
+  const loadedAutoFixReadyCount = useMemo(() => {
+    let count = 0;
+
+    for (const row of visibleRows) {
+      const id = String(row.id);
+      if (row.category_id) continue;
+
+      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      const top = suggestions[0] ?? null;
+      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+      if (topCategoryId && isBulkSafeCategorySuggestion(top, 0)) count += 1;
+    }
+
+    return count;
+  }, [visibleRows, sugByEntryId]);
 
   const autoFixGroups = useMemo(() => {
     const categoryNameById = new Map<string, string>(
@@ -1257,6 +1283,12 @@ export default function CategoryReviewPageClient() {
           return next;
         });
 
+        setCategoryDraftByEntryId((prev) => {
+          const next = { ...prev };
+          for (const id of Array.from(successIds)) delete next[id];
+          return next;
+        });
+
         setSelectedIds((prev) => {
           const next = new Set(prev);
           for (const id of Array.from(successIds)) next.delete(id);
@@ -1296,6 +1328,12 @@ export default function CategoryReviewPageClient() {
       : missingSuggestionTargets.length > 200
         ? "Load next 200 suggestions"
         : "Load suggestions for loaded rows";
+  const autoFixButtonReadyCount = selectedCount > 0 ? autoFixReadyCount : loadedAutoFixReadyCount;
+  const autoFixButtonDisabled = applyBusy || visibleRows.length === 0 || autoFixButtonReadyCount === 0;
+  const autoFixButtonTitle =
+    autoFixButtonReadyCount === 0
+      ? "No safe Auto Fix suggestions yet. Review suggestions manually."
+      : `${autoFixButtonReadyCount} safe Auto Fix suggestion${autoFixButtonReadyCount === 1 ? "" : "s"} ready on loaded rows.`;
 
   return (
     <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
@@ -1466,60 +1504,63 @@ export default function CategoryReviewPageClient() {
                 )}
               </Button>
 
-              <Button
-                className="h-7 px-3 text-xs"
-                disabled={applyBusy || visibleRows.length === 0}
-                onClick={() => {
-                  if (selectedCount === 0) {
-                    const allVisibleIds = new Set(visibleRows.map((e: any) => String(e.id)));
-                    setSelectedIds(allVisibleIds);
+              <span className="inline-flex" title={autoFixButtonTitle}>
+                <Button
+                  variant={autoFixButtonReadyCount === 0 ? "outline" : "default"}
+                  className="h-7 px-3 text-xs"
+                  disabled={autoFixButtonDisabled}
+                  onClick={() => {
+                    if (selectedCount === 0) {
+                      const allVisibleIds = new Set(visibleRows.map((e: any) => String(e.id)));
+                      setSelectedIds(allVisibleIds);
 
-                    const next: Record<string, string> = { ...selectedSuggestionByEntryId };
+                      const next: Record<string, string> = { ...selectedSuggestionByEntryId };
 
-                    for (const e of visibleRows) {
-                      const id = String(e.id);
-                      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
-                      const top = suggestions[0] ?? null;
-                      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                      if (!next[id] && topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
+                      for (const e of visibleRows) {
+                        const id = String(e.id);
+                        const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+                        const top = suggestions[0] ?? null;
+                        const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+                        if (!next[id] && topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
+                      }
+
+                      const groupCounts = new Map<string, number>();
+                      for (const e of visibleRows) {
+                        const id = String(e.id);
+                        const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+                        const top = suggestions[0] ?? null;
+                        const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+                        const manualCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
+                        const groupKey = manualCategoryId
+                          ? `manual:${manualCategoryId}`
+                          : topCategoryId
+                            ? `suggested:${topCategoryId}`
+                            : "__NO_STRONG_SUGGESTION__";
+                        groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
+                      }
+
+                      const firstGroups = Array.from(groupCounts.entries())
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 3)
+                        .map(([groupKey]) => groupKey);
+
+                      const nextExpanded: Record<string, boolean> = {};
+                      for (const groupKey of firstGroups) nextExpanded[groupKey] = true;
+
+                      setExpandedAutoFixGroups(nextExpanded);
+                      setSelectedSuggestionByEntryId(next);
+                      setApplySummary(null);
+                      clearMutErr();
+                      setApplyOpen(true);
+                      return;
                     }
 
-                    const groupCounts = new Map<string, number>();
-                    for (const e of visibleRows) {
-                      const id = String(e.id);
-                      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
-                      const top = suggestions[0] ?? null;
-                      const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                      const manualCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
-                      const groupKey = manualCategoryId
-                        ? `manual:${manualCategoryId}`
-                        : topCategoryId
-                          ? `suggested:${topCategoryId}`
-                          : "__NO_STRONG_SUGGESTION__";
-                      groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
-                    }
-
-                    const firstGroups = Array.from(groupCounts.entries())
-                      .sort((a, b) => b[1] - a[1])
-                      .slice(0, 3)
-                      .map(([groupKey]) => groupKey);
-
-                    const nextExpanded: Record<string, boolean> = {};
-                    for (const groupKey of firstGroups) nextExpanded[groupKey] = true;
-
-                    setExpandedAutoFixGroups(nextExpanded);
-                    setSelectedSuggestionByEntryId(next);
-                    setApplySummary(null);
-                    clearMutErr();
-                    setApplyOpen(true);
-                    return;
-                  }
-
-                  openAutoFixCategories();
-                }}
-              >
-                Auto Fix loaded rows
-              </Button>
+                    openAutoFixCategories();
+                  }}
+                >
+                  Auto Fix loaded rows
+                </Button>
+              </span>
 
               {selectedCount > 0 ? (
                 <>
@@ -1550,8 +1591,22 @@ export default function CategoryReviewPageClient() {
                       }
                     }}
                   >
-                    Apply to selected loaded rows
+                    Apply bulk category to selected loaded rows
                   </Button>
+
+                  {manuallySelectedApplyItems.length > 0 ? (
+                    <BusyButton
+                      variant="primary"
+                      size="sm"
+                      className="h-7 px-3 text-xs"
+                      busy={applyBusy}
+                      busyLabel="Applying..."
+                      disabled={applyBusy || manuallySelectedApplyItems.length === 0}
+                      onClick={applyManuallySelectedCategories}
+                    >
+                      {`Apply selected categories to loaded rows (${manuallySelectedApplyItems.length})`}
+                    </BusyButton>
+                  ) : null}
 
                   <Button
                     variant="outline"
@@ -1656,7 +1711,6 @@ export default function CategoryReviewPageClient() {
                         const topSuggestedCategoryId = String(
                           topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
                         ).trim();
-                        const topSuggestedCategoryName = categorySuggestionCategoryName(topSuggestion, categoryNameById);
                         const hasTopSuggestion = !e.category_id && !!topSuggestion && !!topSuggestedCategoryId;
                         const topSuggestionIsBulkSafe =
                           hasTopSuggestion && isBulkSafeCategorySuggestion(topSuggestion, 0);
@@ -1730,12 +1784,6 @@ export default function CategoryReviewPageClient() {
                                       void applyReviewedRowCategory(id, null, topSuggestedCategoryId || null);
                                     }}
                                   />
-
-                                  {hasTopSuggestion ? (
-                                    <div className="truncate text-[10px] text-muted-foreground">
-                                      Suggested: {topSuggestedCategoryName || "category"}
-                                    </div>
-                                  ) : null}
 
                                   <div className="flex min-h-5 flex-wrap items-center gap-1">
                                     {pendingIds[id] ? (
@@ -1814,8 +1862,15 @@ export default function CategoryReviewPageClient() {
                                             const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                             const reasonText = categorySuggestionReason(s);
                                             const shortReason = reasonText || sourceLabel;
-                                            const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, true);
                                             const isPrimaryReviewOnly = !topSuggestionIsBulkSafe;
+                                            const metaText = [
+                                              `${conf}%`,
+                                              shortReason,
+                                              isPrimaryReviewOnly ? "Review" : "",
+                                            ].filter(Boolean).join(" · ");
+                                            const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, true);
+                                            const isSuggestionSelected =
+                                              isSelected && String(manualCategoryByEntryId[id] ?? "") === catId;
 
                                             return (
                                               <div
@@ -1831,47 +1886,24 @@ export default function CategoryReviewPageClient() {
                                                   Suggested: {name}
                                                 </span>
 
-                                                <span className="shrink-0 rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                                  {conf}%
-                                                </span>
-
-                                                {isPrimaryReviewOnly ? (
-                                                  <span className="shrink-0 rounded-full border border-bb-status-warning-border bg-card px-1.5 py-0.5 text-[10px] font-medium text-bb-status-warning-fg">
-                                                    Review
-                                                  </span>
-                                                ) : null}
-
-                                                <span className="hidden min-w-0 max-w-[130px] truncate text-[10px] text-muted-foreground sm:inline">
-                                                  {shortReason}
+                                                <span className="hidden min-w-0 max-w-[190px] truncate text-[10px] text-muted-foreground sm:inline">
+                                                  {metaText}
                                                 </span>
 
                                                 <div className="ml-auto flex shrink-0 items-center gap-1">
                                                   <button
                                                     type="button"
                                                     className={`h-5 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
-                                                    disabled={!!pendingIds[id]}
-                                                    onClick={async () => {
+                                                    disabled={!!pendingIds[id] || isSuggestionSelected}
+                                                    title="Select for Apply selected categories"
+                                                    onClick={() => {
                                                       if (!catId) return;
-                                                      if (!selectedBusinessId || !selectedAccountId) return;
                                                       if (pendingIds[id]) return;
 
-                                                      clearMutErr();
-                                                      const prevCategoryId = e.category_id ? String(e.category_id) : null;
-
-                                                      try {
-                                                        await applyCategoryToEntry(id, catId, catId);
-                                                        const isAiSuggestion = String(s?.source ?? "").trim().toUpperCase() === "AI";
-                                                        setAiAppliedById((m) => {
-                                                          const next = { ...m };
-                                                          if (isAiSuggestion) next[id] = true;
-                                                          else delete next[id];
-                                                          return next;
-                                                        });
-                                                        setUndoWindow(id, prevCategoryId, catId);
-                                                      } catch {}
+                                                      selectSuggestedCategoryForReview(id, catId, name);
                                                     }}
                                                   >
-                                                    Use
+                                                    {isSuggestionSelected ? "Selected" : "Select"}
                                                   </button>
 
                                                   <button
@@ -2033,6 +2065,14 @@ export default function CategoryReviewPageClient() {
                       }
 
                       setSelectedSuggestionByEntryId((prev) => {
+                        const next = { ...prev };
+                        for (const id of Array.from(successIds)) {
+                          delete next[id];
+                        }
+                        return next;
+                      });
+
+                      setCategoryDraftByEntryId((prev) => {
                         const next = { ...prev };
                         for (const id of Array.from(successIds)) {
                           delete next[id];
