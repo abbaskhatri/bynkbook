@@ -111,12 +111,45 @@ export function ChartContainer({
     children,
 }: ChartContainerProps) {
     const h = HEIGHT_PX[height];
-    const [responsiveReady, setResponsiveReady] = React.useState(false);
+    const responsiveFrameRef = React.useRef<HTMLDivElement>(null);
+    const [initialDimension, setInitialDimension] = React.useState<{ width: number; height: number } | null>(null);
 
     React.useEffect(() => {
-        const id = window.requestAnimationFrame(() => setResponsiveReady(true));
-        return () => window.cancelAnimationFrame(id);
-    }, []);
+        if (noResponsive || loading || empty) return;
+
+        let rafId = 0;
+        let disposed = false;
+
+        const markReadyIfMeasured = () => {
+            const el = responsiveFrameRef.current;
+            if (!el || disposed) return;
+
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 1 && rect.height > 1) {
+                setInitialDimension((current) => current ?? {
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                });
+            }
+        };
+
+        rafId = window.requestAnimationFrame(markReadyIfMeasured);
+
+        const resizeObserver =
+            typeof ResizeObserver === "undefined"
+                ? null
+                : new ResizeObserver(markReadyIfMeasured);
+
+        if (responsiveFrameRef.current) {
+            resizeObserver?.observe(responsiveFrameRef.current);
+        }
+
+        return () => {
+            disposed = true;
+            window.cancelAnimationFrame(rafId);
+            resizeObserver?.disconnect();
+        };
+    }, [empty, loading, noResponsive]);
 
     return (
         <Card className={`rounded-[10px] border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm ${motionFast}`}>
@@ -152,9 +185,19 @@ export function ChartContainer({
                         {children}
                     </div>
                 ) : (
-                    <div className="text-card-foreground" style={{ height: h, minWidth: 0, minHeight: 0 }}>
-                        {responsiveReady ? (
-                            <ResponsiveContainer width="99%" height="99%">
+                    <div
+                        ref={responsiveFrameRef}
+                        className="w-full text-card-foreground"
+                        style={{ height: h, minHeight: h, minWidth: 160 }}
+                    >
+                        {initialDimension ? (
+                            <ResponsiveContainer
+                                width="99%"
+                                height="99%"
+                                minWidth={0}
+                                minHeight={0}
+                                initialDimension={initialDimension}
+                            >
                                 {children as any}
                             </ResponsiveContainer>
                         ) : (

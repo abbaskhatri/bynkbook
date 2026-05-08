@@ -48,9 +48,26 @@ const DashboardChartPanels = dynamic(() => import("./dashboard-chart-panels"), {
 function DashboardChartPanelsFallback() {
   return (
     <>
-      <Skeleton className="h-[196px] w-full rounded-[10px]" />
-      <Skeleton className="h-[196px] w-full rounded-[10px]" />
-      <Skeleton className="h-[266px] w-full rounded-[10px]" />
+      {[
+        { title: "Cash Flow", height: "h-[130px]" },
+        { title: "Cash Position", height: "h-[130px]" },
+        { title: "Category Breakdown", height: "h-[200px]" },
+      ].map((panel) => (
+        <Card key={panel.title} className="rounded-[10px] border border-bb-border bg-bb-surface-card shadow-sm">
+          <CHeader className="py-1">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-base font-semibold text-foreground/90">{panel.title}</div>
+                <Skeleton className="h-3 w-36" />
+              </div>
+              <Skeleton className="h-10 w-10 rounded-lg" />
+            </div>
+          </CHeader>
+          <CardContent className="px-3 pb-1 pt-0.5">
+            <Skeleton className={`${panel.height} w-full rounded-md`} />
+          </CardContent>
+        </Card>
+      ))}
     </>
   );
 }
@@ -632,6 +649,16 @@ export default function DashboardPageClient() {
     void categoriesQ.refetch();
     void accountsSummaryQ.refetch();
   };
+
+  const dashboardInitialLoading =
+    businessesQ.isLoading ||
+    (dashEnabled &&
+      ((pnlQ.isLoading && !pnlQ.data) ||
+        (cashflowQ.isLoading && !cashflowQ.data) ||
+        (categoriesQ.isLoading && !categoriesQ.data) ||
+        (accountsSummaryQ.isLoading && !accountsSummaryQ.data)));
+  const showDashboardBody = !!selectedBusinessId || businessesQ.isLoading;
+  const showAttentionLoading = dashboardInitialLoading || attentionLoading;
 
   // ---- Derivations (deterministic only) ----
   const cashBalanceCents = useMemo(() => {
@@ -1423,6 +1450,15 @@ export default function DashboardPageClient() {
         <InlineBanner title={dashErr.title} message={dashErr.detail} onRetry={() => refetchAll()} />
       ) : null}
 
+      {dashboardInitialLoading ? (
+        <div className="flex items-center justify-between rounded-[10px] border border-bb-border bg-bb-surface-card px-3 py-2 text-sm text-muted-foreground shadow-sm">
+          <span>Loading dashboard</span>
+          <Skeleton className="h-3 w-28" />
+        </div>
+      ) : null}
+
+      {showDashboardBody ? (
+        <>
       {/* KPI Strip */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
         {[
@@ -1483,7 +1519,7 @@ export default function DashboardPageClient() {
           },
         ].map((k) => {
           const Icon = k.icon;
-          const loading = pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching;
+          const loading = dashboardInitialLoading || pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching;
 
           return (
             <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
@@ -1523,9 +1559,9 @@ export default function DashboardPageClient() {
         {/* LEFT: charts stack */}
         <div className="lg:col-span-2 space-y-4">
           <DashboardChartPanels
-            cashflowLoading={cashflowQ.isFetching}
-            cashPositionLoading={cashflowQ.isFetching || accountsSummaryQ.isFetching}
-            categoriesLoading={categoriesQ.isFetching}
+            cashflowLoading={dashboardInitialLoading || cashflowQ.isFetching}
+            cashPositionLoading={dashboardInitialLoading || cashflowQ.isFetching || accountsSummaryQ.isFetching}
+            categoriesLoading={dashboardInitialLoading || categoriesQ.isFetching}
             cashBarsData={cashBarsData}
             cashPosData={cashPosData}
             expensePieData={expensePieData}
@@ -1552,7 +1588,13 @@ export default function DashboardPageClient() {
             </CHeader>
 
             <CardContent className="p-0">
-              {(accountsSummaryQ.data?.rows ?? []).length === 0 ? (
+              {dashboardInitialLoading ? (
+                <div className="px-4 py-3 space-y-3">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : (accountsSummaryQ.data?.rows ?? []).length === 0 ? (
                 <div className="px-4 py-3 text-sm text-muted-foreground">No accounts found.</div>
               ) : (
                 <div className="-mt-1 divide-y divide-bb-border-muted">
@@ -1595,7 +1637,7 @@ export default function DashboardPageClient() {
                 </div>
 
                 <div className="text-xs font-medium rounded-full border border-bb-border px-2 py-0.5 text-foreground/80 bg-bb-surface-card">
-                  {attentionLoading ? <Skeleton className="h-3 w-10" /> : `${nextActionsN} open`}
+                  {showAttentionLoading ? <Skeleton className="h-3 w-10" /> : `${nextActionsN} open`}
                 </div>
               </div>
             </CHeader>
@@ -1613,7 +1655,7 @@ export default function DashboardPageClient() {
                     </div>
                     <div>
                       <div className="font-medium text-sm text-foreground">
-                        {attentionLoading ? <Skeleton className="h-4 w-24" /> : `${openIssuesN} Open Issues`}
+                        {showAttentionLoading ? <Skeleton className="h-4 w-24" /> : `${openIssuesN} Open Issues`}
                       </div>
                       <div className="text-xs text-muted-foreground">Review and resolve</div>
                     </div>
@@ -1631,7 +1673,7 @@ export default function DashboardPageClient() {
                     </div>
                     <div>
                       <div className="font-medium text-sm text-foreground">
-                        {attentionLoading ? <Skeleton className="h-4 w-32" /> : `${uncategorizedN} Uncategorized`}
+                        {showAttentionLoading ? <Skeleton className="h-4 w-32" /> : `${uncategorizedN} Uncategorized`}
                       </div>
                       <div className="text-xs text-muted-foreground">Assign categories</div>
                     </div>
@@ -1649,7 +1691,7 @@ export default function DashboardPageClient() {
                     </div>
                     <div>
                       <div className="font-medium text-sm text-foreground">
-                        {attentionLoading ? <Skeleton className="h-4 w-32" /> : `${bankUnmatchedN} Bank Unmatched`}
+                        {showAttentionLoading ? <Skeleton className="h-4 w-32" /> : `${bankUnmatchedN} Bank Unmatched`}
                       </div>
                       <div className="text-xs text-muted-foreground">Review bank activity</div>
                     </div>
@@ -1896,6 +1938,8 @@ export default function DashboardPageClient() {
           </Card>
         </div>
       </div>
+        </>
+      ) : null}
     </div>
   );
 }
