@@ -27,8 +27,8 @@ export const uploadAllowMultiple: Record<UploadType, boolean> = {
 };
 
 export const uploadHelperText: Record<UploadType, string> = {
-  RECEIPT: "Upload images or PDFs. We’ll extract vendor, date, and amount to create an expense entry.",
-  INVOICE: "Upload PDFs or images. We’ll extract vendor, invoice number, date, amount, and due date.",
+  RECEIPT: "Upload images or PDFs. We'll extract vendor, date, and amount for review. Ledger entries are created only when you choose Create ledger entries.",
+  INVOICE: "Upload PDFs or images. Invoices are saved for review first. No ledger/payment entry is created until you approve/post it.",
   BANK_STATEMENT: "Upload a bank statement (CSV preferred; PDF supported).",
   BUSINESS_LOGO: "Upload a logo image (PNG/JPG/SVG).",
 };

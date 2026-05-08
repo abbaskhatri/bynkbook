@@ -101,10 +101,10 @@ function statusLabel(item: {
   error?: string;
 }) {
   if (item.status === "FAILED") return item.error ?? "Upload failed";
-  if (item.status === "UPLOADING") return `Uploading · ${item.progress}%`;
-  if (item.status === "UPLOADED") return "Completing review upload";
+  if (item.status === "UPLOADING") return `Uploading - ${item.progress}%`;
+  if (item.status === "UPLOADED") return "Uploaded - processing";
   if (item.status === "COMPLETED") {
-    if (item.parsedStatus === "FAILED") return "Saved for review · extraction failed";
+    if (item.parsedStatus === "FAILED") return "Saved for review - extraction failed";
     return "Saved for review";
   }
   return item.status;
@@ -269,7 +269,7 @@ export default function MobileInvoicePageClient() {
               prefetch
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
-              Queue
+              Review
             </Link>
           </div>
         </section>
@@ -282,7 +282,8 @@ export default function MobileInvoicePageClient() {
           <div className="flex gap-3">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-bb-status-success-fg" />
             <div className="space-y-2 text-sm leading-5 text-bb-status-success-fg">
-              <p>Invoices are uploaded for review only. This will not create a vendor or AP bill automatically.</p>
+              <p>Invoices are saved for review first. No ledger/payment entry is created until you approve/post it.</p>
+              <p>Mobile uploads stay review-only; no vendor or AP bill is created automatically.</p>
               <p>For multiple-page invoices, upload a PDF or add images as separate review files for now.</p>
             </div>
           </div>
@@ -473,8 +474,11 @@ export default function MobileInvoicePageClient() {
                         <div className="mt-2 text-sm leading-5 text-muted-foreground">{summary}</div>
                       ) : null}
                       {item.status === "COMPLETED" ? (
-                        <div className="mt-2 text-sm leading-5 text-bb-status-success-fg">
-                          Review needed. No vendor or AP bill was created.
+                        <div className="mt-2 space-y-2 text-sm leading-5 text-bb-status-success-fg">
+                          <div>Saved for review. No vendor, AP bill, ledger entry, or payment entry was created.</div>
+                          <Link href={reviewHref} prefetch className="inline-flex font-medium underline underline-offset-4">
+                            Open review queue
+                          </Link>
                         </div>
                       ) : null}
                     </div>
