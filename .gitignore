@@ -63,3 +63,10 @@ docs/**/debug*
 # Local Playwright auth/session files
 bynkbook-web/auth/
 .qa/
+.codex-tmp/final-smoke-fixture-validate.mjs
+.codex-tmp/final-smoke-fixture-seed.mjs
+.codex-tmp/final-smoke-check-suggestion-primer.mjs
+.codex-tmp/final-smoke-banktx-import.mjs
+.codex-tmp/final-authenticated-qa-smoke.mjs
+.codex-tmp/final-authenticated-qa-smoke-result.json
+.codex-tmp/final-authenticated-qa-smoke-auth.json
