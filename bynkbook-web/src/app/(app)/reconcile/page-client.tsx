@@ -3263,6 +3263,9 @@ const displayBankActiveList = useMemo(() => {
     bankUnmatchedScopeCounts.scopeKey === bankScopeKey &&
     !bankUnmatchedScopeCounts.loading &&
     !bankUnmatchedScopeCounts.error;
+  const bankScopeCountsLoading =
+    bankUnmatchedScopeCounts.scopeKey === bankScopeKey &&
+    bankUnmatchedScopeCounts.loading;
   const formatProbeCount = (probe: CountProbeResult | null) => {
     if (bankUnmatchedScopeCounts.loading && bankUnmatchedScopeCounts.scopeKey === bankScopeKey) return "Loading";
     if (!probe || bankUnmatchedScopeCounts.scopeKey !== bankScopeKey) return "Not loaded yet";
@@ -3286,6 +3289,30 @@ const displayBankActiveList = useMemo(() => {
     : activeBankStatusLoading
       ? "Loading"
       : "Not loaded yet";
+  const bankUnmatchedScopeSummary = bankScopeCountsReady
+    ? `All-time ${bankAllTimeUnmatchedLabel} • Range ${bankRangeUnmatchedLabel}`
+    : bankScopeCountsLoading
+      ? "Loading full-account counts..."
+      : "Some counts are still loading.";
+  const bankUnmatchedRowsSummary = bankStatusLoaded.unmatched
+    ? `Visible rows loaded: Loaded ${bankUnmatchedLoadedRowsNoSearch}${bankNextCursorByStatus.unmatched ? "+" : ""} • Visible ${displayBankUnmatchedCount}`
+    : bankLoadingByStatus.unmatched
+      ? "Checking visible rows..."
+      : "Visible rows not loaded yet.";
+  const bankScopeCountsNote = bankScopeCountsLoading
+    ? "Loading full-account counts..."
+    : "Some counts are still loading.";
+  const bankScopeRowsCopy = activeBankStatusLoaded
+    ? `Loaded rows ${activeBankLoadedRowsLabel} • Visible filtered rows ${activeBankVisibleFilteredLabel}`
+    : activeBankStatusLoading
+      ? "Visible rows are loading."
+      : "Visible rows not loaded yet.";
+  const bankScopeCopy = bankTab === "unmatched" && bankScopeCountsReady
+    ? `All-time account ${bankAllTimeUnmatchedLabel} • Current date range ${bankRangeUnmatchedLabel} (${dateRangeText}) • ${bankScopeRowsCopy}`
+    : bankTab === "unmatched"
+      ? `${bankScopeRowsCopy} • ${bankScopeCountsNote}`
+      : `${bankScopeRowsCopy} • Full-account counts are shown for unmatched transactions.`;
+  const entriesScopeCopy = `Current date range ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded • Loaded rows ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} • Visible filtered rows ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount} • Full-account count not loaded.`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
       ? Math.max(0, activeBankLoadedRowsCount - (bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount))
@@ -3312,10 +3339,14 @@ const displayBankActiveList = useMemo(() => {
       return "No matched bank transactions in this date range.";
     }
 
-    if (!bankStatusLoaded.unmatched) return "Not loaded yet.";
+    if (!bankStatusLoaded.unmatched) return bankScopeCountsLoading ? "Checking for bank transactions..." : "Not loaded yet.";
 
     if (activeBankHiddenBySearch > 0) {
       return `${activeBankHiddenBySearch} unmatched bank transactions exist outside this search. Clear search to see them.`;
+    }
+
+    if (bankScopeCountsLoading) {
+      return "Checking for bank transactions...";
     }
 
     if (dateRangeActive && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0) {
@@ -3563,10 +3594,10 @@ const displayBankActiveList = useMemo(() => {
           <div className="leading-tight">
             <div className="text-bb-text-muted">Bank unmatched</div>
             <div className="font-semibold text-bb-text">
-              All-time {bankAllTimeUnmatchedLabel} • Range {bankRangeUnmatchedLabel}
+              {bankUnmatchedScopeSummary}
             </div>
             <div className="text-[11px] text-bb-text-muted">
-              Loaded {bankStatusLoaded.unmatched ? `${bankUnmatchedLoadedRowsNoSearch}${bankNextCursorByStatus.unmatched ? "+" : ""}` : bankLoadingByStatus.unmatched ? "Loading" : "Not loaded yet"} • Visible {bankStatusLoaded.unmatched ? displayBankUnmatchedCount : bankLoadingByStatus.unmatched ? "Loading" : "Not loaded yet"}
+              {bankUnmatchedRowsSummary}
             </div>
           </div>
 
@@ -4355,7 +4386,7 @@ const displayBankActiveList = useMemo(() => {
 
             <div className="mt-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1.5 text-[11px] leading-4 text-bb-text-muted">
               <span className="font-semibold text-bb-text">Ledger scope:</span>{" "}
-              All-time account count Not loaded yet • Current date range {entriesLoadedCount}{entriesHitApiLimit ? "+" : ""} loaded • Loaded rows {entriesLoadedCount}{entriesHitApiLimit ? "+" : ""} • Visible filtered rows {expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}
+              {entriesScopeCopy}
             </div>
 
             {entriesHitApiLimit ? (
@@ -4844,7 +4875,7 @@ const displayBankActiveList = useMemo(() => {
             </div>
             <div className="mt-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1.5 text-[11px] leading-4 text-bb-text-muted">
               <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
-              All-time account {bankTab === "unmatched" ? bankAllTimeUnmatchedLabel : "Not loaded yet"} • Current date range {bankTab === "unmatched" ? bankRangeUnmatchedLabel : "Not loaded yet"} ({dateRangeText}) • Loaded rows {activeBankLoadedRowsLabel} • Visible filtered rows {activeBankVisibleFilteredLabel}
+              {bankScopeCopy}
               {activeBankHiddenBySearch > 0 ? (
                 <span> • {activeBankHiddenBySearch} hidden by search</span>
               ) : null}
