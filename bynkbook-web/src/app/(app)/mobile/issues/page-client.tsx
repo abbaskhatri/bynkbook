@@ -1,33 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useMemo } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { AlertTriangle, Building2, Landmark, Loader2 } from "lucide-react";
+import { AlertTriangle, Building2, Landmark } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  isIssuesPageIssueType,
-  listAccountIssues,
-  type EntryIssueRow,
-} from "@/lib/api/issues";
-import { useAccounts } from "@/lib/queries/useAccounts";
-import { useBusinesses } from "@/lib/queries/useBusinesses";
-
-function hrefWith(params: {
-  path: string;
-  businessId?: string | null;
-  accountId?: string | null;
-}) {
-  const q = new URLSearchParams();
-  if (params.businessId) q.set("businessId", params.businessId);
-  if (params.accountId) q.set("accountId", params.accountId);
-  const qs = q.toString();
-  return qs ? `${params.path}?${qs}` : params.path;
-}
+  hrefWithMobileContext,
+  useMobileWorkspaceContext,
+} from "@/lib/mobile/workspaceContext";
+import { useMobileOpenIssues } from "@/lib/mobile/reviewQueues";
+import type { EntryIssueRow } from "@/lib/api/issues";
 
 function formatUsdFromCents(value: string | number | bigint | null | undefined) {
   if (value === null || value === undefined || value === "") return "Amount unavailable";
@@ -66,77 +50,27 @@ function issueExplanation(issue: EntryIssueRow) {
 }
 
 export default function MobileIssuesPageClient() {
-  const sp = useSearchParams();
-  const businessesQ = useBusinesses();
-  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
-  const accountIdFromUrl = sp.get("accountId") ?? null;
-
-  const business = useMemo(() => {
-    const list = businessesQ.data ?? [];
-    if (bizIdFromUrl) return list.find((item) => item.id === bizIdFromUrl) ?? list[0] ?? null;
-    return list[0] ?? null;
-  }, [bizIdFromUrl, businessesQ.data]);
-
-  const businessId = business?.id ?? bizIdFromUrl ?? null;
-  const accountsQ = useAccounts(businessId);
-
-  const activeAccounts = useMemo(
-    () => (accountsQ.data ?? []).filter((account) => !account.archived_at),
-    [accountsQ.data]
-  );
-
-  const accountId = useMemo(() => {
-    if (accountIdFromUrl && accountIdFromUrl !== "all") return accountIdFromUrl;
-    return activeAccounts[0]?.id ?? null;
-  }, [accountIdFromUrl, activeAccounts]);
-
-  const account = useMemo(() => {
-    if (!accountId) return activeAccounts[0] ?? null;
-    return activeAccounts.find((item) => item.id === accountId) ?? activeAccounts[0] ?? null;
-  }, [accountId, activeAccounts]);
-
-  const issuesQ = useInfiniteQuery({
-    queryKey: ["mobileIssues", businessId, accountId, "OPEN"],
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
-      listAccountIssues({
-        businessId: businessId as string,
-        accountId: accountId as string,
-        status: "OPEN",
-        limit: 50,
-        cursor: pageParam,
-      }),
-    getNextPageParam: (lastPage) => (
-      lastPage.hasMore && lastPage.nextCursor ? lastPage.nextCursor : undefined
-    ),
-    enabled: !!businessId && !!accountId,
-    staleTime: 30_000,
-    refetchOnWindowFocus: false,
-    placeholderData: (prev) => prev,
+  const {
+    businessesQ,
+    accountsQ,
+    business,
+    businessId,
+    account,
+    accountId,
+    contextError,
+    contextReady,
+    isLoading: contextLoading,
+  } = useMobileWorkspaceContext();
+  const issuesQueue = useMobileOpenIssues({
+    businessId,
+    accountId,
+    enabled: contextReady,
   });
+  const issuesQ = issuesQueue.query;
+  const issues = issuesQueue.rows;
 
-  const loadedIssueRows = useMemo(() => {
-    const out: EntryIssueRow[] = [];
-    const seen = new Set<string>();
-    for (const page of issuesQ.data?.pages ?? []) {
-      for (const issue of page.issues ?? []) {
-        const key = String(issue.id ?? "");
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        out.push(issue);
-      }
-    }
-    return out;
-  }, [issuesQ.data]);
-
-  const issues = useMemo(
-    () =>
-      loadedIssueRows.filter((issue) => isIssuesPageIssueType(issue.issue_type)),
-    [loadedIssueRows]
-  );
-
-  const reviewHref = hrefWith({ path: "/mobile/review", businessId, accountId });
-  const desktopHref = hrefWith({ path: "/issues", businessId, accountId });
+  const reviewHref = hrefWithMobileContext({ path: "/mobile/review", businessId, accountId });
+  const desktopHref = hrefWithMobileContext({ path: "/issues", businessId, accountId });
 
   const bannerMessage =
     businessesQ.error || accountsQ.error
@@ -144,6 +78,33 @@ export default function MobileIssuesPageClient() {
       : issuesQ.error
         ? "Issue cards could not refresh. Existing desktop pages are unchanged."
         : null;
+
+  if (contextLoading) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-card p-4 shadow-sm">
+            <Skeleton className="h-5 w-40 rounded-md" />
+            <Skeleton className="mt-3 h-8 w-28 rounded-md" />
+            <Skeleton className="mt-3 h-7 w-full rounded-md" />
+          </section>
+          <Skeleton className="h-[176px] w-full rounded-md" />
+          <Skeleton className="h-[176px] w-full rounded-md" />
+        </div>
+      </MobileShell>
+    );
+  }
+
+  if (contextError) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <InlineBanner
+          title="Mobile context unavailable"
+          message={contextError instanceof Error ? contextError.message : "Could not resolve a mobile business and account."}
+        />
+      </MobileShell>
+    );
+  }
 
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
@@ -185,7 +146,9 @@ export default function MobileIssuesPageClient() {
             <div>
               <div className="text-sm font-semibold text-foreground">Open issue cards</div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Showing {issues.length} loaded duplicate or stale-check issues.
+                {issues.length > 0
+                  ? `Showing ${issues.length} open duplicate or stale-check issues for this account.`
+                  : "Loaded the same account-scoped open issue filter used by Review."}
               </div>
             </div>
             <Link
@@ -276,23 +239,6 @@ export default function MobileIssuesPageClient() {
             })
           )}
 
-          {(issuesQ.hasNextPage || issuesQ.isFetchingNextPage) && !issuesQ.isLoading && !issuesQ.isError ? (
-            <button
-              type="button"
-              className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50 disabled:opacity-60"
-              onClick={() => void issuesQ.fetchNextPage()}
-              disabled={issuesQ.isFetchingNextPage}
-            >
-              {issuesQ.isFetchingNextPage ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading…
-                </span>
-              ) : (
-                "Load more"
-              )}
-            </button>
-          ) : null}
         </section>
       </div>
     </MobileShell>
