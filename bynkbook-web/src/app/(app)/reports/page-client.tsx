@@ -621,6 +621,8 @@ export default function ReportsPageClient() {
     !businessesQ.isLoading &&
     (selectedAccountId === "all" || !accountsQ.isLoading)
   );
+  const reportScopeResolving = businessesQ.isLoading || (Boolean(businessId) && accountsQ.isLoading);
+  const reportScopeMissing = !reportScopeResolving && !selectedScope;
 
   const [loading, setLoading] = useState(false);
   const [hasRequestedReport, setHasRequestedReport] = useState(false);
@@ -888,7 +890,7 @@ export default function ReportsPageClient() {
 
   const overviewReady = Boolean(pnl && cashflow);
   const overviewHasActivity = pnlHasLedgerActivity(pnl) || cashflowHasLedgerActivity(cashflow);
-  const overviewShouldPrepare = !overviewReady && (loading || (!hasRequestedReport && Boolean(selectedScope)));
+  const overviewShouldPrepare = !overviewReady && (loading || reportScopeResolving || (!hasRequestedReport && Boolean(selectedScope)));
 
   const pnlReady = Boolean(pnl);
   const pnlHasActivity = pnlHasLedgerActivity(pnl);
@@ -1105,8 +1107,10 @@ export default function ReportsPageClient() {
             <CardContent className="space-y-3 text-sm">
               {overviewShouldPrepare ? (
                 <ReportLoadingState title="Financial Overview" scope={selectedScope} />
-              ) : !overviewReady ? (
+              ) : !overviewReady && reportScopeMissing ? (
                 <div className="text-sm text-bb-text-muted">Select a business and account scope to prepare Financial Overview.</div>
+              ) : !overviewReady ? (
+                <ReportLoadingState title="Financial Overview" scope={selectedScope} />
               ) : !overviewHasActivity ? (
                 <ReportEmptyState currentScope={selectedScope} shownScope={lastRunScope} />
               ) : (
