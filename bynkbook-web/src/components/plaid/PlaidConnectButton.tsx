@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Landmark } from "lucide-react";
 import { plaidApplyOpening, plaidExchange, plaidLinkToken, plaidPreviewOpening, plaidSync } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
 
@@ -59,6 +59,8 @@ function loadPlaidScriptOnce(): Promise<void> {
 type Props = {
   businessId: string;
   accountId: string;
+  businessName?: string;
+  accountName?: string;
 
   // Default effective start date if user doesn't choose (we will override via UI)
   effectiveStartDate: string; // YYYY-MM-DD
@@ -95,6 +97,8 @@ export function PlaidConnectButton(props: Props) {
   const {
     businessId,
     accountId,
+    businessName,
+    accountName,
     effectiveStartDate,
     disabledClassName,
     buttonClassName,
@@ -106,9 +110,9 @@ export function PlaidConnectButton(props: Props) {
   const [connecting, setConnecting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Step 1: consent gate
-  const [consented, setConsented] = useState(false);
-  const [openConsent, setOpenConsent] = useState(false);
+  // Step 1: explicit per-launch confirmation gate
+  const [confirmed, setConfirmed] = useState(false);
+  const [openConfirm, setOpenConfirm] = useState(false);
 
   // Step 2: after Plaid returns metadata, user must choose exactly one account + history window
   const [openSelect, setOpenSelect] = useState(false);
@@ -136,16 +140,10 @@ export function PlaidConnectButton(props: Props) {
   // Hold current link handler so we can exit/cleanup safely
   const handlerRef = useRef<ReturnType<NonNullable<typeof window.Plaid>["create"]> | null>(null);
 
-  const openPlaid = useCallback(async () => {
+  const launchPlaid = useCallback(async () => {
     if (disabled) return;
     if (busy) return;
     if (openingRef.current) return;
-
-    // Must consent first
-    if (!consented) {
-      setOpenConsent(true);
-      return;
-    }
 
     openingRef.current = true;
     setBusy(true);
@@ -223,13 +221,22 @@ export function PlaidConnectButton(props: Props) {
     } catch (e: any) {
       setErrorMsg(e?.message ?? "Plaid failed to load, please retry");
     } finally {
+      setConnecting(false);
       // if we returned early due to Plaid missing, busy must be cleared
       if (!handlerRef.current) {
         setBusy(false);
         openingRef.current = false;
       }
     }
-  }, [accountId, businessId, busy, disabled, effectiveStartDate, onConnected, consented]);
+  }, [accountId, businessId, busy, disabled]);
+
+  const requestPlaidLaunch = useCallback(() => {
+    if (disabled) return;
+    if (busy) return;
+    setErrorMsg(null);
+    setConfirmed(false);
+    setOpenConfirm(true);
+  }, [busy, disabled]);
 
   return (
     <div className="flex flex-col items-start">
@@ -237,35 +244,46 @@ export function PlaidConnectButton(props: Props) {
         type="button"
         className={busy || disabled ? disabledClassName : buttonClassName}
         disabled={busy || !!disabled}
-        onClick={openPlaid}
+        onClick={requestPlaidLaunch}
         title={busy ? "Working…" : undefined}
       >
-        <Sparkles className="h-3.5 w-3.5" /> {busy ? "Opening…" : (props.label ?? "Connect Plaid")}
+        <Landmark className="h-3.5 w-3.5" /> {busy ? "Opening…" : (props.label ?? "Connect bank")}
       </button>
 
       {errorMsg ? <div className="mt-1 text-[11px] text-bb-status-danger-fg">{errorMsg}</div> : null}
 
       <AppDialog
-        open={openConsent}
-        onClose={() => setOpenConsent(false)}
-        title="Connect your bank securely"
+        open={openConfirm}
+        onClose={() => setOpenConfirm(false)}
+        title="Confirm bank connection"
         size="md"
       >
         <div className="p-3 max-h-[70vh] overflow-y-auto overflow-x-hidden">
           <div className="text-xs text-bb-text leading-relaxed break-words">
-            BynkBook uses Plaid to connect securely to your bank. We do not store your bank password.
+            This connects a live bank via Plaid for the selected BynkBook scope.
+          </div>
+
+          <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
+            <div className="flex items-start justify-between gap-3">
+              <span className="text-bb-text-muted">Business</span>
+              <span className="text-right font-semibold text-bb-text">{businessName || "Selected business"}</span>
+            </div>
+            <div className="mt-1 flex items-start justify-between gap-3">
+              <span className="text-bb-text-muted">Account</span>
+              <span className="text-right font-semibold text-bb-text">{accountName || "Selected account"}</span>
+            </div>
           </div>
 
           <div className="mt-3 rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
-            Bank-level encryption • Read-only access • No password stored
+            Bank-level encryption - Read-only access - No password stored
           </div>
 
           <div className="mt-3 text-xs text-bb-text">
-            We access:
+            Before continuing:
             <ul className="list-disc ml-5 mt-1 text-bb-text-muted">
-              <li>Account name, type, and last 4 digits</li>
-              <li>Transaction history (dates, amounts, merchant names)</li>
-              <li>Current account balance</li>
+              <li>This will connect a bank feed for this account.</li>
+              <li>This does not delete existing entries.</li>
+              <li>This may import bank transactions after connection.</li>
             </ul>
           </div>
 
@@ -273,11 +291,11 @@ export function PlaidConnectButton(props: Props) {
             <input
               type="checkbox"
               className="h-4 w-4 mt-0.5 shrink-0"
-              checked={consented}
-              onChange={(e) => setConsented(e.target.checked)}
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
             />
             <span className="min-w-0 break-words">
-              I agree to share my financial data via Plaid as described above.
+              I understand this will open Plaid to connect a live bank feed for this account.
             </span>
           </label>
 
@@ -285,7 +303,7 @@ export function PlaidConnectButton(props: Props) {
             <button
               type="button"
               className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft"
-              onClick={() => setOpenConsent(false)}
+              onClick={() => setOpenConfirm(false)}
             >
               Cancel
             </button>
@@ -293,10 +311,10 @@ export function PlaidConnectButton(props: Props) {
             <button
               type="button"
               className="h-8 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50 inline-flex items-center gap-2"
-              disabled={!consented || busy || connecting}
+              disabled={!confirmed || busy || connecting}
               onClick={async () => {
-                setOpenConsent(false);
-                await openPlaid();
+                setOpenConfirm(false);
+                await launchPlaid();
               }}
             >
               {connecting ? (

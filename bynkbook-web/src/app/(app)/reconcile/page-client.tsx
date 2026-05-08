@@ -4697,41 +4697,13 @@ const displayBankActiveList = useMemo(() => {
 
               <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
                 {!plaid?.connected ? (
-                  <>
-                    <button
-                      type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-                      onClick={() => setOpenUpload(true)}
-                    >
-                      <Download className="h-3.5 w-3.5" /> Upload CSV
-                    </button>
-
-                    <PlaidConnectButton
-                      businessId={selectedBusinessId ?? ""}
-                      accountId={selectedAccountId ?? ""}
-                      effectiveStartDate="2025-11-01"
-                      disabledClassName={disabledBtn}
-                      buttonClassName="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-                      onConnected={async () => {
-                        if (!selectedBusinessId || !selectedAccountId) return;
-
-                        setSyncMsg(null);
-                        setPendingMsg(null);
-                        setPlaidLoading(true);
-                        try {
-                          const res = await plaidStatus(selectedBusinessId, selectedAccountId);
-                          setPlaid(res);
-
-                          await refreshTablesFully({
-                            preserveOnEmpty: true,
-                            skipLegacyMatches: true,
-                          });
-                        } finally {
-                          setPlaidLoading(false);
-                        }
-                      }}
-                    />
-                  </>
+                  <button
+                    type="button"
+                    className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                    onClick={() => setOpenUpload(true)}
+                  >
+                    <Download className="h-3.5 w-3.5" /> Upload CSV
+                  </button>
                 ) : (
                   <>
                     <button
@@ -4783,6 +4755,61 @@ const displayBankActiveList = useMemo(() => {
               </div>
             </div>
           </div>
+
+          {!plaid?.connected ? (
+            <div className="mx-3 mb-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-bb-text">Bank connection settings</div>
+                  <div className="mt-1 text-[11px] text-bb-text-muted">
+                    Connect a live bank feed via Plaid only for the selected business and account.
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                    <span className="text-bb-text-muted">
+                      Business: <span className="font-medium text-bb-text">{selectedBusinessName || "Select business"}</span>
+                    </span>
+                    <span className="text-bb-text-muted">
+                      Account: <span className="font-medium text-bb-text">{selectedAccountName || "Select account"}</span>
+                    </span>
+                  </div>
+                  {!selectedAccountId ? (
+                    <div className="mt-1 text-[11px] text-bb-status-warning-fg">
+                      Select an account before connecting a bank feed.
+                    </div>
+                  ) : null}
+                </div>
+
+                <PlaidConnectButton
+                  businessId={selectedBusinessId ?? ""}
+                  accountId={selectedAccountId ?? ""}
+                  businessName={selectedBusinessName}
+                  accountName={selectedAccountName}
+                  effectiveStartDate="2025-11-01"
+                  disabled={plaidSyncing || !selectedBusinessId || !selectedAccountId}
+                  disabledClassName={disabledBtn}
+                  buttonClassName="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                  onConnected={async () => {
+                    if (!selectedBusinessId || !selectedAccountId) return;
+
+                    setSyncMsg(null);
+                    setPendingMsg(null);
+                    setPlaidLoading(true);
+                    try {
+                      const res = await plaidStatus(selectedBusinessId, selectedAccountId);
+                      setPlaid(res);
+
+                      await refreshTablesFully({
+                        preserveOnEmpty: true,
+                        skipLegacyMatches: true,
+                      });
+                    } finally {
+                      setPlaidLoading(false);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div className="px-3 pb-2">
             <div className="flex items-center gap-2">
