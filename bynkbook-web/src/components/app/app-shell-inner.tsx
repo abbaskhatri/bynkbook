@@ -210,7 +210,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     setMobileNavOpen(true);
   }
 
-  const appDataEnabled = showChrome && authChecked && isAuthed;
+  const appDataEnabled = !isAuthRoute && authChecked && isAuthed;
   const businessesQ = useBusinesses({ enabled: appDataEnabled });
 
   // Stage 1: if signed in but has no businesses, force create-business (except when already there)
@@ -218,12 +218,13 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     if (!authChecked || !isAuthed) return;
     if (pathname.startsWith("/create-business")) return;
     if (businessesQ.isLoading) return;
+    if (businessesQ.error) return;
 
     const list = businessesQ.data ?? [];
     if (list.length === 0) {
       router.replace(`/create-business?next=${encodeURIComponent(currentUrl)}`);
     }
-  }, [authChecked, isAuthed, pathname, businessesQ.isLoading, businessesQ.data, router, currentUrl]);
+  }, [authChecked, isAuthed, pathname, businessesQ.isLoading, businessesQ.error, businessesQ.data, router, currentUrl]);
 
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
 
@@ -677,7 +678,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     }
 
     const list = businessesQ.data ?? [];
-    if (list.length === 0) {
+    if (!businessesQ.error && list.length === 0) {
       // Redirect effect will run; keep the protected shell/sidebar out of the
       // transition so no-workspace users get a clear setup state, not a blank app.
       return <NoWorkspaceRedirectScreen />;

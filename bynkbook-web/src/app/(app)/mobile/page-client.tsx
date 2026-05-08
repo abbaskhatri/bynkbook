@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -31,8 +30,14 @@ import {
 } from "@/lib/api/reports";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
-import { useAccounts } from "@/lib/queries/useAccounts";
-import { useBusinesses } from "@/lib/queries/useBusinesses";
+import {
+  hrefWithMobileContext,
+  useMobileWorkspaceContext,
+} from "@/lib/mobile/workspaceContext";
+import {
+  useMobileOpenIssues,
+  useMobileUncategorizedEntries,
+} from "@/lib/mobile/reviewQueues";
 import { useIdleReady } from "@/lib/useIdleReady";
 
 function todayYmd() {
@@ -66,59 +71,39 @@ function formatUsdFromCents(value: string | number | bigint | null | undefined) 
   return negative ? `(${core})` : core;
 }
 
-function hrefWith(params: {
-  path: string;
-  businessId?: string | null;
-  accountId?: string | null;
-  extra?: Record<string, string>;
-}) {
-  const q = new URLSearchParams();
-  if (params.businessId) q.set("businessId", params.businessId);
-  if (params.accountId) q.set("accountId", params.accountId);
-  for (const [key, value] of Object.entries(params.extra ?? {})) q.set(key, value);
-  const qs = q.toString();
-  return qs ? `${params.path}?${qs}` : params.path;
-}
-
 function formatEvent(raw: string) {
   const s = String(raw || "").replace(/_/g, " ").toLowerCase();
   return s.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function MobilePageClient() {
-  const sp = useSearchParams();
-  const businessesQ = useBusinesses();
-  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
-  const accountIdFromUrl = sp.get("accountId") ?? null;
-
-  const business = useMemo(() => {
-    const list = businessesQ.data ?? [];
-    if (bizIdFromUrl) return list.find((item) => item.id === bizIdFromUrl) ?? list[0] ?? null;
-    return list[0] ?? null;
-  }, [bizIdFromUrl, businessesQ.data]);
-
-  const businessId = business?.id ?? bizIdFromUrl ?? null;
-  const accountsQ = useAccounts(businessId);
-
-  const activeAccounts = useMemo(
-    () => (accountsQ.data ?? []).filter((account) => !account.archived_at),
-    [accountsQ.data]
-  );
-
-  const accountId = useMemo(() => {
-    if (accountIdFromUrl && accountIdFromUrl !== "all") return accountIdFromUrl;
-    return activeAccounts[0]?.id ?? null;
-  }, [accountIdFromUrl, activeAccounts]);
-
-  const account = useMemo(() => {
-    if (!accountId) return activeAccounts[0] ?? null;
-    return activeAccounts.find((item) => item.id === accountId) ?? activeAccounts[0] ?? null;
-  }, [accountId, activeAccounts]);
+  const {
+    businessesQ,
+    accountsQ,
+    activeAccounts,
+    business,
+    businessId,
+    account,
+    accountId,
+    contextError,
+    contextReady,
+    isLoading: contextLoading,
+  } = useMobileWorkspaceContext();
 
   const range = useMemo(() => ({ from: firstOfMonthYmd(), to: todayYmd() }), []);
-  const enabled = !!businessId;
-  const accountEnabled = !!businessId && !!accountId;
+  const enabled = !!businessId && !contextError;
+  const accountEnabled = contextReady;
   const secondaryReady = useIdleReady(enabled, 1200);
+  const uncategorizedQueue = useMobileUncategorizedEntries({
+    businessId,
+    accountId,
+    enabled: contextReady,
+  });
+  const issuesQueue = useMobileOpenIssues({
+    businessId,
+    accountId,
+    enabled: contextReady,
+  });
 
   const accountsSummaryQ = useQuery({
     queryKey: ["mobileHome", "accountsSummary", businessId, range.to],
@@ -189,8 +174,8 @@ export default function MobilePageClient() {
     return total.toString();
   }, [accountsSummaryQ.data]);
 
-  const uncategorizedCount = Number(attentionSummaryQ.data?.uncategorized_count ?? 0) || 0;
-  const openIssues = Number(attentionSummaryQ.data?.issue_count ?? 0) || 0;
+  const uncategorizedCount = uncategorizedQueue.rows.length;
+  const openIssues = issuesQueue.rows.length;
   const bankUnmatchedCount = Number(attentionSummaryQ.data?.bank_unmatched_count ?? 0) || 0;
   const apVendors = apSummaryQ.data?.vendors ?? [];
   const apOpenVendorCount = apVendors.filter((vendor) => {
@@ -211,20 +196,53 @@ export default function MobilePageClient() {
     return total.toString();
   }, [apVendors]);
 
-  const categoryHref = hrefWith({ path: "/mobile/uncategorized", businessId, accountId });
-  const issuesHref = hrefWith({ path: "/mobile/issues", businessId, accountId });
-  const reconcileHref = hrefWith({ path: "/reconcile", businessId, accountId });
-  const receiptHref = hrefWith({ path: "/mobile/receipt", businessId, accountId });
-  const invoiceHref = hrefWith({ path: "/mobile/invoice", businessId, accountId });
-  const vendorsHref = hrefWith({ path: "/mobile/vendors", businessId, accountId });
+  const categoryHref = hrefWithMobileContext({ path: "/mobile/uncategorized", businessId, accountId });
+  const issuesHref = hrefWithMobileContext({ path: "/mobile/issues", businessId, accountId });
+  const reconcileHref = hrefWithMobileContext({ path: "/reconcile", businessId, accountId });
+  const receiptHref = hrefWithMobileContext({ path: "/mobile/receipt", businessId, accountId });
+  const invoiceHref = hrefWithMobileContext({ path: "/mobile/invoice", businessId, accountId });
+  const vendorsHref = hrefWithMobileContext({ path: "/mobile/vendors", businessId, accountId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
 
   const bannerMessage =
     businessesQ.error || accountsQ.error
       ? "Mobile home could not load workspace context."
-      : accountsSummaryQ.error || pnlQ.error || attentionSummaryQ.error || apSummaryQ.error || activityQ.error
+      : accountsSummaryQ.error ||
+          pnlQ.error ||
+          attentionSummaryQ.error ||
+          uncategorizedQueue.query.error ||
+          issuesQueue.query.error ||
+          apSummaryQ.error ||
+          activityQ.error
         ? "Some mobile cards could not refresh. Existing desktop pages are unchanged."
         : null;
+
+  if (contextLoading) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-card p-4 shadow-sm">
+            <Skeleton className="h-5 w-40 rounded-md" />
+            <Skeleton className="mt-3 h-8 w-28 rounded-md" />
+            <Skeleton className="mt-3 h-7 w-full rounded-md" />
+          </section>
+          <Skeleton className="h-[88px] w-full rounded-md" />
+          <Skeleton className="h-[88px] w-full rounded-md" />
+        </div>
+      </MobileShell>
+    );
+  }
+
+  if (contextError) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <InlineBanner
+          title="Mobile context unavailable"
+          message={contextError instanceof Error ? contextError.message : "Could not resolve a mobile business and account."}
+        />
+      </MobileShell>
+    );
+  }
 
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
@@ -250,7 +268,7 @@ export default function MobilePageClient() {
               </div>
             </div>
             <Link
-              href={hrefWith({ path: "/dashboard", businessId })}
+              href={hrefWithMobileContext({ path: "/dashboard", businessId })}
               prefetch
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
@@ -271,7 +289,7 @@ export default function MobilePageClient() {
             title="Category Review"
             description="Review uncategorized entries for the selected account."
             href={categoryHref}
-            metric={attentionSummaryQ.isLoading ? "..." : String(uncategorizedCount)}
+            metric={uncategorizedQueue.query.isLoading ? "..." : String(uncategorizedCount)}
             icon={<Tags className="h-5 w-5" />}
             tone={uncategorizedCount > 0 ? "warning" : "neutral"}
             disabled={!accountId}
@@ -280,7 +298,7 @@ export default function MobilePageClient() {
             title="Issues"
             description="Open duplicate and stale check review for this account."
             href={issuesHref}
-            metric={attentionSummaryQ.isLoading ? "..." : String(openIssues)}
+            metric={issuesQueue.query.isLoading ? "..." : String(openIssues)}
             icon={<AlertTriangle className="h-5 w-5" />}
             tone={openIssues > 0 ? "danger" : "neutral"}
             disabled={!accountId}

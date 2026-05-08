@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, Landmark, Lightbulb, Tags } from "lucide-react";
@@ -10,22 +9,11 @@ import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listCategories } from "@/lib/api/categories";
-import type { Entry } from "@/lib/api/entries";
-import { useAccounts } from "@/lib/queries/useAccounts";
-import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { useEntries } from "@/lib/queries/useEntries";
-
-function hrefWith(params: {
-  path: string;
-  businessId?: string | null;
-  accountId?: string | null;
-}) {
-  const q = new URLSearchParams();
-  if (params.businessId) q.set("businessId", params.businessId);
-  if (params.accountId) q.set("accountId", params.accountId);
-  const qs = q.toString();
-  return qs ? `${params.path}?${qs}` : params.path;
-}
+import {
+  hrefWithMobileContext,
+  useMobileWorkspaceContext,
+} from "@/lib/mobile/workspaceContext";
+import { useMobileUncategorizedEntries } from "@/lib/mobile/reviewQueues";
 
 function formatUsdFromCents(value: string | number | bigint | null | undefined) {
   let cents: bigint;
@@ -60,60 +48,29 @@ function sourceLabel(raw: string | null | undefined) {
   return raw ? typeLabel(raw) : null;
 }
 
-function isReviewableEntry(entry: Entry) {
-  const t = String(entry.type ?? "").toUpperCase();
-  const payee = String(entry.payee ?? "").trim().toLowerCase();
-  return (
-    !entry.deleted_at &&
-    !entry.category_id &&
-    t !== "TRANSFER" &&
-    t !== "ADJUSTMENT" &&
-    t !== "OPENING" &&
-    !payee.startsWith("opening balance")
-  );
-}
-
 export default function MobileUncategorizedPageClient() {
-  const sp = useSearchParams();
-  const businessesQ = useBusinesses();
-  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
-  const accountIdFromUrl = sp.get("accountId") ?? null;
-
-  const business = useMemo(() => {
-    const list = businessesQ.data ?? [];
-    if (bizIdFromUrl) return list.find((item) => item.id === bizIdFromUrl) ?? list[0] ?? null;
-    return list[0] ?? null;
-  }, [bizIdFromUrl, businessesQ.data]);
-
-  const businessId = business?.id ?? bizIdFromUrl ?? null;
-  const accountsQ = useAccounts(businessId);
-
-  const activeAccounts = useMemo(
-    () => (accountsQ.data ?? []).filter((account) => !account.archived_at),
-    [accountsQ.data]
-  );
-
-  const accountId = useMemo(() => {
-    if (accountIdFromUrl && accountIdFromUrl !== "all") return accountIdFromUrl;
-    return activeAccounts[0]?.id ?? null;
-  }, [accountIdFromUrl, activeAccounts]);
-
-  const account = useMemo(() => {
-    if (!accountId) return activeAccounts[0] ?? null;
-    return activeAccounts.find((item) => item.id === accountId) ?? activeAccounts[0] ?? null;
-  }, [accountId, activeAccounts]);
-
-  const entriesQ = useEntries({
+  const {
+    businessesQ,
+    accountsQ,
+    business,
+    businessId,
+    account,
+    accountId,
+    contextError,
+    contextReady,
+    isLoading: contextLoading,
+  } = useMobileWorkspaceContext();
+  const uncategorizedQueue = useMobileUncategorizedEntries({
     businessId,
     accountId,
-    limit: 150,
-    includeDeleted: false,
+    enabled: contextReady,
   });
+  const entriesQ = uncategorizedQueue.query;
 
   const categoriesQ = useQuery({
     queryKey: ["mobileUncategorized", "categories", businessId],
     queryFn: () => listCategories(businessId as string, { includeArchived: false }),
-    enabled: !!businessId,
+    enabled: contextReady,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
@@ -124,17 +81,11 @@ export default function MobileUncategorizedPageClient() {
     return map;
   }, [categoriesQ.data]);
 
-  const uncategorizedRows = useMemo(
-    () =>
-      (entriesQ.data ?? [])
-        .filter(isReviewableEntry)
-        .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? ""))),
-    [entriesQ.data]
-  );
+  const uncategorizedRows = uncategorizedQueue.rows;
 
   const visibleRows = uncategorizedRows.slice(0, 40);
-  const reviewHref = hrefWith({ path: "/mobile/review", businessId, accountId });
-  const desktopHref = hrefWith({ path: "/category-review", businessId, accountId });
+  const reviewHref = hrefWithMobileContext({ path: "/mobile/review", businessId, accountId });
+  const desktopHref = hrefWithMobileContext({ path: "/category-review", businessId, accountId });
 
   const bannerMessage =
     businessesQ.error || accountsQ.error
@@ -142,6 +93,33 @@ export default function MobileUncategorizedPageClient() {
       : entriesQ.error || categoriesQ.error
         ? "Uncategorized cards could not refresh. Existing desktop pages are unchanged."
         : null;
+
+  if (contextLoading) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-card p-4 shadow-sm">
+            <Skeleton className="h-5 w-40 rounded-md" />
+            <Skeleton className="mt-3 h-8 w-40 rounded-md" />
+            <Skeleton className="mt-3 h-7 w-full rounded-md" />
+          </section>
+          <Skeleton className="h-[168px] w-full rounded-md" />
+          <Skeleton className="h-[168px] w-full rounded-md" />
+        </div>
+      </MobileShell>
+    );
+  }
+
+  if (contextError) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <InlineBanner
+          title="Mobile context unavailable"
+          message={contextError instanceof Error ? contextError.message : "Could not resolve a mobile business and account."}
+        />
+      </MobileShell>
+    );
+  }
 
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
@@ -185,7 +163,9 @@ export default function MobileUncategorizedPageClient() {
             <div>
               <div className="text-sm font-semibold text-foreground">Read-only queue</div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Showing up to {visibleRows.length} of {uncategorizedRows.length} loaded uncategorized entries.
+                {uncategorizedRows.length > 0
+                  ? `Showing ${visibleRows.length} of ${uncategorizedRows.length} uncategorized entries for this account.`
+                  : "Loaded the same account-scoped uncategorized filter used by Review."}
               </div>
             </div>
             <Link
