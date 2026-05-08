@@ -2226,6 +2226,15 @@ export default function LedgerPageClient() {
   const pageLabel = hasMoreOnServer
     ? `Page ${page} · ${loadedCountLabel}`
     : `Page ${page} of ${totalPages} · ${loadedCountLabel}`;
+  const olderLoadedPageTarget = Math.min(totalPages, page + 1);
+  const olderLoadedPageRange =
+    olderLoadedPageTarget === totalPages
+      ? `page ${totalPages}`
+      : `pages ${olderLoadedPageTarget}-${totalPages}`;
+  const loadMoreNavigationNote =
+    !isNeedsReconcileView && loadedPageCount > 1 && totalPages > page
+      ? `Older rows loaded. Use page navigation to view ${olderLoadedPageRange}.`
+      : null;
   const loadedScopeNotice = (() => {
     if (isNeedsReconcileView) {
       if (hasMoreOnServer) {
@@ -5798,6 +5807,16 @@ export default function LedgerPageClient() {
         {loadedScopeNotice ? (
           <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
             <span>{loadedScopeNotice}</span>
+            {loadMoreNavigationNote ? <span className="font-medium">{loadMoreNavigationNote}</span> : null}
+            {loadMoreNavigationNote ? (
+              <button
+                type="button"
+                className="h-6 rounded-md border border-amber-300 bg-white px-2 text-xs font-medium text-amber-900 hover:bg-amber-100"
+                onClick={() => setPage(olderLoadedPageTarget)}
+              >
+                Go to older rows
+              </button>
+            ) : null}
             {hasMoreOnServer ? (
               <button
                 type="button"
@@ -5850,7 +5869,10 @@ export default function LedgerPageClient() {
                   setPage={setPage}
                   totalPages={totalPages}
                   pageLabel={pageLabel}
-                  paginationNote={undefined}
+                  paginationNote={loadMoreNavigationNote}
+                  paginationActionLabel={loadMoreNavigationNote ? "Go to older rows" : undefined}
+                  onPaginationAction={loadMoreNavigationNote ? () => setPage(olderLoadedPageTarget) : undefined}
+                  emphasizeNext={!!loadMoreNavigationNote}
                   loadMoreText={hasMoreOnServer ? "Load more entries" : undefined}
                   canLoadMore={canLoadMoreEntries}
                   isLoadingMore={entriesQ.isFetching}
