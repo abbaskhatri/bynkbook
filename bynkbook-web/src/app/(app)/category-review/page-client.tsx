@@ -111,6 +111,30 @@ function categorySuggestionReason(suggestion: any) {
   return String(suggestion?.reason ?? "").trim();
 }
 
+function categorySuggestionInlineReason(reason: string, categoryName: string, confidence: number) {
+  let text = String(reason ?? "").trim();
+  if (!text) return "";
+
+  const escapedCategoryName = categoryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let previous = "";
+
+  while (text && text !== previous) {
+    previous = text;
+    if (escapedCategoryName) {
+      text = text.replace(new RegExp(`^Suggested:\\s*${escapedCategoryName}\\b`, "i"), "");
+      text = text.replace(new RegExp(`^Suggested category:\\s*${escapedCategoryName}\\b`, "i"), "");
+    }
+
+    text = text
+      .replace(new RegExp(`^${confidence}%(?=\\s|$|[·•|-])`, "i"), "")
+      .replace(/^Review\b/i, "")
+      .replace(/^[\s:·•|-]+/, "")
+      .trim();
+  }
+
+  return text;
+}
+
 function hasSuggestionEntry(map: Record<string, any[]>, entryId: string) {
   return Object.prototype.hasOwnProperty.call(map, entryId);
 }
@@ -1861,11 +1885,11 @@ export default function CategoryReviewPageClient() {
                                             const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
                                             const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                             const reasonText = categorySuggestionReason(s);
-                                            const shortReason = reasonText || sourceLabel;
+                                            const inlineReason = categorySuggestionInlineReason(reasonText, name, conf);
                                             const isPrimaryReviewOnly = !topSuggestionIsBulkSafe;
                                             const metaText = [
                                               `${conf}%`,
-                                              shortReason,
+                                              sourceLabel,
                                               isPrimaryReviewOnly ? "Review" : "",
                                             ].filter(Boolean).join(" · ");
                                             const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, true);
@@ -1873,48 +1897,56 @@ export default function CategoryReviewPageClient() {
                                               isSelected && String(manualCategoryByEntryId[id] ?? "") === catId;
 
                                             return (
-                                              <div
-                                                key={`${id}:${catId || name}:top`}
-                                                className={`flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 ${
-                                                  isPrimaryReviewOnly
-                                                    ? "border-bb-status-warning-border bg-bb-status-warning-bg"
-                                                    : "border-primary/20 bg-primary/5"
-                                                }`}
-                                                title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
-                                              >
-                                                <span className="min-w-0 max-w-[150px] truncate text-[10px] font-semibold text-foreground">
-                                                  Suggested: {name}
-                                                </span>
+                                              <div className="min-w-0">
+                                                <div
+                                                  key={`${id}:${catId || name}:top`}
+                                                  className={`flex min-w-0 items-start gap-2 rounded-md border px-1.5 py-0.5 ${
+                                                    isPrimaryReviewOnly
+                                                      ? "border-bb-status-warning-border bg-bb-status-warning-bg"
+                                                      : "border-primary/20 bg-primary/5"
+                                                  }`}
+                                                  title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
+                                                >
+                                                  <div className="min-w-0">
+                                                    <div className="truncate text-[10px] font-semibold text-foreground">
+                                                      Suggested: {name}
+                                                    </div>
+                                                    <div className="truncate text-[10px] text-muted-foreground">
+                                                      {metaText}
+                                                    </div>
+                                                  </div>
 
-                                                <span className="hidden min-w-0 max-w-[190px] truncate text-[10px] text-muted-foreground sm:inline">
-                                                  {metaText}
-                                                </span>
+                                                  <div className="ml-auto flex shrink-0 items-center gap-1 pt-0.5">
+                                                    <button
+                                                      type="button"
+                                                      className={`h-5 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
+                                                      disabled={!!pendingIds[id] || isSuggestionSelected}
+                                                      title="Select for Apply selected categories"
+                                                      onClick={() => {
+                                                        if (!catId) return;
+                                                        if (pendingIds[id]) return;
 
-                                                <div className="ml-auto flex shrink-0 items-center gap-1">
-                                                  <button
-                                                    type="button"
-                                                    className={`h-5 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
-                                                    disabled={!!pendingIds[id] || isSuggestionSelected}
-                                                    title="Select for Apply selected categories"
-                                                    onClick={() => {
-                                                      if (!catId) return;
-                                                      if (pendingIds[id]) return;
+                                                        selectSuggestedCategoryForReview(id, catId, name);
+                                                      }}
+                                                    >
+                                                      {isSuggestionSelected ? "Selected" : "Select"}
+                                                    </button>
 
-                                                      selectSuggestedCategoryForReview(id, catId, name);
-                                                    }}
-                                                  >
-                                                    {isSuggestionSelected ? "Selected" : "Select"}
-                                                  </button>
-
-                                                  <button
-                                                    type="button"
-                                                    className="h-5 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
-                                                    disabled={!!pendingIds[id]}
-                                                    onClick={() => runWhy(id, s)}
-                                                  >
-                                                    Why?
-                                                  </button>
+                                                    <button
+                                                      type="button"
+                                                      className="h-5 px-1.5 rounded-md border border-border bg-card text-muted-foreground text-[10px] inline-flex items-center hover:bg-muted/50 disabled:opacity-60"
+                                                      disabled={!!pendingIds[id]}
+                                                      onClick={() => runWhy(id, s)}
+                                                    >
+                                                      Why?
+                                                    </button>
+                                                  </div>
                                                 </div>
+                                                {inlineReason ? (
+                                                  <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={reasonText}>
+                                                    {inlineReason}
+                                                  </div>
+                                                ) : null}
                                               </div>
                                             );
                                           })() : null}
