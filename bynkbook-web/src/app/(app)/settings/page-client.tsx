@@ -45,7 +45,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, Monitor, Moon, Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off, Sun } from "lucide-react";
+import { AlertTriangle, Check, Monitor, Moon, Settings, Pencil, Archive, Trash2, UploadCloud, Link2Off, Sun } from "lucide-react";
 import { inputH7, ringFocus, selectTriggerClass, tabButtonClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
 import { useThemePreference, type ThemePreference } from "@/lib/theme";
@@ -217,6 +217,10 @@ function monthBounds(month: string) {
 
 function uiErrorMessage(error: any, fallback = "Something went wrong. Try again.") {
   return userFacingErrorMessage(error, fallback);
+}
+
+function isOwner(role?: string | null) {
+  return String(role ?? "").toUpperCase() === "OWNER";
 }
 
 type PlaidCellState = {
@@ -660,6 +664,11 @@ export default function SettingsPageClient() {
   const canManageMemberRolesAllowlist = useMemo(
     () => ["OWNER", "ADMIN"].includes(selectedBusinessRole),
     [selectedBusinessRole]
+  );
+
+  const teamOwnerCount = useMemo(
+    () => (teamMembers ?? []).filter((m) => isOwner(m.role)).length,
+    [teamMembers]
   );
 
   // Create account form
@@ -1451,6 +1460,9 @@ export default function SettingsPageClient() {
                           <SelectItem value="OWNER" disabled={!isOwnerRole}>Owner</SelectItem>
                         </SelectContent>
                       </Select>
+                      {!isOwnerRole ? (
+                        <div className="mt-1 text-[11px] text-muted-foreground">Only owners can invite another owner.</div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -1573,8 +1585,22 @@ export default function SettingsPageClient() {
                       </THead>
                       <TableBody>
                         {teamMembers.map((m) => {
-                          const targetIsOwner = String(m.role).toUpperCase() === "OWNER";
-                          const disableOwnerActions = targetIsOwner && !isOwnerRole;
+                          const targetIsOwner = isOwner(m.role);
+                          const targetIsLastOwner = targetIsOwner && teamOwnerCount <= 1;
+                          const roleChangeRestriction = !canManageMemberRolesAllowlist
+                            ? "Only owners and admins can change member roles."
+                            : targetIsLastOwner
+                              ? "Last owner cannot be downgraded."
+                              : targetIsOwner && !isOwnerRole
+                                ? "Only owners can change another owner."
+                                : null;
+                          const removeRestriction = !canManageMemberRolesAllowlist
+                            ? "Only owners and admins can remove members."
+                            : targetIsLastOwner
+                              ? "Last owner cannot be removed."
+                              : targetIsOwner && !isOwnerRole
+                                ? "Only owners can remove another owner."
+                                : null;
 
                           const shownEmail = (() => {
                             const raw = String((m as any).email || "").trim();
@@ -1595,7 +1621,10 @@ export default function SettingsPageClient() {
                                   value={m.role}
                                   onValueChange={async (v) => {
                                     if (!selectedBusinessId) return;
-                                    if (!["OWNER", "ADMIN"].includes(selectedBusinessRole)) return;
+                                    if (roleChangeRestriction) {
+                                      setTeamError(roleChangeRestriction);
+                                      return;
+                                    }
                                     try {
                                       await updateMemberRole(selectedBusinessId, m.user_id, v);
                                       const res = await getTeam(selectedBusinessId);
@@ -1605,9 +1634,9 @@ export default function SettingsPageClient() {
                                       setTeamError(uiErrorMessage(e, "Failed to update member role."));
                                     }
                                   }}
-                                  disabled={!["OWNER", "ADMIN"].includes(selectedBusinessRole) || disableOwnerActions}
+                                  disabled={!!roleChangeRestriction}
                                 >
-                                  <SelectTrigger className={`${selectTriggerClass} w-40`}>
+                                  <SelectTrigger className={`${selectTriggerClass} w-40`} title={roleChangeRestriction ?? undefined}>
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -1618,24 +1647,42 @@ export default function SettingsPageClient() {
                                     <SelectItem value="OWNER" disabled={!isOwnerRole}>Owner</SelectItem>
                                   </SelectContent>
                                 </Select>
+                                {roleChangeRestriction ? (
+                                  <div className="mt-1 max-w-[180px] text-[11px] text-muted-foreground">
+                                    {roleChangeRestriction}
+                                  </div>
+                                ) : null}
                               </TableCell>
 
                               <TableCell className="py-2 text-foreground">{formatShortDate(m.created_at)}</TableCell>
 
                               <TableCell className="py-2 text-right">
-                                <Button
-                                  className="h-7 px-2 text-xs"
-                                  variant="outline"
-                                  onClick={() => {
-                                    const shownEmail = String((m as any).email || "").trim() || "Member";
-                                    setRemoveMemberTarget({ userId: m.user_id, email: shownEmail });
-                                    setRemoveMemberConfirm("");
-                                    setRemoveMemberOpen(true);
-                                  }}
-                                  disabled={!["OWNER", "ADMIN"].includes(selectedBusinessRole) || disableOwnerActions}
-                                >
-                                  Remove
-                                </Button>
+                                <div className="inline-flex flex-col items-end">
+                                  <HintWrap disabled={!!removeRestriction} reason={removeRestriction} className="inline-flex">
+                                    <Button
+                                      className="h-7 px-2 text-xs"
+                                      variant="outline"
+                                      onClick={() => {
+                                        if (removeRestriction) {
+                                          setTeamError(removeRestriction);
+                                          return;
+                                        }
+                                        const shownEmail = String((m as any).email || "").trim() || "Member";
+                                        setRemoveMemberTarget({ userId: m.user_id, email: shownEmail });
+                                        setRemoveMemberConfirm("");
+                                        setRemoveMemberOpen(true);
+                                      }}
+                                      disabled={!!removeRestriction}
+                                    >
+                                      Remove
+                                    </Button>
+                                  </HintWrap>
+                                  {removeRestriction ? (
+                                    <div className="mt-1 max-w-[180px] text-right text-[11px] text-muted-foreground">
+                                      {removeRestriction}
+                                    </div>
+                                  ) : null}
+                                </div>
                               </TableCell>
                             </TableRow>
                           );
@@ -3338,36 +3385,6 @@ export default function SettingsPageClient() {
                   >
                     Export closed period
                   </Button>
-
-                  {isOwnerRole ? (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-7 px-3 text-xs text-bb-status-warning-fg border-bb-status-warning-border hover:bg-bb-status-warning-bg"
-                        onClick={() => {
-                          setResetBusinessErr(null);
-                          setResetBusinessConfirm("");
-                          setResetBusinessOpen(true);
-                        }}
-                      >
-                        Reset business
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-7 px-3 text-xs text-bb-status-danger-fg border-bb-status-danger-border hover:bg-bb-status-danger-bg"
-                        onClick={() => {
-                          setDeleteBusinessErr(null);
-                          setDeleteBusinessConfirm("");
-                          setDeleteBusinessOpen(true);
-                        }}
-                      >
-                        Delete business
-                      </Button>
-                    </>
-                  ) : null}
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
@@ -3400,6 +3417,64 @@ export default function SettingsPageClient() {
                   </Button>
                 </div>
               </div>
+
+              {isOwnerRole ? (
+                <div className="mt-5 border-t border-bb-status-danger-border pt-4">
+                  <div className="rounded-lg border border-bb-status-danger-border bg-bb-status-danger-bg/40 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-bb-status-danger-fg">
+                          <AlertTriangle className="h-4 w-4 shrink-0" />
+                          <span>Danger Zone</span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          These actions affect business data and still require typed confirmation before anything runs.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      <div className="rounded-md border border-bb-status-warning-border bg-card p-3">
+                        <div className="text-xs font-semibold text-foreground">Reset business</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Clears operational data for this business and leaves the workspace, members, accounts, categories, preferences, invites, and role policies in place.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-3 h-7 px-3 text-xs text-bb-status-warning-fg border-bb-status-warning-border hover:bg-bb-status-warning-bg"
+                          onClick={() => {
+                            setResetBusinessErr(null);
+                            setResetBusinessConfirm("");
+                            setResetBusinessOpen(true);
+                          }}
+                        >
+                          Reset business
+                        </Button>
+                      </div>
+
+                      <div className="rounded-md border border-bb-status-danger-border bg-card p-3">
+                        <div className="text-xs font-semibold text-foreground">Delete business</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Permanently deletes this business and all related data. This cannot be undone.
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-3 h-7 px-3 text-xs text-bb-status-danger-fg border-bb-status-danger-border hover:bg-bb-status-danger-bg"
+                          onClick={() => {
+                            setDeleteBusinessErr(null);
+                            setDeleteBusinessConfirm("");
+                            setDeleteBusinessOpen(true);
+                          }}
+                        >
+                          Delete business
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
