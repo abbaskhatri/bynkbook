@@ -131,13 +131,7 @@ export default function MobileIssuesPageClient() {
 
   const issues = useMemo(
     () =>
-      loadedIssueRows
-        .filter((issue) => isIssuesPageIssueType(issue.issue_type))
-        .sort((a, b) => {
-          const aDate = String(a.entry_date ?? a.detected_at ?? "");
-          const bDate = String(b.entry_date ?? b.detected_at ?? "");
-          return bDate.localeCompare(aDate);
-        }),
+      loadedIssueRows.filter((issue) => isIssuesPageIssueType(issue.issue_type)),
     [loadedIssueRows]
   );
 

@@ -244,6 +244,118 @@ describe("issues list", () => {
     expect(typeof body.nextCursor).toBe("string");
   });
 
+  test("duplicate issues sort before newer stale issues", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({
+          id: "issue-stale-newest",
+          entry_id: "entry-3",
+          issue_type: "STALE_CHECK",
+          group_key: null,
+          detected_at: new Date("2026-04-25T05:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-dup-2",
+          entry_id: "entry-2",
+          issue_type: "DUPLICATE",
+          group_key: "dup-priority",
+          detected_at: new Date("2026-04-25T02:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-dup-1",
+          entry_id: "entry-1",
+          issue_type: "DUPLICATE",
+          group_key: "dup-priority",
+          detected_at: new Date("2026-04-25T01:00:00.000Z"),
+        }),
+      ],
+    });
+
+    const res = await handler(event("OPEN", { limit: "10" }));
+    expect(res.statusCode).toBe(200);
+
+    const body = JSON.parse(res.body);
+    expect(body.issues.map((row: any) => row.id)).toEqual([
+      "issue-dup-2",
+      "issue-dup-1",
+      "issue-stale-newest",
+    ]);
+    expect(body.hasMore).toBe(false);
+  });
+
+  test("cursor pagination remains stable under priority ordering", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        issue({
+          id: "issue-stale-newer",
+          entry_id: "entry-3",
+          issue_type: "STALE_CHECK",
+          group_key: null,
+          detected_at: new Date("2026-04-25T06:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-dup-newer",
+          entry_id: "entry-1",
+          issue_type: "DUPLICATE",
+          group_key: "dup-cursor",
+          detected_at: new Date("2026-04-25T05:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-dup-older",
+          entry_id: "entry-2",
+          issue_type: "DUPLICATE",
+          group_key: "dup-cursor",
+          detected_at: new Date("2026-04-25T04:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-missing",
+          entry_id: "entry-4",
+          issue_type: "MISSING_CATEGORY",
+          group_key: null,
+          detected_at: new Date("2026-04-25T03:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-stale-older",
+          entry_id: "entry-5",
+          issue_type: "STALE_CHECK",
+          group_key: null,
+          detected_at: new Date("2026-04-25T02:00:00.000Z"),
+        }),
+        issue({
+          id: "issue-other",
+          entry_id: "entry-6",
+          issue_type: "REVIEW_REQUIRED",
+          group_key: null,
+          detected_at: new Date("2026-04-25T01:00:00.000Z"),
+        }),
+      ],
+      entries: [
+        entry({ id: "entry-1" }),
+        entry({ id: "entry-2" }),
+        entry({ id: "entry-3" }),
+        entry({ id: "entry-4", category_id: null, category: null }),
+        entry({ id: "entry-5" }),
+        entry({ id: "entry-6" }),
+      ],
+    });
+
+    const first = await handler(event("OPEN", { limit: "2" }));
+    const firstBody = JSON.parse(first.body);
+    expect(firstBody.issues.map((row: any) => row.id)).toEqual(["issue-dup-newer", "issue-dup-older"]);
+    expect(firstBody.hasMore).toBe(true);
+
+    const second = await handler(event("OPEN", { limit: "2", cursor: firstBody.nextCursor }));
+    const secondBody = JSON.parse(second.body);
+    expect(secondBody.issues.map((row: any) => row.id)).toEqual(["issue-missing", "issue-stale-newer"]);
+    expect(secondBody.hasMore).toBe(true);
+
+    const third = await handler(event("OPEN", { limit: "2", cursor: secondBody.nextCursor }));
+    const thirdBody = JSON.parse(third.body);
+    expect(thirdBody.issues.map((row: any) => row.id)).toEqual(["issue-stale-older", "issue-other"]);
+    expect(thirdBody.hasMore).toBe(false);
+    expect(thirdBody.nextCursor).toBeNull();
+  });
+
   test("next page returns older rows from the cursor", async () => {
     const { handler } = await loadHandler({
       issues: [
