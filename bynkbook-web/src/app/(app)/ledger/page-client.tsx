@@ -45,7 +45,7 @@ import { getCategorySuggestions } from "@/lib/api/ai";
 import { aiSuggestCategory } from "@/lib/api/ai";
 import { listClosedPeriods } from "@/lib/api/closedPeriods";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
-import { listAccountIssues, type EntryIssueRow } from "@/lib/api/issues";
+import { listAccountIssues, listAccountIssuesForEntryIds, type EntryIssueRow } from "@/lib/api/issues";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
@@ -1498,7 +1498,7 @@ export default function LedgerPageClient() {
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId) return { ok: true as const, issues: [] as EntryIssueRow[] };
       if (issueEntryIds.length === 0) return { ok: true as const, issues: [] as EntryIssueRow[] };
-      return listAccountIssues({
+      return listAccountIssuesForEntryIds({
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
         status: "OPEN",
@@ -1509,6 +1509,9 @@ export default function LedgerPageClient() {
   });
 
   const openIssues = issuesListQ.data?.issues ?? [];
+  const issueLookupWarning = issuesListQ.isError
+    ? "Some issue markers couldn’t load. Ledger rows are still available."
+    : null;
 
   const openIssueCountForAccount = useMemo(() => {
     return Number(issuesCountQ.data?.issue_count ?? 0) || 0;
@@ -5769,6 +5772,21 @@ export default function LedgerPageClient() {
               : null
           }
         />
+
+        {issueLookupWarning ? (
+          <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-bb-status-warning-fg">Can’t load issue markers</div>
+                <div className="text-sm text-bb-status-warning-fg">{issueLookupWarning}</div>
+              </div>
+
+              <Button variant="outline" className="h-7" onClick={() => void issuesListQ.refetch()}>
+                Retry
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {isNeedsReconcileView ? (
           <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-bb-border bg-bb-surface-card px-3 py-1.5 text-xs text-bb-text-muted">

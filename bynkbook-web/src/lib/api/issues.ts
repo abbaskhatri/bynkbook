@@ -103,6 +103,45 @@ export type ListAccountIssuesResponse = {
   nextCursor?: string | null;
 };
 
+const DEFAULT_ENTRY_ID_CHUNK_SIZE = 50;
+const DEFAULT_ENTRY_ID_CONCURRENCY = 3;
+
+function uniqueEntryIds(entryIds: string[]) {
+  return Array.from(new Set(entryIds.map((id) => String(id).trim()).filter(Boolean)));
+}
+
+function chunkEntryIds(entryIds: string[], chunkSize: number) {
+  const size = Math.max(1, Math.floor(chunkSize));
+  const chunks: string[][] = [];
+  for (let i = 0; i < entryIds.length; i += size) {
+    chunks.push(entryIds.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, Math.floor(concurrency)), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) break;
+        results[index] = await mapper(items[index], index);
+      }
+    })
+  );
+
+  return results;
+}
+
 export function buildAccountIssuesQuery(params: {
   status?: "OPEN" | "RESOLVED" | "ALL";
   limit?: number;
@@ -115,7 +154,7 @@ export function buildAccountIssuesQuery(params: {
   if (limit !== undefined) qs.set("limit", String(limit));
   if (cursor) qs.set("cursor", cursor);
   if (entryIds) {
-    const ids = Array.from(new Set(entryIds.map((id) => String(id).trim()).filter(Boolean)));
+    const ids = uniqueEntryIds(entryIds);
     qs.set("entryIds", ids.join(","));
   }
   return qs;
@@ -136,6 +175,63 @@ export async function listAccountIssues(params: {
     `/v1/businesses/${businessId}/accounts/${accountId}/issues?${qs.toString()}`,
     { method: "GET" }
   );
+}
+
+export async function listAccountIssuesForEntryIds(params: {
+  businessId: string;
+  accountId: string;
+  status?: "OPEN" | "RESOLVED" | "ALL";
+  limit?: number;
+  entryIds: string[];
+  chunkSize?: number;
+  concurrency?: number;
+}): Promise<ListAccountIssuesResponse> {
+  const {
+    businessId,
+    accountId,
+    status = "OPEN",
+    limit,
+    entryIds,
+    chunkSize = DEFAULT_ENTRY_ID_CHUNK_SIZE,
+    concurrency = DEFAULT_ENTRY_ID_CONCURRENCY,
+  } = params;
+  const ids = uniqueEntryIds(entryIds);
+  if (ids.length === 0) {
+    return { ok: true, issues: [], hasMore: false, nextCursor: null };
+  }
+
+  const chunks = chunkEntryIds(ids, chunkSize);
+  const responses = await mapWithConcurrency(chunks, concurrency, (chunk) =>
+    listAccountIssues({
+      businessId,
+      accountId,
+      status,
+      limit,
+      entryIds: chunk,
+    })
+  );
+
+  const issuesById = new Map<string, EntryIssueRow>();
+  let hasMore = false;
+  let nextCursor: string | null = null;
+
+  for (const response of responses) {
+    hasMore = hasMore || Boolean(response.hasMore);
+    nextCursor = nextCursor ?? response.nextCursor ?? null;
+
+    for (const issue of response.issues ?? []) {
+      const issueId = String(issue.id ?? "").trim();
+      if (!issueId || issuesById.has(issueId)) continue;
+      issuesById.set(issueId, issue);
+    }
+  }
+
+  return {
+    ok: true,
+    issues: Array.from(issuesById.values()),
+    hasMore,
+    nextCursor,
+  };
 }
 
 export async function resolveIssue(params: {
