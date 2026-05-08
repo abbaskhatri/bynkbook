@@ -110,15 +110,26 @@ function parseLimit(qs: any): number {
 }
 
 type IssueCursor = {
+  priority: number;
   detectedAt: string;
   id: string;
 };
+
+const ISSUE_PRIORITY_TYPES = ["DUPLICATE", "MISSING_CATEGORY", "STALE_CHECK"] as const;
+
+function issuePriority(issueType: any): number {
+  const t = String(issueType ?? "").toUpperCase();
+  if (t === "DUPLICATE") return 0;
+  if (t === "MISSING_CATEGORY") return 1;
+  if (t === "STALE_CHECK") return 2;
+  return 3;
+}
 
 function encodeCursor(row: any): string | null {
   const detectedAt = row?.detected_at ? new Date(row.detected_at).toISOString() : null;
   const id = String(row?.id ?? "").trim();
   if (!detectedAt || !id) return null;
-  return Buffer.from(JSON.stringify({ detectedAt, id })).toString("base64url");
+  return Buffer.from(JSON.stringify({ priority: issuePriority(row?.issue_type), detectedAt, id })).toString("base64url");
 }
 
 function parseCursor(qs: any): IssueCursor | null {
@@ -127,11 +138,14 @@ function parseCursor(qs: any): IssueCursor | null {
 
   try {
     const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    const priority = Number(parsed?.priority);
     const detectedAt = String(parsed?.detectedAt ?? "").trim();
     const id = String(parsed?.id ?? "").trim();
     const t = Date.parse(detectedAt);
-    if (!detectedAt || !id || !Number.isFinite(t)) return null;
-    return { detectedAt: new Date(t).toISOString(), id };
+    if (!Number.isInteger(priority) || priority < 0 || priority > 3 || !detectedAt || !id || !Number.isFinite(t)) {
+      return null;
+    }
+    return { priority, detectedAt: new Date(t).toISOString(), id };
   } catch {
     return null;
   }
@@ -150,11 +164,47 @@ function cursorWhere(cursor: IssueCursor | null) {
 
 function sortIssues(rows: any[]) {
   return rows.sort((a, b) => {
+    const ap = issuePriority(a?.issue_type);
+    const bp = issuePriority(b?.issue_type);
+    if (ap !== bp) return ap - bp;
     const at = a?.detected_at ? new Date(a.detected_at).getTime() : 0;
     const bt = b?.detected_at ? new Date(b.detected_at).getTime() : 0;
     if (at !== bt) return bt - at;
     return String(b?.id ?? "").localeCompare(String(a?.id ?? ""));
   });
+}
+
+function issueTypeWhereForPriority(priority: number) {
+  if (priority === 0) return { issue_type: "DUPLICATE" };
+  if (priority === 1) return { issue_type: "MISSING_CATEGORY" };
+  if (priority === 2) return { issue_type: "STALE_CHECK" };
+  return { issue_type: { notIn: [...ISSUE_PRIORITY_TYPES] } };
+}
+
+async function findPriorityPageRows(prisma: any, where: any, limit: number, cursor: IssueCursor | null) {
+  const collected: any[] = [];
+
+  for (let priority = 0; priority <= 3 && collected.length <= limit; priority += 1) {
+    if (cursor && priority < cursor.priority) continue;
+
+    const take = limit + 1 - collected.length;
+    if (take <= 0) break;
+
+    const rows = await prisma.entryIssue.findMany({
+      where: {
+        ...where,
+        ...issueTypeWhereForPriority(priority),
+        ...(cursor && priority === cursor.priority ? cursorWhere(cursor) : {}),
+      },
+      orderBy: [{ detected_at: "desc" }, { id: "desc" }],
+      take,
+      select: issueSelect,
+    });
+
+    collected.push(...rows);
+  }
+
+  return collected;
 }
 
 export async function handler(event: any) {
@@ -267,12 +317,7 @@ export async function handler(event: any) {
     const deletedIds = deleted.map((d: any) => d.id);
     if (deletedIds.length) where.entry_id = { notIn: deletedIds };
 
-    const seedRows = await prisma.entryIssue.findMany({
-      where: { ...where, ...cursorWhere(cursor) },
-      orderBy: [{ detected_at: "desc" }, { id: "desc" }],
-      take: limit + 1,
-      select: issueSelect,
-    });
+    const seedRows = await findPriorityPageRows(prisma, where, limit, cursor);
 
     const pageSeedRows = seedRows.slice(0, limit);
     const rowsById = new Map<string, any>();

@@ -422,12 +422,6 @@ export default function IssuesPageClient() {
       });
     }
 
-    // stable sort by date desc
-    out.sort((a, b) => {
-      if (a.date === b.date) return a.kind.localeCompare(b.kind);
-      return a.date < b.date ? 1 : -1;
-    });
-
     return out;
   }, [loadedApiIssues]);
 
@@ -519,11 +513,10 @@ export default function IssuesPageClient() {
 
     // stale not duplicated: show separately
     const staleFiltered = staleRows.filter((s) => !dupEntryIds.has(s.id));
-    staleFiltered.sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1));
 
     const groupsSorted: GroupRow[] = Array.from(dupGroups.entries())
       .map(([groupKey, members]) => {
-        const sorted = [...members].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1));
+        const sorted = [...members];
         const hasStaleInGroup = filteredIssues.some(
           (x) => x.kind === "STALE_CHECK" && members.some((m) => m.id === x.id)
         );
@@ -535,8 +528,7 @@ export default function IssuesPageClient() {
           members: sorted,
           hasStale: hasStaleInGroup,
         };
-      })
-      .sort((a, b) => (a.head.date === b.head.date ? 0 : a.head.date < b.head.date ? 1 : -1));
+      });
 
     for (const g of groupsSorted) {
       out.push(g);
