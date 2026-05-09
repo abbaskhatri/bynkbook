@@ -1505,7 +1505,7 @@ export default function CategoryReviewPageClient() {
       : `${autoFixButtonReadyCount} safe Auto Fix suggestion${autoFixButtonReadyCount === 1 ? "" : "s"} ready on loaded rows.`;
 
   return (
-    <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-4 max-w-6xl overflow-hidden">
+    <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-2 max-w-6xl overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
@@ -1801,13 +1801,13 @@ export default function CategoryReviewPageClient() {
                   <table className="w-full min-w-[780px] table-fixed border-separate border-spacing-0">
                     <colgroup>
                       <col style={{ width: 36 }} />
-                      <col style={{ width: 220 }} />
-                      <col style={{ width: 104 }} />
+                      <col style={{ width: 190 }} />
+                      <col style={{ width: 96 }} />
                       <col />
                     </colgroup>
 
                     <thead className="sticky top-0 z-10 bg-card">
-                      <tr className="h-7 border-b border-border bg-muted/50">
+                      <tr className="h-6 border-b border-border bg-muted/50">
                         <th className="px-0 text-center align-middle border-b border-border">
                           <div className="flex h-7 items-center justify-center">
                             <input
@@ -1852,7 +1852,7 @@ export default function CategoryReviewPageClient() {
 
                         return (
                           <tr key={id} className={`border-b border-border/60 align-top ${isSelected ? "bg-accent" : ""}`}>
-                            <td className="px-0 py-1 text-center align-top border-b border-border/60">
+                            <td className="px-0 py-0.5 text-center align-top border-b border-border/60">
                               <div className="flex items-start justify-center pt-0.5">
                                 <input
                                   type="checkbox"
@@ -1863,10 +1863,10 @@ export default function CategoryReviewPageClient() {
                               </div>
                             </td>
 
-                            <td className="px-2 py-1 border-b border-border/60">
+                            <td className="px-1.5 py-0.5 border-b border-border/60">
                               <div className="flex min-w-0 flex-col gap-0.5">
                                 <div
-                                  className="line-clamp-2 overflow-hidden break-words text-xs font-medium leading-4 text-foreground"
+                                  className="truncate text-xs font-medium leading-4 text-foreground"
                                   title={payee}
                                 >
                                   {payee || "—"}
@@ -1876,16 +1876,16 @@ export default function CategoryReviewPageClient() {
                             </td>
 
                             <td
-                              className={`px-2 py-1 text-xs text-right tabular-nums whitespace-nowrap border-b border-border/60 ${
+                              className={`px-1.5 py-0.5 text-xs text-right tabular-nums whitespace-nowrap border-b border-border/60 ${
                                 Number(e.amount_cents) < 0 ? "text-bb-amount-negative" : "text-bb-amount-neutral"
                               }`}
                             >
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>
 
-                            <td className="px-2 py-1 border-b border-border/60">
-                              <div className="grid min-w-0 grid-cols-[minmax(136px,180px)_minmax(220px,1fr)] items-start gap-1.5">
-                                <div className="flex min-w-[136px] max-w-[180px] flex-col gap-1">
+                            <td className="px-1.5 py-0.5 border-b border-border/60">
+                              <div className="grid min-w-0 grid-cols-[minmax(128px,170px)_minmax(180px,1fr)] items-start gap-1">
+                                <div className="flex min-w-[128px] max-w-[170px] flex-col gap-0.5">
                                   <CategoryCombobox
                                     options={categoryComboboxOptions}
                                     value={isOpening ? "" : categoryComboboxValue}
@@ -2005,7 +2005,7 @@ export default function CategoryReviewPageClient() {
                                               <div className="min-w-0">
                                                 <div
                                                   key={`${id}:${catId || name}:top`}
-                                                  className={`flex min-w-0 items-start gap-2 rounded-md border px-1.5 py-0.5 ${
+                                                  className={`flex min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 ${
                                                     isPrimaryReviewOnly
                                                       ? "border-bb-status-warning-border bg-bb-status-warning-bg"
                                                       : "border-primary/20 bg-primary/5"
@@ -2021,7 +2021,7 @@ export default function CategoryReviewPageClient() {
                                                     </div>
                                                   </div>
 
-                                                  <div className="ml-auto flex shrink-0 items-center gap-1 pt-0.5">
+                                                  <div className="ml-auto flex shrink-0 items-center gap-1">
                                                     <button
                                                       type="button"
                                                       className={`h-5 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
