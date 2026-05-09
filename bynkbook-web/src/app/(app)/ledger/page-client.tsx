@@ -2240,19 +2240,19 @@ export default function LedgerPageClient() {
   const loadedScopeNotice = (() => {
     if (isNeedsReconcileView) {
       if (hasMoreOnServer) {
-        return "Showing reconcile queue from loaded rows. Load more to find older expected/partial entries.";
+        return `${loadedCountLabel}. Load older rows for more queue items.`;
       }
-      return "All loaded entries checked for reconcile queue.";
+      return `${loadedCountLabel}. Queue checked.`;
     }
 
     if (hasMoreOnServer) {
       return totalEntryCount !== undefined
-        ? `Showing ${loadedEntryCount} of ${totalEntryCount} entries. Load more to audit older rows.`
-        : `Showing latest ${loadedEntryCount} entries. Load more to audit older rows.`;
+        ? `${loadedEntryCount} of ${totalEntryCount} loaded.`
+        : `${loadedEntryCount} latest loaded.`;
     }
 
     if (hasActiveLocalFilters && loadedEntryCount > filteredRowsAll.length) {
-      return `Filters are limiting this view to ${filteredRowsAll.length} of ${loadedEntryCount} loaded entries.`;
+      return `${filteredRowsAll.length} of ${loadedEntryCount} loaded shown.`;
     }
 
     if (!hasMoreOnServer && loadedEntryCount === 0 && filteredRowsAll.length === 1 && filteredRowsAll[0]?.id === "opening_balance") {
@@ -2438,6 +2438,8 @@ export default function LedgerPageClient() {
 
   // Ledger row-level pending state (memo/category optimistic saves)
   const [pendingById, setPendingById] = useState<Record<string, boolean>>({});
+  const [savedById, setSavedById] = useState<Record<string, boolean>>({});
+  const savedTimerByEntryIdRef = useRef<Record<string, number>>({});
 
   // F7a (session-local): AI attribution + undo for suggestion-pill applies
   const [aiAppliedById, setAiAppliedById] = useState<Record<string, boolean>>({});
@@ -2482,6 +2484,10 @@ export default function LedgerPageClient() {
         window.clearTimeout(map[k]);
       }
       undoTimerByEntryIdRef.current = {};
+      for (const k of Object.keys(savedTimerByEntryIdRef.current)) {
+        window.clearTimeout(savedTimerByEntryIdRef.current[k]);
+      }
+      savedTimerByEntryIdRef.current = {};
     };
   }, []);
 
@@ -2498,6 +2504,23 @@ export default function LedgerPageClient() {
       delete next[entryId];
       return next;
     });
+  }
+
+  function markRowSaved(entryId: string) {
+    if (!entryId) return;
+    const existing = savedTimerByEntryIdRef.current[entryId];
+    if (existing) window.clearTimeout(existing);
+
+    setSavedById((m) => ({ ...m, [entryId]: true }));
+    savedTimerByEntryIdRef.current[entryId] = window.setTimeout(() => {
+      setSavedById((m) => {
+        if (!m[entryId]) return m;
+        const next = { ...m };
+        delete next[entryId];
+        return next;
+      });
+      delete savedTimerByEntryIdRef.current[entryId];
+    }, 1800);
   }
 
   function isClosedPeriodError(e: any, msg: string | null): boolean {
@@ -3134,9 +3157,10 @@ export default function LedgerPageClient() {
 
       if (vars?.entryId) setEditedIds((m) => ({ ...m, [vars.entryId]: true }));
 
-      scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "update");
-
       const updates = vars?.updates ?? {};
+      const updateKeys = Object.keys(updates).filter((key) => updates[key] !== undefined);
+      const categoryOnlyUpdate =
+        updateKeys.length === 1 && Object.prototype.hasOwnProperty.call(updates, "category_id");
       const shouldRefreshCategorySuggestions = [
         "date",
         "payee",
@@ -3151,12 +3175,17 @@ export default function LedgerPageClient() {
       }
 
       if (Object.prototype.hasOwnProperty.call(updates, "category_id")) {
+        if (vars?.entryId) markRowSaved(vars.entryId);
         void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
         void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
       }
 
-      // Update footer totals promptly (cheap query; no entries refetch storm)
-      void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+      if (!categoryOnlyUpdate) {
+        scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "update");
+
+        // Update footer totals promptly for amount/date/type changes (cheap query; no entries refetch storm)
+        void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
+      }
     },
 
   });
@@ -3648,15 +3677,15 @@ export default function LedgerPageClient() {
       <col key="c3" style={{ width: "auto", minWidth: "150px" }} />, // payee flex
       <col key="c4" style={{ width: "64px" }} />,   // type
       <col key="c5" style={{ width: "66px" }} />,   // method
-      <col key="c6" style={{ width: "210px" }} />,  // category
+      <col key="c6" style={{ width: "238px" }} />,  // category
       <col key="c7" style={{ width: "90px" }} />,   // amount
     ];
 
     const tail = [
-      <col key="c9" style={{ width: "88px" }} />,  // status
+      <col key="c9" style={{ width: "72px" }} />,  // status
       <col key="c10" style={{ width: "20px" }} />,  // dup icon
       <col key="c11" style={{ width: "20px" }} />,  // cat icon
-      <col key="c12" style={{ width: "76px" }} />,  // actions
+      <col key="c12" style={{ width: "64px" }} />,  // actions
     ];
 
     if (isNeedsReconcileView) return [...base, ...tail];
@@ -4351,6 +4380,7 @@ export default function LedgerPageClient() {
   const saveQuickCat = async () => {
     if (!selectedBusinessId || !selectedAccountId) return;
     if (!quickCatEntryId) return;
+    const targetEntryId = quickCatEntryId;
 
     const name = normalizeCategoryName(quickCatValue || "");
     if (!name) {
@@ -4376,15 +4406,13 @@ export default function LedgerPageClient() {
 
       if (!catId) throw new Error("Failed to resolve category");
 
-      // Update the entry (category_id only)
-      await (updateMut as any).mutateAsync({
-        entryId: quickCatEntryId,
+      // Category-only updates are optimistic; close the compact editor as soon as the row state updates.
+      void (updateMut as any).mutateAsync({
+        entryId: targetEntryId,
         updates: { category_id: catId },
+      }).catch(() => {
+        // updateMut owns rollback and compact error display.
       });
-
-      // Refresh issues immediately (so missing icon disappears)
-      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
 
       cancelQuickCat();
     } catch (e: any) {
@@ -4700,8 +4728,13 @@ export default function LedgerPageClient() {
                 ) : null}
 
                 {pendingById[r.id] ? (
-                  <span className="inline-flex items-center" title="Saving…">
+                  <span className="inline-flex items-center gap-1 text-[10px] text-bb-text-muted" title="Saving">
                     <Loader2 className="h-3 w-3 text-bb-text-subtle animate-spin" />
+                    Saving
+                  </span>
+                ) : savedById[r.id] ? (
+                  <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                    Saved
                   </span>
                 ) : null}
 
@@ -5839,13 +5872,13 @@ export default function LedgerPageClient() {
         ) : null}
 
         {loadedScopeNotice ? (
-          <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
+          <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1 text-[11px] leading-4 text-bb-status-warning-fg">
             <span>{loadedScopeNotice}</span>
             {loadMoreNavigationNote ? <span className="font-medium">{loadMoreNavigationNote}</span> : null}
             {loadMoreNavigationNote ? (
               <button
                 type="button"
-                className="h-6 rounded-md border border-amber-300 bg-white px-2 text-xs font-medium text-amber-900 hover:bg-amber-100"
+                className="h-6 rounded-md border border-bb-status-warning-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-status-warning-fg hover:bg-bb-table-row-hover"
                 onClick={() => setPage(olderLoadedPageTarget)}
               >
                 Go to older rows
@@ -5854,7 +5887,7 @@ export default function LedgerPageClient() {
             {hasMoreOnServer ? (
               <button
                 type="button"
-                className="h-6 rounded-md border border-amber-300 bg-white px-2 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+                className="h-6 rounded-md border border-bb-status-warning-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-status-warning-fg hover:bg-bb-table-row-hover disabled:opacity-60"
                 disabled={!canLoadMoreEntries}
                 onClick={() => setLoadedPageCount((n) => n + 1)}
               >

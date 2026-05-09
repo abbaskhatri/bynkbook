@@ -3292,27 +3292,27 @@ const displayBankActiveList = useMemo(() => {
   const bankUnmatchedScopeSummary = bankScopeCountsReady
     ? `All-time ${bankAllTimeUnmatchedLabel} • Range ${bankRangeUnmatchedLabel}`
     : bankScopeCountsLoading
-      ? "Loading full-account counts..."
-      : "Some counts are still loading.";
+      ? "Loading counts..."
+      : "Counts loading.";
   const bankUnmatchedRowsSummary = bankStatusLoaded.unmatched
-    ? `Visible rows loaded: Loaded ${bankUnmatchedLoadedRowsNoSearch}${bankNextCursorByStatus.unmatched ? "+" : ""} • Visible ${displayBankUnmatchedCount}`
+    ? `Loaded ${bankUnmatchedLoadedRowsNoSearch}${bankNextCursorByStatus.unmatched ? "+" : ""} • Visible ${displayBankUnmatchedCount}`
     : bankLoadingByStatus.unmatched
-      ? "Checking visible rows..."
-      : "Visible rows not loaded yet.";
+      ? "Loading rows..."
+      : "Rows not loaded.";
   const bankScopeCountsNote = bankScopeCountsLoading
-    ? "Loading full-account counts..."
-    : "Some counts are still loading.";
+    ? "Loading counts..."
+    : "Counts loading.";
   const bankScopeRowsCopy = activeBankStatusLoaded
-    ? `Loaded rows ${activeBankLoadedRowsLabel} • Visible filtered rows ${activeBankVisibleFilteredLabel}`
+    ? `Loaded ${activeBankLoadedRowsLabel} • Visible ${activeBankVisibleFilteredLabel}`
     : activeBankStatusLoading
-      ? "Visible rows are loading."
-      : "Visible rows not loaded yet.";
+      ? "Rows loading."
+      : "Rows not loaded.";
   const bankScopeCopy = bankTab === "unmatched" && bankScopeCountsReady
-    ? `All-time account ${bankAllTimeUnmatchedLabel} • Current date range ${bankRangeUnmatchedLabel} (${dateRangeText}) • ${bankScopeRowsCopy}`
+    ? `All-time ${bankAllTimeUnmatchedLabel} • Range ${bankRangeUnmatchedLabel} (${dateRangeText}) • ${bankScopeRowsCopy}`
     : bankTab === "unmatched"
       ? `${bankScopeRowsCopy} • ${bankScopeCountsNote}`
-      : `${bankScopeRowsCopy} • Full-account counts are shown for unmatched transactions.`;
-  const entriesScopeCopy = `Current date range ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded • Loaded rows ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} • Visible filtered rows ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount} • Full-account count not loaded.`;
+      : `${bankScopeRowsCopy} • Unmatched has full-account counts.`;
+  const entriesScopeCopy = `Range ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded • Visible ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
       ? Math.max(0, activeBankLoadedRowsCount - (bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount))
@@ -3329,7 +3329,7 @@ const displayBankActiveList = useMemo(() => {
       : "Matched (Not loaded yet)";
   const bankEmptyStateLabel = (() => {
     if (bankTab === "matched" && !bankStatusLoaded.matched) {
-      return "Matched transactions are loaded when opened.";
+      return "Matched loads on open.";
     }
 
     if (bankTab === "matched") {
@@ -3410,13 +3410,13 @@ const displayBankActiveList = useMemo(() => {
 
   const bankLoadedStateCopy = !bankStatusLoaded.unmatched
     ? bankLoadingByStatus.unmatched
-      ? "Unmatched rows are loading. Matched transactions are loaded when opened."
-      : "Unmatched rows are not loaded yet. Matched transactions are loaded when opened."
+      ? "Unmatched loading. Matched loads on open."
+      : "Unmatched not loaded. Matched loads on open."
     : bankStatusLoaded.matched
-      ? "Loaded rows are date-scoped. Search filters visible rows."
+      ? "Date-scoped. Search filters visible rows."
       : bankLoadingByStatus.matched
-        ? "Unmatched rows loaded. Matched rows are loading."
-        : "Unmatched rows loaded. Matched transactions are loaded when opened.";
+        ? "Unmatched loaded. Matched loading."
+        : "Unmatched loaded. Matched loads on open.";
 
   const entryStateSummary = useMemo(() => {
     return {
@@ -3632,9 +3632,9 @@ const displayBankActiveList = useMemo(() => {
     </div>
   );
 
-  const thClass = "px-1.5 py-0.5 align-middle text-xs font-semibold uppercase tracking-wide text-bb-text-muted text-left";
+  const thClass = "px-1.5 py-0 align-middle text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted text-left";
   const tdClass = "px-1.5 py-0.5 align-middle text-xs text-bb-text";
-  const trClass = "h-[24px] border-b border-bb-border-muted";
+  const trClass = "h-[23px] border-b border-bb-border-muted";
   const stickyActionHeaderClass = "sticky right-0 z-20 bg-bb-table-header border-l border-bb-border shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
   const stickyActionCellClass = "sticky right-0 z-[5] border-l border-bb-border shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
   const reconcileTextClampClass = "block min-w-0 max-w-[22rem] overflow-hidden text-ellipsis whitespace-nowrap xl:max-w-[30rem] xl:whitespace-normal xl:[display:-webkit-box] xl:[-webkit-line-clamp:2] xl:[-webkit-box-orient:vertical]";
@@ -4384,14 +4384,15 @@ const displayBankActiveList = useMemo(() => {
               </button>
             </div>
 
-            <div className="mt-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1.5 text-[11px] leading-4 text-bb-text-muted">
+            <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
               <span className="font-semibold text-bb-text">Ledger scope:</span>{" "}
               {entriesScopeCopy}
             </div>
 
             {entriesHitApiLimit ? (
-              <div className="mt-2 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] leading-4 text-bb-status-warning-fg">
-                Loaded {entriesLoadedCount} ledger entries {entriesScopeLabel}. The entries API returns at most {ENTRIES_API_LIMIT}, so Expected/Matched counts and matching choices only reflect loaded rows. Narrow the date range or account to load a smaller set; search filters loaded rows only.
+              <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1 text-[11px] leading-4 text-bb-status-warning-fg">
+                <span>{entriesLoadedCount}+ ledger entries loaded {entriesScopeLabel}.</span>
+                <span>Expected/Matched use loaded rows; narrow range for more precision.</span>
               </div>
             ) : null}
 
@@ -4534,7 +4535,7 @@ const displayBankActiveList = useMemo(() => {
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
-                    <tr className="h-[28px]">
+                    <tr className="h-[24px]">
                       <th className={thClass}>DATE</th>
                       <th className={thClass}>PAYEE</th>
                       <th className={`${thClass} text-right pr-2`}>AMOUNT</th>
@@ -4873,7 +4874,7 @@ const displayBankActiveList = useMemo(() => {
               </button>
               <span className="text-[11px] text-bb-text-muted">{bankLoadedStateCopy}</span>
             </div>
-            <div className="mt-2 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1.5 text-[11px] leading-4 text-bb-text-muted">
+            <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
               <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
               {bankScopeCopy}
               {activeBankHiddenBySearch > 0 ? (
@@ -4900,7 +4901,7 @@ const displayBankActiveList = useMemo(() => {
               ) : bankPanelShowDeferredLoad ? (
                 <div className="h-full min-h-[240px] flex items-center justify-center">
                   <div className="text-center">
-                    <div className="text-xs text-bb-text-muted">Matched transactions are loaded when opened.</div>
+                    <div className="text-xs text-bb-text-muted">Matched loads on open.</div>
                     <button
                       type="button"
                       className="mt-3 h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
@@ -4922,7 +4923,7 @@ const displayBankActiveList = useMemo(() => {
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
-                    <tr className="h-[28px]">
+                    <tr className="h-[24px]">
                       <th className={thClass}>
                         {bankTab === "unmatched" ? (
                           <input
