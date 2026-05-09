@@ -391,8 +391,10 @@ export default function CategoryReviewPageClient() {
   const [manualCategoryByEntryId, setManualCategoryByEntryId] = useState<Record<string, string>>({});
   const [categoryDraftByEntryId, setCategoryDraftByEntryId] = useState<Record<string, string>>({});
   const [suggestionMapByEntryId, setSuggestionMapByEntryId] = useState<Record<string, any[]>>({});
+  const [suggestionLoadedAtByEntryId, setSuggestionLoadedAtByEntryId] = useState<Record<string, number>>({});
   const [suggestionsRequestedKey, setSuggestionsRequestedKey] = useState<string | null>(null);
   const [suggestionRequestNonce, setSuggestionRequestNonce] = useState(0);
+  const [autoFixPendingIds, setAutoFixPendingIds] = useState<string[] | null>(null);
 
   const [applyOpen, setApplyOpen] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -400,6 +402,7 @@ export default function CategoryReviewPageClient() {
     applied: number;
     blocked: number;
     blockedByCode: Record<string, number>;
+    stillNeedReview?: number;
   } | null>(null);
 
   function summarizeApplyResult(res: any) {
@@ -425,7 +428,7 @@ export default function CategoryReviewPageClient() {
     };
   }
 
-  function applySummaryMessage(summary: { applied: number; blocked: number; blockedByCode: Record<string, number> }) {
+  function applySummaryMessage(summary: { applied: number; blocked: number; blockedByCode: Record<string, number>; stillNeedReview?: number }) {
     const reasonLabels: Record<string, string> = {
       CLOSED_PERIOD: "closed period",
       INVALID_CATEGORY: "invalid category",
@@ -439,7 +442,11 @@ export default function CategoryReviewPageClient() {
       .filter(([, count]) => count > 0)
       .map(([code, count]) => `${count} ${reasonLabels[code] ?? code.toLowerCase().replace(/_/g, " ")}`);
     const reasonText = reasons.length ? ` Reasons: ${reasons.join(", ")}.` : "";
-    return `Applied ${summary.applied}. Blocked ${summary.blocked}.${reasonText}`;
+    const reviewText =
+      typeof summary.stillNeedReview === "number"
+        ? ` ${summary.stillNeedReview} still need${summary.stillNeedReview === 1 ? "s" : ""} review.`
+        : "";
+    return `Applied ${summary.applied} categories.${reviewText}${summary.blocked ? ` Blocked ${summary.blocked}.` : ""}${reasonText}`;
   }
 
   function clearMutErr() {
@@ -503,6 +510,7 @@ export default function CategoryReviewPageClient() {
     setCategoryDraftByEntryId({});
     setSelectedSuggestionByEntryId({});
     setSuggestionsRequestedKey(null);
+    setSuggestionLoadedAtByEntryId({});
   }
 
   // Auto-run once so the list is visible by default (no blank state)
@@ -589,9 +597,11 @@ export default function CategoryReviewPageClient() {
 
   useEffect(() => {
     setSuggestionMapByEntryId({});
+    setSuggestionLoadedAtByEntryId({});
     setSuggestionsRequestedKey(null);
     setSelectedSuggestionByEntryId({});
     setManualCategoryByEntryId({});
+    setAutoFixPendingIds(null);
     setWhyEntryId(null);
     setWhyText(null);
     setWhyErr(null);
@@ -656,11 +666,29 @@ export default function CategoryReviewPageClient() {
     if (!suggestionsQ.data) return;
     const nextData = suggestionsQ.data as Record<string, any[]>;
     setSuggestionMapByEntryId((prev) => ({ ...prev, ...nextData }));
+    const loadedAt = Date.now();
+    setSuggestionLoadedAtByEntryId((prev) => {
+      const next = { ...prev };
+      for (const entryId of Object.keys(nextData)) next[entryId] = loadedAt;
+      return next;
+    });
   }, [suggestionsQ.data]);
 
   const sugByEntryId = suggestionMapByEntryId;
   const sugLoading = !!suggestionsRequestedKey && suggestionsQ.isFetching && !suggestionsLoadedForCurrentFilters;
   const sugUpdating = !!suggestionsRequestedKey && suggestionsQ.isFetching && suggestionsLoadedForCurrentFilters;
+  const autoFixPreparing = !!autoFixPendingIds && suggestionsQ.isFetching;
+  const SUGGESTION_STALE_MS = 60_000;
+
+  function requestSuggestionTargets(targets: typeof suggestionTargets) {
+    const requestTargets = targets.slice(0, 200);
+    const requestKey = requestTargets.map((x) => x.id).join("|");
+    if (!requestKey) return false;
+
+    setSuggestionsRequestedKey(requestKey);
+    setSuggestionRequestNonce((n) => n + 1);
+    return true;
+  }
 
   function loadSuggestionsForCurrentFilters() {
     if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0 || sugLoading || sugUpdating) return;
@@ -668,12 +696,7 @@ export default function CategoryReviewPageClient() {
     clearMutErr();
     setApplySummary(null);
 
-    const requestTargets = (suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets).slice(0, 200);
-    const requestKey = requestTargets.map((x) => x.id).join("|");
-    if (!requestKey) return;
-
-    setSuggestionsRequestedKey(requestKey);
-    setSuggestionRequestNonce((n) => n + 1);
+    requestSuggestionTargets(suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets);
   }
 
   // Selection state
@@ -1111,6 +1134,10 @@ export default function CategoryReviewPageClient() {
   }, [autoFixRows]);
 
   const autoFixReadyCount = selectedApplyItems.length + manuallySelectedApplyItems.length;
+  const autoFixSafeSelectedCount = selectedApplyItems.length;
+  const autoFixReviewRows = useMemo(() => {
+    return autoFixRows.filter((row) => !row.bulkSafe);
+  }, [autoFixRows]);
   const autoFixReviewNeededCount = Math.max(0, autoFixRows.length - autoFixReadyCount);
   const loadedAutoFixReadyCount = useMemo(() => {
     let count = 0;
@@ -1129,7 +1156,7 @@ export default function CategoryReviewPageClient() {
   }, [visibleRows, sugByEntryId]);
 
   const autoFixGroups = useMemo(() => {
-    const categoryNameById = new Map<string, string>(
+    const categoryNameByIdMap = new Map<string, string>(
       categories.map((c) => [String(c.id), String(c.name)])
     );
 
@@ -1140,58 +1167,55 @@ export default function CategoryReviewPageClient() {
         categoryId: string;
         categoryName: string;
         count: number;
-        readyCount: number;
-        reviewCount: number;
         totalAmountCents: number;
+        confidenceMin: number;
+        confidenceMax: number;
+        confidenceAvg: number;
+        samplePayees: string[];
         rows: typeof autoFixRows;
       }
     >();
 
     for (const row of autoFixRows) {
+      if (!row.bulkSafe || !row.topCategoryId) continue;
+
       const suggestedCategoryId = String(row.topCategoryId ?? "").trim();
-      const manualCategoryId = String(row.manualCategoryId ?? "").trim();
-      const selectedCategoryId = String(row.selectedCategoryId ?? "").trim();
-      const categoryId = manualCategoryId || suggestedCategoryId || selectedCategoryId;
-      const groupKey = manualCategoryId
-        ? `manual:${manualCategoryId}`
-        : suggestedCategoryId
-          ? `suggested:${suggestedCategoryId}`
-          : "__NO_STRONG_SUGGESTION__";
-      const categoryName = manualCategoryId
-        ? `Selected: ${categoryNameById.get(manualCategoryId) || "Unknown category"}`
-        : suggestedCategoryId
-          ? row.topCategoryName || categoryNameById.get(suggestedCategoryId) || "Unknown category"
-          : "No strong suggestion";
-      const rowReady =
-        !!manualCategoryId ||
-        (!!row.bulkSafe && !!row.selectedCategoryId && row.selectedCategoryId === row.topCategoryId);
+      const groupKey = `safe:${suggestedCategoryId}`;
+      const categoryName =
+        row.topCategoryName || categoryNameByIdMap.get(suggestedCategoryId) || "Unknown category";
+      const top = row.suggestions[0] ?? null;
+      const confidence = categorySuggestionConfidence(top?.confidence);
+      const payee = String(row.entry?.payee ?? "").trim();
 
       const existing = groupsMap.get(groupKey);
       if (existing) {
         existing.count += 1;
-        if (rowReady) existing.readyCount += 1;
-        else existing.reviewCount += 1;
         existing.totalAmountCents += Number(row.entry?.amount_cents ?? 0);
+        existing.confidenceMin = Math.min(existing.confidenceMin, confidence);
+        existing.confidenceMax = Math.max(existing.confidenceMax, confidence);
+        existing.confidenceAvg =
+          Math.round(((existing.confidenceAvg * (existing.count - 1)) + confidence) / existing.count);
+        if (payee && !existing.samplePayees.includes(payee) && existing.samplePayees.length < 3) {
+          existing.samplePayees.push(payee);
+        }
         existing.rows.push(row);
       } else {
         groupsMap.set(groupKey, {
           groupKey,
-          categoryId,
+          categoryId: suggestedCategoryId,
           categoryName,
           count: 1,
-          readyCount: rowReady ? 1 : 0,
-          reviewCount: rowReady ? 0 : 1,
           totalAmountCents: Number(row.entry?.amount_cents ?? 0),
+          confidenceMin: confidence,
+          confidenceMax: confidence,
+          confidenceAvg: confidence,
+          samplePayees: payee ? [payee] : [],
           rows: [row],
         });
       }
     }
 
     return Array.from(groupsMap.values()).sort((a, b) => {
-      if (a.groupKey === "__NO_STRONG_SUGGESTION__" && b.groupKey !== "__NO_STRONG_SUGGESTION__") return 1;
-      if (b.groupKey === "__NO_STRONG_SUGGESTION__" && a.groupKey !== "__NO_STRONG_SUGGESTION__") return -1;
-      if (a.groupKey.startsWith("manual:") && !b.groupKey.startsWith("manual:")) return -1;
-      if (b.groupKey.startsWith("manual:") && !a.groupKey.startsWith("manual:")) return 1;
       const aAbs = Math.abs(a.totalAmountCents);
       const bAbs = Math.abs(b.totalAmountCents);
       if (bAbs !== aAbs) return bAbs - aAbs;
@@ -1206,25 +1230,63 @@ export default function CategoryReviewPageClient() {
     }));
   }
 
-  function openAutoFixCategories() {
+  function isAutoFixGroupSelected(group: { rows: typeof autoFixRows }) {
+    return group.rows.every((row) => {
+      const id = String(row.entry?.id ?? "");
+      return !!id && String(selectedSuggestionByEntryId[id] ?? "") === String(row.topCategoryId ?? "");
+    });
+  }
+
+  function setAutoFixGroupSelected(group: { rows: typeof autoFixRows }, checked: boolean) {
+    setSelectedSuggestionByEntryId((prev) => {
+      const next = { ...prev };
+      for (const row of group.rows) {
+        const id = String(row.entry?.id ?? "");
+        const categoryId = String(row.topCategoryId ?? "").trim();
+        if (!id || !categoryId || !row.bulkSafe) continue;
+        if (checked) next[id] = categoryId;
+        else delete next[id];
+      }
+      return next;
+    });
+  }
+
+  function setAutoFixRowSelected(row: (typeof autoFixRows)[number], checked: boolean) {
+    const id = String(row.entry?.id ?? "");
+    const categoryId = String(row.topCategoryId ?? "").trim();
+    if (!id || !categoryId || !row.bulkSafe) return;
+
+    setSelectedSuggestionByEntryId((prev) => {
+      const next = { ...prev };
+      if (checked) next[id] = categoryId;
+      else delete next[id];
+      return next;
+    });
+  }
+
+  function openAutoFixCategoriesForIds(entryIds: string[]) {
+    const idSet = new Set(entryIds);
     const next: Record<string, string> = { ...selectedSuggestionByEntryId };
+    const clearManualIds: string[] = [];
 
     for (const e of visibleRows) {
       const id = String(e.id);
-      if (!selectedIds.has(id)) continue;
-      if (next[id]) continue;
+      if (!idSet.has(id)) continue;
 
       const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
       const top = suggestions[0] ?? null;
       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
 
-      if (topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
+      if (topCategoryId && isBulkSafeCategorySuggestion(top, 0)) {
+        next[id] = topCategoryId;
+        clearManualIds.push(id);
+      }
     }
 
     const groupCounts = new Map<string, number>();
     for (const e of visibleRows) {
       const id = String(e.id);
-      if (!selectedIds.has(id)) continue;
+      if (!idSet.has(id)) continue;
       const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
       const top = suggestions[0] ?? null;
       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
@@ -1246,11 +1308,60 @@ export default function CategoryReviewPageClient() {
     for (const groupKey of firstGroups) nextExpanded[groupKey] = true;
 
     setExpandedAutoFixGroups(nextExpanded);
+    setSelectedIds(idSet);
     setSelectedSuggestionByEntryId(next);
+    if (clearManualIds.length > 0) {
+      setManualCategoryByEntryId((prev) => {
+        const manualNext = { ...prev };
+        for (const id of clearManualIds) delete manualNext[id];
+        return manualNext;
+      });
+    }
     setApplySummary(null);
     clearMutErr();
     setApplyOpen(true);
   }
+
+  function handleReviewAutoFix() {
+    if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0 || applyBusy || autoFixPreparing) return;
+
+    clearMutErr();
+    setApplySummary(null);
+
+    const selectedScope = selectedCount > 0 ? new Set(selectedIds) : null;
+    const targetIds = suggestionTargets
+      .filter((target) => !selectedScope || selectedScope.has(target.id))
+      .map((target) => target.id)
+      .slice(0, 200);
+
+    if (!targetIds.length) return;
+
+    const now = Date.now();
+    const targetIdSet = new Set(targetIds);
+    const targetsNeedingSuggestions = suggestionTargets.filter((target) => {
+      if (!targetIdSet.has(target.id)) return false;
+      if (!hasSuggestionEntry(suggestionMapByEntryId, target.id)) return true;
+      const loadedAt = suggestionLoadedAtByEntryId[target.id] ?? 0;
+      return now - loadedAt > SUGGESTION_STALE_MS;
+    });
+
+    if (targetsNeedingSuggestions.length > 0 && !sugLoading && !sugUpdating) {
+      setAutoFixPendingIds(targetIds);
+      requestSuggestionTargets(targetsNeedingSuggestions);
+      return;
+    }
+
+    openAutoFixCategoriesForIds(targetIds);
+  }
+
+  useEffect(() => {
+    if (!autoFixPendingIds) return;
+    if (suggestionsQ.isFetching) return;
+
+    setAutoFixPendingIds(null);
+    openAutoFixCategoriesForIds(autoFixPendingIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFixPendingIds, suggestionsQ.isFetching, suggestionsQ.error, sugByEntryId]);
 
   async function applyManuallySelectedCategories() {
     if (!selectedBusinessId || !selectedAccountId || manuallySelectedApplyItems.length === 0) return;
@@ -1281,7 +1392,10 @@ export default function CategoryReviewPageClient() {
         for (const item of manuallySelectedApplyItems) successIds.add(item.entryId);
       }
 
-      setApplySummary(summary);
+      setApplySummary({
+        ...summary,
+        stillNeedReview: Math.max(0, autoFixRows.length - summary.applied),
+      });
 
       if (successIds.size > 0) {
         updateCategoryReviewEntriesCache((row: any) => {
@@ -1353,10 +1467,18 @@ export default function CategoryReviewPageClient() {
         ? "Load next 200 suggestions"
         : "Load suggestions for loaded rows";
   const autoFixButtonReadyCount = selectedCount > 0 ? autoFixReadyCount : loadedAutoFixReadyCount;
-  const autoFixButtonDisabled = applyBusy || visibleRows.length === 0 || autoFixButtonReadyCount === 0;
+  const autoFixButtonDisabled =
+    applyBusy ||
+    autoFixPreparing ||
+    sugLoading ||
+    sugUpdating ||
+    entriesQ.isLoading ||
+    suggestionTargets.length === 0 ||
+    !selectedBusinessId ||
+    !selectedAccountId;
   const autoFixButtonTitle =
     autoFixButtonReadyCount === 0
-      ? "No safe Auto Fix suggestions yet. Review suggestions manually."
+      ? "Review loaded rows and find safe category matches."
       : `${autoFixButtonReadyCount} safe Auto Fix suggestion${autoFixButtonReadyCount === 1 ? "" : "s"} ready on loaded rows.`;
 
   return (
@@ -1533,56 +1655,16 @@ export default function CategoryReviewPageClient() {
                   variant={autoFixButtonReadyCount === 0 ? "outline" : "default"}
                   className="h-7 px-3 text-xs"
                   disabled={autoFixButtonDisabled}
-                  onClick={() => {
-                    if (selectedCount === 0) {
-                      const allVisibleIds = new Set(visibleRows.map((e: any) => String(e.id)));
-                      setSelectedIds(allVisibleIds);
-
-                      const next: Record<string, string> = { ...selectedSuggestionByEntryId };
-
-                      for (const e of visibleRows) {
-                        const id = String(e.id);
-                        const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
-                        const top = suggestions[0] ?? null;
-                        const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                        if (!next[id] && topCategoryId && isBulkSafeCategorySuggestion(top, 0)) next[id] = topCategoryId;
-                      }
-
-                      const groupCounts = new Map<string, number>();
-                      for (const e of visibleRows) {
-                        const id = String(e.id);
-                        const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
-                        const top = suggestions[0] ?? null;
-                        const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                        const manualCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
-                        const groupKey = manualCategoryId
-                          ? `manual:${manualCategoryId}`
-                          : topCategoryId
-                            ? `suggested:${topCategoryId}`
-                            : "__NO_STRONG_SUGGESTION__";
-                        groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
-                      }
-
-                      const firstGroups = Array.from(groupCounts.entries())
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 3)
-                        .map(([groupKey]) => groupKey);
-
-                      const nextExpanded: Record<string, boolean> = {};
-                      for (const groupKey of firstGroups) nextExpanded[groupKey] = true;
-
-                      setExpandedAutoFixGroups(nextExpanded);
-                      setSelectedSuggestionByEntryId(next);
-                      setApplySummary(null);
-                      clearMutErr();
-                      setApplyOpen(true);
-                      return;
-                    }
-
-                    openAutoFixCategories();
-                  }}
+                  onClick={handleReviewAutoFix}
                 >
-                  Auto Fix loaded rows
+                  {autoFixPreparing ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Finding safe category matches…
+                    </span>
+                  ) : (
+                    "Review Auto Fix"
+                  )}
                 </Button>
               </span>
 
@@ -1680,7 +1762,7 @@ export default function CategoryReviewPageClient() {
           {sugLoading && !sugUpdating ? (
             <div className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading category suggestions…
+              Finding safe category matches…
             </div>
           ) : null}
 
@@ -1693,11 +1775,11 @@ export default function CategoryReviewPageClient() {
               {tableUpdating ? <UpdatingOverlay /> : null}
               <div className={`min-h-0 h-full ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
                 <div className="h-full overflow-auto">
-                  <table className="w-full min-w-[860px] table-fixed border-separate border-spacing-0">
+                  <table className="w-full min-w-[780px] table-fixed border-separate border-spacing-0">
                     <colgroup>
                       <col style={{ width: 36 }} />
-                      <col style={{ width: 260 }} />
-                      <col style={{ width: 112 }} />
+                      <col style={{ width: 220 }} />
+                      <col style={{ width: 104 }} />
                       <col />
                     </colgroup>
 
@@ -1747,7 +1829,7 @@ export default function CategoryReviewPageClient() {
 
                         return (
                           <tr key={id} className={`border-b border-border/60 align-top ${isSelected ? "bg-accent" : ""}`}>
-                            <td className="px-0 py-1.5 text-center align-top border-b border-border/60">
+                            <td className="px-0 py-1 text-center align-top border-b border-border/60">
                               <div className="flex items-start justify-center pt-0.5">
                                 <input
                                   type="checkbox"
@@ -1758,10 +1840,10 @@ export default function CategoryReviewPageClient() {
                               </div>
                             </td>
 
-                            <td className="px-2 py-1.5 border-b border-border/60">
+                            <td className="px-2 py-1 border-b border-border/60">
                               <div className="flex min-w-0 flex-col gap-0.5">
                                 <div
-                                  className="max-h-8 overflow-hidden break-words text-xs font-medium leading-4 text-foreground"
+                                  className="line-clamp-2 overflow-hidden break-words text-xs font-medium leading-4 text-foreground"
                                   title={payee}
                                 >
                                   {payee || "—"}
@@ -1771,16 +1853,16 @@ export default function CategoryReviewPageClient() {
                             </td>
 
                             <td
-                              className={`px-2 py-1.5 text-xs text-right tabular-nums whitespace-nowrap border-b border-border/60 ${
+                              className={`px-2 py-1 text-xs text-right tabular-nums whitespace-nowrap border-b border-border/60 ${
                                 Number(e.amount_cents) < 0 ? "text-bb-amount-negative" : "text-bb-amount-neutral"
                               }`}
                             >
                               {formatUsdAccountingFromCents(e.amount_cents)}
                             </td>
 
-                            <td className="px-2 py-1.5 border-b border-border/60">
-                              <div className="grid min-w-0 grid-cols-[minmax(150px,200px)_minmax(0,1fr)] items-start gap-1.5">
-                                <div className="flex min-w-[160px] max-w-[220px] flex-col gap-1">
+                            <td className="px-2 py-1 border-b border-border/60">
+                              <div className="grid min-w-0 grid-cols-[minmax(136px,180px)_minmax(220px,1fr)] items-start gap-1.5">
+                                <div className="flex min-w-[136px] max-w-[180px] flex-col gap-1">
                                   <CategoryCombobox
                                     options={categoryComboboxOptions}
                                     value={isOpening ? "" : categoryComboboxValue}
@@ -1953,7 +2035,7 @@ export default function CategoryReviewPageClient() {
 
                                           {more > 0 ? <span className="mt-0.5 inline-block text-[10px] text-muted-foreground/80">+{more} more</span> : null}
                                           {!rowSuggestionsLoaded ? (
-                                            <span className="text-[10px] text-muted-foreground/80">Suggestions not loaded</span>
+                                            <span className="text-[10px] text-muted-foreground/80">No confident suggestion loaded</span>
                                           ) : null}
                                           {rowSuggestionsLoaded && sugLoading && !list.length ? <span className="h-4 w-16 rounded-full bg-muted animate-pulse" /> : null}
                                           {rowSuggestionsLoaded && !sugLoading && suggestionsQ.error && !list.length ? (
@@ -1969,7 +2051,7 @@ export default function CategoryReviewPageClient() {
                                             </div>
                                           ) : null}
                                           {rowSuggestionsLoaded && !sugLoading && !suggestionsQ.error && !list.length ? (
-                                            <span className="text-[10px] text-muted-foreground/80">No category suggestions</span>
+                                            <span className="text-[10px] text-muted-foreground/80">No confident suggestion</span>
                                           ) : null}
                                         </>
                                       );
@@ -2021,7 +2103,7 @@ export default function CategoryReviewPageClient() {
               if (applyBusy) return;
               setApplyOpen(false);
             }}
-            title="Auto Fix Loaded Rows"
+            title="Review Auto Fix"
             size="lg"
             footer={
               <div className="flex items-center justify-end gap-2">
@@ -2037,7 +2119,7 @@ export default function CategoryReviewPageClient() {
                   disabled={applyBusy || manuallySelectedApplyItems.length === 0}
                   onClick={applyManuallySelectedCategories}
                 >
-                  {`Apply ${manuallySelectedApplyItems.length} selected categor${manuallySelectedApplyItems.length === 1 ? "y" : "ies"}`}
+                  {`Apply manual selections (${manuallySelectedApplyItems.length})`}
                 </BusyButton>
 
                 <BusyButton
@@ -2063,7 +2145,10 @@ export default function CategoryReviewPageClient() {
                       const applied = summary.applied;
                       const blocked = summary.blocked;
 
-                      setApplySummary(summary);
+                      setApplySummary({
+                        ...summary,
+                        stillNeedReview: Math.max(0, autoFixRows.length - summary.applied),
+                      });
 
                       const results = Array.isArray(res?.results) ? res.results : [];
                       const successIds = new Set<string>();
@@ -2136,7 +2221,7 @@ export default function CategoryReviewPageClient() {
                     }
                   }}
                 >
-                  {`Auto Fix ${selectedApplyItems.length} categor${selectedApplyItems.length === 1 ? "y" : "ies"}`}
+                  {`Apply ${selectedApplyItems.length} safe fix${selectedApplyItems.length === 1 ? "" : "es"}`}
                 </BusyButton>
               </div>
             }
@@ -2149,8 +2234,8 @@ export default function CategoryReviewPageClient() {
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ready</div>
-                  <div className="mt-0.5 text-lg font-semibold text-foreground">{autoFixReadyCount}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Safe selected</div>
+                  <div className="mt-0.5 text-lg font-semibold text-foreground">{autoFixSafeSelectedCount}</div>
                 </div>
 
                 <div>
@@ -2166,62 +2251,84 @@ export default function CategoryReviewPageClient() {
                 </div>
               </div>
 
-              {autoFixReviewNeededCount > 0 ? (
+              {autoFixSafeSelectedCount === 0 ? (
+                <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
+                  No safe bulk fixes yet. Review suggestions manually.
+                </div>
+              ) : autoFixReviewNeededCount > 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
                   {autoFixReviewNeededCount} need{autoFixReviewNeededCount === 1 ? "s" : ""} review.
-                  Auto Fix only uses strong suggestions on loaded selected rows; selected dropdown categories use Apply selected categories.
+                  Auto Fix applies selected safe suggestions only. Manual selections apply only selected loaded rows.
                 </div>
               ) : (
                 <div className="text-[11px] text-muted-foreground">
-                  Strong suggestions are ready for loaded selected rows. Selected dropdown categories stay separate.
+                  Safe suggestions are preselected for loaded rows. Uncheck any group or row before applying.
                 </div>
               )}
 
               <div className="h-[320px] overflow-auto rounded-lg border border-border">
-                {autoFixGroups.length === 0 ? (
+                {autoFixRows.length === 0 ? (
                   <div className="px-4 py-6 text-center text-sm text-muted-foreground">
                     No selected rows available for auto-fix.
                   </div>
                 ) : (
                   <div className="min-w-[420px] divide-y divide-border">
+                    {autoFixGroups.length === 0 ? (
+                      <div className="bg-card px-4 py-4 text-sm text-muted-foreground">
+                        Safe category groups will appear here when loaded rows meet the bulk-fix threshold.
+                      </div>
+                    ) : null}
+
                     {autoFixGroups.map((group) => {
                       const isExpanded = !!expandedAutoFixGroups[group.groupKey];
+                      const isGroupSelected = isAutoFixGroupSelected(group);
+                      const confidenceText =
+                        group.confidenceMin === group.confidenceMax
+                          ? `${group.confidenceAvg}%`
+                          : `${group.confidenceMin}-${group.confidenceMax}% avg ${group.confidenceAvg}%`;
+                      const samplePayees = group.samplePayees.join(", ");
 
                       return (
                         <div key={group.groupKey} className="bg-card">
-                          <button
-                            type="button"
-                            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-muted/50"
-                            onClick={() => toggleAutoFixGroup(group.groupKey)}
-                          >
-                            <div className="flex min-w-0 items-center gap-2">
-                              <div className="text-sm leading-none text-muted-foreground/80">
+                          <div className="flex w-full items-start justify-between gap-3 px-3 py-2.5 hover:bg-muted/50">
+                            <div className="flex min-w-0 items-start gap-2">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4"
+                                checked={isGroupSelected}
+                                onChange={(ev) => setAutoFixGroupSelected(group, ev.target.checked)}
+                                aria-label={`Select all ${group.categoryName} safe fixes`}
+                              />
+
+                              <button
+                                type="button"
+                                className="mt-0.5 text-sm leading-none text-muted-foreground/80"
+                                onClick={() => toggleAutoFixGroup(group.groupKey)}
+                                aria-label={`${isExpanded ? "Collapse" : "Expand"} ${group.categoryName}`}
+                              >
                                 {isExpanded ? "⌄" : "›"}
+                              </button>
+
+                              <div className="min-w-0">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <div className="truncate text-sm font-semibold text-foreground">
+                                    {group.categoryName}
+                                  </div>
+                                  <span className="inline-flex min-w-[24px] items-center justify-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground">
+                                    {group.count}
+                                  </span>
+                                </div>
+                                <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                                  {confidenceText} confidence
+                                  {samplePayees ? ` · ${samplePayees}` : ""}
+                                </div>
                               </div>
-
-                              <div className="truncate text-sm font-semibold text-foreground">
-                                {group.categoryName}
-                              </div>
-
-                              <span className="inline-flex min-w-[24px] items-center justify-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground">
-                                {group.count}
-                              </span>
-
-                              <span className="hidden rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary sm:inline-flex">
-                                {group.readyCount} ready
-                              </span>
-
-                              {group.reviewCount > 0 ? (
-                                <span className="hidden rounded-full border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-0.5 text-[10px] font-medium text-bb-status-warning-fg sm:inline-flex">
-                                  {group.reviewCount} review
-                                </span>
-                              ) : null}
                             </div>
 
                             <div className="shrink-0 text-right text-sm font-semibold text-foreground">
                               {formatUsdAccountingFromCents(group.totalAmountCents)}
                             </div>
-                          </button>
+                          </div>
 
                           {isExpanded ? (
                             <div className="border-t border-border bg-muted/40">
@@ -2234,14 +2341,23 @@ export default function CategoryReviewPageClient() {
                                 const topSourceLabel = categorySuggestionSourceLabel(top?.source);
                                 const topConfidence = categorySuggestionConfidence(top?.confidence);
                                 const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
-                                const topCategoryName = categorySuggestionCategoryName(top, categoryNameById);
                                 const topIsBulkSafe = isBulkSafeCategorySuggestion(top, 0);
 
                                 return (
                                   <div
                                     key={id}
-                                    className="grid grid-cols-[minmax(0,1.5fr)_100px_180px] items-start gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                                    className="grid grid-cols-[24px_minmax(0,1.5fr)_100px_128px] items-start gap-3 border-b border-border px-3 py-2 last:border-b-0"
                                   >
+                                    <div className="pt-0.5">
+                                      <input
+                                        type="checkbox"
+                                        className="h-4 w-4"
+                                        checked={String(selectedSuggestionByEntryId[id] ?? "") === topCategoryId}
+                                        onChange={(ev) => setAutoFixRowSelected(row, ev.target.checked)}
+                                        aria-label={`Select ${String(e.payee ?? "row")} safe fix`}
+                                      />
+                                    </div>
+
                                     <div className="min-w-0">
                                       <div className="truncate text-xs font-medium text-foreground" title={String(e.payee ?? "")}>
                                         {String(e.payee ?? "—")}
@@ -2265,41 +2381,8 @@ export default function CategoryReviewPageClient() {
                                       {formatUsdAccountingFromCents(e.amount_cents)}
                                     </div>
 
-                                    <div>
-                                      <select
-                                        className={`h-7 w-full rounded-md border bg-card px-2 text-[11px] ${
-                                          topCategoryId ? "border-bb-status-warning-border ring-1 ring-bb-status-warning-border/40" : "border-border"
-                                        }`}
-                                        value={row.manualCategoryId || row.selectedCategoryId}
-                                        onChange={(ev) => {
-                                          const nextValue = String(ev.target.value ?? "");
-                                          setSelectedSuggestionByEntryId((prev) => ({
-                                            ...prev,
-                                            [id]: nextValue,
-                                          }));
-                                          setManualCategoryByEntryId((prev) => {
-                                            const next = { ...prev };
-                                            if (nextValue) next[id] = nextValue;
-                                            else delete next[id];
-                                            return next;
-                                          });
-                                        }}
-                                      >
-                                        <option value="">Choose category…</option>
-                                        {topCategoryId ? (
-                                          <option value={topCategoryId}>
-                                            {topCategoryName || "Suggested category"} (
-                                            {topIsBulkSafe ? "Auto Fix ready" : "needs review"})
-                                          </option>
-                                        ) : null}
-                                        {categories
-                                          .filter((c) => !topCategoryId || String(c.id) !== topCategoryId)
-                                          .map((c) => (
-                                            <option key={c.id} value={c.id}>
-                                              {c.name}
-                                            </option>
-                                          ))}
-                                      </select>
+                                    <div className="pt-0.5 text-right text-[10px] font-medium text-primary">
+                                      {topIsBulkSafe ? "Safe" : "Review"}
                                     </div>
                                   </div>
                                 );
@@ -2309,6 +2392,97 @@ export default function CategoryReviewPageClient() {
                         </div>
                       );
                     })}
+
+                    {autoFixReviewRows.length > 0 ? (
+                      <details className="bg-card" open={autoFixGroups.length === 0}>
+                        <summary className="cursor-pointer px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50">
+                          Needs review ({autoFixReviewRows.length})
+                        </summary>
+
+                        <div className="border-t border-border bg-muted/40">
+                          <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                            Review-only suggestions are not preselected. Manual selections apply only selected loaded rows.
+                          </div>
+
+                          {autoFixReviewRows.map((row) => {
+                            const e = row.entry;
+                            const id = String(e.id);
+                            const top = row.suggestions[0] ?? null;
+                            const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+                            const topCategoryName = categorySuggestionCategoryName(top, categoryNameById);
+                            const topConfidence = categorySuggestionConfidence(top?.confidence);
+                            const topTierLabel = top
+                              ? categorySuggestionTierLabel(top?.confidence_tier ?? top?.confidenceTier)
+                              : "No confident suggestion";
+                            const topReason = String(top?.reason ?? "").trim();
+
+                            return (
+                              <div
+                                key={id}
+                                className="grid grid-cols-[minmax(0,1.5fr)_100px_180px] items-start gap-3 border-t border-border px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate text-xs font-medium text-foreground" title={String(e.payee ?? "")}>
+                                    {String(e.payee ?? "—")}
+                                  </div>
+                                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {String(e.date ?? "").slice(0, 10)}
+                                  </div>
+                                  <div className="mt-1 text-[10px] text-muted-foreground">
+                                    {topCategoryName ? `${topCategoryName} · ` : ""}
+                                    {topTierLabel}
+                                    {top ? ` · ${topConfidence}%` : ""}
+                                  </div>
+                                  {topReason ? (
+                                    <div className="mt-1 truncate text-[10px] text-muted-foreground" title={topReason}>
+                                      {topReason}
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                <div className="pt-0.5 text-right text-xs font-semibold text-foreground">
+                                  {formatUsdAccountingFromCents(e.amount_cents)}
+                                </div>
+
+                                <select
+                                  className="h-7 w-full rounded-md border border-border bg-card px-2 text-[11px]"
+                                  value={row.manualCategoryId}
+                                  onChange={(ev) => {
+                                    const nextValue = String(ev.target.value ?? "");
+                                    setManualCategoryByEntryId((prev) => {
+                                      const next = { ...prev };
+                                      if (nextValue) next[id] = nextValue;
+                                      else delete next[id];
+                                      return next;
+                                    });
+                                    setSelectedSuggestionByEntryId((prev) => {
+                                      const next = { ...prev };
+                                      if (nextValue) next[id] = nextValue;
+                                      else delete next[id];
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  <option value="">Manual review…</option>
+                                  {topCategoryId ? (
+                                    <option value={topCategoryId}>
+                                      {topCategoryName || "Suggested category"} (needs review)
+                                    </option>
+                                  ) : null}
+                                  {categories
+                                    .filter((c) => !topCategoryId || String(c.id) !== topCategoryId)
+                                    .map((c) => (
+                                      <option key={c.id} value={c.id}>
+                                        {c.name}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                 )}
               </div>
