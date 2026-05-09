@@ -3329,7 +3329,7 @@ const displayBankActiveList = useMemo(() => {
       : "Matched (Not loaded yet)";
   const bankEmptyStateLabel = (() => {
     if (bankTab === "matched" && !bankStatusLoaded.matched) {
-      return "Matched loads on open.";
+      return "No matched bank transactions.";
     }
 
     if (bankTab === "matched") {
@@ -3407,16 +3407,6 @@ const displayBankActiveList = useMemo(() => {
     // Full-match only: partial doesn't exist
     return { unmatchedN, partialN: 0, matchedN, remainingAbsTotal };
   }, [bankTxSorted, remainingAbsByBankTxnId]);
-
-  const bankLoadedStateCopy = !bankStatusLoaded.unmatched
-    ? bankLoadingByStatus.unmatched
-      ? "Unmatched loading. Matched loads on open."
-      : "Unmatched not loaded. Matched loads on open."
-    : bankStatusLoaded.matched
-      ? "Date-scoped. Search filters visible rows."
-      : bankLoadingByStatus.matched
-        ? "Unmatched loaded. Matched loading."
-        : "Unmatched loaded. Matched loads on open.";
 
   const entryStateSummary = useMemo(() => {
     return {
@@ -4872,18 +4862,19 @@ const displayBankActiveList = useMemo(() => {
               >
                 {bankMatchedTabLabel}
               </button>
-              <span className="text-[11px] text-bb-text-muted">{bankLoadedStateCopy}</span>
             </div>
-            <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
-              <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
-              {bankScopeCopy}
-              {activeBankHiddenBySearch > 0 ? (
-                <span> • {activeBankHiddenBySearch} hidden by search</span>
-              ) : null}
-              {bankTab === "unmatched" && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0 ? (
-                <span> • {bankUnmatchedOutsideDateRange}{bankUnmatchedScopeCounts.allTime?.capped ? "+" : ""} outside date range</span>
-              ) : null}
-            </div>
+            {bankTab === "unmatched" || activeBankStatusLoaded || activeBankStatusLoading ? (
+              <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
+                <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
+                {bankScopeCopy}
+                {activeBankHiddenBySearch > 0 ? (
+                  <span> • {activeBankHiddenBySearch} hidden by search</span>
+                ) : null}
+                {bankTab === "unmatched" && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0 ? (
+                  <span> • {bankUnmatchedOutsideDateRange}{bankUnmatchedScopeCounts.allTime?.capped ? "+" : ""} outside date range</span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="h-px bg-bb-border" />
@@ -4901,10 +4892,9 @@ const displayBankActiveList = useMemo(() => {
               ) : bankPanelShowDeferredLoad ? (
                 <div className="h-full min-h-[240px] flex items-center justify-center">
                   <div className="text-center">
-                    <div className="text-xs text-bb-text-muted">Matched loads on open.</div>
                     <button
                       type="button"
-                      className="mt-3 h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
+                      className="h-7 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                       onClick={() => void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] })}
                     >
                       Load matched transactions
