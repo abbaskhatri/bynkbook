@@ -2208,16 +2208,6 @@ export default function LedgerPageClient() {
   const totalEntryCount = typeof entriesMeta?.totalCount === "number" ? entriesMeta.totalCount : undefined;
   const hasMoreOnServer = !!entriesMeta?.hasMore;
   const canLoadMoreEntries = hasMoreOnServer && !entriesQ.isFetching;
-  const hasActiveLocalFilters =
-    !!debouncedPayee.trim() ||
-    filterType !== "ALL" ||
-    filterMethod !== "ALL" ||
-    filterCategory !== "ALL" ||
-    !!filterFrom ||
-    !!filterTo ||
-    !!filterAmountMin.trim() ||
-    !!filterAmountMax.trim() ||
-    !!filterAmountExact.trim();
   const canNext = endIdx < displayRowsAll.length;
   const canPrev = page > 1;
   const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / rowsPerPage));
@@ -2237,43 +2227,20 @@ export default function LedgerPageClient() {
     !isNeedsReconcileView && loadedPageCount > 1 && totalPages > page
       ? `Older rows loaded. Use page navigation to view ${olderLoadedPageRange}.`
       : null;
-  const loadedScopeNotice = (() => {
-    if (isNeedsReconcileView) {
-      if (hasMoreOnServer) {
-        return `${loadedCountLabel}. Load older rows for more queue items.`;
-      }
-      return `${loadedCountLabel}. Queue checked.`;
-    }
-
-    if (hasMoreOnServer) {
-      return totalEntryCount !== undefined
-        ? `${loadedEntryCount} of ${totalEntryCount} loaded.`
-        : `${loadedEntryCount} latest loaded.`;
-    }
-
-    if (hasActiveLocalFilters && loadedEntryCount > filteredRowsAll.length) {
-      return `${filteredRowsAll.length} of ${loadedEntryCount} loaded shown.`;
-    }
-
-    if (!hasMoreOnServer && loadedEntryCount === 0 && filteredRowsAll.length === 1 && filteredRowsAll[0]?.id === "opening_balance") {
-      return "Only Opening Balance is in this account after loading all entries.";
-    }
-
-    return null;
-  })();
+  const ledgerLoadedScopeLabel = `${isNeedsReconcileView ? "Queue" : "Current date range"} ${loadedEntryCount}${hasMoreOnServer ? "+" : ""} loaded • Visible ${displayRowsAll.length}`;
   const footerScopeNote = (() => {
     const deletedNote = showDeleted ? " Deleted rows excluded." : "";
 
     if (isNeedsReconcileView) {
       const deletedQueueNote = reconcileQueueDeletedRows.length > 0 ? ` Deleted audit rows shown: ${reconcileQueueDeletedRows.length}.` : "";
-      return `Expected ${reconcileQueueExpectedRows.length} · Partial ${reconcileQueuePartialRows.length} · Total amount shown ${formatUsdFromCents(footerTotals.net)}.${deletedQueueNote}`;
+      return `${ledgerLoadedScopeLabel}. Expected ${reconcileQueueExpectedRows.length} · Partial ${reconcileQueuePartialRows.length} · Total amount shown ${formatUsdFromCents(footerTotals.net)}.${deletedQueueNote}`;
     }
 
     if (!hasMoreOnServer && totalEntryCount !== undefined && loadedEntryCount >= totalEntryCount) {
-      return `Loaded all ${totalEntryCount} entries; totals reflect this page.${deletedNote}`;
+      return `${ledgerLoadedScopeLabel}. Loaded all ${totalEntryCount} entries; totals reflect this page.${deletedNote}`;
     }
 
-    return `Totals reflect rows on this page, not the full ledger.${deletedNote}`;
+    return `${ledgerLoadedScopeLabel}. Totals reflect rows on this page, not the full ledger.${deletedNote}`;
   })();
 
   // Selection
@@ -3677,14 +3644,14 @@ export default function LedgerPageClient() {
       <col key="c3" style={{ width: "auto", minWidth: "150px" }} />, // payee flex
       <col key="c4" style={{ width: "64px" }} />,   // type
       <col key="c5" style={{ width: "66px" }} />,   // method
-      <col key="c6" style={{ width: "238px" }} />,  // category
+      <col key="c6" style={{ width: "190px" }} />,  // category
       <col key="c7" style={{ width: "90px" }} />,   // amount
     ];
 
     const tail = [
-      <col key="c9" style={{ width: "72px" }} />,  // status
-      <col key="c10" style={{ width: "20px" }} />,  // dup icon
-      <col key="c11" style={{ width: "20px" }} />,  // cat icon
+      <col key="c9" style={{ width: "64px" }} />,  // status
+      <col key="c10" style={{ width: "16px" }} />,  // dup icon
+      <col key="c11" style={{ width: "16px" }} />,  // cat icon
       <col key="c12" style={{ width: "64px" }} />,  // actions
     ];
 
@@ -5158,8 +5125,8 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Actions */}
-          <td className={td + " text-center pr-1"}>
-            <div className="relative mx-auto flex h-full min-h-7 w-[86px] items-center justify-end gap-1.5" data-rowmenu={r.id}>
+          <td className={td + " text-center px-0.5"}>
+            <div className="relative mx-auto flex h-full min-h-7 w-[60px] items-center justify-center gap-1" data-rowmenu={r.id}>
               {deletedRow ? (
                 <>
                   <Button
@@ -5871,31 +5838,6 @@ export default function LedgerPageClient() {
           </div>
         ) : null}
 
-        {loadedScopeNotice ? (
-          <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1 text-[11px] leading-4 text-bb-status-warning-fg">
-            <span>{loadedScopeNotice}</span>
-            {loadMoreNavigationNote ? <span className="font-medium">{loadMoreNavigationNote}</span> : null}
-            {loadMoreNavigationNote ? (
-              <button
-                type="button"
-                className="h-6 rounded-md border border-bb-status-warning-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-status-warning-fg hover:bg-bb-table-row-hover"
-                onClick={() => setPage(olderLoadedPageTarget)}
-              >
-                Go to older rows
-              </button>
-            ) : null}
-            {hasMoreOnServer ? (
-              <button
-                type="button"
-                className="h-6 rounded-md border border-bb-status-warning-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-status-warning-fg hover:bg-bb-table-row-hover disabled:opacity-60"
-                disabled={!canLoadMoreEntries}
-                onClick={() => setLoadedPageCount((n) => n + 1)}
-              >
-                {entriesQ.isFetching ? "Loading..." : "Load more entries"}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
