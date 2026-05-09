@@ -10,7 +10,6 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { issueCountKey } from "@/lib/queries/issueKeys";
-import { getConfiguredAppEnvironment, type AppEnvironmentLabel } from "@/lib/appEnvironment";
 import { apiFetch } from "@/lib/api/client";
 import { listCategories } from "@/lib/api/categories";
 
@@ -118,42 +117,6 @@ function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
         <span>{label}</span>
       </div>
     </div>
-  );
-}
-
-function getApiBaseFromEnv(): string {
-  const v =
-    (process.env.NEXT_PUBLIC_API_BASE_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      process.env.NEXT_PUBLIC_API_BASE ||
-      "") as string;
-  return String(v || "").trim();
-}
-
-function safeHost(u: string): string {
-  const s = String(u || "").trim();
-  if (!s) return "";
-  try {
-    return new URL(s).host;
-  } catch {
-    // allow raw host strings
-    return s.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  }
-}
-
-function EnvBadge({ label, tooltip }: { label: AppEnvironmentLabel; tooltip: string }) {
-  const cls =
-    label === "PROD"
-      ? "bg-primary/10 text-primary border-primary/20"
-      : "bg-bb-status-warning-bg text-bb-status-warning-fg border-bb-status-warning-border";
-
-  return (
-    <span
-      title={tooltip}
-      className={`inline-flex items-center h-6 px-2 rounded-full border text-[11px] font-semibold tracking-wide select-none ${cls}`}
-    >
-      {label}
-    </span>
   );
 }
 
@@ -797,17 +760,6 @@ export default function ReconcilePageClient() {
   const router = useRouter();
   const sp = useSearchParams();
   const qc = useQueryClient();
-
-  // ENV badge + API host tooltip (prevents “wrong backend” confusion)
-  const apiBase = useMemo(() => getApiBaseFromEnv(), []);
-  const apiHost = useMemo(() => safeHost(apiBase), [apiBase]);
-  const appEnv = useMemo(() => getConfiguredAppEnvironment(), []);
-
-  const envLabel = appEnv.label;
-
-  const envTooltip = useMemo(() => {
-    return `ENV: ${envLabel}\nSource: ${appEnv.source}${appEnv.explicit ? "" : " fallback"}\nAPI host: ${apiHost || "(unset)"}\nAPI base: ${apiBase || "(unset)"}`;
-  }, [envLabel, appEnv.source, appEnv.explicit, apiHost, apiBase]);
 
   // Layout: keep only table bodies scrolling
   const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
@@ -3459,7 +3411,6 @@ const displayBankActiveList = useMemo(() => {
 
   const headerRight = (
     <div className="flex items-center gap-2">
-      <EnvBadge label={envLabel} tooltip={envTooltip} />
       <button
         type="button"
         className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"

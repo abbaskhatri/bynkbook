@@ -108,7 +108,7 @@ export function TotalsFooter(props: {
 
         <Button
           variant="outline"
-          className={`${navBtnClass} ${emphasizeNext && canNext ? "border-amber-300 bg-amber-50 text-amber-950 shadow-sm hover:bg-amber-100" : ""}`}
+          className={`${navBtnClass} ${emphasizeNext && canNext ? "border-bb-border bg-bb-surface-elevated text-bb-text shadow-sm hover:bg-bb-table-row-hover" : ""}`}
           disabled={!canNext}
           onClick={() => setPage(page + 1)}
           aria-label="Next page"
@@ -117,14 +117,14 @@ export function TotalsFooter(props: {
         </Button>
 
         {paginationNote ? (
-          <div className="flex min-w-0 max-w-[420px] items-center gap-2 text-[11px] text-amber-700">
+          <div className="flex min-w-0 max-w-[420px] items-center gap-2 text-[11px] text-bb-text-muted">
             <span className="truncate" title={typeof paginationNote === "string" ? paginationNote : undefined}>
               {paginationNote}
             </span>
             {paginationActionLabel && onPaginationAction ? (
               <button
                 type="button"
-                className="h-6 shrink-0 rounded-md border border-amber-300 bg-white px-2 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+                className="h-6 shrink-0 rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text hover:bg-bb-table-row-hover"
                 onClick={onPaginationAction}
               >
                 {paginationActionLabel}

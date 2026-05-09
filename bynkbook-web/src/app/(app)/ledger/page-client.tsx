@@ -2162,14 +2162,19 @@ export default function LedgerPageClient() {
   // - exclude TRANSFER (so totals aren't distorted)
   // - balance = top visible running balance (first non-deleted row), not a sum
   // ================================
+  const activePageRows = useMemo(() => {
+    return pageRows.filter((r) => {
+      if (r.isDeleted) return false;
+      if (r.id === "opening_balance") return false;
+      if (r.isOpeningBalanceEntry) return false;
+      return true;
+    });
+  }, [pageRows]);
+
   const footerTotals = useMemo(() => {
     let income = ZERO;
     let expense = ZERO; // will remain negative (signed)
-    for (const r of pageRows) {
-      if (r.isDeleted) continue;
-      if (r.id === "opening_balance") continue;
-      if (r.isOpeningBalanceEntry) continue;
-
+    for (const r of activePageRows) {
       const t = (r.rawType || "").toString().toUpperCase();
       if (t === "TRANSFER") continue;
 
@@ -2186,11 +2191,8 @@ export default function LedgerPageClient() {
 
     // Balance: first visible non-deleted row's running balance
     const top =
-      pageRows.find(
+      activePageRows.find(
         (r) =>
-          !r.isDeleted &&
-          r.id !== "opening_balance" &&
-          !r.isOpeningBalanceEntry &&
           r.balanceStr &&
           r.balanceStr !== "—"
       ) ?? null;
@@ -2199,7 +2201,7 @@ export default function LedgerPageClient() {
     const balStr = top ? top.balanceStr : "—";
 
     return { income, expense, net, balanceCents: balCents, balanceStr: balStr };
-  }, [pageRows, isNeedsReconcileView]);
+  }, [activePageRows, isNeedsReconcileView]);
 
   const entriesMeta = (entriesQ.data as any)?.meta as
     | { totalCount?: number; hasMore?: boolean; nextCursor?: string | null; limit?: number }
@@ -2227,20 +2229,14 @@ export default function LedgerPageClient() {
     !isNeedsReconcileView && loadedPageCount > 1 && totalPages > page
       ? `Older rows loaded. Use page navigation to view ${olderLoadedPageRange}.`
       : null;
-  const ledgerLoadedScopeLabel = `${isNeedsReconcileView ? "Queue" : "Current date range"} ${loadedEntryCount}${hasMoreOnServer ? "+" : ""} loaded • Visible ${displayRowsAll.length}`;
   const footerScopeNote = (() => {
-    const deletedNote = showDeleted ? " Deleted rows excluded." : "";
+    const deletedNote = showDeleted ? "Deleted rows excluded from totals." : null;
 
     if (isNeedsReconcileView) {
-      const deletedQueueNote = reconcileQueueDeletedRows.length > 0 ? ` Deleted audit rows shown: ${reconcileQueueDeletedRows.length}.` : "";
-      return `${ledgerLoadedScopeLabel}. Expected ${reconcileQueueExpectedRows.length} · Partial ${reconcileQueuePartialRows.length} · Total amount shown ${formatUsdFromCents(footerTotals.net)}.${deletedQueueNote}`;
+      return reconcileQueueDeletedRows.length > 0 ? "Deleted audit rows excluded from totals." : deletedNote;
     }
 
-    if (!hasMoreOnServer && totalEntryCount !== undefined && loadedEntryCount >= totalEntryCount) {
-      return `${ledgerLoadedScopeLabel}. Loaded all ${totalEntryCount} entries; totals reflect this page.${deletedNote}`;
-    }
-
-    return `${ledgerLoadedScopeLabel}. Totals reflect rows on this page, not the full ledger.${deletedNote}`;
+    return deletedNote;
   })();
 
   // Selection
@@ -5700,7 +5696,7 @@ export default function LedgerPageClient() {
                 {uncategorizedCount > 0 ? (
                   <button
                     type="button"
-                    className="h-7 px-2 text-xs rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg inline-flex items-center gap-1"
+                    className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card text-bb-text-muted hover:bg-bb-table-row-hover inline-flex items-center gap-1"
                     title="Review uncategorized entries"
                     onClick={() => {
                       if (!selectedBusinessId || !selectedAccountId) return;
@@ -5718,14 +5714,14 @@ export default function LedgerPageClient() {
                   className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 inline-flex items-center gap-1.5"
                   onClick={() => void anomaliesQ.refetch()}
                   disabled={!selectedBusinessId || !selectedAccountId || anomaliesQ.isFetching}
-                  title={(anomaliesQ.data as any)?.anomalies ? "Refresh anomaly insights" : "Run anomaly scan"}
+                  title={(anomaliesQ.data as any)?.anomalies ? "Rescan issue signals" : "Scan issue signals"}
                 >
                   {anomaliesQ.isFetching ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <RefreshCw className="h-3.5 w-3.5" />
                   )}
-                  {(anomaliesQ.data as any)?.anomalies ? "Refresh anomalies" : "Run anomalies"}
+                  {(anomaliesQ.data as any)?.anomalies ? "Rescan issues" : "Scan issues"}
                 </button>
 
                 <button

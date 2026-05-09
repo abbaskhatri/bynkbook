@@ -209,12 +209,12 @@ export default function ClosedPeriodsPageClient() {
         ) : null}
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
+      <Card className="gap-2 py-3">
+        <CardHeader className="px-3 pb-0">
           <CardTitle className="text-sm">Close period</CardTitle>
         </CardHeader>
 
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 px-3">
           {/* Current status */}
           <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
             <div className="text-[11px] font-semibold text-bb-text-muted">Closed through</div>
