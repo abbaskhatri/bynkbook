@@ -1130,8 +1130,17 @@ export default function CategoryReviewPageClient() {
   const [expandedAutoFixGroups, setExpandedAutoFixGroups] = useState<Record<string, boolean>>({});
 
   const autoFixTotalAmountCents = useMemo(() => {
-    return autoFixRows.reduce((sum, row) => sum + Number(row.entry?.amount_cents ?? 0), 0);
-  }, [autoFixRows]);
+    const selectedApplyEntryIds = new Set([
+      ...selectedApplyItems.map((item) => item.entryId),
+      ...manuallySelectedApplyItems.map((item) => item.entryId),
+    ]);
+
+    return autoFixRows.reduce((sum, row) => {
+      const id = String(row.entry?.id ?? "");
+      if (!selectedApplyEntryIds.has(id)) return sum;
+      return sum + Number(row.entry?.amount_cents ?? 0);
+    }, 0);
+  }, [autoFixRows, selectedApplyItems, manuallySelectedApplyItems]);
 
   const autoFixReadyCount = selectedApplyItems.length + manuallySelectedApplyItems.length;
   const autoFixSafeSelectedCount = selectedApplyItems.length;
@@ -1264,7 +1273,10 @@ export default function CategoryReviewPageClient() {
     });
   }
 
-  function openAutoFixCategoriesForIds(entryIds: string[]) {
+  function openAutoFixCategoriesForIds(
+    entryIds: string[],
+    suggestionsByEntryId: Record<string, any[]> = sugByEntryId
+  ) {
     const idSet = new Set(entryIds);
     const next: Record<string, string> = { ...selectedSuggestionByEntryId };
     const clearManualIds: string[] = [];
@@ -1273,7 +1285,7 @@ export default function CategoryReviewPageClient() {
       const id = String(e.id);
       if (!idSet.has(id)) continue;
 
-      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      const suggestions = Array.isArray(suggestionsByEntryId[id]) ? suggestionsByEntryId[id] : [];
       const top = suggestions[0] ?? null;
       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
 
@@ -1287,7 +1299,7 @@ export default function CategoryReviewPageClient() {
     for (const e of visibleRows) {
       const id = String(e.id);
       if (!idSet.has(id)) continue;
-      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      const suggestions = Array.isArray(suggestionsByEntryId[id]) ? suggestionsByEntryId[id] : [];
       const top = suggestions[0] ?? null;
       const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
       const manualCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
@@ -1357,11 +1369,22 @@ export default function CategoryReviewPageClient() {
   useEffect(() => {
     if (!autoFixPendingIds) return;
     if (suggestionsQ.isFetching) return;
+    const resolvedSuggestionsByEntryId = {
+      ...sugByEntryId,
+      ...((suggestionsQ.data as Record<string, any[]> | undefined) ?? {}),
+    };
+
+    if (!suggestionsQ.error) {
+      const allPendingSuggestionsLoaded = autoFixPendingIds.every((id) =>
+        hasSuggestionEntry(resolvedSuggestionsByEntryId, id)
+      );
+      if (!allPendingSuggestionsLoaded) return;
+    }
 
     setAutoFixPendingIds(null);
-    openAutoFixCategoriesForIds(autoFixPendingIds);
+    openAutoFixCategoriesForIds(autoFixPendingIds, resolvedSuggestionsByEntryId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFixPendingIds, suggestionsQ.isFetching, suggestionsQ.error, sugByEntryId]);
+  }, [autoFixPendingIds, suggestionsQ.isFetching, suggestionsQ.error, suggestionsQ.data, sugByEntryId]);
 
   async function applyManuallySelectedCategories() {
     if (!selectedBusinessId || !selectedAccountId || manuallySelectedApplyItems.length === 0) return;
@@ -2244,7 +2267,7 @@ export default function CategoryReviewPageClient() {
                 </div>
 
                 <div>
-                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Total amount</div>
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Selected amount</div>
                   <div className="mt-0.5 text-lg font-semibold text-foreground">
                     {formatUsdAccountingFromCents(autoFixTotalAmountCents)}
                   </div>
