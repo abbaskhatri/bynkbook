@@ -7,7 +7,7 @@ type BrandLogoProps = {
   collapsed?: boolean;
   size?: "sm" | "md" | "lg";
   variant?: "icon" | "full";
-  tone?: "default" | "light";
+  tone?: "default" | "light" | "auto";
   className?: string;
   priority?: boolean;
 };
@@ -34,7 +34,7 @@ export function BrandLogo({
   collapsed = false,
   size = "md",
   variant,
-  tone = "default",
+  tone = "auto",
   className,
   priority = false,
 }: BrandLogoProps) {
@@ -47,6 +47,9 @@ export function BrandLogo({
         ? fullAssetsLight[size]
         : fullAssetsDefault[size];
 
+  const lightAsset = resolvedVariant === "full" ? fullAssetsLight[size] : null;
+  const imageClass = "h-auto w-auto max-w-full select-none object-contain";
+
   return (
     <div
       className={cn(
@@ -55,14 +58,35 @@ export function BrandLogo({
         className
       )}
     >
-      <Image
-        src={asset.src}
-        alt="BynkBook"
-        width={asset.width}
-        height={asset.height}
-        priority={priority}
-        className="h-auto w-auto max-w-full select-none object-contain"
-      />
+      {tone === "auto" && lightAsset ? (
+        <>
+          <Image
+            src={asset.src}
+            alt="BynkBook"
+            width={asset.width}
+            height={asset.height}
+            priority={priority}
+            className={cn(imageClass, "dark:hidden")}
+          />
+          <Image
+            src={lightAsset.src}
+            alt="BynkBook"
+            width={lightAsset.width}
+            height={lightAsset.height}
+            priority={priority}
+            className={cn(imageClass, "hidden drop-shadow-[0_1px_0_rgba(0,0,0,0.35)] dark:block")}
+          />
+        </>
+      ) : (
+        <Image
+          src={asset.src}
+          alt="BynkBook"
+          width={asset.width}
+          height={asset.height}
+          priority={priority}
+          className={imageClass}
+        />
+      )}
     </div>
   );
 }
