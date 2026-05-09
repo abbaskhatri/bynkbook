@@ -956,6 +956,7 @@ type EditDraft = {
   type: UiType;
   method: UiMethod;
   category: string;
+  categoryId: string | null;
   amountStr: string;
 };
 
@@ -1727,6 +1728,7 @@ export default function LedgerPageClient() {
       const entryRawStatus = String(e.status ?? "EXPECTED").trim().toUpperCase() || "EXPECTED";
       const displayRawStatus = (() => {
         if (isDeleted) return "DELETED";
+        if (isOpeningBalanceEntry) return "SYSTEM";
         if (bankMatchRawStatus) return bankMatchRawStatus;
         if (entryRawStatus === "SYSTEM") return "SYSTEM";
         return "EXPECTED";
@@ -3080,6 +3082,11 @@ export default function LedgerPageClient() {
         ...prevRow,
         ...u,
         memo: u.memo ?? prevRow.memo,
+        category_name: affectsCategory
+          ? u.category_id
+            ? categoryNameById.get(String(u.category_id)) ?? prevRow.category_name
+            : null
+          : prevRow.category_name,
         updated_at: new Date().toISOString(),
       };
 
@@ -3489,7 +3496,9 @@ export default function LedgerPageClient() {
 
     // Category id (only meaningful for income/expense)
     const catName = normalizeCategoryName(editDraft.category || "");
-    const catId = catName ? (categoryIdByNormName.get(normKey(catName)) ?? null) : null;
+    const catId = catName
+      ? editDraft.categoryId ?? categoryIdByNormName.get(normKey(catName)) ?? null
+      : null;
 
     // TRANSFER edits must go through updateTransfer (atomic)
     if (backendType === "TRANSFER") {
@@ -3637,23 +3646,23 @@ export default function LedgerPageClient() {
       <col key="c1" style={{ width: "90px" }} />,   // date
       <col key="c2" style={{ width: "64px" }} />,   // ref
       <col key="c3" style={{ width: "auto", minWidth: "150px" }} />, // payee flex
-      <col key="c4" style={{ width: "68px" }} />,   // type
-      <col key="c5" style={{ width: "72px" }} />,   // method
-      <col key="c6" style={{ width: "94px" }} />,  // category
-      <col key="c7" style={{ width: "84px" }} />,   // amount
+      <col key="c4" style={{ width: "64px" }} />,   // type
+      <col key="c5" style={{ width: "66px" }} />,   // method
+      <col key="c6" style={{ width: "210px" }} />,  // category
+      <col key="c7" style={{ width: "90px" }} />,   // amount
     ];
 
     const tail = [
-      <col key="c9" style={{ width: "102px" }} />,  // status
+      <col key="c9" style={{ width: "88px" }} />,  // status
       <col key="c10" style={{ width: "20px" }} />,  // dup icon
       <col key="c11" style={{ width: "20px" }} />,  // cat icon
-      <col key="c12" style={{ width: "92px" }} />,  // actions
+      <col key="c12" style={{ width: "76px" }} />,  // actions
     ];
 
     if (isNeedsReconcileView) return [...base, ...tail];
     return [
       ...base,
-      <col key="c8" style={{ width: "84px" }} />,   // balance
+      <col key="c8" style={{ width: "92px" }} />,   // balance
       ...tail,
     ];
   }, [isNeedsReconcileView]);
@@ -3790,7 +3799,7 @@ export default function LedgerPageClient() {
       </td>
 
       {/* Category / Note / To Account */}
-      <td className={td}>
+      <td className={td + " overflow-hidden"}>
         {draftType === "TRANSFER" ? (
           <Select value={draftToAccountId} onValueChange={(v) => setDraftToAccountId(v)}>
             <SelectTrigger className={selectTriggerClass}>
@@ -4761,16 +4770,43 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Category */}
-          <td className={td + " min-w-0 " + deletedText}>
+          <td className={td + " min-w-0 overflow-hidden " + deletedText}>
             {isEditing && editDraft ? (
               <CategoryCombobox
                 value={editDraft.category}
-                onValueChange={(v) => setEditDraft({ ...editDraft, category: v })}
+                categoryId={editDraft.categoryId}
+                onValueChange={(v) => {
+                  const n = normalizeCategoryName(v);
+                  setEditDraft({
+                    ...editDraft,
+                    category: v,
+                    categoryId: n ? categoryIdByNormName.get(normKey(n)) ?? null : null,
+                  });
+                }}
+                onSelect={(option) => setEditDraft({ ...editDraft, category: option.name, categoryId: option.id })}
                 options={categoryComboboxOptions}
                 placeholder="Category"
                 inputClassName={inputH7}
                 allowCreate
-                onCreate={(name) => setEditDraft({ ...editDraft, category: name })}
+                onCreate={async (name) => {
+                  if (!selectedBusinessId) return;
+
+                  const n = normalizeCategoryName(name);
+                  const hit = categoryIdByNormName.get(normKey(n));
+                  if (hit) {
+                    setEditDraft({ ...editDraft, category: categoryNameById.get(hit) ?? n, categoryId: hit });
+                    return;
+                  }
+
+                  try {
+                    const res = await createCategory(selectedBusinessId, n);
+                    setEditDraft({ ...editDraft, category: res.row.name, categoryId: res.row.id });
+                    void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId] });
+                    void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
+                  } catch (e: any) {
+                    setErr(e?.message || "Failed to create category");
+                  }
+                }}
                 onSubmit={() => triggerSaveEdit(r.id)}
               />
             ) : quickCatEntryId === r.id ? (
@@ -4813,9 +4849,9 @@ export default function LedgerPageClient() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 <span
-                  className="block max-w-full truncate"
+                  className="block min-w-0 max-w-full truncate"
                   title={r.categoryTooltip ? r.categoryTooltip : r.category}
                 >
                   {r.category}
@@ -4915,7 +4951,7 @@ export default function LedgerPageClient() {
                         return (
                           <button
                             type="button"
-                            className="h-5 px-2 rounded-full border border-bb-border bg-bb-table-header text-bb-text-muted text-[10px] inline-flex items-center shrink-0 hover:bg-bb-table-row-hover"
+                            className="h-5 max-w-[128px] min-w-0 px-2 rounded-full border border-bb-border bg-bb-table-header text-bb-text-muted text-[10px] inline-flex items-center hover:bg-bb-table-row-hover"
                             title={ledgerSugNotice}
                             onClick={(ev) => {
                               ev.stopPropagation();
@@ -4925,7 +4961,7 @@ export default function LedgerPageClient() {
                               setQuickCatBusy(false);
                             }}
                           >
-                            Choose category
+                            <span className="truncate">Choose category</span>
                           </button>
                         );
                       }
@@ -4933,7 +4969,7 @@ export default function LedgerPageClient() {
                       return (
                         <button
                           type="button"
-                          className="h-5 px-2 rounded-full border border-bb-border bg-bb-table-header text-bb-text-muted text-[10px] inline-flex items-center shrink-0 hover:bg-bb-table-row-hover"
+                          className="h-5 max-w-[128px] min-w-0 px-2 rounded-full border border-bb-border bg-bb-table-header text-bb-text-muted text-[10px] inline-flex items-center hover:bg-bb-table-row-hover"
                           title="Choose category"
                           onClick={(ev) => {
                             ev.stopPropagation();
@@ -4943,7 +4979,7 @@ export default function LedgerPageClient() {
                             setQuickCatBusy(false);
                           }}
                         >
-                          Choose category
+                          <span className="truncate">Choose category</span>
                         </button>
                       );
                     }
@@ -4955,8 +4991,8 @@ export default function LedgerPageClient() {
                     return (
                       <button
                         type="button"
-                        className="h-5 px-2 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15"
-                        title={String(s?.reason ?? "")}
+                        className="h-5 max-w-full min-w-0 px-2 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15"
+                        title={[name, String(s?.reason ?? "")].filter(Boolean).join(" - ")}
                         onClick={async (ev) => {
                           ev.stopPropagation();
                           if (!catId) return;
@@ -4983,7 +5019,7 @@ export default function LedgerPageClient() {
                           }
                         }}
                       >
-                        <span className="font-semibold truncate max-w-[120px]">{name}</span>
+                        <span className="min-w-0 max-w-[120px] truncate font-semibold">{name}</span>
                         <span className="text-primary">{conf}%</span>
                       </button>
                     );
@@ -5157,9 +5193,6 @@ export default function LedgerPageClient() {
                                 return;
                               }
 
-                              const topSug = ledgerSugTopByEntryId[r.id] ?? null;
-                              const suggestedCategoryName = String(topSug?.category_name ?? "").trim();
-
                               setEditingId(r.id);
                               setEditDraft({
                                 date: r.date,
@@ -5167,7 +5200,8 @@ export default function LedgerPageClient() {
                                 payee: r.payee,
                                 type: uiTypeFromRaw(r.rawType),
                                 method: uiMethodFromRaw(r.rawMethod),
-                                category: r.category || suggestedCategoryName || "",
+                                category: r.category || "",
+                                categoryId: r.categoryId ?? null,
                                 amountStr: stripMoneyDisplay(r.amountStr),
                               });
                               requestAnimationFrame(() => editPayeeRef.current?.focus());

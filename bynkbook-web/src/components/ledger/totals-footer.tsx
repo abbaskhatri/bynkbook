@@ -69,9 +69,9 @@ export function TotalsFooter(props: {
   const navBtnClass = iconButtonH7;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2 text-xs text-bb-text-muted">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 text-xs text-bb-text-muted">
       {/* Left: rows + paging */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <span>Rows:</span>
 
         <Select
@@ -117,7 +117,7 @@ export function TotalsFooter(props: {
         </Button>
 
         {paginationNote ? (
-          <div className="flex max-w-[540px] items-center gap-2 text-[11px] text-amber-700">
+          <div className="flex min-w-0 max-w-[420px] items-center gap-2 text-[11px] text-amber-700">
             <span className="truncate" title={typeof paginationNote === "string" ? paginationNote : undefined}>
               {paginationNote}
             </span>
@@ -146,7 +146,7 @@ export function TotalsFooter(props: {
       </div>
 
       {/* Right: totals */}
-      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs tabular-nums">
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right text-xs tabular-nums">
         {totalsScopeLabel ? (
           <div className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-semibold text-bb-text">
@@ -154,7 +154,7 @@ export function TotalsFooter(props: {
             </span>
             {totalsScopeNote ? (
               <span
-                className="max-w-[320px] truncate text-[11px] text-bb-text-muted"
+                className="max-w-[260px] truncate text-[11px] text-bb-text-muted"
                 title={typeof totalsScopeNote === "string" ? totalsScopeNote : undefined}
               >
                 {totalsScopeNote}
