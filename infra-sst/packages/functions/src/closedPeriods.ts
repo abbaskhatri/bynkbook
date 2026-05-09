@@ -104,6 +104,8 @@ export async function handler(event: any) {
       WHERE e.business_id = $1::uuid
         ${whereAcctSql}
         AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
+        AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
         AND e.date >= $3::date
         AND e.date <= $4::date
       `,
@@ -113,30 +115,68 @@ export async function handler(event: any) {
       to
     );
 
-const reconciledRows: any[] = await prisma.$queryRawUnsafe(
-  `
-  SELECT COUNT(DISTINCT e.id)::int AS n
-  FROM "entry" e
-  LEFT JOIN "bank_match" bm
-    ON bm.entry_id = e.id
-   AND bm.business_id = e.business_id
-   ${accountId ? "AND bm.account_id = e.account_id" : ""}
-   AND bm.voided_at IS NULL
-  WHERE e.business_id = $1::uuid
-    ${whereAcctSql}
-    AND e.deleted_at IS NULL
-    AND e.date >= $3::date
-    AND e.date <= $4::date
-    AND (
-      bm.entry_id IS NOT NULL
-      OR UPPER(e.type) = 'ADJUSTMENT'
-    )
-  `,
-  biz,
-  acctParam,
-  from,
-  to
-);
+    const reconciledRows: any[] = await prisma.$queryRawUnsafe(
+      `
+      WITH active_match_group_amounts AS (
+        SELECT
+          mge.entry_id,
+          mge.business_id,
+          mge.account_id,
+          SUM(mge.matched_amount_cents)::bigint AS matched_abs_cents
+        FROM "match_group_entry" mge
+        INNER JOIN "match_group" mg
+          ON mg.id = mge.match_group_id
+         AND mg.business_id = mge.business_id
+         AND mg.account_id = mge.account_id
+         AND mg.status = 'ACTIVE'
+         AND mg.voided_at IS NULL
+        WHERE EXISTS (
+          SELECT 1
+          FROM "match_group_bank" mgb
+          WHERE mgb.match_group_id = mge.match_group_id
+            AND mgb.business_id = mge.business_id
+            AND mgb.account_id = mge.account_id
+        )
+        GROUP BY mge.entry_id, mge.business_id, mge.account_id
+      ),
+      legacy_bank_match_amounts AS (
+        SELECT
+          bm.entry_id,
+          bm.business_id,
+          bm.account_id,
+          SUM(ABS(bm.matched_amount_cents))::bigint AS matched_abs_cents
+        FROM "bank_match" bm
+        WHERE bm.voided_at IS NULL
+        GROUP BY bm.entry_id, bm.business_id, bm.account_id
+      )
+      SELECT COUNT(DISTINCT e.id)::int AS n
+      FROM "entry" e
+      LEFT JOIN active_match_group_amounts mgm
+        ON mgm.entry_id = e.id
+       AND mgm.business_id = e.business_id
+       AND mgm.account_id = e.account_id
+      LEFT JOIN legacy_bank_match_amounts lbm
+        ON lbm.entry_id = e.id
+       AND lbm.business_id = e.business_id
+       AND lbm.account_id = e.account_id
+      WHERE e.business_id = $1::uuid
+        ${whereAcctSql}
+        AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
+        AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
+        AND e.date >= $3::date
+        AND e.date <= $4::date
+        AND (
+          UPPER(COALESCE(e.type, '')) = 'ADJUSTMENT'
+          OR COALESCE(mgm.matched_abs_cents, 0) >= ABS(e.amount_cents)
+          OR COALESCE(lbm.matched_abs_cents, 0) >= ABS(e.amount_cents)
+        )
+      `,
+      biz,
+      acctParam,
+      from,
+      to
+    );
 
     const issuesRows: any[] = await prisma.$queryRawUnsafe(
       `
@@ -150,6 +190,26 @@ const reconciledRows: any[] = await prisma.$queryRawUnsafe(
         ${accountId ? "AND ei.account_id = $2::uuid" : ""}
         AND ei.status = 'OPEN'
         AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
+        AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
+        AND e.date >= $3::date
+        AND e.date <= $4::date
+      `,
+      biz,
+      acctParam,
+      from,
+      to
+    );
+
+    const uncategorizedRows: any[] = await prisma.$queryRawUnsafe(
+      `
+      SELECT COUNT(*)::int AS n
+      FROM "entry" e
+      WHERE e.business_id = $1::uuid
+        ${whereAcctSql}
+        AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.type, '')) IN ('INCOME', 'EXPENSE')
+        AND e.category_id IS NULL
         AND e.date >= $3::date
         AND e.date <= $4::date
       `,
@@ -162,9 +222,10 @@ const reconciledRows: any[] = await prisma.$queryRawUnsafe(
     const entries_total = Number(totalRows?.[0]?.n ?? 0);
     const entries_reconciled = Number(reconciledRows?.[0]?.n ?? 0);
     const issues_open = Number(issuesRows?.[0]?.n ?? 0);
+    const entries_uncategorized = Number(uncategorizedRows?.[0]?.n ?? 0);
     const entries_unreconciled = Math.max(0, entries_total - entries_reconciled);
 
-    const is_clean = entries_unreconciled === 0 && issues_open === 0;
+    const is_clean = entries_unreconciled === 0 && issues_open === 0 && entries_uncategorized === 0;
 
     return json(200, {
       ok: true,
@@ -177,6 +238,7 @@ const reconciledRows: any[] = await prisma.$queryRawUnsafe(
         entries_reconciled,
         entries_unreconciled,
         issues_open,
+        entries_uncategorized,
         is_clean,
       },
     });

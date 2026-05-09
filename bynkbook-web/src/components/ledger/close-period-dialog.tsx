@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { previewClosedPeriods, closeThroughDate } from "@/lib/api/closedPeriods";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
@@ -88,6 +87,7 @@ export function ClosePeriodDialog(props: {
   const stats = preview?.stats ?? null;
   const monthsAffected: string[] = preview?.months_affected ?? [];
   const isClean = !!stats?.is_clean;
+  const uncategorizedCount = Number(stats?.entries_uncategorized ?? 0);
 
   async function runPreview() {
     setLoading(true);
@@ -268,7 +268,7 @@ export function ClosePeriodDialog(props: {
             {!preview ? (
               <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
             ) : (
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div className="rounded-md border border-bb-border p-3">
                   <div className="text-[11px] text-bb-text-muted">Total</div>
                   <div className="text-sm font-semibold">{stats.entries_total}</div>
@@ -284,6 +284,10 @@ export function ClosePeriodDialog(props: {
                 <div className="rounded-md border border-bb-border p-3">
                   <div className="text-[11px] text-bb-text-muted">Open issues</div>
                   <div className="text-sm font-semibold">{stats.issues_open}</div>
+                </div>
+                <div className="rounded-md border border-bb-border p-3">
+                  <div className="text-[11px] text-bb-text-muted">Uncategorized</div>
+                  <div className="text-sm font-semibold">{uncategorizedCount}</div>
                 </div>
               </div>
             )}

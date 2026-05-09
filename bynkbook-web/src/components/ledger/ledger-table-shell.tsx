@@ -86,7 +86,7 @@ export function LedgerTableShell(props: {
 
           <tbody>
             {addRowChildren ? (
-              <tr className="sticky top-[28px] z-30 bg-primary/10 border-b-2 border-primary/20">
+              <tr className="sticky top-[28px] z-30 border-b-2 border-primary/25 bg-bb-surface-card shadow-[0_1px_0_rgba(0,0,0,0.04),0_8px_18px_rgba(0,0,0,0.08)]">
                 {addRowChildren}
               </tr>
             ) : null}
