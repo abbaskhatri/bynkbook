@@ -410,6 +410,17 @@ function sortEntriesChronAsc(a: Entry, b: Entry) {
   return ca < cb ? -1 : 1;
 }
 
+function sortLedgerQueueRowsDesc<T extends { date?: string | null }>(rows: T[]) {
+  return rows.slice().sort((a, b) => {
+    const ad = String(a.date ?? "").slice(0, 10);
+    const bd = String(b.date ?? "").slice(0, 10);
+    if (ad === bd) return 0;
+    if (!ad) return 1;
+    if (!bd) return -1;
+    return ad < bd ? 1 : -1;
+  });
+}
+
 function titleCase(s: string) {
   const t = (s || "").trim().toLowerCase();
   if (!t) return "";
@@ -2018,30 +2029,30 @@ export default function LedgerPageClient() {
   }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
 
   const reconcileQueueExpectedRows = useMemo(() => {
-    return filteredRowsAll.filter((r) => {
+    return sortLedgerQueueRowsDesc(filteredRowsAll.filter((r) => {
       if (r.isDeleted) return false;
       if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
       if (String(r.rawStatus ?? "").toUpperCase() !== "EXPECTED") return false;
       return true;
-    });
+    }));
   }, [filteredRowsAll]);
 
   const reconcileQueuePartialRows = useMemo(() => {
-    return filteredRowsAll.filter((r) => {
+    return sortLedgerQueueRowsDesc(filteredRowsAll.filter((r) => {
       if (r.isDeleted) return false;
       if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
       if (String(r.rawStatus ?? "").toUpperCase() !== "PARTIAL") return false;
       return true;
-    });
+    }));
   }, [filteredRowsAll]);
 
   const reconcileQueueDeletedRows = useMemo(() => {
     if (!showDeleted) return [] as typeof filteredRowsAll;
-    return filteredRowsAll.filter((r) => {
+    return sortLedgerQueueRowsDesc(filteredRowsAll.filter((r) => {
       if (!r.isDeleted) return false;
       if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
       return true;
-    });
+    }));
   }, [filteredRowsAll, showDeleted]);
 
   const reconcileQueueRowsAll = useMemo(() => {
@@ -5830,7 +5841,7 @@ export default function LedgerPageClient() {
         {isNeedsReconcileView ? (
           <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-bb-border bg-bb-surface-card px-3 py-1.5 text-xs text-bb-text-muted">
             <span className="font-medium text-bb-text">Work queue view.</span>
-            <span>Ledger order and running balances remain chronological.</span>
+            <span>Running balances remain in Chronological.</span>
           </div>
         ) : null}
 

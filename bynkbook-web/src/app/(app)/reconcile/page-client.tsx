@@ -2118,7 +2118,6 @@ const isReconcileExemptEntry = (e: any) => {
   const allEntries = entriesQ.data ?? [];
   const entriesLoadedCount = allEntries.length;
   const entriesHitApiLimit = entriesLoadedCount >= ENTRIES_API_LIMIT;
-  const entriesScopeLabel = from || to ? "for this date range" : "for this account";
 
   const allEntriesSorted = useMemo(() => {
     const arr = [...allEntries];
@@ -4329,13 +4328,6 @@ const displayBankActiveList = useMemo(() => {
               <span className="font-semibold text-bb-text">Ledger scope:</span>{" "}
               {entriesScopeCopy}
             </div>
-
-            {entriesHitApiLimit ? (
-              <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1 text-[11px] leading-4 text-bb-status-warning-fg">
-                <span>{entriesLoadedCount}+ ledger entries loaded {entriesScopeLabel}.</span>
-                <span>Expected/Matched use loaded rows; narrow range for more precision.</span>
-              </div>
-            ) : null}
 
             {bankTab === "unmatched" && selectedBankTxnIds.size > 0 ? (
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">
