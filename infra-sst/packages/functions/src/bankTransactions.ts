@@ -74,6 +74,9 @@ function absBig(n: bigint) {
 const POSSIBLE_DUPLICATE_ENTRY_CODE = "POSSIBLE_DUPLICATE_ENTRY";
 const POSSIBLE_DUPLICATE_ENTRY_MESSAGE =
   "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
+const PENDING_BANK_TRANSACTION_CODE = "PENDING_BANK_TRANSACTION_NOT_ACTIONABLE";
+const PENDING_BANK_TRANSACTION_MESSAGE =
+  "Pending bank transactions can be reviewed once they post.";
 const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
 const ALLOWED_BANK_ENTRY_METHODS = new Set([
   "CASH",
@@ -573,7 +576,7 @@ export async function handler(event: any) {
               id: bankId,
               is_removed: false,
             },
-            select: { id: true, posted_date: true, name: true, amount_cents: true, raw: true },
+            select: { id: true, posted_date: true, name: true, amount_cents: true, is_pending: true, raw: true },
           });
 
           if (!bankTxn) {
@@ -582,6 +585,15 @@ export async function handler(event: any) {
               status: "FAILED",
               code: "NOT_FOUND",
               error: "Bank transaction not found",
+            });
+            continue;
+          }
+          if (bankTxn.is_pending) {
+            results.push({
+              bank_transaction_id: bankId,
+              status: "SKIPPED",
+              code: PENDING_BANK_TRANSACTION_CODE,
+              error: PENDING_BANK_TRANSACTION_MESSAGE,
             });
             continue;
           }
@@ -956,11 +968,19 @@ export async function handler(event: any) {
           posted_date: true,
           name: true,
           amount_cents: true,
+          is_pending: true,
           raw: true,
         },
       });
 
       if (!bankTxn) return json(404, { ok: false, error: "Bank transaction not found" });
+      if (bankTxn.is_pending) {
+        return json(409, {
+          ok: false,
+          code: PENDING_BANK_TRANSACTION_CODE,
+          error: PENDING_BANK_TRANSACTION_MESSAGE,
+        });
+      }
 
       const bankAmt = BigInt(bankTxn.amount_cents);
       const bankAbs = absBig(bankAmt);
