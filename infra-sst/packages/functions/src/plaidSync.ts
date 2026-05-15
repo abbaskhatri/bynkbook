@@ -10,5 +10,17 @@ export async function handler(event: any) {
   if (!businessId) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing businessId" }) };
   if (!accountId) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing accountId" }) };
 
-  return syncTransactions({ businessId, accountId, userId: sub });
+  let body: any = {};
+  try {
+    body = event?.body ? JSON.parse(event.body) : {};
+  } catch {
+    body = {};
+  }
+
+  return syncTransactions({
+    businessId,
+    accountId,
+    userId: sub,
+    requestRefresh: body?.refresh === true || body?.forceRefresh === true,
+  });
 }

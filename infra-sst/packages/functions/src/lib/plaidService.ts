@@ -524,10 +524,10 @@ export async function disconnectBankConnection(params: { businessId: string; acc
 
 /**
  * Sync transactions (cursor-based) + retention + balance + webhook flag clearing + opening adjustment entry.
- * Returns: newCount, upgradedCount(=0), duplicateCount, pendingCount, lastSyncAt
+ * Returns: newCount, upgradedCount, duplicateCount, pendingCount, lastSyncAt
  */
-export async function syncTransactions(params: { businessId: string; accountId: string; userId: string }) {
-  const { businessId, accountId, userId } = params;
+export async function syncTransactions(params: { businessId: string; accountId: string; userId: string; requestRefresh?: boolean }) {
+  const { businessId, accountId, userId, requestRefresh } = params;
 
   const prisma = await getPrisma();
   const role = await requireMembership(prisma, businessId, userId);
@@ -549,6 +549,21 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   try {
     const plaid = await getPlaidClient();
     const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+    let refreshRequested = false;
+    let refreshSucceeded = false;
+    let refreshErrorCode: string | null = null;
+    let refreshErrorMessage: string | null = null;
+
+    if (requestRefresh) {
+      refreshRequested = true;
+      try {
+        await plaid.transactionsRefresh({ access_token: accessToken });
+        refreshSucceeded = true;
+      } catch (refreshError: any) {
+        refreshErrorCode = plaidErrorCode(refreshError);
+        refreshErrorMessage = plaidErrorMessage(refreshError);
+      }
+    }
 
     // Fetch current balance (backend-provided; stored for UI)
     // Note: this returns all accounts on the item, we select the mapped one.
@@ -585,6 +600,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   let totalSeen = 0;
 
   let newCount = 0;
+  let upgradedCount = 0;
   let duplicateCount = 0;
 
   // pendingCount will be computed from DB at end (accurate), not guessed during loop
@@ -644,7 +660,7 @@ export async function syncTransactions(params: { businessId: string; accountId: 
       if (!isPending && t.pending_transaction_id) {
         const pendingId = String(t.pending_transaction_id);
         if (pendingId) {
-          await prisma.bankTransaction.updateMany({
+          const upgraded = await prisma.bankTransaction.updateMany({
             where: {
               business_id: businessId,
               account_id: accountId,
@@ -667,6 +683,10 @@ export async function syncTransactions(params: { businessId: string; accountId: 
               updated_at: new Date(),
             },
           });
+          if (upgraded.count > 0) {
+            upgradedCount += upgraded.count;
+            continue;
+          }
         }
       }
 
@@ -896,10 +916,14 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   return json(200, {
     ok: true,
     newCount,
-    upgradedCount: 0,
+    upgradedCount,
     duplicateCount,
     pendingCount,
     lastSyncAt: now.toISOString(),
+    refreshRequested,
+    refreshSucceeded,
+    refreshErrorCode,
+    refreshErrorMessage,
 
     // Progress metadata (useful for UI)
     pages: pageN,
