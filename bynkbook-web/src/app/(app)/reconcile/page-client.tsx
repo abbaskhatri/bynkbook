@@ -4722,16 +4722,33 @@ const displayBankActiveList = useMemo(() => {
                         if (!selectedBusinessId || !selectedAccountId) return;
 
                         setPlaidSyncing(true);
-                        setSyncMsg(null);
+                        setSyncMsg("Checking bank for latest transactions...");
                         setPendingMsg(null);
 
                         try {
-                          const res = await plaidSync(selectedBusinessId, selectedAccountId);
+                          const res = await plaidSync(selectedBusinessId, selectedAccountId, { refresh: true });
                           const newCount = Number(res?.newCount ?? 0);
+                          const upgradedCount = Number(res?.upgradedCount ?? 0);
                           const pendingCount = Number(res?.pendingCount ?? 0);
+                          const refreshRequested = Boolean(res?.refreshRequested);
+                          const refreshSucceeded = Boolean(res?.refreshSucceeded);
+                          const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
 
-                          setSyncMsg(`Synced: ${newCount} new${pendingCount > 0 ? ` • ${pendingCount} pending` : ""}`);
-                          if (pendingCount > 0) setPendingMsg("Pending shown read-only until posted.");
+                          const syncParts = [`Synced: ${newCount} new`];
+                          if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
+                          if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
+                          if (refreshRequested) {
+                            syncParts.push(refreshSucceeded ? "fresh check requested" : "fresh check unavailable");
+                          }
+
+                          setSyncMsg(syncParts.join(" • "));
+                          if (pendingCount > 0) {
+                            setPendingMsg("Pending shown read-only until posted.");
+                          } else if (refreshSucceeded) {
+                            setPendingMsg("No pending transactions available from Plaid yet.");
+                          } else if (refreshErrorCode) {
+                            setPendingMsg("Plaid fresh check unavailable; showing latest synced data.");
+                          }
 
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
