@@ -40,6 +40,8 @@ function canWrite(role: string | null) {
 
 const PLACEMENT_SUMMARY_BANK_ID_MAX = 1000;
 const PLACEMENT_SUMMARY_ENTRY_ID_MAX = 500;
+const PENDING_BANK_TRANSACTION_MESSAGE =
+  "Pending bank transactions can be reviewed once they post.";
 
 function parseYmdParam(value: any, field: string) {
   const raw = String(value ?? "").trim();
@@ -624,9 +626,10 @@ async function createGroupTx(tx: any, args: {
       id: { in: bankIds },
       is_removed: false,
     },
-    select: { id: true, amount_cents: true, posted_date: true },
+    select: { id: true, amount_cents: true, posted_date: true, is_pending: true },
   });
   if (banks.length !== bankIds.length) throw new Error("One or more bank transactions not found");
+  if (banks.some((b: any) => !!b.is_pending)) throw new Error(PENDING_BANK_TRANSACTION_MESSAGE);
 
   // Load entries (scoped)
   const entries = await tx.entry.findMany({

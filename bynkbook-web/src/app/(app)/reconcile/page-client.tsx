@@ -3060,6 +3060,31 @@ const isReconcileExemptEntry = (e: any) => {
     return out;
   }, [bankTxNewestFirst, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankMatchedVisibleN]);
 
+  const bankPendingUnmatchedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of bankTxSorted) {
+      const id = String(t.id ?? "");
+      if (!id) continue;
+      if (!t?.is_pending) continue;
+      if (optimisticHiddenBankTxnIds.has(id)) continue;
+      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) continue;
+      ids.add(id);
+    }
+    return ids;
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+
+  useEffect(() => {
+    if (bankPendingUnmatchedIds.size === 0) return;
+    setSelectedBankTxnIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of bankPendingUnmatchedIds) {
+        if (next.delete(id)) changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [bankPendingUnmatchedIds]);
+
   const bankUnmatchedLoadedRowsNoSearch = useMemo(() => {
     let count = 0;
     for (const t of bankTxSorted) {
@@ -3083,9 +3108,10 @@ const isReconcileExemptEntry = (e: any) => {
   }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
 
   // Counts (uncapped) for tab labels
-  const { bankUnmatchedCount, bankMatchedCount } = useMemo(() => {
+  const { bankUnmatchedCount, bankMatchedCount, bankPendingUnmatchedCount } = useMemo(() => {
     let u = 0;
     let m = 0;
+    let pending = 0;
     for (const t of bankTxSorted) {
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
       if (!matchesRowSearch(hay)) continue;
@@ -3093,10 +3119,14 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id ?? "");
       if (!id) continue;
 
-      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) m++;
-      else if (!optimisticHiddenBankTxnIds.has(id)) u++;
+      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) {
+        m++;
+      } else if (!optimisticHiddenBankTxnIds.has(id)) {
+        u++;
+        if (t?.is_pending) pending++;
+      }
     }
-    return { bankUnmatchedCount: u, bankMatchedCount: m };
+    return { bankUnmatchedCount: u, bankMatchedCount: m, bankPendingUnmatchedCount: pending };
   }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ]);
 
   const entriesTruthReady =
@@ -3263,6 +3293,10 @@ const displayBankActiveList = useMemo(() => {
     : bankTab === "unmatched"
       ? `${bankScopeRowsCopy} • ${bankScopeCountsNote}`
       : `${bankScopeRowsCopy} • Unmatched has full-account counts.`;
+  const bankPendingCopy =
+    bankTab === "unmatched" && bankPendingUnmatchedCount > 0
+      ? `${bankPendingUnmatchedCount} pending shown read-only until posted.`
+      : null;
   const entriesScopeCopy = `Range ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded • Visible ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
@@ -4368,7 +4402,8 @@ const displayBankActiveList = useMemo(() => {
                       clearMutErr();
                       setCreateEntryErr(null);
 
-                      const ids = Array.from(selectedBankTxnIds);
+                      const ids = Array.from(selectedBankTxnIds).filter((id) => !bankPendingUnmatchedIds.has(String(id)));
+                      if (ids.length === 0) return;
                       for (const id of ids) markPending(String(id));
 
                       // Clear previous results for selected ids
@@ -4695,8 +4730,8 @@ const displayBankActiveList = useMemo(() => {
                           const newCount = Number(res?.newCount ?? 0);
                           const pendingCount = Number(res?.pendingCount ?? 0);
 
-                          setSyncMsg(`Synced: ${newCount} new`);
-                          if (pendingCount > 0) setPendingMsg("Pending will appear once posted.");
+                          setSyncMsg(`Synced: ${newCount} new${pendingCount > 0 ? ` • ${pendingCount} pending` : ""}`);
+                          if (pendingCount > 0) setPendingMsg("Pending shown read-only until posted.");
 
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
@@ -4810,6 +4845,9 @@ const displayBankActiveList = useMemo(() => {
               <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
                 <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
                 {bankScopeCopy}
+                {bankPendingCopy ? (
+                  <span className="text-bb-status-warning-fg"> • {bankPendingCopy}</span>
+                ) : null}
                 {activeBankHiddenBySearch > 0 ? (
                   <span> • {activeBankHiddenBySearch} hidden by search</span>
                 ) : null}
@@ -4903,8 +4941,10 @@ const displayBankActiveList = useMemo(() => {
                       const isMatched =
                         activeGroupByBankTxnId.has(String(t.id)) ||
                         activeLegacyMatchByBankTxnId.has(String(t.id));
-                      const rowTone = isMatched ? " bg-primary/10" : "";
-                      const actionCellBg = isMatched ? "bg-primary/10" : "bg-bb-surface-card";
+                      const isPendingBankTxn = Boolean(t?.is_pending);
+                      const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
+                      const rowTone = isPendingBankTxn ? " bg-bb-status-warning-bg" : isMatched ? " bg-primary/10" : "";
+                      const actionCellBg = isPendingBankTxn ? "bg-bb-status-warning-bg" : isMatched ? "bg-primary/10" : "bg-bb-surface-card";
 
                       const deEmphasis = bankTab === "matched" ? " text-bb-text-muted" : "";
 
@@ -4946,8 +4986,11 @@ const displayBankActiveList = useMemo(() => {
                               <input
                                 type="checkbox"
                                 className="h-3 w-3"
-                                checked={isSelected}
+                                checked={!isPendingBankTxn && isSelected}
+                                disabled={isPendingBankTxn}
+                                title={isPendingBankTxn ? pendingActionReason : "Select bank transaction"}
                                 onChange={(e) => {
+                                  if (isPendingBankTxn) return;
                                   const checked = e.target.checked;
                                   setSelectedBankTxnIds((prev) => {
                                     const next = new Set(prev);
@@ -4983,6 +5026,12 @@ const displayBankActiveList = useMemo(() => {
                                 >
                                   <RotateCcw className="h-3.5 w-3.5 text-bb-text-muted" />
                                 </button>
+                              ) : null}
+
+                              {isPendingBankTxn ? (
+                                <span className="shrink-0">
+                                  <StatusChip label="Pending" tone="warning" />
+                                </span>
                               ) : null}
 
                               {t.source ? (
@@ -5024,14 +5073,30 @@ const displayBankActiveList = useMemo(() => {
                                 </button>
                               ) : (
                                 <>
-                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                  <HintWrap
+                                    disabled={!canWriteReconcileEffective || isPendingBankTxn}
+                                    reason={
+                                      isPendingBankTxn
+                                        ? pendingActionReason
+                                        : !canWriteReconcileEffective
+                                          ? reconcileWriteReason
+                                          : null
+                                    }
+                                  >
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
-                                      disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "Review match suggestions for this bank transaction" : (reconcileWriteReason ?? noPermTitle)}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
+                                      disabled={!canWriteReconcileEffective || isPendingBankTxn}
+                                      title={
+                                        isPendingBankTxn
+                                          ? pendingActionReason
+                                          : canWriteReconcileEffective
+                                            ? "Review match suggestions for this bank transaction"
+                                            : (reconcileWriteReason ?? noPermTitle)
+                                      }
                                       aria-label="Match bank transaction"
                                       onClick={() => {
+                                        if (isPendingBankTxn) return;
                                         if (!canWriteReconcileEffective) return;
                                         setMatchBankTxnId(t.id);
                                         setMatchSearch("");
@@ -5049,18 +5114,30 @@ const displayBankActiveList = useMemo(() => {
                                 </>
                               )}
 
-                              <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                              <HintWrap
+                                disabled={!canWriteReconcileEffective || isPendingBankTxn}
+                                reason={
+                                  isPendingBankTxn
+                                    ? pendingActionReason
+                                    : !canWriteReconcileEffective
+                                      ? reconcileWriteReason
+                                      : null
+                                }
+                              >
                                 <button
                                   type="button"
-                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
+                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
                                     }`}
                                   disabled={
                                     !canWriteReconcileEffective ||
+                                    isPendingBankTxn ||
                                     !!createEntryBusyByBankId[String(t.id)] ||
                                     (remainingAbsByBankTxnId.get(t.id) ?? 0n) === 0n
                                   }
                                   title={
-                                    !canWriteReconcileEffective
+                                    isPendingBankTxn
+                                      ? pendingActionReason
+                                      : !canWriteReconcileEffective
                                       ? (reconcileWriteReason ?? noPermTitle)
                                       : (remainingAbsByBankTxnId.get(t.id) ?? 0n) === 0n
                                         ? "Already fully matched"
@@ -5069,6 +5146,7 @@ const displayBankActiveList = useMemo(() => {
                                   aria-label="Create entry"
                                   onClick={(ev) => {
                                     ev.stopPropagation();
+                                    if (isPendingBankTxn) return;
                                     if (!canWriteReconcileEffective) return;
 
                                     const bankId = String(t.id);
