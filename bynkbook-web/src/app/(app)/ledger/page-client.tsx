@@ -1366,7 +1366,19 @@ export default function LedgerPageClient() {
   const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage), [rowsPerPage]);
 
   const entriesKey = useMemo(
-    () => ["entries", selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, "", "", loadedPageCount] as const,
+    () =>
+      [
+        "entries",
+        selectedBusinessId,
+        selectedAccountId,
+        fetchLimit,
+        showDeleted,
+        "",
+        "",
+        loadedPageCount,
+        false,
+        false,
+      ] as const,
     [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, loadedPageCount]
   );
 
