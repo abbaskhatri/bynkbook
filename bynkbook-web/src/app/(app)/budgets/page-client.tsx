@@ -124,6 +124,8 @@ export default function BudgetsPageClient() {
 
   async function onSave() {
     if (!selectedBusinessId) return;
+    const previousRows = rows;
+    const previousDrafts = draftByCatId;
     setSaving(true);
     setSaveError(null);
 
@@ -142,20 +144,37 @@ export default function BudgetsPageClient() {
         return;
       }
 
+      const updateByCategoryId = new Map(updates.map((u) => [u.category_id, String(u.budget_cents)]));
+      const optimisticRows = rows.map((row) =>
+        updateByCategoryId.has(row.category_id)
+          ? { ...row, budget_cents: updateByCategoryId.get(row.category_id)! }
+          : row
+      );
+      const optimisticDrafts: Record<string, string> = {};
+      for (const row of optimisticRows) optimisticDrafts[row.category_id] = centsToInput(row.budget_cents);
+      setRows(optimisticRows);
+      setDraftByCatId(optimisticDrafts);
+      setSaving(false);
+
       const res = await putBudgets(selectedBusinessId, month, updates);
 
       const failed = (res.results ?? []).filter((r: any) => !r.ok);
       if (failed.length) {
+        setRows(previousRows);
+        setDraftByCatId(previousDrafts);
         setSaveError(`Some rows failed to save (${failed.length}).`);
+        return;
       }
 
-      // Refresh server truth after save (authoritative backend)
-      const fresh = await getBudgets(selectedBusinessId, month);
-      setRows(fresh.rows ?? []);
-      const nextDraft: Record<string, string> = {};
-      for (const r of fresh.rows ?? []) nextDraft[r.category_id] = centsToInput(r.budget_cents);
-      setDraftByCatId(nextDraft);
+      void getBudgets(selectedBusinessId, month).then((fresh) => {
+        setRows(fresh.rows ?? []);
+        const nextDraft: Record<string, string> = {};
+        for (const r of fresh.rows ?? []) nextDraft[r.category_id] = centsToInput(r.budget_cents);
+        setDraftByCatId(nextDraft);
+      });
     } catch (e: any) {
+      setRows(previousRows);
+      setDraftByCatId(previousDrafts);
       setSaveError(e?.message ?? "Save failed");
     } finally {
       setSaving(false);

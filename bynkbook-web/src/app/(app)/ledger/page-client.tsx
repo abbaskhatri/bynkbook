@@ -22,7 +22,6 @@ import dynamic from "next/dynamic";
 import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchAuthSession } from "aws-amplify/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -1987,6 +1986,8 @@ export default function LedgerPageClient() {
     const hasMax = maxCentsAbs !== null && Number.isFinite(maxCentsAbs);
 
     return rowsUi.filter((r) => {
+      if (r.isDeleted && !showDeleted) return false;
+
       // Payee search (debounced)
       if (q && !r.payee.toLowerCase().includes(q)) return false;
 
@@ -2038,7 +2039,7 @@ export default function LedgerPageClient() {
 
       return true;
     });
-  }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
+  }, [rowsUi, showDeleted, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
 
   const reconcileQueueExpectedRows = useMemo(() => {
     return sortLedgerQueueRowsDesc(filteredRowsAll.filter((r) => {
@@ -2695,40 +2696,13 @@ export default function LedgerPageClient() {
     setScanBusy(true);
 
     try {
-      const session = await fetchAuthSession();
-      const token = session.tokens?.accessToken?.toString();
-      if (!token) throw new Error("Missing access token");
-
-      const base =
-        process.env.NEXT_PUBLIC_API_URL ||
-        process.env.NEXT_PUBLIC_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_ENDPOINT ||
-        "";
-
-      if (!base) throw new Error("Missing NEXT_PUBLIC_API_URL");
-
-      const url = `${base}/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`;
-
-      const res = await fetch(url, {
+      await apiFetch(`/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
         body: JSON.stringify({
           includeMissingCategory: true,
           dryRun: false,
         }),
       });
-
-      if (!res.ok) {
-        try {
-          await res.text();
-        } catch { }
-        const err: any = new Error("Issue scan failed");
-        err.status = res.status;
-        throw err;
-      }
 
       // Targeted refresh: only issues queries for this account (no storms)
       void qc.invalidateQueries({
@@ -3312,14 +3286,30 @@ export default function LedgerPageClient() {
         reason: "Unmatch and delete from Ledger",
       });
     },
-    onMutate: () => {
+    onMutate: async (entryId: string) => {
       setMutErr(null);
       setMutErrIsClosed(false);
-      setMatchedDeleteDialog((cur) => (cur ? { ...cur, error: null } : cur));
+      const previous = (qc.getQueryData(entriesKey) as Entry[] | undefined) ?? [];
+      const previousDialog = matchedDeleteDialog;
+      setDeletingId(entryId);
+      setMatchedDeleteDialog(null);
+      await qc.cancelQueries({ queryKey: entriesKey });
+      const nowIso = new Date().toISOString();
+      qc.setQueryData(
+        entriesKey,
+        previous.map((e) => (e.id === entryId ? { ...e, deleted_at: nowIso, updated_at: nowIso } : e))
+      );
+      return { previous, previousDialog };
     },
-    onError: (e: any) => {
+    onError: (e: any, _entryId: string, ctx: any) => {
+      if (ctx?.previous) qc.setQueryData(entriesKey, ctx.previous);
       const msg = e?.payload?.error ?? appErrorMessageOrNull(e) ?? e?.message ?? "Unmatch and delete failed";
-      setMatchedDeleteDialog((cur) => (cur ? { ...cur, error: msg } : cur));
+      setMatchedDeleteDialog(
+        ctx?.previousDialog
+          ? { ...ctx.previousDialog, error: msg }
+          : null
+      );
+      setDeletingId(null);
       setMutErrIsClosed(isClosedPeriodError(e, msg));
     },
     onSuccess: async (_data: any, entryId: string) => {

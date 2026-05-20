@@ -126,7 +126,37 @@ export default function GoalsPageClient() {
     if (createMonthEnd && !/^\d{4}-\d{2}$/.test(createMonthEnd)) return setErr("End month must be YYYY-MM.");
     const target_cents = inputToCents(createTarget);
 
-    setCreating(true);
+    const previousRows = rows;
+    const previousForm = {
+      name: createName,
+      categoryId: createCategoryId,
+      monthStart: createMonthStart,
+      monthEnd: createMonthEnd,
+      target: createTarget,
+    };
+    const nowIso = new Date().toISOString();
+    const categoryName = categories.find((c) => String(c.id) === String(createCategoryId))?.name ?? "";
+    const tempGoal: GoalRow = {
+      id: `temp_goal_${Date.now()}`,
+      name,
+      category_id: createCategoryId,
+      category_name: categoryName,
+      month_start: createMonthStart,
+      month_end: createMonthEnd ? createMonthEnd : null,
+      target_cents: String(target_cents),
+      progress_cents: "0",
+      status: "ACTIVE",
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    setRows((current) => [tempGoal, ...current]);
+    setCreateOpen(false);
+    setCreateName("");
+    setCreateTarget("0.00");
+    setCreateMonthStart(ymNow());
+    setCreateMonthEnd("");
+    setCreating(false);
     try {
       await createGoal(selectedBusinessId, {
         name,
@@ -137,18 +167,16 @@ export default function GoalsPageClient() {
         status: "ACTIVE",
       });
 
-      const fresh = await listGoals(selectedBusinessId);
-      setRows(fresh.rows ?? []);
-
-      setCreateOpen(false);
-      setCreateName("");
-      setCreateTarget("0.00");
-      setCreateMonthStart(ymNow());
-      setCreateMonthEnd("");
+      void listGoals(selectedBusinessId).then((fresh) => setRows(fresh.rows ?? []));
     } catch (e: any) {
+      setRows(previousRows);
+      setCreateName(previousForm.name);
+      setCreateCategoryId(previousForm.categoryId);
+      setCreateMonthStart(previousForm.monthStart);
+      setCreateMonthEnd(previousForm.monthEnd);
+      setCreateTarget(previousForm.target);
+      setCreateOpen(true);
       setErr(e?.message ?? "Create failed");
-    } finally {
-      setCreating(false);
     }
   }
 
