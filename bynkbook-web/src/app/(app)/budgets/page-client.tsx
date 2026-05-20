@@ -2,16 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { getBudgets, putBudgets, type BudgetRow } from "@/lib/api/budgets";
 
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { inputH7 } from "@/components/primitives/tokens";
@@ -62,18 +59,6 @@ export default function BudgetsPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
-
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
 
@@ -84,11 +69,10 @@ export default function BudgetsPageClient() {
   }, [bizIdFromUrl, businessesQ.data]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
     if (!sp.get("businessId")) router.replace(`/budgets?businessId=${selectedBusinessId}`);
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const [month, setMonth] = useState<string>(ymNow());
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -110,7 +94,6 @@ export default function BudgetsPageClient() {
   }, [rows, draftByCatId]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     let alive = true;
@@ -137,7 +120,7 @@ export default function BudgetsPageClient() {
     return () => {
       alive = false;
     };
-  }, [authReady, selectedBusinessId, month, reloadNonce]);
+  }, [selectedBusinessId, month, reloadNonce]);
 
   async function onSave() {
     if (!selectedBusinessId) return;
@@ -178,8 +161,6 @@ export default function BudgetsPageClient() {
       setSaving(false);
     }
   }
-
-  if (!authReady) return <Skeleton className="h-10 w-64" />;
 
   return (
     <div className="space-y-6 max-w-6xl">

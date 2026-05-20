@@ -203,7 +203,7 @@ export default function ClosedPeriodsPageClient() {
               title="No business yet"
               description="Create a business to start using BynkBook."
               primary={{ label: "Create business", href: "/settings?tab=business" }}
-              secondary={{ label: "Reload", onClick: () => window.location.reload() }}
+              secondary={{ label: "Reload", onClick: () => void businessesQ.refetch() }}
             />
           </div>
         ) : null}

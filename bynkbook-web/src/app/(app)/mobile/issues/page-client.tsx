@@ -131,7 +131,7 @@ export default function MobileIssuesPageClient() {
             </div>
             <Link
               href={reviewHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Queue
@@ -153,7 +153,7 @@ export default function MobileIssuesPageClient() {
             </div>
             <Link
               href={desktopHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Desktop
@@ -228,7 +228,7 @@ export default function MobileIssuesPageClient() {
                   <div className="mt-4">
                     <Link
                       href={desktopHref}
-                      prefetch
+                      prefetch={false}
                       className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
                     >
                       Open full issue page

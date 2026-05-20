@@ -3,7 +3,7 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser, fetchAuthSession, signOut } from "aws-amplify/auth";
+import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
@@ -243,17 +243,6 @@ export default function SettingsPageClient() {
 
   // Phase 1: per-surface reload triggers (no router.refresh storms)
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -322,7 +311,7 @@ export default function SettingsPageClient() {
   const usageQ = useQuery({
 
     queryKey: ["business-usage", selectedBusinessId],
-    enabled: !!selectedBusinessId && authReady,
+    enabled: !!selectedBusinessId,
     queryFn: () => getBusinessUsage(String(selectedBusinessId)),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
@@ -387,7 +376,6 @@ export default function SettingsPageClient() {
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "bookkeeping") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -428,7 +416,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, authReady, selectedBusinessId]);
+  }, [spKey, selectedBusinessId]);
 
   // Account create/edit dialogs
   const [open, setOpen] = useState(false);
@@ -585,43 +573,27 @@ export default function SettingsPageClient() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
 
   useEffect(() => {
-    if (!authReady) return;
-
     (async () => {
-      try {
-        const u: any = await getCurrentUser();
-        const id = String(u?.userId || u?.username || "").trim();
-        setCurrentUserId(id);
-      } catch {
-        setCurrentUserId("");
-      }
-
       try {
         const sess: any = await fetchAuthSession();
         const claims = sess?.tokens?.idToken?.payload ?? {};
+        const id = String(claims?.sub || claims?.username || "").trim();
         const email = String(claims?.email || "").trim();
         const name =
           String(claims?.name || "").trim() ||
           [claims?.given_name, claims?.family_name].filter(Boolean).join(" ").trim();
 
+        setCurrentUserId(id);
         setCurrentUserEmail(email || "");
         setCurrentUserName(name || "");
         return;
       } catch {
-        // ignore and continue
-      }
-
-      try {
-        const u: any = await getCurrentUser();
-        const loginId = String(u?.signInDetails?.loginId || "").trim();
-        setCurrentUserEmail(loginId.includes("@") ? loginId : "");
-        setCurrentUserName("");
-      } catch {
+        setCurrentUserId("");
         setCurrentUserName("");
         setCurrentUserEmail("");
       }
     })();
-  }, [authReady]);
+  }, []);
 
   // Team
   const [teamLoading, setTeamLoading] = useState(false);
@@ -850,7 +822,6 @@ export default function SettingsPageClient() {
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "activity") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -877,7 +848,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, authReady, selectedBusinessId, actEventType, reloadNonce]);
+  }, [spKey, selectedBusinessId, actEventType, reloadNonce]);
 
   const actUserOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -920,7 +891,6 @@ export default function SettingsPageClient() {
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "team" && tab !== "activity") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -944,13 +914,12 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, authReady, selectedBusinessId, reloadNonce]);
+  }, [spKey, selectedBusinessId, reloadNonce]);
 
   // Load role policies when Team tab is active
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "team") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -973,13 +942,12 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [sp, teamSubTab, authReady, selectedBusinessId]);
+  }, [sp, teamSubTab, selectedBusinessId]);
 
   // Load plaid status when Accounts tab is active (cached)
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "accounts") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
     // Do not block on isLoading; we fetch once accounts data is present.
 
@@ -1067,13 +1035,12 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, authReady, selectedBusinessId, accountsQ.data]);
+  }, [spKey, selectedBusinessId, accountsQ.data]);
 
   // Load categories when Bookkeeping tab is active
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "bookkeeping") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -1094,13 +1061,12 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [sp, authReady, selectedBusinessId, catShowArchived, reloadNonce]);
+  }, [sp, selectedBusinessId, catShowArchived, reloadNonce]);
 
   // Load delete eligibility when Accounts tab is active (cached)
   useEffect(() => {
     const tab = sp.get("tab") || "business";
     if (tab !== "accounts") return;
-    if (!authReady) return;
     if (!selectedBusinessId) return;
     if (accountsQ.isLoading) return;
 
@@ -1166,7 +1132,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, authReady, selectedBusinessId, accountsQ.isLoading, accountsQ.data]);
+  }, [spKey, selectedBusinessId, accountsQ.isLoading, accountsQ.data]);
 
   useEffect(() => {
     if (!exportClosedOpen || !selectedBusinessId) return;
@@ -1205,8 +1171,6 @@ export default function SettingsPageClient() {
     if (raw === "team" || raw === "activity" || raw === "accounts" || raw === "bookkeeping" || raw === "business") return raw;
     return "business";
   })();
-
-  if (!authReady) return <div><Skeleton className="h-10 w-64" /></div>;
 
   return (
     <div className="space-y-6 max-w-6xl">

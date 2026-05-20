@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
@@ -10,7 +9,6 @@ import { listGoals, createGoal, type GoalRow } from "@/lib/api/goals";
 
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AppDialog } from "@/components/primitives/AppDialog";
@@ -48,18 +46,6 @@ export default function GoalsPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
-
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
 
@@ -70,11 +56,10 @@ export default function GoalsPageClient() {
   }, [bizIdFromUrl, businessesQ.data]);
 
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
     if (!sp.get("businessId")) router.replace(`/goals?businessId=${selectedBusinessId}`);
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [rows, setRows] = useState<GoalRow[]>([]);
@@ -91,7 +76,6 @@ export default function GoalsPageClient() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!authReady) return;
     if (!selectedBusinessId) return;
 
     let alive = true;
@@ -121,7 +105,7 @@ export default function GoalsPageClient() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, selectedBusinessId, reloadNonce]);
+  }, [selectedBusinessId, reloadNonce]);
 
   const kpi = useMemo(() => {
     const total = rows.length;
@@ -167,8 +151,6 @@ export default function GoalsPageClient() {
       setCreating(false);
     }
   }
-
-  if (!authReady) return <Skeleton className="h-10 w-64" />;
 
   return (
     <div className="space-y-6 max-w-6xl">

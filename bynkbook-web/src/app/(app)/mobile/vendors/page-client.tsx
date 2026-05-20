@@ -251,7 +251,7 @@ export default function MobileVendorsPageClient() {
             </div>
             <Link
               href={reviewHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Review
@@ -303,7 +303,7 @@ export default function MobileVendorsPageClient() {
             </div>
             <Link
               href={invoiceHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               <FileText className="mr-2 h-4 w-4" />
@@ -336,7 +336,7 @@ export default function MobileVendorsPageClient() {
               });
 
               return (
-                <Link key={vendor.vendor_id} href={detailHref} prefetch className="block">
+                <Link key={vendor.vendor_id} href={detailHref} prefetch={false} className="block">
                   <article className="mobile-token-card rounded-md border p-4 shadow-sm transition-colors hover:bg-muted/50">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -394,7 +394,7 @@ export default function MobileVendorsPageClient() {
         <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <Link
             href={desktopVendorsHref}
-            prefetch
+            prefetch={false}
             className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
           >
             Open desktop vendors

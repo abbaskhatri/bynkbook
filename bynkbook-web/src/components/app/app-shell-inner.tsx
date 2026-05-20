@@ -22,7 +22,6 @@ import {
   BarChart3,
   Users,
   PieChart,
-  Target,
   Settings,
   FileText,
 } from "lucide-react";
@@ -85,6 +84,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     const qs = sp.toString();
     return qs ? `${pathname}?${qs}` : pathname;
   }, [pathname, sp]);
+  const currentUrlRef = useRef(currentUrl);
+
+  useEffect(() => {
+    currentUrlRef.current = currentUrl;
+  }, [currentUrl]);
 
   // Stage 1: global auth guard for all app routes (exclude auth pages themselves)
   const [authChecked, setAuthChecked] = useState(false);
@@ -119,12 +123,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         setCurrentUserId(id || null);
       } catch {
         setCurrentUserId(null);
-        router.replace(`/login?next=${encodeURIComponent(currentUrl)}`);
+        router.replace(`/login?next=${encodeURIComponent(currentUrlRef.current)}`);
       } finally {
         setAuthChecked(true);
       }
     })();
-  }, [pathname, router, currentUrl]);
+  }, [pathname, router]);
 
   // Hooks must always run; decide chrome after
   const isAuthRoute =
@@ -374,12 +378,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const attentionAccountId =
     currentAccountId && currentAccountId !== "all" ? currentAccountId : navAccountId;
 
-  const account = useMemo(() => {
-    const list = accountsQ.data ?? [];
-    const id = effectiveAccountId ?? "";
-    return list.find((a) => a.id === id) ?? list[0] ?? null;
-  }, [accountsQ.data, effectiveAccountId]);
-
   const autopickRef = useRef<{ bizId: string | null; timer: any }>({ bizId: null, timer: null });
 
   // Auto-pick first account after accounts load (single debounced URL write)
@@ -415,40 +413,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       autopickRef.current.timer = null;
     }, 200);
 
+    const ref = autopickRef.current;
     return () => {
-      if (autopickRef.current.timer) {
-        clearTimeout(autopickRef.current.timer);
-        autopickRef.current.timer = null;
+      if (ref.timer) {
+        clearTimeout(ref.timer);
+        ref.timer = null;
       }
     };
   }, [accountsQ.isLoading, accountIdFromUrl, businessId, firstActiveAccountId, pathname, router, sp]);
-
-  function onBusinessChange(nextBusinessId: string) {
-    const params = new URLSearchParams(sp.toString());
-    params.set("businessId", nextBusinessId);
-    params.delete("businessesId");
-    params.delete("accountId"); // LOCK: clear accountId immediately on business change
-
-    // Allow autopick for the new business after accounts load
-    autopickRef.current.bizId = null;
-    if (autopickRef.current.timer) {
-      clearTimeout(autopickRef.current.timer);
-      autopickRef.current.timer = null;
-    }
-
-    router.replace(`${pathname}?${params.toString()}`);
-  }
-
-  function onAccountChange(nextAccountId: string) {
-    if (!businessId) return;
-    const params = new URLSearchParams(sp.toString());
-    params.set("businessId", businessId);
-    params.delete("businessesId");
-    params.set("accountId", nextAccountId);
-
-    autopickRef.current.bizId = businessId;
-    router.replace(`${pathname}?${params.toString()}`);
-  }
 
   // Sidebar Issues count (authoritative; server-derived)
   const issuesCountQ = useQuery({
@@ -578,7 +550,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     >
                       <Link
                         href={link}
-                        prefetch
+                        prefetch={false}
                         className="relative flex items-center justify-center w-full"
                         onClick={onNavigate}
                       >
@@ -611,7 +583,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   >
                     <Link
                       href={link}
-                      prefetch
+                      prefetch={false}
                       className="flex w-full items-center gap-2 transition-all duration-200"
                       onClick={onNavigate}
                     >

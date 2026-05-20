@@ -82,9 +82,8 @@ export default function MobileReviewPageClient() {
   } = useMobileWorkspaceContext();
 
   const range = useMemo(() => ({ from: firstOfMonthYmd(), to: todayYmd() }), []);
-  const enabled = !!businessId && !contextError;
   const accountEnabled = contextReady;
-  const secondaryReady = useIdleReady(enabled, 1200);
+  const secondaryReady = useIdleReady(contextReady, 1200);
   const uncategorizedQueue = useMobileUncategorizedEntries({
     businessId,
     accountId,
@@ -111,7 +110,7 @@ export default function MobileReviewPageClient() {
   const apSummaryQ = useQuery({
     queryKey: ["mobileReview", "apSummary", businessId, range.to],
     queryFn: () => getVendorsApSummary({ businessId: businessId as string, asOf: range.to, limit: 200 }),
-    enabled: secondaryReady,
+    enabled: secondaryReady && !!businessId,
     staleTime: 45_000,
     placeholderData: (prev) => prev,
   });
@@ -123,7 +122,7 @@ export default function MobileReviewPageClient() {
         limit: 1,
         accountId: accountId ?? undefined,
       }),
-    enabled: secondaryReady,
+    enabled: secondaryReady && !!businessId && !!accountId,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -160,15 +159,18 @@ export default function MobileReviewPageClient() {
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
   const homeHref = hrefWithMobileContext({ path: "/mobile", businessId, accountId });
 
+  const failedCards = [
+    uncategorizedQueue.query.error ? "category queue" : null,
+    issuesQueue.query.error ? "issue queue" : null,
+    apSummaryQ.error ? "vendor payables" : null,
+    activityQ.error ? "recent activity" : null,
+  ].filter(Boolean);
+
   const bannerMessage =
     businessesQ.error || accountsQ.error
       ? "Mobile review could not load workspace context."
-      : attentionSummaryQ.error ||
-          uncategorizedQueue.query.error ||
-          issuesQueue.query.error ||
-          apSummaryQ.error ||
-          activityQ.error
-        ? "Some review cards could not refresh. Existing desktop pages are unchanged."
+      : failedCards.length
+        ? `Could not refresh ${failedCards.join(", ")}. Existing desktop pages are unchanged.`
         : null;
 
   if (contextLoading) {
@@ -223,7 +225,7 @@ export default function MobileReviewPageClient() {
             </div>
             <Link
               href={homeHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Home
@@ -274,7 +276,7 @@ export default function MobileReviewPageClient() {
               title="Bank reconcile"
               description="Review unmatched bank transactions for this account."
               href={reconcileHref}
-              metric={String(bankUnmatchedCount)}
+              metric={attentionSummaryQ.error ? "Open" : String(bankUnmatchedCount)}
               icon={<Landmark className="h-5 w-5" />}
               tone={bankUnmatchedCount > 0 ? "warning" : "neutral"}
               disabled={!accountId}

@@ -160,7 +160,7 @@ export async function handler(event: any) {
     const [issueCount, uncategorizedCount, bankUnmatchedCount] = await Promise.all([
       countActionableIssues(prisma, biz, acct),
       countUncategorizedEntries(prisma, biz, acct),
-      countBankUnmatchedTransactions(prisma, biz, acct),
+      countBankUnmatchedTransactions(prisma, biz, acct).catch(() => null),
     ]);
 
     return json(200, {

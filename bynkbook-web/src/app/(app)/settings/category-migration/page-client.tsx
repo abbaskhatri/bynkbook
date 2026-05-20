@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser } from "aws-amplify/auth";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
@@ -28,19 +27,6 @@ type MappingChoice = { mode: "CREATE_SAME" } | { mode: "EXISTING"; categoryId: s
 export default function CategoryMigrationPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
-
-  // Auth gate (match other pages)
-  const [authReady, setAuthReady] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await getCurrentUser();
-        setAuthReady(true);
-      } catch {
-        router.replace("/login");
-      }
-    })();
-  }, [router]);
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -72,7 +58,6 @@ export default function CategoryMigrationPageClient() {
 
   // Keep URL consistent
   useEffect(() => {
-    if (!authReady) return;
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
 
@@ -83,7 +68,7 @@ export default function CategoryMigrationPageClient() {
     const next = params.toString();
     const cur = sp.toString();
     if (next !== cur) router.replace(`/settings/category-migration?${next}`);
-  }, [authReady, businessesQ.isLoading, selectedBusinessId, router, sp]);
+  }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   // Categories list (for mapping)
   const [categories, setCategories] = useState<CategoryRow[]>([]);
@@ -218,8 +203,6 @@ export default function CategoryMigrationPageClient() {
       setLoading(false);
     }
   }
-
-  if (!authReady) return null;
 
   const accountCapsule = (
     <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">

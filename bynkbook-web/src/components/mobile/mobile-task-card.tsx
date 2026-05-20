@@ -62,7 +62,7 @@ export function MobileTaskCard({
   if (disabled || !href) return content;
 
   return (
-    <Link href={href} prefetch className="block">
+    <Link href={href} prefetch={false} className="block">
       {content}
     </Link>
   );

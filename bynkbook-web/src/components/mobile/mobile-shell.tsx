@@ -100,7 +100,7 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
             }
 
             return (
-              <Link key={item.label} href={item.href} prefetch>
+              <Link key={item.label} href={item.href} prefetch={false}>
                 {content}
               </Link>
             );

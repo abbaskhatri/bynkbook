@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -20,9 +19,12 @@ import {
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useUploadController } from "@/components/uploads/useUploadController";
-import { useAccounts } from "@/lib/queries/useAccounts";
-import { useBusinesses } from "@/lib/queries/useBusinesses";
+import {
+  hrefWithMobileContext,
+  useMobileWorkspaceContext,
+} from "@/lib/mobile/workspaceContext";
 
 const MAX_RECEIPT_BYTES = 25 * 1024 * 1024;
 const RECEIPT_ACCEPT = "image/*,application/pdf";
@@ -35,18 +37,6 @@ type SelectedReceiptFile = {
 
 function localId() {
   return Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
-}
-
-function hrefWith(params: {
-  path: string;
-  businessId?: string | null;
-  accountId?: string | null;
-}) {
-  const q = new URLSearchParams();
-  if (params.businessId) q.set("businessId", params.businessId);
-  if (params.accountId) q.set("accountId", params.accountId);
-  const qs = q.toString();
-  return qs ? `${params.path}?${qs}` : params.path;
 }
 
 function formatBytes(bytes: number) {
@@ -100,39 +90,19 @@ function statusLabel(item: {
 }
 
 export default function MobileReceiptPageClient() {
-  const sp = useSearchParams();
-  const businessesQ = useBusinesses();
-  const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId") ?? null;
-  const accountIdFromUrl = sp.get("accountId") ?? null;
+  const {
+    business,
+    businessId,
+    account,
+    accountId,
+    contextError,
+    isLoading: contextLoading,
+  } = useMobileWorkspaceContext();
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previewUrlsRef = useRef<Set<string>>(new Set());
   const [selectedFiles, setSelectedFiles] = useState<SelectedReceiptFile[]>([]);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-
-  const business = useMemo(() => {
-    const list = businessesQ.data ?? [];
-    if (bizIdFromUrl) return list.find((item) => item.id === bizIdFromUrl) ?? list[0] ?? null;
-    return list[0] ?? null;
-  }, [bizIdFromUrl, businessesQ.data]);
-
-  const businessId = business?.id ?? bizIdFromUrl ?? null;
-  const accountsQ = useAccounts(businessId);
-
-  const activeAccounts = useMemo(
-    () => (accountsQ.data ?? []).filter((account) => !account.archived_at),
-    [accountsQ.data]
-  );
-
-  const accountId = useMemo(() => {
-    if (accountIdFromUrl && accountIdFromUrl !== "all") return accountIdFromUrl;
-    return activeAccounts[0]?.id ?? null;
-  }, [accountIdFromUrl, activeAccounts]);
-
-  const account = useMemo(() => {
-    if (!accountId) return activeAccounts[0] ?? null;
-    return activeAccounts.find((item) => item.id === accountId) ?? activeAccounts[0] ?? null;
-  }, [accountId, activeAccounts]);
 
   const uploader = useUploadController({
     type: "RECEIPT",
@@ -151,8 +121,8 @@ export default function MobileReceiptPageClient() {
     };
   }, []);
 
-  const reviewHref = hrefWith({ path: "/mobile/review", businessId, accountId });
-  const ledgerHref = hrefWith({ path: "/ledger", businessId, accountId });
+  const reviewHref = hrefWithMobileContext({ path: "/mobile/review", businessId, accountId });
+  const ledgerHref = hrefWithMobileContext({ path: "/ledger", businessId, accountId });
 
   const imageCount = selectedFiles.filter((item) => item.file.type.startsWith("image/")).length;
   const hasMultipleImages = imageCount > 1;
@@ -220,9 +190,24 @@ export default function MobileReceiptPageClient() {
   }
 
   const bannerMessage =
-    businessesQ.error || accountsQ.error
+    contextError
       ? "Receipt capture could not load workspace context."
       : null;
+
+  if (contextLoading) {
+    return (
+      <MobileShell businessId={businessId} accountId={accountId}>
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-card p-4 shadow-sm">
+            <Skeleton className="h-5 w-40 rounded-md" />
+            <Skeleton className="mt-3 h-8 w-44 rounded-md" />
+            <Skeleton className="mt-3 h-7 w-full rounded-md" />
+          </section>
+          <Skeleton className="h-32 w-full rounded-md" />
+        </div>
+      </MobileShell>
+    );
+  }
 
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
@@ -249,7 +234,7 @@ export default function MobileReceiptPageClient() {
             </div>
             <Link
               href={reviewHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Review
@@ -459,7 +444,7 @@ export default function MobileReceiptPageClient() {
                       {item.status === "COMPLETED" ? (
                         <div className="mt-2 space-y-2 text-sm leading-5 text-bb-status-success-fg">
                           <div>Saved for review only. No ledger entry was created.</div>
-                          <Link href={reviewHref} prefetch className="inline-flex font-medium underline underline-offset-4">
+                          <Link href={reviewHref} prefetch={false} className="inline-flex font-medium underline underline-offset-4">
                             Open review queue
                           </Link>
                         </div>
@@ -484,7 +469,7 @@ export default function MobileReceiptPageClient() {
 
         <section className="rounded-md border border-border bg-card p-4 text-sm leading-5 text-muted-foreground shadow-sm">
           Need the full ledger workflow?{" "}
-          <Link href={ledgerHref} prefetch className="font-medium text-foreground underline underline-offset-4">
+          <Link href={ledgerHref} prefetch={false} className="font-medium text-foreground underline underline-offset-4">
             Open desktop ledger
           </Link>
           .

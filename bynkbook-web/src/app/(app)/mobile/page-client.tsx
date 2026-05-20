@@ -91,9 +91,8 @@ export default function MobilePageClient() {
   } = useMobileWorkspaceContext();
 
   const range = useMemo(() => ({ from: firstOfMonthYmd(), to: todayYmd() }), []);
-  const enabled = !!businessId && !contextError;
   const accountEnabled = contextReady;
-  const secondaryReady = useIdleReady(enabled, 1200);
+  const secondaryReady = useIdleReady(contextReady, 1200);
   const uncategorizedQueue = useMobileUncategorizedEntries({
     businessId,
     accountId,
@@ -113,7 +112,7 @@ export default function MobilePageClient() {
         accountId: "all",
         includeArchived: false,
       }),
-    enabled: secondaryReady,
+    enabled: secondaryReady && !!businessId,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -127,7 +126,7 @@ export default function MobilePageClient() {
         accountId: "all",
         ytd: false,
       }),
-    enabled: secondaryReady,
+    enabled: secondaryReady && !!businessId,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -147,7 +146,7 @@ export default function MobilePageClient() {
   const apSummaryQ = useQuery({
     queryKey: ["mobileHome", "apSummary", businessId, range.to],
     queryFn: () => getVendorsApSummary({ businessId: businessId as string, asOf: range.to, limit: 500 }),
-    enabled: secondaryReady,
+    enabled: secondaryReady && !!businessId,
     staleTime: 45_000,
     placeholderData: (prev) => prev,
   });
@@ -159,7 +158,7 @@ export default function MobilePageClient() {
         limit: 3,
         accountId: accountId ?? undefined,
       }),
-    enabled: secondaryReady,
+    enabled: secondaryReady && !!businessId && !!accountId,
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
@@ -204,17 +203,20 @@ export default function MobilePageClient() {
   const vendorsHref = hrefWithMobileContext({ path: "/mobile/vendors", businessId, accountId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
 
+  const failedCards = [
+    accountsSummaryQ.error ? "cash snapshot" : null,
+    pnlQ.error ? "month-to-date profit" : null,
+    uncategorizedQueue.query.error ? "category queue" : null,
+    issuesQueue.query.error ? "issue queue" : null,
+    apSummaryQ.error ? "vendor payables" : null,
+    activityQ.error ? "recent activity" : null,
+  ].filter(Boolean);
+
   const bannerMessage =
     businessesQ.error || accountsQ.error
       ? "Mobile home could not load workspace context."
-      : accountsSummaryQ.error ||
-          pnlQ.error ||
-          attentionSummaryQ.error ||
-          uncategorizedQueue.query.error ||
-          issuesQueue.query.error ||
-          apSummaryQ.error ||
-          activityQ.error
-        ? "Some mobile cards could not refresh. Existing desktop pages are unchanged."
+      : failedCards.length
+        ? `Could not refresh ${failedCards.join(", ")}. Existing desktop pages are unchanged.`
         : null;
 
   if (contextLoading) {
@@ -269,7 +271,7 @@ export default function MobilePageClient() {
             </div>
             <Link
               href={hrefWithMobileContext({ path: "/dashboard", businessId })}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               Desktop
@@ -307,7 +309,7 @@ export default function MobilePageClient() {
             title="Bank Reconcile"
             description="Review unmatched bank transactions for the selected account."
             href={reconcileHref}
-            metric={attentionSummaryQ.isLoading ? "..." : String(bankUnmatchedCount)}
+            metric={attentionSummaryQ.error ? "Open" : attentionSummaryQ.isLoading ? "..." : String(bankUnmatchedCount)}
             icon={<Landmark className="h-5 w-5" />}
             tone={bankUnmatchedCount > 0 ? "warning" : "neutral"}
             disabled={!accountId}
@@ -411,7 +413,7 @@ export default function MobilePageClient() {
             </div>
             <Link
               href={activityHref}
-              prefetch
+              prefetch={false}
               className="inline-flex h-10 items-center justify-center rounded-md border border-border px-3 text-sm font-medium text-foreground hover:bg-muted/50"
             >
               View

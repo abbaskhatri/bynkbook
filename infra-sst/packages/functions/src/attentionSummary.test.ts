@@ -18,6 +18,7 @@ async function loadHandler(options: {
   account?: any;
   issueRows?: any[];
   bankUnmatchedRows?: any[];
+  bankUnmatchedError?: Error;
   uncategorizedCount?: number;
 } = {}) {
   vi.resetModules();
@@ -42,6 +43,7 @@ async function loadHandler(options: {
     $queryRaw: vi.fn(async (strings: any) => {
       const queryText = String(strings);
       if (queryText.includes("FROM bank_transaction bt")) {
+        if (options.bankUnmatchedError) throw options.bankUnmatchedError;
         return options.bankUnmatchedRows ?? [{ bank_unmatched_count: 0 }];
       }
       return options.issueRows ?? [{ issue_count: 0 }];
@@ -192,6 +194,23 @@ describe("attention summary", () => {
     expect(queryText).toContain("bt.account_id =");
     expect(queryValues).toContain("11111111-1111-4111-8111-111111111111");
     expect(queryValues).toContain("22222222-2222-4222-8222-222222222222");
+  });
+
+  test("preserves issue and category counts when bank unmatched count is unavailable", async () => {
+    const { handler } = await loadHandler({
+      issueRows: [{ issue_count: 3 }],
+      uncategorizedCount: 7,
+      bankUnmatchedError: new Error("bank count unavailable"),
+    });
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      ok: true,
+      issue_count: 3,
+      uncategorized_count: 7,
+      bank_unmatched_count: null,
+    });
   });
 
   test("bank_unmatched_count excludes is_removed bank transactions", async () => {

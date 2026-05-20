@@ -109,6 +109,12 @@ export default function PlanningPageClient() {
   }, [businessesQ.isLoading, selectedBusinessId, router, sp]);
 
   const [tab, setTab] = useState<TabKey>("budgets");
+  const [reloadToken, setReloadToken] = useState(0);
+
+  function retryPlanning() {
+    void businessesQ.refetch();
+    setReloadToken((value) => value + 1);
+  }
 
   // ---------------- Budgets state ----------------
   const [month, setMonth] = useState<string>(ymNow());
@@ -156,7 +162,7 @@ export default function PlanningPageClient() {
     return () => {
       alive = false;
     };
-  }, [selectedBusinessId, month]);
+  }, [selectedBusinessId, month, reloadToken]);
 
   async function onSaveBudgets() {
     if (!selectedBusinessId) return;
@@ -238,7 +244,7 @@ export default function PlanningPageClient() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBusinessId]);
+  }, [selectedBusinessId, reloadToken]);
 
   const goalsKpi = useMemo(() => {
     const total = goalRows.length;
@@ -368,7 +374,7 @@ export default function PlanningPageClient() {
             <InlineBanner
               title="Can’t load planning"
               message={appErrorMessageOrNull(businessesQ.error) || budgetsErr || goalsErr || null}
-              onRetry={() => router.refresh()}
+              onRetry={retryPlanning}
             />
           </div>
         ) : null}
@@ -379,7 +385,7 @@ export default function PlanningPageClient() {
               title="No business yet"
               description="Create a business to start using BynkBook."
               primary={{ label: "Create business", href: "/settings?tab=business" }}
-              secondary={{ label: "Reload", onClick: () => router.refresh() }}
+              secondary={{ label: "Reload", onClick: retryPlanning }}
             />
           </div>
         ) : null}

@@ -1442,7 +1442,7 @@ export default function DashboardPageClient() {
           title="No business yet"
           description="Create a business to start using BynkBook."
           primary={{ label: "Create business", href: "/settings?tab=business" }}
-          secondary={{ label: "Reload", onClick: () => router.refresh() }}
+          secondary={{ label: "Reload", onClick: () => void businessesQ.refetch() }}
         />
       ) : null}
 
