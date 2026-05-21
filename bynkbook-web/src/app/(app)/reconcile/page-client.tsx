@@ -2132,7 +2132,7 @@ export default function ReconcilePageClient() {
 
     if (isInactiveEntryRecord(e)) return true;
     if (isOpeningLikeEntry(e)) return true;
-    if (t === "ADJUSTMENT") return true;
+    if (t !== "INCOME" && t !== "EXPENSE") return true;
     if (String(selectedAccountForReconcile?.type ?? "").toUpperCase() === "CASH") return true;
 
     return false;

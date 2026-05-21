@@ -433,8 +433,19 @@ function sortLedgerQueueRowsDesc<T extends { date?: string | null }>(rows: T[]) 
   });
 }
 
-function sortLedgerReviewRowsAsc<T extends { date?: string | null }>(rows: T[]) {
+function ledgerReviewPriority(row: { rawStatus?: string | null }) {
+  const status = String(row.rawStatus ?? "").trim().toUpperCase();
+  if (status === "PARTIAL") return 0;
+  if (status === "EXPECTED") return 1;
+  return 2;
+}
+
+function sortLedgerReviewRowsAsc<T extends { date?: string | null; rawStatus?: string | null }>(rows: T[]) {
   return rows.slice().sort((a, b) => {
+    const ap = ledgerReviewPriority(a);
+    const bp = ledgerReviewPriority(b);
+    if (ap !== bp) return ap - bp;
+
     const ad = String(a.date ?? "").slice(0, 10);
     const bd = String(b.date ?? "").slice(0, 10);
     if (ad === bd) return 0;
@@ -2087,6 +2098,7 @@ export default function LedgerPageClient() {
     return sortLedgerReviewRowsAsc(filteredRowsAll.filter((r) => {
       if (r.isDeleted) return false;
       if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
+      if (!isIncomeOrExpenseType(r.rawType)) return false;
       if (!["EXPECTED", "PARTIAL"].includes(String(r.rawStatus ?? "").toUpperCase())) return false;
       return true;
     }));
@@ -5068,6 +5080,14 @@ export default function LedgerPageClient() {
                           ev.stopPropagation();
                           if (!catId) return;
                           if (!selectedBusinessId || !selectedAccountId) return;
+
+                          if (requiresReview || warning) {
+                            setQuickCatEntryId(r.id);
+                            setQuickCatValue(name === "—" ? "" : name);
+                            setQuickCatErr(null);
+                            setQuickCatBusy(false);
+                            return;
+                          }
 
                           // Prevent double-submit while row is pending
                           if (pendingById[r.id]) return;
