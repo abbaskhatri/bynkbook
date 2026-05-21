@@ -421,6 +421,36 @@ function sortLedgerQueueRowsDesc<T extends { date?: string | null }>(rows: T[]) 
   });
 }
 
+function sortLedgerReviewRowsAsc<T extends { date?: string | null }>(rows: T[]) {
+  return rows.slice().sort((a, b) => {
+    const ad = String(a.date ?? "").slice(0, 10);
+    const bd = String(b.date ?? "").slice(0, 10);
+    if (ad === bd) return 0;
+    if (!ad) return 1;
+    if (!bd) return -1;
+    return ad < bd ? -1 : 1;
+  });
+}
+
+const INACTIVE_ENTRY_STATUSES = new Set(["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"]);
+
+function entryStatusValue(row: any) {
+  return String(row?.status ?? row?.entry_status ?? row?.entryStatus ?? "").trim().toUpperCase();
+}
+
+function isInactiveEntryRecord(row: any) {
+  if (!row) return false;
+  if (row.deleted_at || row.deletedAt) return true;
+  if (row.voided_at || row.voidedAt) return true;
+  if (row.removed_at || row.removedAt) return true;
+  return INACTIVE_ENTRY_STATUSES.has(entryStatusValue(row));
+}
+
+function isIncomeOrExpenseType(rawType: unknown) {
+  const t = String(rawType ?? "").trim().toUpperCase();
+  return t === "INCOME" || t === "EXPENSE";
+}
+
 function titleCase(s: string) {
   const t = (s || "").trim().toLowerCase();
   if (!t) return "";
@@ -1686,6 +1716,7 @@ export default function LedgerPageClient() {
   const payeeOptions = useMemo(() => {
     const set = new Set<string>();
     for (const e of entriesWithOpening) {
+      if (isInactiveEntryRecord(e)) continue;
       const p = (e.payee || "").trim();
       if (p && p !== "Opening Balance") set.add(p);
     }
@@ -1704,7 +1735,7 @@ export default function LedgerPageClient() {
   const rowModels = useMemo(() => {
     const listDescAll = entriesWithOpening.slice();
     const listAscAll = entriesWithOpening.slice().sort(sortEntriesChronAsc);
-    const listAscBal = listAscAll.filter((e) => e.id === "opening_balance" || !e.deleted_at);
+    const listAscBal = listAscAll.filter((e) => e.id === "opening_balance" || !isInactiveEntryRecord(e));
 
     const idxOpen = listAscBal.findIndex((e) => e.id === "opening_balance");
     const delta = listAscBal.map((e) => (e.id === "opening_balance" ? ZERO : toBigIntSafe(e.amount_cents)));
@@ -1722,7 +1753,7 @@ export default function LedgerPageClient() {
     for (let i = 0; i < listAscBal.length; i++) balById.set(listAscBal[i].id, bal[i]);
 
     return listDescAll.map((e) => {
-      const isDeleted = !!e.deleted_at;
+      const isDeleted = isInactiveEntryRecord(e);
       const amt = toBigIntSafe(e.amount_cents);
       const backendBal = (e as any).running_balance_cents;
       const rowBal =
@@ -2040,20 +2071,11 @@ export default function LedgerPageClient() {
     });
   }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
 
-  const reconcileQueueExpectedRows = useMemo(() => {
-    return sortLedgerQueueRowsDesc(filteredRowsAll.filter((r) => {
+  const reconcileQueueReviewRows = useMemo(() => {
+    return sortLedgerReviewRowsAsc(filteredRowsAll.filter((r) => {
       if (r.isDeleted) return false;
       if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
-      if (String(r.rawStatus ?? "").toUpperCase() !== "EXPECTED") return false;
-      return true;
-    }));
-  }, [filteredRowsAll]);
-
-  const reconcileQueuePartialRows = useMemo(() => {
-    return sortLedgerQueueRowsDesc(filteredRowsAll.filter((r) => {
-      if (r.isDeleted) return false;
-      if (r.id === "opening_balance" || r.isOpeningBalanceEntry) return false;
-      if (String(r.rawStatus ?? "").toUpperCase() !== "PARTIAL") return false;
+      if (!["EXPECTED", "PARTIAL"].includes(String(r.rawStatus ?? "").toUpperCase())) return false;
       return true;
     }));
   }, [filteredRowsAll]);
@@ -2069,16 +2091,18 @@ export default function LedgerPageClient() {
 
   const reconcileQueueRowsAll = useMemo(() => {
     return [
-      ...reconcileQueueExpectedRows,
-      ...reconcileQueuePartialRows,
+      ...reconcileQueueReviewRows,
       ...reconcileQueueDeletedRows,
     ];
-  }, [reconcileQueueExpectedRows, reconcileQueuePartialRows, reconcileQueueDeletedRows]);
+  }, [reconcileQueueReviewRows, reconcileQueueDeletedRows]);
 
-  const displayRowsAll = isNeedsReconcileView ? reconcileQueueRowsAll : filteredRowsAll;
+  const displayRowsAll = useMemo(
+    () => (isNeedsReconcileView ? reconcileQueueRowsAll : filteredRowsAll),
+    [isNeedsReconcileView, reconcileQueueRowsAll, filteredRowsAll]
+  );
   const startIdx = (page - 1) * rowsPerPage;
   const endIdx = page * rowsPerPage;
-  const pageRows = displayRowsAll.slice(startIdx, endIdx);
+  const pageRows = useMemo(() => displayRowsAll.slice(startIdx, endIdx), [displayRowsAll, startIdx, endIdx]);
 
   // Stable key for suggestion targets (prevents effect loops)
   const ledgerSuggestionTargetIds = useMemo(() => {
@@ -2190,6 +2214,7 @@ export default function LedgerPageClient() {
       if (r.isDeleted) return false;
       if (r.id === "opening_balance") return false;
       if (r.isOpeningBalanceEntry) return false;
+      if (!isIncomeOrExpenseType(r.rawType)) return false;
       return true;
     });
   }, [pageRows]);
@@ -2199,7 +2224,7 @@ export default function LedgerPageClient() {
     let expense = ZERO; // will remain negative (signed)
     for (const r of activePageRows) {
       const t = (r.rawType || "").toString().toUpperCase();
-      if (t === "TRANSFER") continue;
+      if (!isIncomeOrExpenseType(t)) continue;
 
       const amt = toBigIntSafe(r.amountCents);
       if (amt > ZERO) income += amt;
@@ -5006,12 +5031,22 @@ export default function LedgerPageClient() {
                     const catId = String(s?.category_id ?? "");
                     const name = String(s?.category_name ?? "—");
                     const conf = Math.max(0, Math.min(100, Math.round(Number(s?.confidence ?? 0) || 0)));
+                    const confLabel = String(s?.confidence_label ?? s?.confidenceLabel ?? "").trim();
+                    const warning = String(s?.warning ?? "").trim();
+                    const requiresReview = s?.requiresUserConfirmation !== false;
+                    const suggestionTitle = [
+                      name,
+                      confLabel ? `Confidence: ${confLabel}` : `${conf}% confidence`,
+                      String(s?.reason ?? "").trim(),
+                      warning,
+                      requiresReview ? "Requires review before applying" : "",
+                    ].filter(Boolean).join(" - ");
 
                     return (
                       <button
                         type="button"
                         className="h-5 max-w-full min-w-0 px-2 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15"
-                        title={[name, String(s?.reason ?? "")].filter(Boolean).join(" - ")}
+                        title={suggestionTitle}
                         onClick={async (ev) => {
                           ev.stopPropagation();
                           if (!catId) return;
@@ -5039,7 +5074,9 @@ export default function LedgerPageClient() {
                         }}
                       >
                         <span className="min-w-0 max-w-[120px] truncate font-semibold">{name}</span>
-                        <span className="text-primary">{conf}%</span>
+                        <span className={warning ? "text-bb-status-warning-fg" : "text-primary"}>
+                          {confLabel || `${conf}%`}
+                        </span>
                       </button>
                     );
                   })()
@@ -5521,7 +5558,13 @@ export default function LedgerPageClient() {
       if (!printWindow) throw new Error("Pop-up blocked. Allow pop-ups to print the ledger.");
 
       const generatedAt = new Date().toISOString();
-      const totalCents = rows.reduce((sum, row) => sum + toBigIntSafe(row.amount_cents), ZERO);
+      const activeRowsForTotals = rows.filter((row) => {
+        if (!isInactiveEntryRecord(row)) {
+          return isIncomeOrExpenseType(row.type);
+        }
+        return false;
+      });
+      const totalCents = activeRowsForTotals.reduce((sum, row) => sum + toBigIntSafe(row.amount_cents), ZERO);
       const tableRows = rows.length
         ? rows.map((row) => {
           const amount = toBigIntSafe(row.amount_cents);

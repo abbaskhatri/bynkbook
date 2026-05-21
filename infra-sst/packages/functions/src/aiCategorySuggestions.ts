@@ -103,6 +103,12 @@ function clampPercent(v: any) {
   return Math.round(n);
 }
 
+function confidenceLabelFromScore(score: number): "high" | "medium" | "low" {
+  if (score >= 85) return "high";
+  if (score >= 70) return "medium";
+  return "low";
+}
+
 function amountToBigInt(v: any): bigint {
   try {
     if (typeof v === "bigint") return v;
@@ -191,14 +197,64 @@ type SuggestionSource = "VENDOR_DEFAULT" | "MEMORY" | "HEURISTIC" | "AI";
 export type CategorySuggestion = {
   category_id: string;
   category_name: string;
+  suggestedCategory?: string;
   confidence: number;
+  confidence_label?: "high" | "medium" | "low";
   confidence_tier: "SAFE_DETERMINISTIC" | "STRONG_SUGGESTION" | "ALTERNATE" | "REVIEW_BUCKET";
   reason: string;
+  requiresUserConfirmation?: true;
+  warning?: string;
+  review_only?: boolean;
+  protected_class?: string;
   source: SuggestionSource;
   merchant_normalized: string;
 };
 
 type Suggestion = CategorySuggestion;
+
+function suggestionSafetyWarning(row: {
+  category_name?: string | null;
+  reason?: string | null;
+  merchant_normalized?: string | null;
+}) {
+  const text = `${row.category_name ?? ""} ${row.reason ?? ""} ${row.merchant_normalized ?? ""}`.toLowerCase();
+
+  if (/\b(irs|eftps|treasury|tax|payroll|adp|gusto|paychex)\b/.test(text)) {
+    return "Tax and payroll patterns require user review before applying.";
+  }
+
+  if (/\b(credit card|card payment|amex|american express|visa payment|mastercard|loan|principal|interest|refund|chargeback|owner draw|owner contribution|equity)\b/.test(text)) {
+    return "This may need accounting review; do not apply unless the category is confirmed.";
+  }
+
+  if (/\b(zelle|ach|wire|transfer|online banking|card payoff)\b/.test(text) && !/\b(bank fee|wire fee|service charge)\b/.test(text)) {
+    return "This may be a transfer or payment rather than an expense; confirm before applying.";
+  }
+
+  if (/\b(amazon|costco|sams|sam's|wholesale)\b/.test(text)) {
+    return "This merchant can map to several categories; confirm the business purpose before applying.";
+  }
+
+  return "";
+}
+
+function withSuggestionSafety(row: Suggestion): Suggestion {
+  const warning = suggestionSafetyWarning(row);
+  const confidence = clampPercent(row.confidence);
+  const confidence_tier = row.confidence_tier ?? confidenceTierFromScore(confidence);
+  const reviewOnly = !!warning || confidence < 85 || confidence_tier === "REVIEW_BUCKET";
+
+  return {
+    ...row,
+    suggestedCategory: row.category_name,
+    confidence,
+    confidence_label: confidenceLabelFromScore(confidence),
+    confidence_tier,
+    requiresUserConfirmation: true,
+    ...(warning ? { warning, review_only: true, protected_class: "REVIEW_REQUIRED" } : {}),
+    ...(!warning && reviewOnly ? { review_only: true } : {}),
+  };
+}
 
 type DeterministicStrength = {
   topConfidence: number;
@@ -493,11 +549,11 @@ function sortAndNormalizeMergedSuggestions(items: Suggestion[], limit: number) {
       confidence = Math.max(60, sorted[0].confidence - 2 - index);
     }
 
-    return {
+    return withSuggestionSafety({
       ...row,
       confidence,
       confidence_tier: confidenceTierFromScore(confidence),
-    } satisfies Suggestion;
+    } satisfies Suggestion);
   });
 }
 
@@ -562,6 +618,8 @@ async function runAiFallback(args: {
     "Do not invent categories.",
     "Only use category_id values supplied in the categories array.",
     "Prefer deterministic candidates when they fit.",
+    "Do not treat possible transfers, credit card payments, loan payments, refunds, owner equity, Zelle, ACH, or wire activity as ordinary expenses without clear evidence.",
+    "Tax and payroll patterns must remain review-first.",
     "This fallback is only for ambiguous rows, so confidence must stay between 60 and 84.",
     "Keep each reason short and concrete.",
   ].join(" ");

@@ -351,6 +351,17 @@ function compactText(value: unknown, fallback = "—") {
   return s || fallback;
 }
 
+const INACTIVE_ENTRY_STATUSES = new Set(["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"]);
+
+function isInactiveEntryRecord(row: any) {
+  if (!row) return false;
+  if (row.deleted_at || row.deletedAt) return true;
+  if (row.voided_at || row.voidedAt) return true;
+  if (row.removed_at || row.removedAt) return true;
+  const status = String(row?.status ?? row?.entry_status ?? row?.entryStatus ?? "").trim().toUpperCase();
+  return INACTIVE_ENTRY_STATUSES.has(status);
+}
+
 function extractCheckRefFromBankTransaction(bank: any) {
   const explicit = compactText(
     bank?.check_number ?? bank?.checkNumber ?? bank?.check_num ?? bank?.checkNum ?? "",
@@ -2091,31 +2102,32 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Derived + sorting (oldest-first)
   // -------------------------
-  const isAdjustedEntry = (e: any) => Boolean(e?.is_adjustment) || locallyAdjusted.has(e?.id);
+  const isAdjustedEntry = useCallback((e: any) => Boolean(e?.is_adjustment) || locallyAdjusted.has(e?.id), [locallyAdjusted]);
 
-  const isOpeningLikeEntry = (e: any) => {
+  const isOpeningLikeEntry = useCallback((e: any) => {
     const t = String(e?.type ?? "").toUpperCase();
     const payee = String(e?.payee ?? "").trim().toLowerCase();
     return t === "OPENING" || payee.startsWith("opening balance");
-  };
+  }, []);
 
-const isReconcileExemptEntry = (e: any) => {
-  const t = String(e?.type ?? "").toUpperCase();
-
-  if (isOpeningLikeEntry(e)) return true;
-  if (t === "ADJUSTMENT") return true;
-
-  const account = (accountsQ.data ?? []).find(
-    (a: any) => String(a.id) === String(selectedAccountId)
+  const selectedAccountForReconcile = useMemo(
+    () => (accountsQ.data ?? []).find((a: any) => String(a.id) === String(selectedAccountId)) ?? null,
+    [accountsQ.data, selectedAccountId]
   );
 
-  if (String(account?.type ?? "").toUpperCase() === "CASH") return true;
+  const isReconcileExemptEntry = useCallback((e: any) => {
+    const t = String(e?.type ?? "").toUpperCase();
 
-  return false;
-};
+    if (isInactiveEntryRecord(e)) return true;
+    if (isOpeningLikeEntry(e)) return true;
+    if (t === "ADJUSTMENT") return true;
+    if (String(selectedAccountForReconcile?.type ?? "").toUpperCase() === "CASH") return true;
+
+    return false;
+  }, [isOpeningLikeEntry, selectedAccountForReconcile]);
 
   // Keep raw entries; tab-level filtering decides visibility (Expected hides Adjusted-unmatched)
-  const allEntries = entriesQ.data ?? [];
+  const allEntries = useMemo(() => (entriesQ.data ?? []).filter((entry: any) => !isInactiveEntryRecord(entry)), [entriesQ.data]);
   const entriesLoadedCount = allEntries.length;
   const entriesHitApiLimit = entriesLoadedCount >= ENTRIES_API_LIMIT;
 
@@ -2286,6 +2298,29 @@ const isReconcileExemptEntry = (e: any) => {
     return m;
   }, [activeMatches]);
 
+  const activeLegacyMatchedAbsByBankTxnId = useMemo(() => {
+    const m = new Map<string, bigint>();
+    for (const x of activeMatches ?? []) {
+      const id = String(x?.bank_transaction_id ?? "");
+      if (!id) continue;
+      const matchedAbs = absBig(toBigIntSafe(x?.matched_amount_cents));
+      m.set(id, (m.get(id) ?? 0n) + matchedAbs);
+    }
+    return m;
+  }, [activeMatches]);
+
+  const isBankTxnFullyMatched = useCallback((bankTxn: any) => {
+    const id = String(bankTxn?.id ?? "");
+    if (!id) return false;
+    if (activeGroupByBankTxnId.has(id)) return true;
+
+    const legacyAbs = activeLegacyMatchedAbsByBankTxnId.get(id) ?? 0n;
+    if (legacyAbs <= 0n) return activeLegacyMatchByBankTxnId.has(id);
+
+    const bankAbs = absBig(toBigIntSafe(bankTxn?.amount_cents));
+    return bankAbs > 0n && legacyAbs >= bankAbs;
+  }, [activeGroupByBankTxnId, activeLegacyMatchedAbsByBankTxnId, activeLegacyMatchByBankTxnId]);
+
   // (removed legacy matches-based revert marker; MatchGroups-based version is below)
 
   // MatchGroups (FULL match only): entry is matched iff it appears in an ACTIVE group
@@ -2311,13 +2346,13 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id);
       if (!id) continue;
       const legacyMatch = activeLegacyMatchByBankTxnId.get(id);
+      const legacyAbs = activeLegacyMatchedAbsByBankTxnId.get(id) ?? 0n;
       if (!activeGroupByBankTxnId.has(id) && !legacyMatch) continue;
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const legacyAbs = legacyMatch ? absBig(toBigIntSafe(legacyMatch?.matched_amount_cents)) : 0n;
       if (bankAbs > 0n) m.set(id, legacyAbs > 0n ? legacyAbs : bankAbs);
     }
     return m;
-  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, activeLegacyMatchedAbsByBankTxnId]);
 
   const remainingAbsByBankTxnId = useMemo(() => {
     const m = new Map<string, bigint>();
@@ -2325,11 +2360,16 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id);
       if (!id) continue;
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const isMatched = activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id);
-      m.set(id, isMatched ? 0n : bankAbs);
+      if (activeGroupByBankTxnId.has(id)) {
+        m.set(id, 0n);
+        continue;
+      }
+      const legacyAbs = activeLegacyMatchedAbsByBankTxnId.get(id) ?? 0n;
+      const remaining = legacyAbs > 0n ? bankAbs - legacyAbs : bankAbs;
+      m.set(id, remaining > 0n ? remaining : 0n);
     }
     return m;
-  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchedAbsByBankTxnId]);
 
     function buildBankAiCandidates(bank: any) {
     const bankAmt = toBigIntSafe(bank?.amount_cents);
@@ -2979,7 +3019,7 @@ const isReconcileExemptEntry = (e: any) => {
       if (out.length >= expectedVisibleN) break;
     }
     return out;
-  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN, accountsQ.data, selectedAccountId]);
+  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN, isAdjustedEntry, isReconcileExemptEntry]);
 
   const entriesMatchedList = useMemo(() => {
     const out: any[] = [];
@@ -2994,7 +3034,7 @@ const isReconcileExemptEntry = (e: any) => {
       if (out.length >= matchedVisibleN) break;
     }
     return out;
-  }, [allEntriesNewestFirst, matchedEntryIdSet, searchQ, matchedVisibleN, accountsQ.data, selectedAccountId]);
+  }, [allEntriesNewestFirst, matchedEntryIdSet, searchQ, matchedVisibleN, isReconcileExemptEntry]);
 
   // Counts (uncapped) for tab labels — computed cheaply in one pass
   const { expectedCount, matchedCount } = useMemo(() => {
@@ -3020,7 +3060,7 @@ const isReconcileExemptEntry = (e: any) => {
       else exp++;
     }
     return { expectedCount: exp, matchedCount: mat };
-  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, accountsQ.data, selectedAccountId]);
+  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, isAdjustedEntry, isReconcileExemptEntry]);
 
   // Tabs: Bank Transactions (Phase 2: cap rendered rows for instant tab switches)
   const bankUnmatchedList = useMemo(() => {
@@ -3032,13 +3072,13 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id ?? "");
       if (!id) continue;
       if (optimisticHiddenBankTxnIds.has(id)) continue;
-      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) continue;
+      if (isBankTxnFullyMatched(t)) continue;
 
       out.push(t);
       if (out.length >= bankUnmatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankUnmatchedVisibleN]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, searchQ, bankUnmatchedVisibleN]);
 
   useEffect(() => {
     setSelectedBankTxnIds(new Set());
@@ -3052,13 +3092,13 @@ const isReconcileExemptEntry = (e: any) => {
 
       const id = String(t.id ?? "");
       if (!id) continue;
-      if (!activeGroupByBankTxnId.has(id) && !activeLegacyMatchByBankTxnId.has(id)) continue;
+      if (!isBankTxnFullyMatched(t)) continue;
 
       out.push(t);
       if (out.length >= bankMatchedVisibleN) break;
     }
     return out;
-  }, [bankTxNewestFirst, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ, bankMatchedVisibleN]);
+  }, [bankTxNewestFirst, isBankTxnFullyMatched, searchQ, bankMatchedVisibleN]);
 
   const bankPendingUnmatchedIds = useMemo(() => {
     const ids = new Set<string>();
@@ -3067,11 +3107,11 @@ const isReconcileExemptEntry = (e: any) => {
       if (!id) continue;
       if (!t?.is_pending) continue;
       if (optimisticHiddenBankTxnIds.has(id)) continue;
-      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) continue;
+      if (isBankTxnFullyMatched(t)) continue;
       ids.add(id);
     }
     return ids;
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched]);
 
   useEffect(() => {
     if (bankPendingUnmatchedIds.size === 0) return;
@@ -3091,21 +3131,21 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id ?? "");
       if (!id) continue;
       if (optimisticHiddenBankTxnIds.has(id)) continue;
-      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) continue;
+      if (isBankTxnFullyMatched(t)) continue;
       count++;
     }
     return count;
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched]);
 
   const bankMatchedLoadedRowsNoSearch = useMemo(() => {
     let count = 0;
     for (const t of bankTxSorted) {
       const id = String(t.id ?? "");
       if (!id) continue;
-      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) count++;
+      if (isBankTxnFullyMatched(t)) count++;
     }
     return count;
-  }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId]);
+  }, [bankTxSorted, isBankTxnFullyMatched]);
 
   // Counts (uncapped) for tab labels
   const { bankUnmatchedCount, bankMatchedCount, bankPendingUnmatchedCount } = useMemo(() => {
@@ -3119,7 +3159,7 @@ const isReconcileExemptEntry = (e: any) => {
       const id = String(t.id ?? "");
       if (!id) continue;
 
-      if (activeGroupByBankTxnId.has(id) || activeLegacyMatchByBankTxnId.has(id)) {
+      if (isBankTxnFullyMatched(t)) {
         m++;
       } else if (!optimisticHiddenBankTxnIds.has(id)) {
         u++;
@@ -3127,7 +3167,7 @@ const isReconcileExemptEntry = (e: any) => {
       }
     }
     return { bankUnmatchedCount: u, bankMatchedCount: m, bankPendingUnmatchedCount: pending };
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, activeGroupByBankTxnId, activeLegacyMatchByBankTxnId, searchQ]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, searchQ]);
 
   const entriesTruthReady =
     !entriesQ.isLoading &&
@@ -4191,16 +4231,18 @@ const displayBankActiveList = useMemo(() => {
                                 const id = String(s?.category_id ?? s?.categoryId ?? "");
                                 const name = String(s?.category_name ?? s?.categoryName ?? "—");
                                 const conf = categorySuggestionConfidence(s?.confidence);
+                                const confLabel = String(s?.confidence_label ?? s?.confidenceLabel ?? "").trim();
                                 const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
                                 const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                 const reasonText = String(s?.reason ?? "").trim();
+                                const warningText = String(s?.warning ?? "").trim();
                                 const selected = createEntryCategoryId && createEntryCategoryId === id;
 
                                 return (
                                   <button
                                     key={id || name}
                                     type="button"
-                                    title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
+                                    title={[tierLabel, sourceLabel, confLabel ? `Confidence: ${confLabel}` : "", reasonText, warningText, "Requires review before saving"].filter(Boolean).join(" • ")}
                                     className={[
                                       "h-7 px-2.5 rounded-full border text-[11px] inline-flex items-center gap-2",
                                       selected
@@ -4224,7 +4266,7 @@ const displayBankActiveList = useMemo(() => {
                                         selected ? "bg-primary/10 text-primary" : "bg-bb-border-muted text-bb-text-muted",
                                       ].join(" ")}
                                     >
-                                      {conf}%
+                                      {confLabel || `${conf}%`}
                                     </span>
                                   </button>
                                 );
@@ -4236,16 +4278,21 @@ const displayBankActiveList = useMemo(() => {
                               {" • "}
                               {categorySuggestionSourceLabel(createEntrySuggestions?.[0]?.source)}
                               {" • "}
-                              {categorySuggestionConfidence(createEntrySuggestions?.[0]?.confidence)}%
+                              {String(createEntrySuggestions?.[0]?.confidence_label ?? "").trim() ||
+                                `${categorySuggestionConfidence(createEntrySuggestions?.[0]?.confidence)}%`}
                             </div>
 
                             <div
                               className="text-[11px] text-bb-text-muted truncate"
-                              title={String(createEntrySuggestions?.[0]?.reason ?? "Review this entry before saving")}
+                              title={[
+                                String(createEntrySuggestions?.[0]?.reason ?? "Review this entry before saving"),
+                                String(createEntrySuggestions?.[0]?.warning ?? ""),
+                              ].filter(Boolean).join(" • ")}
                             >
-                              {String(createEntrySuggestions?.[0]?.reason ?? "").trim()
-                                ? String(createEntrySuggestions?.[0]?.reason ?? "")
-                                : "Review this entry before saving"}
+                              {String(createEntrySuggestions?.[0]?.warning ?? "").trim() ||
+                                (String(createEntrySuggestions?.[0]?.reason ?? "").trim()
+                                  ? String(createEntrySuggestions?.[0]?.reason ?? "")
+                                  : "Review this entry before saving")}
                             </div>
                           </div>
                         ) : createEntrySugErr ? (
@@ -4955,9 +5002,7 @@ const displayBankActiveList = useMemo(() => {
                         }
                       })();
 
-                      const isMatched =
-                        activeGroupByBankTxnId.has(String(t.id)) ||
-                        activeLegacyMatchByBankTxnId.has(String(t.id));
+                      const isMatched = isBankTxnFullyMatched(t);
                       const isPendingBankTxn = Boolean(t?.is_pending);
                       const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
                       const rowTone = isPendingBankTxn ? " bg-bb-status-warning-bg" : isMatched ? " bg-primary/10" : "";
