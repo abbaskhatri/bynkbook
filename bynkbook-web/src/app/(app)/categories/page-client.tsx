@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -14,6 +14,7 @@ import { Tags } from "lucide-react";
 import { createCategory, listCategories, updateCategory, type CategoryRow } from "@/lib/api/categories";
 
 export default function CategoriesPageClient() {
+  const router = useRouter();
   const sp = useSearchParams();
   const qc = useQueryClient();
 
@@ -62,29 +63,17 @@ export default function CategoriesPageClient() {
     const name = newName.trim().replace(/\s+/g, " ");
     if (!name) return;
 
-    const tempId = `temp_category_${Date.now()}`;
-    const nowIso = new Date().toISOString();
-    const optimisticRow: CategoryRow = {
-      id: tempId,
-      name,
-      archived_at: null,
-      created_at: nowIso,
-      updated_at: nowIso,
-    };
-    const previousRows = rows;
-
-    setRows((current) => [optimisticRow, ...current]);
-    setNewName("");
-    setSavingId(null);
+    setSavingId("create");
     setErr(null);
     try {
-      const res = await createCategory(businessId, name);
-      setRows((current) => current.map((row) => (row.id === tempId ? res.row : row)));
+      await createCategory(businessId, name);
+      setNewName("");
       void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
+      await load();
     } catch (e: any) {
-      setRows(previousRows);
-      setNewName(name);
       setErr(e?.message ?? "Create failed");
+    } finally {
+      setSavingId(null);
     }
   }
 
@@ -93,53 +82,31 @@ export default function CategoriesPageClient() {
     const name = String(editNameById[id] ?? "").trim().replace(/\s+/g, " ");
     if (!name) return;
 
-    const previousRows = rows;
-    const previousDraft = editNameById[id];
-    setRows((current) => current.map((row) => (row.id === id ? { ...row, name, updated_at: new Date().toISOString() } : row)));
-    setEditNameById((current) => {
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    setSavingId(null);
+    setSavingId(id);
     setErr(null);
     try {
-      const res = await updateCategory(businessId, id, { name });
-      setRows((current) => current.map((row) => (row.id === id ? res.row : row)));
+      await updateCategory(businessId, id, { name });
       void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
+      await load();
     } catch (e: any) {
-      setRows(previousRows);
-      if (previousDraft !== undefined) setEditNameById((current) => ({ ...current, [id]: previousDraft }));
       setErr(e?.message ?? "Rename failed");
+    } finally {
+      setSavingId(null);
     }
   }
 
   async function onToggleArchive(id: string, nextArchived: boolean) {
     if (!businessId) return;
-    const previousRows = rows;
-    const nowIso = new Date().toISOString();
-    setRows((current) =>
-      current
-        .map((row) =>
-          row.id === id
-            ? { ...row, archived_at: nextArchived ? nowIso : null, updated_at: nowIso }
-            : row
-        )
-        .filter((row) => includeArchived || !row.archived_at)
-    );
-    setSavingId(null);
+    setSavingId(id);
     setErr(null);
     try {
-      const res = await updateCategory(businessId, id, { archived: nextArchived });
-      setRows((current) =>
-        current
-          .map((row) => (row.id === id ? res.row : row))
-          .filter((row) => includeArchived || !row.archived_at)
-      );
+      await updateCategory(businessId, id, { archived: nextArchived });
       void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
+      await load();
     } catch (e: any) {
-      setRows(previousRows);
       setErr(e?.message ?? "Update failed");
+    } finally {
+      setSavingId(null);
     }
   }
 

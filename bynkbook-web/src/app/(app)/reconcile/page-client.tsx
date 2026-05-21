@@ -661,42 +661,6 @@ function upsertMatchGroup(items: any[], group: any): any[] {
   return next;
 }
 
-function removeMatchGroup(items: any[], groupId: string): any[] {
-  const gid = String(groupId ?? "");
-  if (!gid) return Array.isArray(items) ? items : [];
-  return (Array.isArray(items) ? items : []).filter((g: any) => String(g?.id ?? "") !== gid);
-}
-
-function buildOptimisticMatchGroup(args: {
-  id: string;
-  bankTransactionIds: string[];
-  entryIds: string[];
-  bankById: Map<string, any>;
-  entryById: Map<string, any>;
-}) {
-  return {
-    id: args.id,
-    status: "ACTIVE",
-    __optimistic_pending: true,
-    banks: args.bankTransactionIds.map((bankId) => {
-      const bank = args.bankById.get(String(bankId));
-      return {
-        match_group_id: args.id,
-        bank_transaction_id: bankId,
-        matched_amount_cents: absBig(toBigIntSafe(bank?.amount_cents ?? 0)).toString(),
-      };
-    }),
-    entries: args.entryIds.map((entryId) => {
-      const entry = args.entryById.get(String(entryId));
-      return {
-        match_group_id: args.id,
-        entry_id: entryId,
-        matched_amount_cents: absBig(toBigIntSafe(entry?.amount_cents ?? 0)).toString(),
-      };
-    }),
-  };
-}
-
 function matchGroupsFromPlacementSummary(summary: MatchGroupPlacementSummary | null): any[] {
   const groupsById = new Map<string, any>();
 
@@ -3885,11 +3849,6 @@ const displayBankActiveList = useMemo(() => {
                           });
                         }
 
-                        setOpenCreateEntry(false);
-                        setCreateEntryBankTxnId(null);
-                        setCreateEntryDuplicateCandidates([]);
-                        setCreateEntryDuplicateConfirm("");
-
                         try {
                           const topSuggestion = createEntrySuggestions[0] ?? null;
                           const suggestedCategoryId = String(
@@ -3925,6 +3884,10 @@ const displayBankActiveList = useMemo(() => {
                           });
 
                           clearMutErr();
+                          setOpenCreateEntry(false);
+                          setCreateEntryBankTxnId(null);
+                          setCreateEntryDuplicateCandidates([]);
+                          setCreateEntryDuplicateConfirm("");
                         } catch (e: any) {
                           setOptimisticPendingEntryDrafts((prev) =>
                             prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
@@ -3940,8 +3903,6 @@ const displayBankActiveList = useMemo(() => {
                             const payload = possibleDuplicateCreateEntryPayload(e);
                             clearMutErr();
                             setCreateEntryErr(duplicateMessage);
-                            setOpenCreateEntry(true);
-                            setCreateEntryBankTxnId(bankId);
                             setCreateEntryDuplicateCandidates(
                               Array.isArray(payload?.possible_duplicate_candidates)
                                 ? payload.possible_duplicate_candidates
@@ -4445,32 +4406,6 @@ const displayBankActiveList = useMemo(() => {
                       if (ids.length === 0) return;
                       for (const id of ids) markPending(String(id));
 
-                      setBulkCreateBusy(true);
-                      setOptimisticHiddenBankTxnIds((prev) => {
-                        const next = new Set(prev);
-                        for (const id of ids) next.add(String(id));
-                        return next;
-                      });
-                      setOptimisticPendingEntryDrafts((prev) => {
-                        const next = prev.filter(
-                          (x: any) => !ids.includes(String(x?.__source_bank_txn_id ?? ""))
-                        );
-                        for (const id of ids) {
-                          const bankTxn = bankTxSorted.find((x: any) => String(x.id) === String(id)) ?? null;
-                          if (!bankTxn) continue;
-                          next.unshift({
-                            id: `optimistic-entry:${id}`,
-                            date: bankTxn?.posted_date ? String(bankTxn.posted_date).slice(0, 10) : "",
-                            payee: String(bankTxn?.name ?? "").trim() || "Bank transaction",
-                            amount_cents: bankTxn?.amount_cents ?? 0,
-                            __optimistic_pending: true,
-                            __source_bank_txn_id: String(id),
-                          });
-                        }
-                        return next;
-                      });
-                      setSelectedBankTxnIds(new Set());
-
                       // Clear previous results for selected ids
                       setBulkCreateResultByBankTxnId((m) => {
                         const next = { ...m };
@@ -4479,6 +4414,8 @@ const displayBankActiveList = useMemo(() => {
                       });
 
                       try {
+                        setBulkCreateBusy(true);
+
                         const payload = {
                           items: ids.map((id) => ({
                             bank_transaction_id: id,
@@ -4516,28 +4453,9 @@ const displayBankActiveList = useMemo(() => {
                           await refreshIssuesAfterBankEntryCreate();
                         }
 
-                        const failedOrDuplicateIds = new Set<string>();
-                        for (const r of list) {
-                          const bid = String(r?.bank_transaction_id ?? "");
-                          const st = String(r?.status ?? "");
-                          const code = String(r?.code ?? "");
-                          if (bid && st !== "CREATED" && st !== "SKIPPED") failedOrDuplicateIds.add(bid);
-                          if (bid && code === "POSSIBLE_DUPLICATE_ENTRY") failedOrDuplicateIds.add(bid);
-                        }
-
-                        setOptimisticPendingEntryDrafts((prev) =>
-                          prev.filter((x: any) => !ids.includes(String(x?.__source_bank_txn_id ?? "")))
-                        );
-                        setOptimisticHiddenBankTxnIds((prev) => {
-                          const next = new Set(prev);
-                          for (const id of ids) next.delete(String(id));
-                          return next;
-                        });
-
-                        // Keep/reselect failures so user can retry, but successful rows stay cleared.
+                        // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
                         setSelectedBankTxnIds((prev) => {
                           const next = new Set(prev);
-                          for (const id of failedOrDuplicateIds) next.add(id);
                           for (const r of list) {
                             const bid = String(r?.bank_transaction_id ?? "");
                             const st = String(r?.status ?? "");
@@ -4547,15 +4465,6 @@ const displayBankActiveList = useMemo(() => {
                           return next;
                         });
                       } catch (e: any) {
-                        setOptimisticPendingEntryDrafts((prev) =>
-                          prev.filter((x: any) => !ids.includes(String(x?.__source_bank_txn_id ?? "")))
-                        );
-                        setOptimisticHiddenBankTxnIds((prev) => {
-                          const next = new Set(prev);
-                          for (const id of ids) next.delete(String(id));
-                          return next;
-                        });
-                        setSelectedBankTxnIds(new Set(ids.map(String)));
                         applyMutationError(e, "Can’t create entries");
                       } finally {
                         setBulkCreateBusy(false);
@@ -5740,39 +5649,15 @@ const displayBankActiveList = useMemo(() => {
                       setMatchError(null);
                       clearMutErr();
 
-                      const bankTxnId = String(matchBankTxnId);
-                      const selectedEntryIds = Array.from(matchSelectedEntryIds).map(String);
-                      const pendingIds = [bankTxnId, ...selectedEntryIds];
+                      const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
                       for (const id of pendingIds) markPending(id);
-
-                      const optimisticGroupId = `optimistic-match:${bankTxnId}:${Date.now()}`;
-                      const optimisticGroup = buildOptimisticMatchGroup({
-                        id: optimisticGroupId,
-                        bankTransactionIds: [bankTxnId],
-                        entryIds: selectedEntryIds,
-                        bankById: bankByIdFast,
-                        entryById: entryByIdFast,
-                      });
-
-                      setMatchGroups((prev) => upsertMatchGroup(prev, optimisticGroup));
-                      if (allMatchGroupsHydrated) {
-                        setAllMatchGroups((prev) => upsertMatchGroup(prev, optimisticGroup));
-                      }
-
-                      setOpenMatch(false);
-                      setMatchBankTxnId(null);
-                      setMatchSearch("");
-                      setMatchSelectedEntryIds(new Set());
-                      setMatchAiSuggestions([]);
-                      setMatchSuggestError(null);
-                      setMatchBusy(false);
 
                       try {
                         const payloadItems = [
                           {
-                            client_id: `manual:${bankTxnId}:${Date.now()}`,
-                            bankTransactionIds: [bankTxnId],
-                            entryIds: selectedEntryIds,
+                            client_id: `manual:${matchBankTxnId}:${Date.now()}`,
+                            bankTransactionIds: [matchBankTxnId],
+                            entryIds: Array.from(matchSelectedEntryIds),
                           },
                         ];
 
@@ -5786,7 +5671,8 @@ const displayBankActiveList = useMemo(() => {
                         const first = results[0];
 
                         if (!first?.ok) {
-                          throw new Error(String(first?.error ?? "Match failed"));
+                          setMatchError(String(first?.error ?? "Match failed"));
+                          return;
                         }
 
                         const createdGroup =
@@ -5797,9 +5683,9 @@ const displayBankActiveList = useMemo(() => {
                           null;
 
                         if (createdGroup?.id) {
-                          setMatchGroups((prev) => upsertMatchGroup(removeMatchGroup(prev, optimisticGroupId), createdGroup));
+                          setMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
                           if (allMatchGroupsHydrated) {
-                            setAllMatchGroups((prev) => upsertMatchGroup(removeMatchGroup(prev, optimisticGroupId), createdGroup));
+                            setAllMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
                           }
                         }
 
@@ -5810,15 +5696,18 @@ const displayBankActiveList = useMemo(() => {
                         });
 
                         clearMutErr();
+                        setOpenMatch(false);
+                        setMatchBankTxnId(null);
+                        setMatchSearch("");
+                        setMatchSelectedEntryIds(new Set());
+                        setMatchAiSuggestions([]);
+                        setMatchSuggestError(null);
                       } catch (e: any) {
-                        setMatchGroups((prev) => removeMatchGroup(prev, optimisticGroupId));
-                        if (allMatchGroupsHydrated) {
-                          setAllMatchGroups((prev) => removeMatchGroup(prev, optimisticGroupId));
-                        }
                         const r = applyMutationError(e, "Can’t match transactions");
                         if (!r.isClosed) setMatchError(r.msg);
                         else setMatchError(null);
                       } finally {
+                        const pendingIds = [String(matchBankTxnId), ...Array.from(matchSelectedEntryIds).map(String)];
                         for (const id of pendingIds) clearPending(id);
                         setMatchBusy(false);
                       }
@@ -6167,42 +6056,34 @@ const displayBankActiveList = useMemo(() => {
                     if (!selectedBusinessId || !selectedAccountId) return;
                     if (!adjustEntryId) return;
 
-                    const entryId = String(adjustEntryId);
-                    const reason = adjustReason.trim();
-
                     setAdjustBusy(true);
                     setAdjustError(null);
                     clearMutErr();
-                    markPending(entryId);
-                    setLocallyAdjusted((prev) => {
-                      const next = new Set(prev);
-                      next.add(entryId);
-                      return next;
-                    });
-                    setOpenAdjust(false);
-                    setAdjustBusy(false);
+                    markPending(String(adjustEntryId));
 
                     try {
                       await markEntryAdjustment({
                         businessId: selectedBusinessId,
                         accountId: selectedAccountId,
-                        entryId,
-                        reason,
+                        entryId: adjustEntryId,
+                        reason: adjustReason.trim(),
+                      });
+
+                      setLocallyAdjusted((prev) => {
+                        const next = new Set(prev);
+                        next.add(adjustEntryId);
+                        return next;
                       });
 
                       refreshAllDebounced();
                       clearMutErr();
+                      setOpenAdjust(false);
                     } catch (e: any) {
-                      setLocallyAdjusted((prev) => {
-                        const next = new Set(prev);
-                        next.delete(entryId);
-                        return next;
-                      });
                       const r = applyMutationError(e, "Can’t update adjustment");
                       if (!r.isClosed) setAdjustError(r.msg);
                       else setAdjustError(null);
                     } finally {
-                      clearPending(entryId);
+                      clearPending(String(adjustEntryId));
                       setAdjustBusy(false);
                     }
                   }}
@@ -6323,39 +6204,15 @@ const displayBankActiveList = useMemo(() => {
                       setEntryMatchError(null);
                       clearMutErr();
 
-                      const entryId = String(entryMatchEntryId);
-                      const selectedBankTxnIdsForMatch = Array.from(entryMatchSelectedBankTxnIds).map(String);
-                      const pendingIds = [entryId, ...selectedBankTxnIdsForMatch];
+                      const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
                       for (const id of pendingIds) markPending(id);
-
-                      const optimisticGroupId = `optimistic-match:${entryId}:${Date.now()}`;
-                      const optimisticGroup = buildOptimisticMatchGroup({
-                        id: optimisticGroupId,
-                        bankTransactionIds: selectedBankTxnIdsForMatch,
-                        entryIds: [entryId],
-                        bankById: bankByIdFast,
-                        entryById: entryByIdFast,
-                      });
-
-                      setMatchGroups((prev) => upsertMatchGroup(prev, optimisticGroup));
-                      if (allMatchGroupsHydrated) {
-                        setAllMatchGroups((prev) => upsertMatchGroup(prev, optimisticGroup));
-                      }
-
-                      setOpenEntryMatch(false);
-                      setEntryMatchEntryId(null);
-                      setEntryMatchSearch("");
-                      setEntryMatchSelectedBankTxnIds(new Set());
-                      setEntryAiSuggestions([]);
-                      setEntrySuggestError(null);
-                      setEntryMatchBusy(false);
 
                       try {
                         const payloadItems = [
                           {
-                            client_id: `combine:${entryId}:${Date.now()}`,
-                            bankTransactionIds: selectedBankTxnIdsForMatch,
-                            entryIds: [entryId],
+                            client_id: `combine:${entryMatchEntryId}:${Date.now()}`,
+                            bankTransactionIds: Array.from(entryMatchSelectedBankTxnIds).map(String),
+                            entryIds: [entryMatchEntryId],
                           },
                         ];
 
@@ -6367,7 +6224,8 @@ const displayBankActiveList = useMemo(() => {
 
                         const first = (Array.isArray(res?.results) ? res.results : [])[0];
                         if (!first?.ok) {
-                          throw new Error(String(first?.error ?? "Combine match failed"));
+                          setEntryMatchError(String(first?.error ?? "Combine match failed"));
+                          return;
                         }
 
                         // Optimistic: inject created group so rows move instantly.
@@ -6379,9 +6237,9 @@ const displayBankActiveList = useMemo(() => {
                           null;
 
                         if (createdGroup?.id) {
-                          setMatchGroups((prev) => upsertMatchGroup(removeMatchGroup(prev, optimisticGroupId), createdGroup));
+                          setMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
                           if (allMatchGroupsHydrated) {
-                            setAllMatchGroups((prev) => upsertMatchGroup(removeMatchGroup(prev, optimisticGroupId), createdGroup));
+                            setAllMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
                           }
                         }
 
@@ -6392,15 +6250,18 @@ const displayBankActiveList = useMemo(() => {
                         });
 
                         clearMutErr();
+                        setOpenEntryMatch(false);
+                        setEntryMatchEntryId(null);
+                        setEntryMatchSearch("");
+                        setEntryMatchSelectedBankTxnIds(new Set());
+                        setEntryAiSuggestions([]);
+                        setEntrySuggestError(null);
                       } catch (e: any) {
-                        setMatchGroups((prev) => removeMatchGroup(prev, optimisticGroupId));
-                        if (allMatchGroupsHydrated) {
-                          setAllMatchGroups((prev) => removeMatchGroup(prev, optimisticGroupId));
-                        }
                         const r = applyMutationError(e, "Can’t create match");
                         if (!r.isClosed) setEntryMatchError(r.msg);
                         else setEntryMatchError(null);
                       } finally {
+                        const pendingIds = [String(entryMatchEntryId), ...Array.from(entryMatchSelectedBankTxnIds).map(String)];
                         for (const id of pendingIds) clearPending(id);
                         setEntryMatchBusy(false);
                       }

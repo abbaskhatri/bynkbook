@@ -166,8 +166,6 @@ export default function PlanningPageClient() {
 
   async function onSaveBudgets() {
     if (!selectedBusinessId) return;
-    const previousRows = budgetRows;
-    const previousDrafts = draftByCatId;
     setSaving(true);
     setBudgetsErr(null);
 
@@ -186,36 +184,16 @@ export default function PlanningPageClient() {
         return;
       }
 
-      const updateByCategoryId = new Map(updates.map((u) => [u.category_id, String(u.budget_cents)]));
-      const optimisticRows = budgetRows.map((row) =>
-        updateByCategoryId.has(row.category_id)
-          ? { ...row, budget_cents: updateByCategoryId.get(row.category_id)! }
-          : row
-      );
-      const optimisticDrafts: Record<string, string> = {};
-      for (const row of optimisticRows) optimisticDrafts[row.category_id] = centsToInput(row.budget_cents);
-      setBudgetRows(optimisticRows);
-      setDraftByCatId(optimisticDrafts);
-      setSaving(false);
-
       const res = await putBudgets(selectedBusinessId, month, updates);
       const failed = (res.results ?? []).filter((r: any) => !r.ok);
-      if (failed.length) {
-        setBudgetRows(previousRows);
-        setDraftByCatId(previousDrafts);
-        setBudgetsErr(`Some rows failed to save (${failed.length}).`);
-        return;
-      }
+      if (failed.length) setBudgetsErr(`Some rows failed to save (${failed.length}).`);
 
-      void getBudgets(selectedBusinessId, month).then((fresh) => {
-        setBudgetRows(fresh.rows ?? []);
-        const nextDraft: Record<string, string> = {};
-        for (const r of fresh.rows ?? []) nextDraft[r.category_id] = centsToInput(r.budget_cents);
-        setDraftByCatId(nextDraft);
-      });
+      const fresh = await getBudgets(selectedBusinessId, month);
+      setBudgetRows(fresh.rows ?? []);
+      const nextDraft: Record<string, string> = {};
+      for (const r of fresh.rows ?? []) nextDraft[r.category_id] = centsToInput(r.budget_cents);
+      setDraftByCatId(nextDraft);
     } catch (e: any) {
-      setBudgetRows(previousRows);
-      setDraftByCatId(previousDrafts);
       setBudgetsErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setSaving(false);
@@ -287,37 +265,7 @@ export default function PlanningPageClient() {
     if (createMonthEnd && !/^\d{4}-\d{2}$/.test(createMonthEnd)) return setGoalsErr("End month must be YYYY-MM.");
     const target_cents = inputToCents(createTarget);
 
-    const previousRows = goalRows;
-    const previousForm = {
-      name: createName,
-      categoryId: createCategoryId,
-      monthStart: createMonthStart,
-      monthEnd: createMonthEnd,
-      target: createTarget,
-    };
-    const nowIso = new Date().toISOString();
-    const categoryName = categories.find((c) => String(c.id) === String(createCategoryId))?.name ?? "";
-    const tempGoal: GoalRow = {
-      id: `temp_goal_${Date.now()}`,
-      name,
-      category_id: createCategoryId,
-      category_name: categoryName,
-      month_start: createMonthStart,
-      month_end: createMonthEnd ? createMonthEnd : null,
-      target_cents: String(target_cents),
-      progress_cents: "0",
-      status: "ACTIVE",
-      created_at: nowIso,
-      updated_at: nowIso,
-    };
-
-    setGoalRows((current) => [tempGoal, ...current]);
-    setCreateOpen(false);
-    setCreateName("");
-    setCreateTarget("0.00");
-    setCreateMonthStart(ymNow());
-    setCreateMonthEnd("");
-    setCreating(false);
+    setCreating(true);
     try {
       await createGoal(selectedBusinessId, {
         name,
@@ -328,16 +276,18 @@ export default function PlanningPageClient() {
         status: "ACTIVE",
       });
 
-      void listGoals(selectedBusinessId).then((fresh) => setGoalRows(fresh.rows ?? []));
+      const fresh = await listGoals(selectedBusinessId);
+      setGoalRows(fresh.rows ?? []);
+
+      setCreateOpen(false);
+      setCreateName("");
+      setCreateTarget("0.00");
+      setCreateMonthStart(ymNow());
+      setCreateMonthEnd("");
     } catch (e: any) {
-      setGoalRows(previousRows);
-      setCreateName(previousForm.name);
-      setCreateCategoryId(previousForm.categoryId);
-      setCreateMonthStart(previousForm.monthStart);
-      setCreateMonthEnd(previousForm.monthEnd);
-      setCreateTarget(previousForm.target);
-      setCreateOpen(true);
       setGoalsErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
+    } finally {
+      setCreating(false);
     }
   }
 
