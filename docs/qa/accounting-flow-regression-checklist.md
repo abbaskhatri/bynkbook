@@ -217,6 +217,9 @@ Refund:
 
 ## Production-Safe Smoke Checklist
 
+For production deployment or production smoke checks, use:
+docs/qa/production-readiness-smoke-gate.md
+
 Only run after explicit approval.
 
 First:
