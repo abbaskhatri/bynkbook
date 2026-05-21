@@ -176,6 +176,18 @@ function allTimeStartYmd() {
   return "2000-01-01";
 }
 
+function ledgerCategorySuggestionRequiresReview(suggestion: any) {
+  return (
+    suggestion?.requiresUserConfirmation === true ||
+    suggestion?.review_only === true ||
+    suggestion?.reviewOnly === true ||
+    suggestion?.protected === true ||
+    suggestion?.is_protected === true ||
+    suggestion?.isProtected === true ||
+    !!String(suggestion?.protected_class ?? suggestion?.protectedClass ?? "").trim()
+  );
+}
+
 type LedgerRangePreset =
   | "TODAY"
   | "YESTERDAY"
@@ -5033,7 +5045,7 @@ export default function LedgerPageClient() {
                     const conf = Math.max(0, Math.min(100, Math.round(Number(s?.confidence ?? 0) || 0)));
                     const confLabel = String(s?.confidence_label ?? s?.confidenceLabel ?? "").trim();
                     const warning = String(s?.warning ?? "").trim();
-                    const requiresReview = s?.requiresUserConfirmation !== false;
+                    const requiresReview = ledgerCategorySuggestionRequiresReview(s);
                     const suggestionTitle = [
                       name,
                       confLabel ? `Confidence: ${confLabel}` : `${conf}% confidence`,
@@ -5045,7 +5057,12 @@ export default function LedgerPageClient() {
                     return (
                       <button
                         type="button"
-                        className="h-5 max-w-full min-w-0 px-2 rounded-full border border-primary/20 bg-primary/10 text-primary text-[10px] inline-flex items-center gap-1 hover:bg-primary/15"
+                        className={[
+                          "h-5 max-w-full min-w-0 px-2 rounded-full border text-[10px] inline-flex items-center gap-1 hover:bg-primary/15",
+                          requiresReview
+                            ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
+                            : "border-primary/20 bg-primary/10 text-primary",
+                        ].join(" ")}
                         title={suggestionTitle}
                         onClick={async (ev) => {
                           ev.stopPropagation();
@@ -5074,9 +5091,14 @@ export default function LedgerPageClient() {
                         }}
                       >
                         <span className="min-w-0 max-w-[120px] truncate font-semibold">{name}</span>
-                        <span className={warning ? "text-bb-status-warning-fg" : "text-primary"}>
+                        <span className={requiresReview || warning ? "text-bb-status-warning-fg" : "text-primary"}>
                           {confLabel || `${conf}%`}
                         </span>
+                        {requiresReview ? (
+                          <span className="shrink-0 rounded-full border border-bb-status-warning-border bg-background/40 px-1 text-[9px] font-semibold">
+                            Review
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })()

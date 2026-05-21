@@ -202,7 +202,7 @@ export type CategorySuggestion = {
   confidence_label?: "high" | "medium" | "low";
   confidence_tier: "SAFE_DETERMINISTIC" | "STRONG_SUGGESTION" | "ALTERNATE" | "REVIEW_BUCKET";
   reason: string;
-  requiresUserConfirmation?: true;
+  requiresUserConfirmation?: boolean;
   warning?: string;
   review_only?: boolean;
   protected_class?: string;
@@ -219,19 +219,47 @@ function suggestionSafetyWarning(row: {
 }) {
   const text = `${row.category_name ?? ""} ${row.reason ?? ""} ${row.merchant_normalized ?? ""}`.toLowerCase();
 
-  if (/\b(irs|eftps|treasury|tax|payroll|adp|gusto|paychex)\b/.test(text)) {
-    return "Tax and payroll patterns require user review before applying.";
+  if (/\b(irs|eftps|treasury|tax)\b/.test(text)) {
+    return "CPA/tax treatment review may be needed before applying this category.";
   }
 
-  if (/\b(credit card|card payment|amex|american express|visa payment|mastercard|loan|principal|interest|refund|chargeback|owner draw|owner contribution|equity)\b/.test(text)) {
-    return "This may need accounting review; do not apply unless the category is confirmed.";
+  if (/\b(payroll|adp|gusto|paychex)\b/.test(text)) {
+    return "Payroll treatment can affect taxes and liabilities; review before applying.";
   }
 
-  if (/\b(zelle|ach|wire|transfer|online banking|card payoff)\b/.test(text) && !/\b(bank fee|wire fee|service charge)\b/.test(text)) {
+  if (/\b(credit card|card payment|amex|american express|visa payment|mastercard|card payoff)\b/.test(text)) {
+    return "This may be a credit card payment or transfer; avoid duplicating the underlying card expenses.";
+  }
+
+  if (/\b(loan|principal|interest)\b/.test(text)) {
+    return "Loan payments may need principal and interest treatment; review before applying.";
+  }
+
+  if (/\b(refund|chargeback)\b/.test(text)) {
+    return "Refunds usually map back to the original transaction or category where possible.";
+  }
+
+  if (/\b(owner draw|owner contribution|equity)\b/.test(text)) {
+    return "Owner equity activity needs review before applying an income or expense category.";
+  }
+
+  if (/\bzelle\b/.test(text)) {
+    return "Zelle sender text alone may not prove income or expense treatment; confirm first.";
+  }
+
+  if (/\b(ach|wire)\b/.test(text) && !/\b(bank fee|wire fee|service charge)\b/.test(text)) {
+    return "Generic ACH or wire language needs confirmation before applying a category.";
+  }
+
+  if (/\b(transfer|online banking)\b/.test(text) && !/\b(bank fee|wire fee|service charge)\b/.test(text)) {
     return "This may be a transfer or payment rather than an expense; confirm before applying.";
   }
 
-  if (/\b(amazon|costco|sams|sam's|wholesale)\b/.test(text)) {
+  if (/\bamazon\b/.test(text)) {
+    return "Amazon purchases are ambiguous without a receipt or history; confirm the business purpose.";
+  }
+
+  if (/\b(costco|sams|sam's|wholesale)\b/.test(text)) {
     return "This merchant can map to several categories; confirm the business purpose before applying.";
   }
 
@@ -250,7 +278,7 @@ function withSuggestionSafety(row: Suggestion): Suggestion {
     confidence,
     confidence_label: confidenceLabelFromScore(confidence),
     confidence_tier,
-    requiresUserConfirmation: true,
+    requiresUserConfirmation: reviewOnly,
     ...(warning ? { warning, review_only: true, protected_class: "REVIEW_REQUIRED" } : {}),
     ...(!warning && reviewOnly ? { review_only: true } : {}),
   };

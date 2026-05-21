@@ -98,6 +98,29 @@ describe("isBulkSafeCategorySuggestion", () => {
       )
     ).toBe(false);
   });
+
+  test("rejects suggestions with warnings, confirmation flags, or risky payment language", () => {
+    expect(
+      isBulkSafeCategorySuggestion(
+        { category_id: "cat-1", confidence_tier: "SAFE_DETERMINISTIC", confidence: 95, warning: "Review first" },
+        0
+      )
+    ).toBe(false);
+
+    expect(
+      isBulkSafeCategorySuggestion(
+        { category_id: "cat-1", confidence_tier: "SAFE_DETERMINISTIC", confidence: 95, requiresUserConfirmation: true },
+        0
+      )
+    ).toBe(false);
+
+    expect(
+      isBulkSafeCategorySuggestion(
+        { category_id: "cat-1", category_name: "Credit Card Payment", confidence_tier: "SAFE_DETERMINISTIC", confidence: 95 },
+        0
+      )
+    ).toBe(false);
+  });
 });
 
 describe("category keyword suggestions", () => {

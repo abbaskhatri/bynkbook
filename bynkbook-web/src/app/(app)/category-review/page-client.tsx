@@ -139,6 +139,28 @@ function hasSuggestionEntry(map: Record<string, any[]>, entryId: string) {
   return Object.prototype.hasOwnProperty.call(map, entryId);
 }
 
+function isInactiveEntryForCategoryReview(entry: any) {
+  if (entry?.deleted_at || entry?.deletedAt) return true;
+  const status = String(entry?.status ?? "").trim().toUpperCase();
+  return status === "DELETED" || status === "SOFT_DELETED" || status === "VOIDED" || status === "REMOVED";
+}
+
+function categorySuggestionRequiresReview(suggestion: any) {
+  return (
+    suggestion?.requiresUserConfirmation === true ||
+    suggestion?.review_only === true ||
+    suggestion?.reviewOnly === true ||
+    suggestion?.protected === true ||
+    suggestion?.is_protected === true ||
+    suggestion?.isProtected === true ||
+    !!String(suggestion?.protected_class ?? suggestion?.protectedClass ?? "").trim()
+  );
+}
+
+function categorySuggestionWarning(suggestion: any) {
+  return String(suggestion?.warning ?? "").trim();
+}
+
 function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<string, string>) {
   const categoryId = String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
   const categoryName =
@@ -149,6 +171,8 @@ function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<str
   const tierLabel = categorySuggestionTierLabel(suggestion?.confidence_tier ?? suggestion?.confidenceTier);
   const sourceLabel = categorySuggestionSourceLabel(suggestion?.source);
   const reasonText = String(suggestion?.reason ?? "").trim();
+  const warningText = categorySuggestionWarning(suggestion);
+  const requiresReview = categorySuggestionRequiresReview(suggestion);
   const merchantNormalized = String(suggestion?.merchant_normalized ?? suggestion?.merchantNormalized ?? "").trim();
 
   const lines = [
@@ -157,7 +181,9 @@ function categorySuggestionWhyText(suggestion: any, categoryNameById: Record<str
     `Source: ${sourceLabel}`,
   ];
 
+  if (requiresReview) lines.push("Review required: yes");
   if (reasonText) lines.push(`Rationale: ${reasonText}`);
+  if (warningText) lines.push(`Warning: ${warningText}`);
   if (merchantNormalized) lines.push(`Matched merchant key: ${merchantNormalized}`);
 
   return lines.join("\n");
@@ -544,6 +570,8 @@ export default function CategoryReviewPageClient() {
     };
 
     return allEntries.filter((e) => {
+      if (isInactiveEntryForCategoryReview(e)) return false;
+
       const ymd = String(e.date ?? "").slice(0, 10);
       if (!inRange(ymd)) return false;
 
@@ -1987,15 +2015,17 @@ export default function CategoryReviewPageClient() {
                                             const catId = String(s?.category_id ?? s?.categoryId ?? "");
                                             const name = categorySuggestionCategoryName(s, categoryNameById) || "—";
                                             const conf = categorySuggestionConfidence(s?.confidence);
+                                            const confLabel = String(s?.confidence_label ?? s?.confidenceLabel ?? "").trim();
                                             const tierLabel = categorySuggestionTierLabel(s?.confidence_tier);
                                             const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                             const reasonText = categorySuggestionReason(s);
+                                            const warningText = categorySuggestionWarning(s);
+                                            const requiresReview = categorySuggestionRequiresReview(s);
                                             const inlineReason = categorySuggestionInlineReason(reasonText, name, conf);
-                                            const isPrimaryReviewOnly = !topSuggestionIsBulkSafe;
+                                            const isPrimaryReviewOnly = requiresReview || !topSuggestionIsBulkSafe;
                                             const metaText = [
-                                              `${conf}%`,
+                                              confLabel ? `${confLabel} (${conf}%)` : `${conf}%`,
                                               sourceLabel,
-                                              isPrimaryReviewOnly ? "Review" : "",
                                             ].filter(Boolean).join(" · ");
                                             const buttonTone = categorySuggestionButtonClass(s?.confidence_tier, true);
                                             const isSuggestionSelected =
@@ -2010,7 +2040,7 @@ export default function CategoryReviewPageClient() {
                                                       ? "border-bb-status-warning-border bg-bb-status-warning-bg"
                                                       : "border-primary/20 bg-primary/5"
                                                   }`}
-                                                  title={[tierLabel, sourceLabel, reasonText].filter(Boolean).join(" • ")}
+                                                  title={[tierLabel, sourceLabel, reasonText, warningText].filter(Boolean).join(" • ")}
                                                 >
                                                   <div className="min-w-0">
                                                     <div className="truncate text-[10px] font-semibold text-foreground">
@@ -2022,6 +2052,12 @@ export default function CategoryReviewPageClient() {
                                                   </div>
 
                                                   <div className="ml-auto flex shrink-0 items-center gap-1">
+                                                    {requiresReview ? (
+                                                      <span className="h-5 px-1.5 rounded-full border border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg text-[10px] inline-flex items-center">
+                                                        Review required
+                                                      </span>
+                                                    ) : null}
+
                                                     <button
                                                       type="button"
                                                       className={`h-5 px-1.5 rounded-md border text-[10px] font-semibold inline-flex items-center disabled:opacity-60 ${buttonTone}`}
@@ -2050,6 +2086,11 @@ export default function CategoryReviewPageClient() {
                                                 {inlineReason ? (
                                                   <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={reasonText}>
                                                     {inlineReason}
+                                                  </div>
+                                                ) : null}
+                                                {warningText ? (
+                                                  <div className="mt-0.5 truncate text-[10px] text-bb-status-warning-fg" title={warningText}>
+                                                    {warningText}
                                                   </div>
                                                 ) : null}
                                               </div>
@@ -2365,6 +2406,8 @@ export default function CategoryReviewPageClient() {
                                 const topConfidence = categorySuggestionConfidence(top?.confidence);
                                 const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
                                 const topIsBulkSafe = isBulkSafeCategorySuggestion(top, 0);
+                                const topWarning = categorySuggestionWarning(top);
+                                const topRequiresReview = categorySuggestionRequiresReview(top);
 
                                 return (
                                   <div
@@ -2398,6 +2441,11 @@ export default function CategoryReviewPageClient() {
                                           {topReason}
                                         </div>
                                       ) : null}
+                                      {topWarning ? (
+                                        <div className="mt-1 truncate text-[10px] text-bb-status-warning-fg" title={topWarning}>
+                                          {topWarning}
+                                        </div>
+                                      ) : null}
                                     </div>
 
                                     <div className="pt-0.5 text-right text-xs font-semibold text-foreground">
@@ -2405,7 +2453,7 @@ export default function CategoryReviewPageClient() {
                                     </div>
 
                                     <div className="pt-0.5 text-right text-[10px] font-medium text-primary">
-                                      {topIsBulkSafe ? "Safe" : "Review"}
+                                      {topIsBulkSafe && !topRequiresReview ? "Safe" : "Review required"}
                                     </div>
                                   </div>
                                 );
@@ -2438,6 +2486,7 @@ export default function CategoryReviewPageClient() {
                               ? categorySuggestionTierLabel(top?.confidence_tier ?? top?.confidenceTier)
                               : "No confident suggestion";
                             const topReason = String(top?.reason ?? "").trim();
+                            const topWarning = categorySuggestionWarning(top);
 
                             return (
                               <div
@@ -2459,6 +2508,11 @@ export default function CategoryReviewPageClient() {
                                   {topReason ? (
                                     <div className="mt-1 truncate text-[10px] text-muted-foreground" title={topReason}>
                                       {topReason}
+                                    </div>
+                                  ) : null}
+                                  {topWarning ? (
+                                    <div className="mt-1 truncate text-[10px] text-bb-status-warning-fg" title={topWarning}>
+                                      {topWarning}
                                     </div>
                                   ) : null}
                                 </div>
