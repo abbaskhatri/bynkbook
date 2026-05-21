@@ -121,6 +121,32 @@ describe("isBulkSafeCategorySuggestion", () => {
       )
     ).toBe(false);
   });
+
+  test("keeps risky accounting scenario language out of bulk safe apply", () => {
+    const riskyScenarios = [
+      { category_name: "Taxes", reason: "IRS EFTPS tax payment" },
+      { category_name: "Credit Card Payment", reason: "Visa card payoff" },
+      { category_name: "Refund", reason: "Vendor refund received" },
+      { category_name: "Owner Equity", reason: "Owner contribution" },
+      { category_name: "Payroll", reason: "Gusto payroll processor" },
+      { category_name: "Sales", merchant_normalized: "zelle received" },
+      { category_name: "Contract Labor", reason: "ACH wire transfer" },
+    ];
+
+    for (const scenario of riskyScenarios) {
+      expect(
+        isBulkSafeCategorySuggestion(
+          {
+            category_id: "cat-1",
+            confidence_tier: "SAFE_DETERMINISTIC",
+            confidence: 95,
+            ...scenario,
+          },
+          0
+        )
+      ).toBe(false);
+    }
+  });
 });
 
 describe("category keyword suggestions", () => {

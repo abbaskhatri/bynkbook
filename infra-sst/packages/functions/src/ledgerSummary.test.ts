@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 const businessId = "biz-1";
 const accountId = "acct-1";
+const inactiveStatuses = ["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"];
+const activeLedgerTypes = ["INCOME", "EXPENSE"];
 
 function event(queryStringParameters: Record<string, string> = {}) {
   return {
@@ -41,8 +43,8 @@ async function loadHandler() {
           business_id: businessId,
           account_id: accountId,
           deleted_at: null,
-          status: { notIn: ["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"] },
-          type: { in: ["INCOME", "EXPENSE"] },
+          status: { notIn: inactiveStatuses },
+          type: { in: activeLedgerTypes },
         });
 
         if (where.amount_cents?.gt === 0n) return { _sum: { amount_cents: 5000n } };
@@ -75,6 +77,18 @@ describe("ledger summary active accounting totals", () => {
 
     expect(res.statusCode).toBe(200);
     expect(prisma.entry.aggregate).toHaveBeenCalledTimes(4);
+
+    const aggregateWheres = prisma.entry.aggregate.mock.calls.map(([args]) => args.where);
+    for (const where of aggregateWheres) {
+      expect(where.status.notIn).toEqual(inactiveStatuses);
+      expect(where.type.in).toEqual(activeLedgerTypes);
+    }
+    expect(aggregateWheres[0].amount_cents).toEqual({ gt: 0n });
+    expect(aggregateWheres[1].amount_cents).toEqual({ lt: 0n });
+    expect(aggregateWheres[2].amount_cents).toBeUndefined();
+    expect(aggregateWheres[3].amount_cents).toBeUndefined();
+    expect(aggregateWheres[3].date).toEqual({ lte: new Date("2026-04-30T00:00:00.000Z") });
+
     expect(body.totals).toEqual({
       income_cents: "5000",
       expense_cents: "1200",

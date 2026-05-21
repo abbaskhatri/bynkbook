@@ -187,6 +187,51 @@ describe("apply-category-batch category safety", () => {
     expect(prisma.entry.update).not.toHaveBeenCalled();
   });
 
+  test("rejects protected or review-only top suggestions", async () => {
+    const protectedCases = [
+      { review_only: true },
+      { protected_class: "TRANSFER" },
+      { is_protected: true },
+    ];
+
+    for (const marker of protectedCases) {
+      const { handler, prisma, request } = await loadHandler({
+        suggestionsById: {
+          [entryId]: [
+            {
+              category_id: safeCatId,
+              confidence_tier: "SAFE_DETERMINISTIC",
+              confidence: 95,
+              ...marker,
+            },
+          ],
+        },
+      });
+
+      const res = await handler(request);
+      const body = JSON.parse(res.body);
+
+      expect(body.applied).toBe(0);
+      expect(body.results[0]).toMatchObject({ ok: false, code: "UNSAFE_SUGGESTION" });
+      expect(prisma.entry.update).not.toHaveBeenCalled();
+    }
+  });
+
+  test("rejects missing confidence on suggested bulk apply", async () => {
+    const { handler, prisma, request } = await loadHandler({
+      suggestionsById: {
+        [entryId]: [{ category_id: safeCatId, confidence_tier: "STRONG_SUGGESTION" }],
+      },
+    });
+
+    const res = await handler(request);
+    const body = JSON.parse(res.body);
+
+    expect(body.applied).toBe(0);
+    expect(body.results[0]).toMatchObject({ ok: false, code: "UNSAFE_SUGGESTION" });
+    expect(prisma.entry.update).not.toHaveBeenCalled();
+  });
+
   test("rejects risky payment language even without explicit warning", async () => {
     const { handler, prisma, request } = await loadHandler({
       suggestionsById: {
