@@ -90,6 +90,19 @@ Expected:
 - Up to date with origin/main.
 - Working tree clean.
 
+## Optional Production Preflight Helper
+
+PowerShell:
+
+```powershell
+cd C:\Users\abbas\Bynkbook-app
+.\scripts\bynkbook-production-preflight.ps1
+```
+
+The helper is read-only. It verifies the current branch, clean working tree, origin/main alignment, and AWS identity.
+
+It does not deploy, does not run production API checks, and does not mutate production data. Passing the helper does not equal deployment approval; deployment still requires explicit approval.
+
 ## Local Validation Preflight
 
 PowerShell:

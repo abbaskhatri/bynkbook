@@ -220,6 +220,9 @@ Refund:
 For production deployment or production smoke checks, use:
 docs/qa/production-readiness-smoke-gate.md
 
+Optional read-only preflight helper:
+scripts/bynkbook-production-preflight.ps1
+
 Only run after explicit approval.
 
 First:
