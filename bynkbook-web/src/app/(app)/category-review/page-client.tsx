@@ -141,7 +141,9 @@ function hasSuggestionEntry(map: Record<string, any[]>, entryId: string) {
 
 function isInactiveEntryForCategoryReview(entry: any) {
   if (entry?.deleted_at || entry?.deletedAt) return true;
-  const status = String(entry?.status ?? "").trim().toUpperCase();
+  if (entry?.voided_at || entry?.voidedAt) return true;
+  if (entry?.removed_at || entry?.removedAt) return true;
+  const status = String(entry?.status ?? entry?.entry_status ?? entry?.entryStatus ?? "").trim().toUpperCase();
   return status === "DELETED" || status === "SOFT_DELETED" || status === "VOIDED" || status === "REMOVED";
 }
 
@@ -575,9 +577,9 @@ export default function CategoryReviewPageClient() {
       const ymd = String(e.date ?? "").slice(0, 10);
       if (!inRange(ymd)) return false;
 
-      // Exclude types that don't require categories
+      // Category review applies only to active accounting entries.
       const t = String(e.type ?? "").toUpperCase();
-      if (t === "TRANSFER" || t === "ADJUSTMENT" || t === "OPENING") return false;
+      if (t !== "INCOME" && t !== "EXPENSE") return false;
 
       // Exclude opening balance placeholders (these must never be categorized)
       const payeeText = String(e.payee ?? "").trim().toLowerCase();

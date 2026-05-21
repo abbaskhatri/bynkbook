@@ -65,8 +65,8 @@ export async function handler(event: any) {
     business_id: biz,
     account_id: acct,
     deleted_at: null,
-    // Lock: TRANSFER entries must be excluded from totals (P&L / cashflow / dashboard)
-    type: { not: "TRANSFER" },
+    status: { notIn: ["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"] },
+    type: { in: ["INCOME", "EXPENSE"] },
     date: { gte: fromDate, lte: toDate },
   };
 
@@ -90,6 +90,8 @@ export async function handler(event: any) {
       business_id: biz,
       account_id: acct,
       deleted_at: null,
+      status: { notIn: ["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"] },
+      type: { in: ["INCOME", "EXPENSE"] },
       date: { lte: toDate },
     },
     _sum: { amount_cents: true },
