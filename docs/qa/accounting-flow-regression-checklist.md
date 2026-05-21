@@ -102,6 +102,20 @@ If package paths or tests differ, operator should use the actual repo scripts an
 - Dark mode remains readable.
 - Mobile/narrow width remains usable.
 
+## Plaid / Bank Transaction Visibility Checklist
+
+- Correct AWS identity is verified before any production API check.
+- Sync action shows clear state: syncing, succeeded, failed, or stale where available.
+- Last synced value is visible where available.
+- New transactions appear after successful sync/import.
+- If new transactions do not appear, active filters/date/account/search are visible.
+- Empty state distinguishes no records from filters hiding records.
+- Balance freshness is not misrepresented as transaction-list freshness.
+- Reconcile refreshes bank candidates after sync/import.
+- Ledger refreshes relevant bank/ledger data after sync/import where that surface supports bank sync.
+- No fake import counts or fake sync success.
+- No production data mutation during smoke checks unless explicitly approved.
+
 ## Category Review Checklist
 
 - Category Review page loads.

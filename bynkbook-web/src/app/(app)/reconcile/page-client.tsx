@@ -1148,6 +1148,7 @@ export default function ReconcilePageClient() {
     loading: false,
     error: null,
   });
+  const [bankCountRefreshSeq, setBankCountRefreshSeq] = useState(0);
 
   // B2: Bulk create entries from selected bank txns (unmatched tab)
   const [selectedBankTxnIds, setSelectedBankTxnIds] = useState<Set<string>>(new Set());
@@ -1722,7 +1723,7 @@ export default function ReconcilePageClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBusinessId, selectedAccountId, from, to, countUnmatchedBankTransactionsForScope]);
+  }, [selectedBusinessId, selectedAccountId, from, to, bankCountRefreshSeq, countUnmatchedBankTransactionsForScope]);
 
   // One debounced refresh after any mutation (no storms)
   const [refreshBusy, setRefreshBusy] = useState(false);
@@ -3373,7 +3374,9 @@ const displayBankActiveList = useMemo(() => {
       if (activeBankHiddenBySearch > 0) {
         return `${activeBankHiddenBySearch} matched bank transactions are hidden by search. Clear search to see them.`;
       }
-      return "No matched bank transactions in this date range.";
+      return dateRangeActive
+        ? "No matched bank transactions in this date range."
+        : "No matched bank transactions for this account.";
     }
 
     if (!bankStatusLoaded.unmatched) return bankScopeCountsLoading ? "Checking for bank transactions..." : "Not loaded yet.";
@@ -3391,7 +3394,7 @@ const displayBankActiveList = useMemo(() => {
     }
 
     if (bankScopeCountsReady && bankUnmatchedScopeCounts.dateRange?.count === 0) {
-      return "No unmatched bank transactions in this date range.";
+      return "No unmatched bank transactions match the current filters.";
     }
 
     if (activeBankNextCursor) {
@@ -3579,6 +3582,12 @@ const displayBankActiveList = useMemo(() => {
     const bal = plaid?.lastKnownBalanceCents ? toBigIntSafe(plaid.lastKnownBalanceCents) : null;
     return bal !== null ? formatUsdFromCents(bal) : "—";
   }, [plaid?.lastKnownBalanceCents]);
+  const transactionSyncText = plaid?.lastSyncAt ? new Date(plaid.lastSyncAt).toLocaleString() : "";
+  const balanceCheckedText = plaid?.lastKnownBalanceAt ? new Date(plaid.lastKnownBalanceAt).toLocaleString() : "";
+  const bankUpdatesAvailable =
+    !!plaid?.connected &&
+    !!plaid?.hasNewTransactions &&
+    !plaidSyncing;
 
   const filterLeft = (
     <div className="flex items-center gap-2 flex-wrap">
@@ -3647,10 +3656,10 @@ const displayBankActiveList = useMemo(() => {
             </div>
           ) : null}
 
-          {plaid?.connected && plaid?.lastSyncAt ? (
+          {plaid?.connected && transactionSyncText ? (
             <div className="leading-tight">
-              <div className="text-bb-text-muted">Last sync</div>
-              <div className="font-semibold text-bb-text">{new Date(plaid.lastSyncAt).toLocaleString()}</div>
+              <div className="text-bb-text-muted">Txn sync</div>
+              <div className="font-semibold text-bb-text">{transactionSyncText}</div>
             </div>
           ) : null}
         </div>
@@ -4749,8 +4758,12 @@ const displayBankActiveList = useMemo(() => {
                       {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
                       <span className="text-bb-text-subtle"> • </span>
                       <span className="tabular-nums">Balance: {balanceText}</span>
-                      {plaid?.lastSyncAt ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {plaid?.lastSyncAt ? <span>Last sync: {new Date(plaid.lastSyncAt).toLocaleString()}</span> : null}
+                      {balanceCheckedText ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {balanceCheckedText ? <span>Balance checked: {balanceCheckedText}</span> : null}
+                      {transactionSyncText ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {transactionSyncText ? <span>Transactions synced: {transactionSyncText}</span> : null}
+                      {bankUpdatesAvailable ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {bankUpdatesAvailable ? <span className="text-bb-status-warning-fg">Bank reports new activity; sync to refresh transactions.</span> : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
                       {syncMsg ? <span className="truncate">{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
@@ -4801,7 +4814,7 @@ const displayBankActiveList = useMemo(() => {
                           const refreshSucceeded = Boolean(res?.refreshSucceeded);
                           const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
 
-                          const syncParts = [`Synced: ${newCount} new`];
+                          const syncParts = [`Transactions refreshed: ${newCount} new`];
                           if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
                           if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
                           if (refreshRequested) {
@@ -4825,8 +4838,10 @@ const displayBankActiveList = useMemo(() => {
                             skipLegacyMatches: true,
                             silent: true,
                           });
+                          setBankCountRefreshSeq((n) => n + 1);
                         } catch (e: any) {
-                          setSyncMsg(e?.message ?? "Sync failed");
+                          setSyncMsg(`Sync failed: ${e?.message ?? "Unable to refresh transactions"}`);
+                          setPendingMsg("Keeping the current transaction list until sync succeeds.");
                         } finally {
                           setPlaidSyncing(false);
                         }
@@ -4872,11 +4887,26 @@ const displayBankActiveList = useMemo(() => {
                   disabled={plaidSyncing || !selectedBusinessId || !selectedAccountId}
                   disabledClassName={disabledBtn}
                   buttonClassName="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-                  onConnected={async () => {
+                  onConnected={async (syncResult?: any) => {
                     if (!selectedBusinessId || !selectedAccountId) return;
 
-                    setSyncMsg(null);
-                    setPendingMsg(null);
+                    const initialSyncFailed = !!syncResult?.syncFailed || syncResult?.ok === false;
+                    if (initialSyncFailed) {
+                      setSyncMsg(`Initial transaction sync failed: ${syncResult?.error ?? "Unable to refresh transactions"}`);
+                      setPendingMsg("Connected bank, but the transaction list may be stale. Try Sync.");
+                    } else if (syncResult) {
+                      const newCount = Number(syncResult?.newCount ?? 0);
+                      const upgradedCount = Number(syncResult?.upgradedCount ?? 0);
+                      const pendingCount = Number(syncResult?.pendingCount ?? 0);
+                      const syncParts = [`Transactions refreshed: ${newCount} new`];
+                      if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
+                      if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
+                      setSyncMsg(syncParts.join(" • "));
+                      setPendingMsg(pendingCount > 0 ? "Pending shown read-only until posted." : null);
+                    } else {
+                      setSyncMsg(null);
+                      setPendingMsg(null);
+                    }
                     setPlaidLoading(true);
                     try {
                       const res = await plaidStatus(selectedBusinessId, selectedAccountId);
@@ -4886,6 +4916,7 @@ const displayBankActiveList = useMemo(() => {
                         preserveOnEmpty: true,
                         skipLegacyMatches: true,
                       });
+                      setBankCountRefreshSeq((n) => n + 1);
                     } finally {
                       setPlaidLoading(false);
                     }
@@ -7562,6 +7593,16 @@ const displayBankActiveList = useMemo(() => {
             type="BANK_STATEMENT"
             limit={25}
             showStatementPeriod
+            onImported={async () => {
+              setSyncMsg("Bank statement import finished; transaction list refreshed.");
+              setPendingMsg(null);
+              await refreshTablesFully({
+                preserveOnEmpty: true,
+                skipLegacyMatches: true,
+                silent: true,
+              });
+              setBankCountRefreshSeq((n) => n + 1);
+            }}
           />
         </AppDialog>
       ) : null}
