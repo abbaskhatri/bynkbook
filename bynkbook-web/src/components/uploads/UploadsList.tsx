@@ -31,8 +31,9 @@ export function UploadsList(props: {
   vendorId?: string;
   limit?: number;
   showStatementPeriod?: boolean;
+  onImported?: (result: any) => void | Promise<void>;
 }) {
-  const { title, businessId, accountId, type, vendorId, limit = 10, showStatementPeriod } = props;
+  const { title, businessId, accountId, type, vendorId, limit = 10, showStatementPeriod, onImported } = props;
   const { items, loading, error, refetch } = useUploadsList({ businessId, accountId, type, vendorId, limit });
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -41,9 +42,10 @@ export function UploadsList(props: {
   async function runImport(uploadId: string) {
     try {
       setImportingId(uploadId);
-      await importBankStatementUpload(businessId, uploadId);
+      const result = await importBankStatementUpload(businessId, uploadId);
       // Targeted refresh only (no full reload)
       await refetch();
+      await onImported?.(result);
     } finally {
       setImportingId(null);
     }

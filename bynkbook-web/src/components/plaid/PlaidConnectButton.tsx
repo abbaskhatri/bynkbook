@@ -128,6 +128,7 @@ export function PlaidConnectButton(props: Props) {
   // Initial sync progress
   const [openSyncing, setOpenSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<{ newCount: number; pendingCount: number } | null>(null);
+  const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null);
 
   // Opening preview / conflict review
   const [openOpeningReview, setOpenOpeningReview] = useState(false);
@@ -139,6 +140,28 @@ export function PlaidConnectButton(props: Props) {
 
   // Hold current link handler so we can exit/cleanup safely
   const handlerRef = useRef<ReturnType<NonNullable<typeof window.Plaid>["create"]> | null>(null);
+
+  const runInitialSync = useCallback(async () => {
+    setOpenSyncing(true);
+    setSyncInfo(null);
+    setSyncErrorMsg(null);
+
+    try {
+      const syncResult: any = await plaidSync(businessId, accountId);
+      setSyncInfo({
+        newCount: Number(syncResult?.newCount ?? 0),
+        pendingCount: Number(syncResult?.pendingCount ?? 0),
+      });
+      return syncResult;
+    } catch (e: any) {
+      const message = e?.message ?? "Initial transaction sync failed";
+      setSyncErrorMsg(message);
+      setErrorMsg(`Plaid connected, but initial transaction sync failed: ${message}`);
+      return { ok: false, syncFailed: true, error: message };
+    } finally {
+      setOpenSyncing(false);
+    }
+  }, [accountId, businessId]);
 
   const launchPlaid = useCallback(async () => {
     if (disabled) return;
@@ -461,22 +484,7 @@ export function PlaidConnectButton(props: Props) {
                     setPendingAccounts([]);
                     setSelectedPlaidAccountId("");
 
-                    setOpenSyncing(true);
-                    setSyncInfo(null);
-
-                    let syncRes: any = null;
-                    try {
-                      const s: any = await plaidSync(businessId, accountId);
-                      syncRes = s;
-                      setSyncInfo({
-                        newCount: Number(s?.newCount ?? 0),
-                        pendingCount: Number(s?.pendingCount ?? 0),
-                      });
-                    } catch {
-                      setSyncInfo({ newCount: 0, pendingCount: 0 });
-                    } finally {
-                      setOpenSyncing(false);
-                    }
+                    const syncRes = await runInitialSync();
 
                     onConnected(syncRes);
                     return;
@@ -506,22 +514,7 @@ export function PlaidConnectButton(props: Props) {
                   setSelectedPlaidAccountId("");
 
                   // Immediately run initial sync (production-grade UX)
-                  setOpenSyncing(true);
-                  setSyncInfo(null);
-
-                  let syncRes: any = null;
-                  try {
-                    const s: any = await plaidSync(businessId, accountId);
-                    syncRes = s;
-                    setSyncInfo({
-                      newCount: Number(s?.newCount ?? 0),
-                      pendingCount: Number(s?.pendingCount ?? 0),
-                    });
-                  } catch {
-                    setSyncInfo({ newCount: 0, pendingCount: 0 });
-                  } finally {
-                    setOpenSyncing(false);
-                  }
+                  const syncRes = await runInitialSync();
 
                   onConnected(syncRes);
                 } catch (e: any) {
@@ -580,21 +573,8 @@ export function PlaidConnectButton(props: Props) {
                     suggestedOpeningCents: String(openingPreview?.suggestedOpeningCents),
                   });
 
-                  // sync after applying
                   setOpenOpeningReview(false);
-                  setOpenSyncing(true);
-                  setSyncInfo(null);
-
-                  let syncRes: any = null;
-                  try {
-                    const s: any = await plaidSync(businessId, accountId);
-                    syncRes = s;
-                    setSyncInfo({ newCount: Number(s?.newCount ?? 0), pendingCount: Number(s?.pendingCount ?? 0) });
-                  } catch {
-                    setSyncInfo({ newCount: 0, pendingCount: 0 });
-                  } finally {
-                    setOpenSyncing(false);
-                  }
+                  const syncRes = await runInitialSync();
 
                   onConnected(syncRes);
                 } finally {
@@ -621,21 +601,8 @@ export function PlaidConnectButton(props: Props) {
                     suggestedOpeningCents: String(openingPreview?.suggestedOpeningCents ?? "0"),
                   });
 
-                  // sync but do not touch opening
                   setOpenOpeningReview(false);
-                  setOpenSyncing(true);
-                  setSyncInfo(null);
-
-                  let syncRes: any = null;
-                  try {
-                    const s: any = await plaidSync(businessId, accountId);
-                    syncRes = s;
-                    setSyncInfo({ newCount: Number(s?.newCount ?? 0), pendingCount: Number(s?.pendingCount ?? 0) });
-                  } catch {
-                    setSyncInfo({ newCount: 0, pendingCount: 0 });
-                  } finally {
-                    setOpenSyncing(false);
-                  }
+                  const syncRes = await runInitialSync();
 
                   onConnected(syncRes);
                 } finally {
@@ -704,6 +671,12 @@ export function PlaidConnectButton(props: Props) {
                 <span className="text-bb-text-muted">Pending</span>
                 <span className="font-semibold text-bb-text">{syncInfo.pendingCount}</span>
               </div>
+            </div>
+          ) : null}
+
+          {syncErrorMsg ? (
+            <div className="mt-3 rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
+              Initial transaction sync failed: {syncErrorMsg}
             </div>
           ) : null}
         </div>
