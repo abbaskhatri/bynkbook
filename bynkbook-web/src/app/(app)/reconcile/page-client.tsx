@@ -283,6 +283,18 @@ function categorySuggestionSourceLabel(raw: unknown) {
   return "Suggestion";
 }
 
+function categorySuggestionRequiresReview(suggestion: any) {
+  return (
+    suggestion?.requiresUserConfirmation === true ||
+    suggestion?.review_only === true ||
+    suggestion?.reviewOnly === true ||
+    suggestion?.protected === true ||
+    suggestion?.is_protected === true ||
+    suggestion?.isProtected === true ||
+    !!String(suggestion?.protected_class ?? suggestion?.protectedClass ?? "").trim()
+  );
+}
+
 function aiUiMessage(err: any, fallback = "Smart suggestions are unavailable right now.") {
   const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
   const raw = String(
@@ -4236,6 +4248,7 @@ const displayBankActiveList = useMemo(() => {
                                 const sourceLabel = categorySuggestionSourceLabel(s?.source);
                                 const reasonText = String(s?.reason ?? "").trim();
                                 const warningText = String(s?.warning ?? "").trim();
+                                const requiresReview = categorySuggestionRequiresReview(s);
                                 const selected = createEntryCategoryId && createEntryCategoryId === id;
 
                                 return (
@@ -4247,7 +4260,9 @@ const displayBankActiveList = useMemo(() => {
                                       "h-7 px-2.5 rounded-full border text-[11px] inline-flex items-center gap-2",
                                       selected
                                         ? "border-primary/20 bg-primary/10 text-primary"
-                                        : idx === 0
+                                        : requiresReview
+                                          ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg hover:bg-bb-status-warning-bg"
+                                          : idx === 0
                                           ? "border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
                                           : "border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover",
                                       ringFocus,
@@ -4268,6 +4283,11 @@ const displayBankActiveList = useMemo(() => {
                                     >
                                       {confLabel || `${conf}%`}
                                     </span>
+                                    {requiresReview ? (
+                                      <span className="rounded-full border border-bb-status-warning-border bg-background/40 px-1 text-[9px] font-semibold">
+                                        Review
+                                      </span>
+                                    ) : null}
                                   </button>
                                 );
                               })}

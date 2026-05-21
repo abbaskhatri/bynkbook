@@ -37,9 +37,16 @@ export type HeuristicSuggestion = {
 export type CategorySuggestionSafetyInput = {
   category_id?: unknown;
   categoryId?: unknown;
+  category_name?: unknown;
+  categoryName?: unknown;
   confidence?: unknown;
+  confidence_label?: unknown;
+  confidenceLabel?: unknown;
   confidence_tier?: unknown;
   confidenceTier?: unknown;
+  reason?: unknown;
+  warning?: unknown;
+  requiresUserConfirmation?: unknown;
   review_only?: unknown;
   reviewOnly?: unknown;
   protected?: unknown;
@@ -47,6 +54,8 @@ export type CategorySuggestionSafetyInput = {
   isProtected?: unknown;
   protected_class?: unknown;
   protectedClass?: unknown;
+  merchant_normalized?: unknown;
+  merchantNormalized?: unknown;
 };
 
 type CategoryEvidence = {
@@ -406,6 +415,7 @@ function suggestionMarkedReviewOnlyOrProtected(suggestion: CategorySuggestionSaf
   if (!suggestion) return false;
 
   return (
+    suggestion.requiresUserConfirmation === true ||
     suggestion.review_only === true ||
     suggestion.reviewOnly === true ||
     suggestion.protected === true ||
@@ -415,6 +425,24 @@ function suggestionMarkedReviewOnlyOrProtected(suggestion: CategorySuggestionSaf
   );
 }
 
+function suggestionHasWarning(suggestion: CategorySuggestionSafetyInput | null | undefined) {
+  return !!String(suggestion?.warning ?? "").trim();
+}
+
+function suggestionHasRiskyBulkApplyLanguage(suggestion: CategorySuggestionSafetyInput | null | undefined) {
+  const text = [
+    suggestion?.category_name,
+    suggestion?.categoryName,
+    suggestion?.reason,
+    suggestion?.merchant_normalized,
+    suggestion?.merchantNormalized,
+  ]
+    .map((x) => String(x ?? "").toLowerCase())
+    .join(" ");
+
+  return /\b(irs|eftps|treasury|tax|payroll|adp|gusto|paychex|credit card|card payment|amex|american express|visa payment|mastercard|loan|principal|interest|refund|chargeback|owner draw|owner contribution|equity|zelle|ach|wire|transfer|online banking|card payoff)\b/.test(text);
+}
+
 export function isBulkSafeCategorySuggestion(
   suggestion: CategorySuggestionSafetyInput | null | undefined,
   suggestionIndex: number
@@ -422,6 +450,8 @@ export function isBulkSafeCategorySuggestion(
   if (suggestionIndex !== 0) return false;
   if (!suggestionHasCategoryId(suggestion)) return false;
   if (suggestionMarkedReviewOnlyOrProtected(suggestion)) return false;
+  if (suggestionHasWarning(suggestion)) return false;
+  if (suggestionHasRiskyBulkApplyLanguage(suggestion)) return false;
 
   const confidence = suggestionConfidenceValue(suggestion?.confidence);
   if (confidence === null || confidence < 85) return false;

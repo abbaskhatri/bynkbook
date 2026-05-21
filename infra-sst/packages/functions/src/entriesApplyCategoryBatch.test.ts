@@ -164,6 +164,51 @@ describe("apply-category-batch category safety", () => {
     expect(prisma.entry.update).not.toHaveBeenCalled();
   });
 
+  test("rejects warning or review-required top suggestions", async () => {
+    const { handler, prisma, request } = await loadHandler({
+      suggestionsById: {
+        [entryId]: [
+          {
+            category_id: safeCatId,
+            confidence_tier: "SAFE_DETERMINISTIC",
+            confidence: 95,
+            requiresUserConfirmation: true,
+            warning: "CPA review needed",
+          },
+        ],
+      },
+    });
+
+    const res = await handler(request);
+    const body = JSON.parse(res.body);
+
+    expect(body.applied).toBe(0);
+    expect(body.results[0]).toMatchObject({ ok: false, code: "UNSAFE_SUGGESTION" });
+    expect(prisma.entry.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects risky payment language even without explicit warning", async () => {
+    const { handler, prisma, request } = await loadHandler({
+      suggestionsById: {
+        [entryId]: [
+          {
+            category_id: safeCatId,
+            category_name: "Credit Card Payment",
+            confidence_tier: "SAFE_DETERMINISTIC",
+            confidence: 95,
+          },
+        ],
+      },
+    });
+
+    const res = await handler(request);
+    const body = JSON.parse(res.body);
+
+    expect(body.applied).toBe(0);
+    expect(body.results[0]).toMatchObject({ ok: false, code: "UNSAFE_SUGGESTION" });
+    expect(prisma.entry.update).not.toHaveBeenCalled();
+  });
+
   test("rejects requested category that does not match the current top suggestion", async () => {
     const { handler, prisma, request } = await loadHandler({
       body: { items: [{ entryId, category_id: otherCatId, suggested_category_id: otherCatId }] },
