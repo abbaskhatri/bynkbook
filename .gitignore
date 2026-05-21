@@ -70,3 +70,6 @@ bynkbook-web/auth/
 .codex-tmp/final-authenticated-qa-smoke.mjs
 .codex-tmp/final-authenticated-qa-smoke-result.json
 .codex-tmp/final-authenticated-qa-smoke-auth.json
+.codex-tmp/local-instant-action-smoke.mjs
+.codex-tmp/qa-bank-statement.csv
+.codex-tmp/qa-banktx-import-refreshed.mjs
