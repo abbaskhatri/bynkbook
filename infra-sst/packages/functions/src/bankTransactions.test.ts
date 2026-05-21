@@ -436,6 +436,69 @@ describe("bank transaction create-entry duplicate preflight", () => {
     expect(prisma.matchGroup.create).toHaveBeenCalledTimes(1);
   });
 
+  test("create-entry-and-match rejects a bank transaction that becomes matched before transaction create", async () => {
+    const rows = [tx("bank-stale-match", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "Hardware Store", amount_cents: -4500n })];
+    const { handler, prisma } = await loadHandler({
+      rows,
+      activeGroupIds: ["group-active"],
+      bankTransactionsInActiveGroups: ["bank-stale-match"],
+    });
+    prisma.matchGroup.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "group-active" }]);
+
+    const res = await handler(postCreateEntryEvent("bank-stale-match", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("ALREADY_IN_GROUP");
+    expect(body.error).toBe("Bank transaction is already matched.");
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("existing generated entry cannot be auto-matched when stale bank match state appears", async () => {
+    const rows = [tx("bank-existing-stale", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "Hardware Store", amount_cents: -4500n })];
+    const generated = entry("entry-existing-stale", "2026-04-26", -4500n, {
+      payee: "Hardware Store",
+      sourceBankTransactionId: "bank-existing-stale",
+    });
+    const { handler, prisma } = await loadHandler({
+      rows,
+      entries: [generated],
+      activeGroupIds: ["group-active"],
+      bankTransactionsInActiveGroups: ["bank-existing-stale"],
+    });
+    prisma.matchGroup.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "group-active" }]);
+
+    const res = await handler(postCreateEntryEvent("bank-existing-stale", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("ALREADY_IN_GROUP");
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("create-entry reports an existing source-bank entry found during transaction without duplicating it", async () => {
+    const rows = [tx("bank-concurrent-entry", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "Hardware Store", amount_cents: -4500n })];
+    const { handler, prisma } = await loadHandler({ rows });
+    prisma.entry.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "entry-concurrent" });
+
+    const res = await handler(postCreateEntryEvent("bank-concurrent-entry", { autoMatch: false }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.entry_id).toBe("entry-concurrent");
+    expect(body.auto_matched).toBe(false);
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
   test("bulk create skips duplicate candidates and reports them", async () => {
     const rows = [
       tx("bank-dup", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n }),

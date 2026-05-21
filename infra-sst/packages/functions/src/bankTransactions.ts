@@ -423,6 +423,106 @@ async function activeMatchedBankTransactionIds(prisma: any, businessId: string, 
   );
 }
 
+async function activeMatchGroupIds(prisma: any, businessId: string, accountId: string) {
+  const activeGroups = await prisma.matchGroup.findMany({
+    where: { business_id: businessId, account_id: accountId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  return activeGroups.map((g: any) => String(g?.id ?? "").trim()).filter(Boolean);
+}
+
+async function hasActiveBankMatchGroup(prisma: any, args: {
+  businessId: string;
+  accountId: string;
+  bankTransactionId: string;
+  activeGroupIds?: string[];
+}) {
+  const ids = args.activeGroupIds ?? await activeMatchGroupIds(prisma, args.businessId, args.accountId);
+  if (ids.length === 0) return false;
+
+  const first = await prisma.matchGroupBank.findFirst({
+    where: {
+      business_id: args.businessId,
+      account_id: args.accountId,
+      bank_transaction_id: args.bankTransactionId,
+      match_group_id: { in: ids },
+    },
+    select: { match_group_id: true },
+  });
+
+  return !!first;
+}
+
+async function hasActiveEntryMatchGroup(prisma: any, args: {
+  businessId: string;
+  accountId: string;
+  entryId: string;
+  activeGroupIds?: string[];
+}) {
+  const ids = args.activeGroupIds ?? await activeMatchGroupIds(prisma, args.businessId, args.accountId);
+  if (ids.length === 0) return false;
+
+  const first = await prisma.matchGroupEntry.findFirst({
+    where: {
+      business_id: args.businessId,
+      account_id: args.accountId,
+      entry_id: args.entryId,
+      match_group_id: { in: ids },
+    },
+    select: { match_group_id: true },
+  });
+
+  return !!first;
+}
+
+async function createBankEntryMatchGroup(prisma: any, args: {
+  businessId: string;
+  accountId: string;
+  bankTransactionId: string;
+  entryId: string;
+  bankAbs: bigint;
+  direction: "INFLOW" | "OUTFLOW";
+  sub: string;
+  now: Date;
+}) {
+  const groupId = randomUUID();
+
+  await prisma.matchGroup.create({
+    data: ({
+      id: groupId,
+      business_id: args.businessId,
+      account_id: args.accountId,
+      status: "ACTIVE",
+      direction: args.direction,
+      created_by_user_id: args.sub,
+      created_at: args.now,
+    } as any),
+    select: { id: true },
+  });
+
+  await prisma.matchGroupBank.create({
+    data: {
+      business_id: args.businessId,
+      account_id: args.accountId,
+      match_group_id: groupId,
+      bank_transaction_id: args.bankTransactionId,
+      matched_amount_cents: args.bankAbs,
+    },
+  });
+
+  await prisma.matchGroupEntry.create({
+    data: {
+      business_id: args.businessId,
+      account_id: args.accountId,
+      match_group_id: groupId,
+      entry_id: args.entryId,
+      matched_amount_cents: args.bankAbs,
+    },
+  });
+
+  return groupId;
+}
+
 /**
  * GET /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions?from=&to=&status=&limit=&cursor=
  * - scoped by businessId + accountId
@@ -618,25 +718,13 @@ export async function handler(event: any) {
           }
 
           // FULL-match only: if bank txn is in ANY ACTIVE group, we treat it as matched (no partial).
-          const activeGroups = await prisma.matchGroup.findMany({
-            where: { business_id: businessId, account_id: accountId, status: "ACTIVE" },
-            select: { id: true },
+          const activeGroupIds = await activeMatchGroupIds(prisma, businessId, accountId);
+          const hasActive = await hasActiveBankMatchGroup(prisma, {
+            businessId,
+            accountId,
+            bankTransactionId: bankId,
+            activeGroupIds,
           });
-          const activeGroupIds = activeGroups.map((g: any) => g.id);
-
-          let hasActive = false;
-          if (activeGroupIds.length > 0) {
-            const first = await prisma.matchGroupBank.findFirst({
-              where: {
-                business_id: businessId,
-                account_id: accountId,
-                bank_transaction_id: bankId,
-                match_group_id: { in: activeGroupIds },
-              },
-              select: { match_group_id: true },
-            });
-            hasActive = !!first;
-          }
 
           if (hasActive) {
             results.push({
@@ -687,67 +775,43 @@ export async function handler(event: any) {
             let createdMatchGroupId: string | null = null;
 
             if (autoMatch) {
-              // Enforce one ACTIVE group per item
-              if (activeGroupIds.length > 0) {
-                const eFirst = await prisma.matchGroupEntry.findFirst({
-                  where: {
-                    business_id: businessId,
-                    account_id: accountId,
-                    entry_id: existing.id,
-                    match_group_id: { in: activeGroupIds },
-                  },
-                  select: { match_group_id: true },
-                });
-                if (eFirst) {
-                  results.push({
-                    bank_transaction_id: bankId,
-                    status: "FAILED",
-                    code: "ALREADY_IN_GROUP",
-                    error: "Entry is already matched.",
-                    entry_id: existing.id,
-                  });
-                  continue;
-                }
-              }
-
-              const groupId = randomUUID();
-
               await prisma.$transaction(async (tx: any) => {
-                await tx.matchGroup.create({
-                  data: ({
-                    id: groupId,
-                    business_id: businessId,
-                    account_id: accountId,
-                    status: "ACTIVE",
-                    direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
-                    created_by_user_id: sub,
-                    created_at: now,
-                  } as any),
-                  select: { id: true },
+                const txActiveGroupIds = await activeMatchGroupIds(tx, businessId, accountId);
+                const bankAlreadyMatched = await hasActiveBankMatchGroup(tx, {
+                  businessId,
+                  accountId,
+                  bankTransactionId: bankId,
+                  activeGroupIds: txActiveGroupIds,
                 });
+                if (bankAlreadyMatched) {
+                  const err: any = new Error("Bank transaction is already matched.");
+                  err.code = "ALREADY_IN_GROUP";
+                  throw err;
+                }
 
-                await tx.matchGroupBank.create({
-                  data: {
-                    business_id: businessId,
-                    account_id: accountId,
-                    match_group_id: groupId,
-                    bank_transaction_id: bankId,
-                    matched_amount_cents: bankAbs,
-                  },
+                const entryAlreadyMatched = await hasActiveEntryMatchGroup(tx, {
+                  businessId,
+                  accountId,
+                  entryId: existing.id,
+                  activeGroupIds: txActiveGroupIds,
                 });
+                if (entryAlreadyMatched) {
+                  const err: any = new Error("Entry is already matched.");
+                  err.code = "ENTRY_ALREADY_IN_GROUP";
+                  throw err;
+                }
 
-                await tx.matchGroupEntry.create({
-                  data: {
-                    business_id: businessId,
-                    account_id: accountId,
-                    match_group_id: groupId,
-                    entry_id: existing.id,
-                    matched_amount_cents: bankAbs,
-                  },
+                createdMatchGroupId = await createBankEntryMatchGroup(tx, {
+                  businessId,
+                  accountId,
+                  bankTransactionId: bankId,
+                  entryId: existing.id,
+                  bankAbs,
+                  direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
+                  sub,
+                  now,
                 });
               });
-
-              createdMatchGroupId = groupId;
             }
 
             results.push({
@@ -784,9 +848,66 @@ export async function handler(event: any) {
           }
 
           const entryId = randomUUID();
+          let createdEntryId = entryId;
           let createdMatchGroupId: string | null = null;
+          let existingEntryInTx = false;
 
           await prisma.$transaction(async (tx: any) => {
+            const txActiveGroupIds = await activeMatchGroupIds(tx, businessId, accountId);
+            const bankAlreadyMatched = await hasActiveBankMatchGroup(tx, {
+              businessId,
+              accountId,
+              bankTransactionId: bankId,
+              activeGroupIds: txActiveGroupIds,
+            });
+            if (bankAlreadyMatched) {
+              const err: any = new Error("Bank transaction already matched");
+              err.code = "ALREADY_IN_GROUP";
+              throw err;
+            }
+
+            const existingInTx = await tx.entry.findFirst({
+              where: {
+                business_id: businessId,
+                account_id: accountId,
+                deleted_at: null,
+                sourceBankTransactionId: bankId,
+              } as any,
+              select: { id: true },
+            });
+
+            if (existingInTx?.id) {
+              createdEntryId = existingInTx.id;
+              existingEntryInTx = true;
+
+              if (autoMatch) {
+                const entryAlreadyMatched = await hasActiveEntryMatchGroup(tx, {
+                  businessId,
+                  accountId,
+                  entryId: existingInTx.id,
+                  activeGroupIds: txActiveGroupIds,
+                });
+                if (entryAlreadyMatched) {
+                  const err: any = new Error("Entry is already matched.");
+                  err.code = "ENTRY_ALREADY_IN_GROUP";
+                  throw err;
+                }
+
+                createdMatchGroupId = await createBankEntryMatchGroup(tx, {
+                  businessId,
+                  accountId,
+                  bankTransactionId: bankId,
+                  entryId: existingInTx.id,
+                  bankAbs,
+                  direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
+                  sub,
+                  now,
+                });
+              }
+
+              return;
+            }
+
             const createdEntry = await tx.entry.create({
               data: {
                 id: entryId,
@@ -809,67 +930,24 @@ export async function handler(event: any) {
             });
 
             if (autoMatch) {
-              // Still enforce bank txn not in any ACTIVE group (FULL-match only)
-              if (activeGroupIds.length > 0) {
-                const bFirst = await tx.matchGroupBank.findFirst({
-                  where: {
-                    business_id: businessId,
-                    account_id: accountId,
-                    bank_transaction_id: bankId,
-                    match_group_id: { in: activeGroupIds },
-                  },
-                  select: { match_group_id: true },
-                });
-                if (bFirst) {
-                  const err: any = new Error("Bank transaction already matched");
-                  err.code = "ALREADY_IN_GROUP";
-                  throw err;
-                }
-              }
-
-              const groupId = randomUUID();
-
-              await tx.matchGroup.create({
-                data: ({
-                  id: groupId,
-                  business_id: businessId,
-                  account_id: accountId,
-                  status: "ACTIVE",
-                  direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
-                  created_by_user_id: sub,
-                  created_at: now,
-                } as any),
-                select: { id: true },
+              createdMatchGroupId = await createBankEntryMatchGroup(tx, {
+                businessId,
+                accountId,
+                bankTransactionId: bankId,
+                entryId: createdEntry.id,
+                bankAbs,
+                direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
+                sub,
+                now,
               });
-
-              await tx.matchGroupBank.create({
-                data: {
-                  business_id: businessId,
-                  account_id: accountId,
-                  match_group_id: groupId,
-                  bank_transaction_id: bankId,
-                  matched_amount_cents: bankAbs,
-                },
-              });
-
-              await tx.matchGroupEntry.create({
-                data: {
-                  business_id: businessId,
-                  account_id: accountId,
-                  match_group_id: groupId,
-                  entry_id: createdEntry.id,
-                  matched_amount_cents: bankAbs,
-                },
-              });
-
-              createdMatchGroupId = groupId;
             }
           });
 
           results.push({
             bank_transaction_id: bankId,
-            status: "CREATED",
-            entry_id: entryId,
+            status: existingEntryInTx ? "SKIPPED" : "CREATED",
+            ...(existingEntryInTx ? { code: "DUPLICATE", error: "Entry already exists for this bank transaction." } : {}),
+            entry_id: createdEntryId,
             match_group_id: createdMatchGroupId,
             auto_matched: !!createdMatchGroupId,
           });
@@ -883,6 +961,15 @@ export async function handler(event: any) {
               status: "FAILED",
               code: "ALREADY_IN_GROUP",
               error: "Bank transaction is already matched.",
+            });
+            continue;
+          }
+          if (code === "ENTRY_ALREADY_IN_GROUP") {
+            results.push({
+              bank_transaction_id: String(it?.bank_transaction_id ?? ""),
+              status: "FAILED",
+              code: "ALREADY_IN_GROUP",
+              error: "Entry is already matched.",
             });
             continue;
           }
@@ -993,25 +1080,13 @@ export async function handler(event: any) {
       if (!cp.ok) return cp.response;
 
       // FULL-match only: if bank txn is in ANY ACTIVE group, treat as matched (no partial remaining calc).
-      const activeGroups = await prisma.matchGroup.findMany({
-        where: { business_id: businessId, account_id: accountId, status: "ACTIVE" },
-        select: { id: true },
+      const activeGroupIds = await activeMatchGroupIds(prisma, businessId, accountId);
+      const hasActive = await hasActiveBankMatchGroup(prisma, {
+        businessId,
+        accountId,
+        bankTransactionId,
+        activeGroupIds,
       });
-      const activeGroupIds = activeGroups.map((g: any) => g.id);
-
-      let hasActive = false;
-      if (activeGroupIds.length > 0) {
-        const first = await prisma.matchGroupBank.findFirst({
-          where: {
-            business_id: businessId,
-            account_id: accountId,
-            bank_transaction_id: bankTransactionId,
-            match_group_id: { in: activeGroupIds },
-          },
-          select: { match_group_id: true },
-        });
-        hasActive = !!first;
-      }
 
       if (hasActive) {
         return json(409, {
@@ -1051,60 +1126,43 @@ export async function handler(event: any) {
         let createdMatchGroupId: string | null = null;
 
         if (autoMatch) {
-          // Enforce entry is not already in any ACTIVE group
-          if (activeGroupIds.length > 0) {
-            const eFirst = await prisma.matchGroupEntry.findFirst({
-              where: {
-                business_id: businessId,
-                account_id: accountId,
-                entry_id: existing.id,
-                match_group_id: { in: activeGroupIds },
-              },
-              select: { match_group_id: true },
-            });
-            if (eFirst) {
-              return json(409, { ok: false, code: "ALREADY_IN_GROUP", error: "Entry is already matched." });
-            }
-          }
-
-          const groupId = randomUUID();
-
           await prisma.$transaction(async (tx: any) => {
-            await tx.matchGroup.create({
-              data: ({
-                id: groupId,
-                business_id: businessId,
-                account_id: accountId,
-                status: "ACTIVE",
-                direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
-                created_by_user_id: sub,
-                created_at: now,
-              } as any),
-              select: { id: true },
+            const txActiveGroupIds = await activeMatchGroupIds(tx, businessId, accountId);
+            const bankAlreadyMatched = await hasActiveBankMatchGroup(tx, {
+              businessId,
+              accountId,
+              bankTransactionId,
+              activeGroupIds: txActiveGroupIds,
             });
+            if (bankAlreadyMatched) {
+              const err: any = new Error("Bank transaction is already matched.");
+              err.code = "ALREADY_IN_GROUP";
+              throw err;
+            }
 
-            await tx.matchGroupBank.create({
-              data: {
-                business_id: businessId,
-                account_id: accountId,
-                match_group_id: groupId,
-                bank_transaction_id: bankTransactionId,
-                matched_amount_cents: bankAbs,
-              },
+            const entryAlreadyMatched = await hasActiveEntryMatchGroup(tx, {
+              businessId,
+              accountId,
+              entryId: existing.id,
+              activeGroupIds: txActiveGroupIds,
             });
+            if (entryAlreadyMatched) {
+              const err: any = new Error("Entry is already matched.");
+              err.code = "ENTRY_ALREADY_IN_GROUP";
+              throw err;
+            }
 
-            await tx.matchGroupEntry.create({
-              data: {
-                business_id: businessId,
-                account_id: accountId,
-                match_group_id: groupId,
-                entry_id: existing.id,
-                matched_amount_cents: bankAbs,
-              },
+            createdMatchGroupId = await createBankEntryMatchGroup(tx, {
+              businessId,
+              accountId,
+              bankTransactionId,
+              entryId: existing.id,
+              bankAbs,
+              direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
+              sub,
+              now,
             });
           });
-
-          createdMatchGroupId = groupId;
         }
 
         return json(200, {
@@ -1135,6 +1193,60 @@ export async function handler(event: any) {
       }
 
       const result = await prisma.$transaction(async (tx: any) => {
+        const txActiveGroupIds = await activeMatchGroupIds(tx, businessId, accountId);
+        const bankAlreadyMatched = await hasActiveBankMatchGroup(tx, {
+          businessId,
+          accountId,
+          bankTransactionId,
+          activeGroupIds: txActiveGroupIds,
+        });
+        if (bankAlreadyMatched) {
+          const err: any = new Error("Bank transaction already matched");
+          err.code = "ALREADY_IN_GROUP";
+          throw err;
+        }
+
+        const existingInTx = await tx.entry.findFirst({
+          where: {
+            business_id: businessId,
+            account_id: accountId,
+            deleted_at: null,
+            sourceBankTransactionId: bankTransactionId,
+          } as any,
+          select: { id: true },
+        });
+
+        if (existingInTx?.id) {
+          let createdMatchGroupId: string | null = null;
+
+          if (autoMatch) {
+            const entryAlreadyMatched = await hasActiveEntryMatchGroup(tx, {
+              businessId,
+              accountId,
+              entryId: existingInTx.id,
+              activeGroupIds: txActiveGroupIds,
+            });
+            if (entryAlreadyMatched) {
+              const err: any = new Error("Entry is already matched.");
+              err.code = "ENTRY_ALREADY_IN_GROUP";
+              throw err;
+            }
+
+            createdMatchGroupId = await createBankEntryMatchGroup(tx, {
+              businessId,
+              accountId,
+              bankTransactionId,
+              entryId: existingInTx.id,
+              bankAbs,
+              direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
+              sub,
+              now,
+            });
+          }
+
+          return { createdEntryId: existingInTx.id, createdMatchGroupId, existingEntry: true };
+        }
+
         const createdEntry = await tx.entry.create({
           data: {
             id: entryId,
@@ -1159,47 +1271,29 @@ export async function handler(event: any) {
         let createdMatchGroupId: string | null = null;
 
         if (autoMatch) {
-          const groupId = randomUUID();
-
-          await tx.matchGroup.create({
-            data: ({
-              id: groupId,
-              business_id: businessId,
-              account_id: accountId,
-              status: "ACTIVE",
-              direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
-              created_by_user_id: sub,
-              created_at: now,
-            } as any),
-            select: { id: true },
+          createdMatchGroupId = await createBankEntryMatchGroup(tx, {
+            businessId,
+            accountId,
+            bankTransactionId,
+            entryId: createdEntry.id,
+            bankAbs,
+            direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
+            sub,
+            now,
           });
-
-          // FULL-match only: POSITIVE abs cents invariants for MatchGroupBank/Entry
-          await tx.matchGroupBank.create({
-            data: {
-              business_id: businessId,
-              account_id: accountId,
-              match_group_id: groupId,
-              bank_transaction_id: bankTransactionId,
-              matched_amount_cents: bankAbs,
-            },
-          });
-
-          await tx.matchGroupEntry.create({
-            data: {
-              business_id: businessId,
-              account_id: accountId,
-              match_group_id: groupId,
-              entry_id: createdEntry.id,
-              matched_amount_cents: bankAbs,
-            },
-          });
-
-          createdMatchGroupId = groupId;
         }
 
-        return { createdEntryId: createdEntry.id, createdMatchGroupId };
+        return { createdEntryId: createdEntry.id, createdMatchGroupId, existingEntry: false };
       });
+
+      if (result.existingEntry) {
+        return json(200, {
+          ok: true,
+          entry_id: result.createdEntryId,
+          match_group_id: result.createdMatchGroupId,
+          auto_matched: !!result.createdMatchGroupId,
+        });
+      }
 
       if (categoryIdFinal) {
         await writeCategoryMemoryFeedback({
@@ -1243,6 +1337,14 @@ export async function handler(event: any) {
         duplicate_warning_overridden: allowPossibleDuplicate && possibleDuplicateCandidates.length > 0,
       });
     } catch (e: any) {
+      const code = String(e?.code ?? "");
+      if (code === "ALREADY_IN_GROUP") {
+        return json(409, { ok: false, code: "ALREADY_IN_GROUP", error: "Bank transaction is already matched." });
+      }
+      if (code === "ENTRY_ALREADY_IN_GROUP") {
+        return json(409, { ok: false, code: "ALREADY_IN_GROUP", error: "Entry is already matched." });
+      }
+
       const msg = String(e?.message ?? e ?? "Unknown error");
       return json(500, {
         ok: false,

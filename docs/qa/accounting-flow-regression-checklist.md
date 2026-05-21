@@ -102,6 +102,20 @@ If package paths or tests differ, operator should use the actual repo scripts an
 - Dark mode remains readable.
 - Mobile/narrow width remains usable.
 
+## Reconcile Revert / Duplicate Safety Checklist
+
+- Existing match can be reviewed before unmatch.
+- Unmatch confirmation explains whether the ledger entry remains.
+- Revert generated entry confirmation explains what will be removed/unlinked.
+- Bank transaction remains reviewable after revert/unmatch where intended.
+- Create-entry-and-match cannot be triggered twice from stale/pending rows.
+- Already matched bank transactions cannot create duplicate ledger entries.
+- Partial matches remain review-priority until fully resolved.
+- Failed match/unmatch/revert does not fake success.
+- Row actions are disabled while pending.
+- Destructive or risky reconcile actions remain confirmation-protected.
+- No production data mutation during smoke checks unless explicitly approved.
+
 ## Plaid / Bank Transaction Visibility Checklist
 
 - Correct AWS identity is verified before any production API check.

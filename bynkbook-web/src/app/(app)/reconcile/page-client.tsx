@@ -886,6 +886,10 @@ export default function ReconcilePageClient() {
 
   const possibleDuplicateEntryMessage =
     "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
+  const matchedOrPendingCreateEntryMessage =
+    "This bank transaction already appears matched or pending. Refresh before trying again.";
+  const createEntryAndMatchConfirmationCopy =
+    "This will create a new ledger entry from this bank transaction and mark it matched. Review the category, amount, and date before continuing.";
 
   function possibleDuplicateCreateEntryPayload(e: any) {
     const directPayload = e?.payload ?? e?.data ?? e?.response?.data ?? null;
@@ -2384,6 +2388,21 @@ export default function ReconcilePageClient() {
     return m;
   }, [bankTxSorted, activeGroupByBankTxnId, activeLegacyMatchedAbsByBankTxnId]);
 
+  function getCreateEntryActionBlockReason(bankId: string) {
+    const id = String(bankId ?? "").trim();
+    if (!id) return matchedOrPendingCreateEntryMessage;
+    if (pendingById[id] || createEntryBusyByBankId[id]) return matchedOrPendingCreateEntryMessage;
+
+    const bank = bankByIdFast.get(id);
+    if (!bank) return "Refresh the bank transaction list before trying again.";
+    if (bank?.is_pending) return "Pending transaction. Actions unlock once it posts.";
+    if (isBankTxnFullyMatched(bank) || (remainingAbsByBankTxnId.get(id) ?? 0n) === 0n) {
+      return matchedOrPendingCreateEntryMessage;
+    }
+
+    return null;
+  }
+
     function buildBankAiCandidates(bank: any) {
     const bankAmt = toBigIntSafe(bank?.amount_cents);
     const bankSign = bankAmt < 0n ? -1n : 1n;
@@ -3138,6 +3157,27 @@ export default function ReconcilePageClient() {
     });
   }, [bankPendingUnmatchedIds]);
 
+  const selectedActionableBankTxnIds = useMemo(() => {
+    return Array.from(selectedBankTxnIds).filter((id) => {
+      const bankId = String(id);
+      const bank = bankByIdFast.get(bankId);
+      if (!bank) return false;
+      if (bankPendingUnmatchedIds.has(bankId)) return false;
+      if (pendingById[bankId] || createEntryBusyByBankId[bankId]) return false;
+      if (isBankTxnFullyMatched(bank)) return false;
+      if ((remainingAbsByBankTxnId.get(bankId) ?? 0n) === 0n) return false;
+      return true;
+    });
+  }, [
+    selectedBankTxnIds,
+    bankByIdFast,
+    bankPendingUnmatchedIds,
+    pendingById,
+    createEntryBusyByBankId,
+    isBankTxnFullyMatched,
+    remainingAbsByBankTxnId,
+  ]);
+
   const bankUnmatchedLoadedRowsNoSearch = useMemo(() => {
     let count = 0;
     for (const t of bankTxSorted) {
@@ -3807,7 +3847,10 @@ const displayBankActiveList = useMemo(() => {
                   <PillToggle
                     checked={createEntryAutoMatch}
                     onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
-                    disabled={!canWriteReconcileEffective}
+                    disabled={
+                      !canWriteReconcileEffective ||
+                      !!(createEntryBankTxnId && getCreateEntryActionBlockReason(String(createEntryBankTxnId)))
+                    }
                   />
                 </div>
               }
@@ -3839,7 +3882,11 @@ const displayBankActiveList = useMemo(() => {
                         setOpenMatch(true);
                         if (bank) void runAiSuggestForBank(bank);
                       }}
-                      disabled={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
+                      disabled={
+                        !!(createEntryBankTxnId &&
+                          (createEntryBusyByBankId[String(createEntryBankTxnId)] ||
+                            getCreateEntryActionBlockReason(String(createEntryBankTxnId))))
+                      }
                     >
                       Review / Match existing entry
                     </BusyButton>
@@ -3870,6 +3917,7 @@ const displayBankActiveList = useMemo(() => {
                       disabled={
                         !canWriteReconcileEffective ||
                         !createEntryBankTxnId ||
+                        !!(createEntryBankTxnId && getCreateEntryActionBlockReason(String(createEntryBankTxnId))) ||
                         (createEntryDuplicateCandidates.length > 0 &&
                           createEntryDuplicateConfirm.trim() !== "Create a separate ledger entry")
                       }
@@ -3879,6 +3927,11 @@ const displayBankActiveList = useMemo(() => {
 
                         const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
                         if (!bankId) return;
+                        const blockedReason = getCreateEntryActionBlockReason(bankId);
+                        if (blockedReason) {
+                          setCreateEntryErr(blockedReason);
+                          return;
+                        }
 
                         const bankTxn = bankTxSorted.find((x: any) => String(x.id) === bankId) ?? null;
                         const optimisticEntryId = `optimistic-entry:${bankId}`;
@@ -4018,6 +4071,7 @@ const displayBankActiveList = useMemo(() => {
             };
 
             const busy = bankId ? !!createEntryBusyByBankId[bankId] : false;
+            const createEntryBlockReason = bankId ? getCreateEntryActionBlockReason(bankId) : null;
 
             return (
               <div className="flex flex-col max-h-[55vh]">
@@ -4025,8 +4079,16 @@ const displayBankActiveList = useMemo(() => {
                   <div className="text-xs text-bb-text-muted">
                     {createEntryDuplicateCandidates.length
                       ? "A possible existing ledger entry was found. Review the bank transaction, suggested existing match, and new entry preview before choosing what to do."
-                      : "This will create an entry from the selected bank transaction. Review method, category, and memo before creating."}
+                      : createEntryAutoMatch
+                        ? createEntryAndMatchConfirmationCopy
+                        : "This will create a new ledger entry from this bank transaction. Review the category, amount, and date before continuing."}
                   </div>
+
+                  {createEntryBlockReason ? (
+                    <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
+                      {createEntryBlockReason}
+                    </div>
+                  ) : null}
 
                   <div className={`mt-3 grid grid-cols-1 gap-3 ${createEntryDuplicateCandidates.length ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
                     <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
@@ -4443,7 +4505,7 @@ const displayBankActiveList = useMemo(() => {
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-bb-text">
-                    {selectedBankTxnIds.size} selected
+                    {selectedActionableBankTxnIds.length} of {selectedBankTxnIds.size} selected
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -4465,10 +4527,18 @@ const displayBankActiveList = useMemo(() => {
                     size="sm"
                     busy={bulkCreateBusy}
                     busyLabel="Creating…"
-                    disabled={bulkCreateBusy || !canWriteReconcileEffective || selectedBusinessId == null || selectedAccountId == null}
+                    disabled={
+                      bulkCreateBusy ||
+                      !canWriteReconcileEffective ||
+                      selectedBusinessId == null ||
+                      selectedAccountId == null ||
+                      selectedActionableBankTxnIds.length === 0
+                    }
                     title={
                       !canWriteReconcileEffective
                         ? (reconcileWriteReason ?? noPermTitle)
+                        : selectedActionableBankTxnIds.length === 0
+                          ? matchedOrPendingCreateEntryMessage
                         : "Create entries from selected bank transactions"
                     }
                     onClick={async () => {
@@ -4478,8 +4548,11 @@ const displayBankActiveList = useMemo(() => {
                       clearMutErr();
                       setCreateEntryErr(null);
 
-                      const ids = Array.from(selectedBankTxnIds).filter((id) => !bankPendingUnmatchedIds.has(String(id)));
-                      if (ids.length === 0) return;
+                      const ids = selectedActionableBankTxnIds;
+                      if (ids.length === 0) {
+                        setCreateEntryErr(matchedOrPendingCreateEntryMessage);
+                        return;
+                      }
                       for (const id of ids) markPending(String(id));
 
                       // Clear previous results for selected ids
@@ -4545,8 +4618,7 @@ const displayBankActiveList = useMemo(() => {
                       } finally {
                         setBulkCreateBusy(false);
 
-                        const ids2 = Array.from(selectedBankTxnIds);
-                        for (const id of ids2) clearPending(String(id));
+                        for (const id of ids) clearPending(String(id));
                       }
                     }}
                   >
@@ -5021,7 +5093,14 @@ const displayBankActiveList = useMemo(() => {
                             }
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedBankTxnIds(new Set(displayBankUnmatchedList.map((x: any) => String(x.id))));
+                                setSelectedBankTxnIds(new Set(
+                                  displayBankUnmatchedList
+                                    .filter((x: any) => {
+                                      const id = String(x?.id ?? "");
+                                      return id && !x?.is_pending && !pendingById[id] && !isBankTxnFullyMatched(x);
+                                    })
+                                    .map((x: any) => String(x.id))
+                                ));
                               } else {
                                 setSelectedBankTxnIds(new Set());
                               }
@@ -5055,7 +5134,10 @@ const displayBankActiveList = useMemo(() => {
 
                       const isMatched = isBankTxnFullyMatched(t);
                       const isPendingBankTxn = Boolean(t?.is_pending);
+                      const isRowPending = !!pendingById[txnId] || !!createEntryBusyByBankId[txnId];
                       const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
+                      const rowBusyReason = matchedOrPendingCreateEntryMessage;
+                      const createEntryActionBlockReason = getCreateEntryActionBlockReason(txnId);
                       const rowTone = isPendingBankTxn ? " bg-bb-status-warning-bg" : isMatched ? " bg-primary/10" : "";
                       const actionCellBg = isPendingBankTxn ? "bg-bb-status-warning-bg" : isMatched ? "bg-primary/10" : "bg-bb-surface-card";
 
@@ -5099,11 +5181,11 @@ const displayBankActiveList = useMemo(() => {
                               <input
                                 type="checkbox"
                                 className="h-3 w-3"
-                                checked={!isPendingBankTxn && isSelected}
-                                disabled={isPendingBankTxn}
-                                title={isPendingBankTxn ? pendingActionReason : "Select bank transaction"}
+                                checked={!isPendingBankTxn && !isRowPending && isSelected}
+                                disabled={isPendingBankTxn || isRowPending}
+                                title={isPendingBankTxn ? pendingActionReason : isRowPending ? rowBusyReason : "Select bank transaction"}
                                 onChange={(e) => {
-                                  if (isPendingBankTxn) return;
+                                  if (isPendingBankTxn || isRowPending) return;
                                   const checked = e.target.checked;
                                   setSelectedBankTxnIds((prev) => {
                                     const next = new Set(prev);
@@ -5174,12 +5256,14 @@ const displayBankActiveList = useMemo(() => {
                               {bankTab === "matched" ? (
                                 <button
                                   type="button"
-                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
+                                  className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card disabled:opacity-50 disabled:cursor-not-allowed", !isRowPending && !revertBusy ? "hover:bg-bb-table-row-hover" : "", ringFocus].join(" ")}
+                                  disabled={isRowPending || revertBusy}
                                   onClick={(ev) => {
                                     ev.stopPropagation();
+                                    if (isRowPending || revertBusy) return;
                                     void openAuditForBankTxn();
                                   }}
-                                  title="Revert (view audit)"
+                                  title={isRowPending || revertBusy ? rowBusyReason : "Revert (view audit)"}
                                   aria-label="Revert (view audit)"
                                 >
                                   <Undo2 className="h-4 w-4 text-bb-text" />
@@ -5187,10 +5271,12 @@ const displayBankActiveList = useMemo(() => {
                               ) : (
                                 <>
                                   <HintWrap
-                                    disabled={!canWriteReconcileEffective || isPendingBankTxn}
+                                     disabled={!canWriteReconcileEffective || isPendingBankTxn || isRowPending}
                                     reason={
                                       isPendingBankTxn
                                         ? pendingActionReason
+                                        : isRowPending
+                                          ? rowBusyReason
                                         : !canWriteReconcileEffective
                                           ? reconcileWriteReason
                                           : null
@@ -5198,18 +5284,20 @@ const displayBankActiveList = useMemo(() => {
                                   >
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
-                                      disabled={!canWriteReconcileEffective || isPendingBankTxn}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn && !isRowPending ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
+                                      disabled={!canWriteReconcileEffective || isPendingBankTxn || isRowPending}
                                       title={
                                         isPendingBankTxn
                                           ? pendingActionReason
+                                          : isRowPending
+                                            ? rowBusyReason
                                           : canWriteReconcileEffective
                                             ? "Review match suggestions for this bank transaction"
                                             : (reconcileWriteReason ?? noPermTitle)
                                       }
                                       aria-label="Match bank transaction"
                                       onClick={() => {
-                                        if (isPendingBankTxn) return;
+                                        if (isPendingBankTxn || isRowPending) return;
                                         if (!canWriteReconcileEffective) return;
                                         setMatchBankTxnId(t.id);
                                         setMatchSearch("");
@@ -5243,15 +5331,15 @@ const displayBankActiveList = useMemo(() => {
                                     }`}
                                   disabled={
                                     !canWriteReconcileEffective ||
-                                    isPendingBankTxn ||
-                                    !!createEntryBusyByBankId[String(t.id)] ||
-                                    (remainingAbsByBankTxnId.get(t.id) ?? 0n) === 0n
+                                    !!createEntryActionBlockReason
                                   }
                                   title={
                                     isPendingBankTxn
                                       ? pendingActionReason
                                       : !canWriteReconcileEffective
                                       ? (reconcileWriteReason ?? noPermTitle)
+                                      : createEntryActionBlockReason
+                                        ? createEntryActionBlockReason
                                       : (remainingAbsByBankTxnId.get(t.id) ?? 0n) === 0n
                                         ? "Already fully matched"
                                         : "Create entry from this bank transaction"
@@ -5259,7 +5347,10 @@ const displayBankActiveList = useMemo(() => {
                                   aria-label="Create entry"
                                   onClick={(ev) => {
                                     ev.stopPropagation();
-                                    if (isPendingBankTxn) return;
+                                    if (createEntryActionBlockReason) {
+                                      setCreateEntryErr(createEntryActionBlockReason);
+                                      return;
+                                    }
                                     if (!canWriteReconcileEffective) return;
 
                                     const bankId = String(t.id);
@@ -5302,12 +5393,14 @@ const displayBankActiveList = useMemo(() => {
                                   return (
                                     <button
                                       type="button"
-                                      className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
+                                      className={["h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card disabled:opacity-50 disabled:cursor-not-allowed", !isRowPending && !revertBusy ? "hover:bg-bb-table-row-hover" : "", ringFocus].join(" ")}
+                                      disabled={isRowPending || revertBusy}
                                       onClick={(ev) => {
                                         ev.stopPropagation();
+                                        if (isRowPending || revertBusy) return;
                                         void openAuditForBankTxn();
                                       }}
-                                      title="Revert (view audit)"
+                                      title={isRowPending || revertBusy ? rowBusyReason : "Revert (view audit)"}
                                       aria-label="Revert (view audit)"
                                     >
                                       <Undo2 className="h-4 w-4 text-bb-text" />
@@ -7183,8 +7276,9 @@ const displayBankActiveList = useMemo(() => {
                 {revertPreview.already_reverted ? "Already reverted" : "Review revert actions"}
               </div>
               <div className="text-xs text-bb-text-muted">
-                This will unmatch the bank transaction and remove only generated ledger entries that are safe to soft-delete.
-                Manual ledger entries will be preserved.
+                {(revertPreview.generated_entries_to_soft_delete ?? []).length > 0
+                  ? "This will undo the generated ledger entry created from this bank transaction. The bank transaction will remain available for review."
+                  : "This will unlink the bank transaction from the ledger entry. The ledger entry will remain unless it was created only for this match."}
               </div>
 
               {revertPreview.blocked ? (
@@ -7245,8 +7339,8 @@ const displayBankActiveList = useMemo(() => {
 
               <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs text-bb-text">
                 {(revertPreview.generated_entries_to_soft_delete ?? []).length > 0
-                  ? "Destructive confirmation required: generated entries are soft-deleted, not hard-deleted."
-                  : "No generated ledger entry will be deleted. The match group will be voided when active."}
+                  ? "Destructive confirmation required: generated entries are soft-deleted, not hard-deleted; the bank transaction returns to review."
+                  : "No generated ledger entry will be deleted. The match group will be voided when active, and the bank transaction returns to review."}
               </div>
             </>
           ) : (
