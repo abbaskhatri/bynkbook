@@ -1458,14 +1458,22 @@ export default function DashboardPageClient() {
       ) : null}
 
       {showDashboardBody ? (
+        (() => {
+          // Format each KPI once (was being called twice — once for .text, once for .isNeg).
+          const cashKpi = fmtUsdAccountingFromCents(cashBalanceCents);
+          const revenueKpi = fmtUsdAccountingFromCents(revenueCents ?? undefined);
+          const expensesKpi = fmtUsdAccountingFromCents(expensesCents ?? undefined);
+          const netKpi = fmtUsdAccountingFromCents(netCents ?? undefined);
+
+          return (
         <>
       {/* KPI Strip */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
         {[
           {
             label: "Cash Balance",
-            value: fmtUsdAccountingFromCents(cashBalanceCents).text,
-            isNeg: fmtUsdAccountingFromCents(cashBalanceCents).isNeg,
+            value: cashKpi.text,
+            isNeg: cashKpi.isNeg,
             sub: `As of ${range.to}`,
             tooltip: null as string | null,
             icon: Wallet,
@@ -1486,8 +1494,8 @@ export default function DashboardPageClient() {
           },
           {
             label: "Revenue",
-            value: fmtUsdAccountingFromCents(revenueCents ?? undefined).text,
-            isNeg: fmtUsdAccountingFromCents(revenueCents ?? undefined).isNeg,
+            value: revenueKpi.text,
+            isNeg: revenueKpi.isNeg,
             sub: "Cash-basis",
             tooltip: null as string | null,
             icon: TrendingUp,
@@ -1497,8 +1505,8 @@ export default function DashboardPageClient() {
           },
           {
             label: "Expenses",
-            value: fmtUsdAccountingFromCents(expensesCents ?? undefined).text,
-            isNeg: fmtUsdAccountingFromCents(expensesCents ?? undefined).isNeg,
+            value: expensesKpi.text,
+            isNeg: expensesKpi.isNeg,
             sub: "Cash-basis",
             tooltip: null as string | null,
             icon: TrendingDown,
@@ -1508,8 +1516,8 @@ export default function DashboardPageClient() {
           },
           {
             label: "Net",
-            value: fmtUsdAccountingFromCents(netCents ?? undefined).text,
-            isNeg: fmtUsdAccountingFromCents(netCents ?? undefined).isNeg,
+            value: netKpi.text,
+            isNeg: netKpi.isNeg,
             sub: "Revenue − Expenses",
             tooltip: null as string | null,
             icon: Sigma,
@@ -1939,6 +1947,8 @@ export default function DashboardPageClient() {
         </div>
       </div>
         </>
+          );
+        })()
       ) : null}
     </div>
   );

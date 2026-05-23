@@ -45,6 +45,51 @@ function navVariant(active: boolean) {
 
 const NAV_ICON_CLASS = "h-5 w-5";
 
+const AUTH_ROUTE_PREFIXES = [
+  "/login",
+  "/signup",
+  "/confirm-signup",
+  "/forgot-password",
+  "/reset-password",
+  "/accept-invite",
+  "/oauth-callback",
+  "/create-business",
+  "/privacy",
+  "/terms",
+] as const;
+
+function isAuthPathname(pathname: string): boolean {
+  return AUTH_ROUTE_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+const NAV_GROUPS = [
+  {
+    group: "Core",
+    items: [
+      { label: "Dashboard", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className={NAV_ICON_CLASS} /> },
+      { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
+    ],
+  },
+  {
+    group: "Bookkeeping",
+    items: [
+      { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className={NAV_ICON_CLASS} /> },
+      { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className={NAV_ICON_CLASS} /> },
+      { label: "Category Review", path: "/category-review", needsAccountId: true, icon: <Tags className={NAV_ICON_CLASS} /> },
+      { label: "Closed Periods", path: "/closed-periods", needsAccountId: true, icon: <CalendarCheck2 className={NAV_ICON_CLASS} /> },
+      { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className={NAV_ICON_CLASS} /> },
+      { label: "Reports", path: "/reports", needsAccountId: false, icon: <BarChart3 className={NAV_ICON_CLASS} /> },
+    ],
+  },
+  {
+    group: "Business",
+    items: [
+      { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className={NAV_ICON_CLASS} /> },
+      { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className={NAV_ICON_CLASS} /> },
+    ],
+  },
+];
+
 function AuthRedirectScreen() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6">
@@ -96,18 +141,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (
-      pathname.startsWith("/login") ||
-      pathname.startsWith("/signup") ||
-      pathname.startsWith("/confirm-signup") ||
-      pathname.startsWith("/forgot-password") ||
-      pathname.startsWith("/reset-password") ||
-      pathname.startsWith("/accept-invite") ||
-      pathname.startsWith("/oauth-callback") ||
-      pathname.startsWith("/create-business") ||
-      pathname.startsWith("/privacy") ||
-      pathname.startsWith("/terms")
-    ) {
+    if (isAuthPathname(pathname)) {
       setAuthChecked(true);
       setIsAuthed(false);
       return;
@@ -131,17 +165,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }, [pathname, router]);
 
   // Hooks must always run; decide chrome after
-  const isAuthRoute =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/signup") ||
-    pathname.startsWith("/confirm-signup") ||
-    pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/reset-password") ||
-    pathname.startsWith("/accept-invite") ||
-    pathname.startsWith("/oauth-callback") ||
-    pathname.startsWith("/create-business") ||
-    pathname.startsWith("/privacy") ||
-    pathname.startsWith("/terms");
+  const isAuthRoute = isAuthPathname(pathname);
 
   const isMobileRoute = pathname === "/mobile" || pathname.startsWith("/mobile/");
   const showChrome = !isAuthRoute && !isMobileRoute;
@@ -472,43 +496,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     return id ? `${base}&accountId=${id}` : base;
   };
 
-  const navGroups = [
-    {
-      group: "Core",
-      items: [
-        { label: "Dashboard", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className={NAV_ICON_CLASS} /> },
-        { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
-      ],
-    },
-      {
-        group: "Bookkeeping",
-        items: [
-          { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className={NAV_ICON_CLASS} /> },
-          { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className={NAV_ICON_CLASS} /> },
-          { label: "Category Review", path: "/category-review", needsAccountId: true, icon: <Tags className={NAV_ICON_CLASS} /> },
-          { label: "Closed Periods", path: "/closed-periods", needsAccountId: true, icon: <CalendarCheck2 className={NAV_ICON_CLASS} /> },
-          { label: "Planning", path: "/planning", needsAccountId: false, icon: <PieChart className={NAV_ICON_CLASS} /> },
-          { label: "Reports", path: "/reports", needsAccountId: false, icon: <BarChart3 className={NAV_ICON_CLASS} /> },
-        ],
-      },
-      {
-        group: "Business",
-        items: [
-          { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className={NAV_ICON_CLASS} /> },
-          { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className={NAV_ICON_CLASS} /> },
-        ],
-      },
-    {
-      group: "System",
-      items: [
-        // Intentionally minimal for Phase 3; keep room for future items.
-      ],
-    },
-  ];
-
   const renderNavGroups = (isCollapsed: boolean, onNavigate?: () => void) => (
     <div className="p-3 space-y-3 flex-1 overflow-y-auto">
-      {navGroups.map((group) => {
+      {NAV_GROUPS.map((group) => {
         if (!group.items.length) return null;
 
         return (
