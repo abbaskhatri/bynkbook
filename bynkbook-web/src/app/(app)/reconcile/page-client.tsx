@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
 
@@ -2702,6 +2703,35 @@ const displayBankActiveList = useMemo(() => {
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
 
+  // Row virtualization for the two reconcile tables. Both can grow large
+  // (no pagination), so windowing the rendered <tr> set keeps scroll smooth
+  // and reduces React work per render. The data arrays are unchanged —
+  // virtualization only affects which rows are rendered to the DOM.
+  const entriesScrollRef = useRef<HTMLDivElement | null>(null);
+  const bankScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const RECONCILE_ROW_HEIGHT_ESTIMATE = 30;
+  const RECONCILE_VIRTUALIZE_THRESHOLD = 80;
+
+  const entriesVirtualizer = useVirtualizer({
+    count: displayEntriesActiveList.length,
+    getScrollElement: () => entriesScrollRef.current,
+    estimateSize: () => RECONCILE_ROW_HEIGHT_ESTIMATE,
+    overscan: 12,
+  });
+
+  const bankVirtualizer = useVirtualizer({
+    count: displayBankActiveList.length,
+    getScrollElement: () => bankScrollRef.current,
+    estimateSize: () => RECONCILE_ROW_HEIGHT_ESTIMATE,
+    overscan: 12,
+  });
+
+  // Only virtualize when the list is meaningfully large. Below the threshold
+  // direct rendering is faster (no overhead, no scroll-anchor risk on tiny lists).
+  const entriesShouldVirtualize = displayEntriesActiveList.length >= RECONCILE_VIRTUALIZE_THRESHOLD;
+  const bankShouldVirtualize = displayBankActiveList.length >= RECONCILE_VIRTUALIZE_THRESHOLD;
+
   const activeBankNextCursor = bankNextCursorByStatus[bankTab] ?? null;
 
   const bankPanelHasRows = displayBankActiveList.length > 0;
@@ -4026,7 +4056,7 @@ const displayBankActiveList = useMemo(() => {
           <div className="h-px bg-bb-border" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
-            <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
+            <div ref={entriesScrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-auto">
               {entriesTruthBlocking ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
@@ -4055,7 +4085,8 @@ const displayBankActiveList = useMemo(() => {
                   </thead>
 
                   <tbody>
-                    {displayEntriesActiveList.map((e: any) => {
+                    {(() => {
+                    const renderEntryRow = (e: any) => {
                       const amt = toBigIntSafe(e.amount_cents);
                       const payee = (e.payee ?? "").trim();
                       const isOptimisticPending = Boolean(e?.__optimistic_pending);
@@ -4176,7 +4207,30 @@ const displayBankActiveList = useMemo(() => {
                           </td>
                         </tr>
                       );
-                    })}
+                    };
+
+                    if (!entriesShouldVirtualize) {
+                      return displayEntriesActiveList.map((e: any) => renderEntryRow(e));
+                    }
+
+                    const items = entriesVirtualizer.getVirtualItems();
+                    const totalSize = entriesVirtualizer.getTotalSize();
+                    const startPad = items.length > 0 ? items[0].start : 0;
+                    const endPad =
+                      items.length > 0 ? totalSize - items[items.length - 1].end : 0;
+
+                    return (
+                      <>
+                        {startPad > 0 ? (
+                          <tr style={{ height: startPad }}><td colSpan={5} /></tr>
+                        ) : null}
+                        {items.map((v) => renderEntryRow(displayEntriesActiveList[v.index]))}
+                        {endPad > 0 ? (
+                          <tr style={{ height: endPad }}><td colSpan={5} /></tr>
+                        ) : null}
+                      </>
+                    );
+                    })()}
                   </tbody>
                 </table>
 
@@ -4442,7 +4496,7 @@ const displayBankActiveList = useMemo(() => {
           <div className="h-px bg-bb-border" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
-            <div className="h-full min-h-0 overflow-y-auto overflow-x-auto">
+            <div ref={bankScrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-auto">
               {bankPanelShowInitialLoading ? (
                 <div className="p-3">
                   <Skeleton className="h-24 w-full" />
@@ -4511,7 +4565,8 @@ const displayBankActiveList = useMemo(() => {
                   </thead>
 
                   <tbody>
-                    {displayBankActiveList.map((t: any) => {
+                    {(() => {
+                    const renderBankRow = (t: any) => {
 
                       const txnId = String(t.id ?? "");
                       const isSelected = txnId ? selectedBankTxnIds.has(txnId) : false;
@@ -4806,7 +4861,30 @@ const displayBankActiveList = useMemo(() => {
                           </td>
                         </tr>
                       );
-                    })}
+                    };
+
+                    if (!bankShouldVirtualize) {
+                      return displayBankActiveList.map((t: any) => renderBankRow(t));
+                    }
+
+                    const items = bankVirtualizer.getVirtualItems();
+                    const totalSize = bankVirtualizer.getTotalSize();
+                    const startPad = items.length > 0 ? items[0].start : 0;
+                    const endPad =
+                      items.length > 0 ? totalSize - items[items.length - 1].end : 0;
+
+                    return (
+                      <>
+                        {startPad > 0 ? (
+                          <tr style={{ height: startPad }}><td colSpan={5} /></tr>
+                        ) : null}
+                        {items.map((v) => renderBankRow(displayBankActiveList[v.index]))}
+                        {endPad > 0 ? (
+                          <tr style={{ height: endPad }}><td colSpan={5} /></tr>
+                        ) : null}
+                      </>
+                    );
+                    })()}
                   </tbody>
                 </table>
 
