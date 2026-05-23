@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { configureAmplify } from "@/lib/auth/amplify";
 import { ThemeProvider } from "@/lib/theme";
+import { PerfOverlay } from "@/components/app/perf-overlay";
 
 // Configure immediately so auth checks never race.
 configureAmplify();
@@ -33,7 +34,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {children}
+        <PerfOverlay />
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

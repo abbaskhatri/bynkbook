@@ -44,6 +44,30 @@ function logSummary(name: string, values: number[]) {
   dlog(`[perf] ${name} p50=${p50.toFixed(1)}ms p95=${p95.toFixed(1)}ms n=${values.length}`);
 }
 
+export type PerfSnapshot = {
+  api: Array<{ name: string; n: number; p50: number; p95: number; lastMs: number }>;
+  ui: Array<{ name: string; n: number; p50: number; p95: number; lastMs: number }>;
+  counters: Record<string, number>;
+};
+
+function snapshotStore(store: Record<string, number[]>) {
+  const out: Array<{ name: string; n: number; p50: number; p95: number; lastMs: number }> = [];
+  for (const name of Object.keys(store)) {
+    const values = store[name];
+    if (!values?.length) continue;
+    const p50 = percentile(values, 50) ?? 0;
+    const p95 = percentile(values, 95) ?? 0;
+    out.push({
+      name,
+      n: values.length,
+      p50,
+      p95,
+      lastMs: values[values.length - 1],
+    });
+  }
+  return out.sort((a, b) => b.p95 - a.p95);
+}
+
 export const metrics = {
   timeUi(name: string, startMs: number) {
     const ms = performance.now() - startMs;
@@ -65,5 +89,19 @@ export const metrics = {
 
   resetCounters() {
     for (const k of Object.keys(COUNTERS)) COUNTERS[k] = 0;
+  },
+
+  getSnapshot(): PerfSnapshot {
+    return {
+      api: snapshotStore(API_SAMPLES),
+      ui: snapshotStore(UI_SAMPLES),
+      counters: { ...COUNTERS },
+    };
+  },
+
+  reset() {
+    for (const k of Object.keys(API_SAMPLES)) delete API_SAMPLES[k];
+    for (const k of Object.keys(UI_SAMPLES)) delete UI_SAMPLES[k];
+    for (const k of Object.keys(COUNTERS)) delete COUNTERS[k];
   },
 };
