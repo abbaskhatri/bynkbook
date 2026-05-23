@@ -11,7 +11,6 @@ import { listGoals, createGoal, type GoalRow } from "@/lib/api/goals";
 
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AppDialog } from "@/components/primitives/AppDialog";

@@ -647,7 +647,7 @@ export default function VendorDetailPageClient() {
     if (accountIdParam) setApplyAccountId(accountIdParam);
     if (entryIdParam) setPaymentEntryId(entryIdParam);
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [openApplyParam, accountIdParam, entryIdParam]);
 
   useEffect(() => {

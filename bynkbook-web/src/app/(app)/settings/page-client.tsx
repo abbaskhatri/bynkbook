@@ -15,7 +15,6 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { patchBusiness, resetBusiness, deleteBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
 import { listEntries } from "@/lib/api/entries";
 import { listMatchGroups } from "@/lib/api/match-groups";
-import { listVendors } from "@/lib/api/vendors";
 import { listClosedPeriods, previewClosedPeriods, type ClosedPeriodRow } from "@/lib/api/closedPeriods";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import {
@@ -36,7 +35,6 @@ import { listCategories, createCategory, updateCategory, deleteCategory, type Ca
 import { getBookkeepingPreferences, updateBookkeepingPreferences } from "@/lib/api/bookkeepingPreferences";
 
 import { HintWrap } from "@/components/primitives/HintWrap";
-import { canWriteByRolePolicy } from "@/lib/auth/permissionHints";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
