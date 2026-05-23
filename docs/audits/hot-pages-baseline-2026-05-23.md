@@ -99,3 +99,24 @@ New modules (importable / reusable):
 - `components/reconcile/match-cards.tsx` (179 lines, 7 KB) — pure presentational: TinySpinner, UpdatingOverlay, MatchSignalChip, MatchSideCard, MatchPairPreview.
 
 Modest size win, but the main `ReconcilePageClient` function lost ~600 lines from its body — meaningfully reducing render and JIT cost. Sets up the pattern for Phase 2c (dialog extraction with lazy loading), where the real bundle-size wins live.
+
+## Update — Phase 2c (ledger pure-helper extraction)
+
+Same safe pattern applied to `ledger/page-client.tsx`. Pure functions and
+presentational sub-components only — no mutation, query, or accounting code touched.
+
+| Page         | Before (bytes) | After (bytes) | Δ           |
+|--------------|---------------:|--------------:|------------:|
+| ledger       |        264,374 |       230,706 | **−34 KB**  |
+| └─ page-client.tsx |  263,171 |       229,503 | **−12.8%**  |
+
+New modules:
+- `lib/ledger/helpers.ts` (568 lines) — pure functions: BigInt money math, date range helpers, sort comparators, normalization, type conversion, fix-issue helpers, status formatters.
+- `components/ledger/inputs.tsx` (357 lines) — pure presentational: AutoInput (autocomplete), HoverTooltip (portal), VendorSuggestPill (vendor suggestion), UpdatingOverlay.
+
+Bigger win than 2b (12.8% vs 6.4%) because ledger had more helper code than reconcile. The main `LedgerPageClient` function lost ~850 lines from its body. Side benefit: 3 pre-existing unused-import warnings were also removed when those imports became truly unused after the extraction.
+
+Cumulative reduction across hot pages so far:
+- ledger: −34 KB (−12.8%)
+- reconcile: −22 KB (−6.4%)
+- **Total: −56 KB removed from the two largest page-client files.**
