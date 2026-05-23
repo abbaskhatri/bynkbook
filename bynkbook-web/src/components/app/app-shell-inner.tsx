@@ -201,11 +201,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const [activityOpen, setActivityOpen] = useState(false);
   const activityRef = useRef<HTMLDivElement | null>(null);
 
-  const [activityItems, setActivityItems] = useState<ActivityLogItem[] | null>(null);
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [activityErr, setActivityErr] = useState<string | null>(null);
-  const activityFetchedAtRef = useRef<number>(0);
-
   const ACTIVITY_TTL_MS = 15_000;
 
   useEffect(() => {
@@ -274,14 +269,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const businessId = showChrome ? business?.id ?? bizIdFromUrl ?? "" : "";
 
   const accountsQ = useAccounts(showChrome ? businessId || null : null);
-
-    // Activity cache must never leak across businesses.
-  useEffect(() => {
-    setActivityItems(null);
-    setActivityErr(null);
-    setActivityLoading(false);
-    activityFetchedAtRef.current = 0;
-  }, [businessId]);
 
   const firstActiveAccountId = useMemo(() => {
     const list = accountsQ.data ?? [];
@@ -467,33 +454,31 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
   const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.issue_count ?? 0) || 0);
 
-  async function ensureActivityFresh(force = false) {
-    if (!businessId) return;
+  // Activity feed (bell dropdown) — fetched on open with TTL caching.
+  // useQuery handles per-business cache isolation via queryKey, so we no
+  // longer need a businessId-change effect to clear local state.
+  const activityScopedAccountId =
+    accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : null;
 
-    const now = Date.now();
-    const hasCache = Array.isArray(activityItems);
-    const fresh = hasCache && now - activityFetchedAtRef.current < ACTIVITY_TTL_MS;
-
-    if (!force && fresh) return;
-
-    setActivityLoading(true);
-    setActivityErr(null);
-
-    try {
+  const activityQ = useQuery({
+    queryKey: ["activityFeed", businessId, activityScopedAccountId ?? "all"],
+    enabled: !!businessId && activityOpen,
+    queryFn: async () => {
       const res = await getActivity(businessId, {
         limit: 10,
-        accountId: accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined,
+        accountId: activityScopedAccountId ?? undefined,
       });
+      return res.items ?? [];
+    },
+    staleTime: ACTIVITY_TTL_MS,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
+  });
 
-      setActivityItems(res.items ?? []);
-      activityFetchedAtRef.current = Date.now();
-    } catch {
-      // Keep last-good items visible; just show a small error line.
-      setActivityErr("Couldn’t load activity.");
-    } finally {
-      setActivityLoading(false);
-    }
-  }
+  // Compat shims so the existing JSX below reads naturally without rewrites.
+  const activityItems: ActivityLogItem[] | null = activityQ.data ?? null;
+  const activityLoading = activityQ.isFetching;
+  const activityErr = activityQ.error ? "Couldn’t load activity." : null;
 
   const href = (path: string, needsAccountId: boolean) => {
     if (!businessId) return path;
@@ -549,8 +534,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     >
                       <Link
                         href={link}
-                        prefetch={false}
-                        className="relative flex items-center justify-center w-full"
+                                                className="relative flex items-center justify-center w-full"
                         onClick={onNavigate}
                       >
                         <span>{item.icon}</span>
@@ -582,8 +566,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   >
                     <Link
                       href={link}
-                      prefetch={false}
-                      className="flex w-full items-center gap-2 transition-all duration-200"
+                                            className="flex w-full items-center gap-2 transition-all duration-200"
                       onClick={onNavigate}
                     >
                       <span className="shrink-0 text-current">{item.icon}</span>
@@ -776,14 +759,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   // Close other menu; toggle activity
                   setUserMenuOpen(false);
 
-                  setActivityOpen((v) => {
-                    const next = !v;
-                    if (next) {
-                      // Fetch-on-open with TTL. Keep last-good list visible.
-                      ensureActivityFresh(false);
-                    }
-                    return next;
-                  });
+                  // Just toggle — the activity useQuery is enabled when
+                  // activityOpen flips to true and uses staleTime as the TTL.
+                  setActivityOpen((v) => !v);
                 }}
               >
                 <Bell className={NAV_ICON_CLASS} />
@@ -818,7 +796,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         <button
                           type="button"
                           className="text-xs text-foreground/80 hover:text-foreground"
-                          onClick={() => ensureActivityFresh(true)}
+                          onClick={() => void activityQ.refetch()}
                         >
                           Retry
                         </button>
