@@ -161,12 +161,12 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
   const totalVisible = entries.slice(0, 6).length + bankTxns.slice(0, 6).length;
 
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-auto">
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-bb-text-subtle" />
         <Input
           ref={inputRef}
-          className="h-9 w-[320px] rounded-xl border-bb-input-border bg-bb-input-bg pl-9 pr-16 text-sm shadow-sm"
+          className="h-9 w-full sm:w-[320px] rounded-xl border-bb-input-border bg-bb-input-bg pl-9 pr-16 text-sm shadow-sm"
           placeholder="Search entries, bank txns, payees…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
