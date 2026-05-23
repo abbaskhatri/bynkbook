@@ -139,6 +139,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthPathname(pathname)) {
@@ -155,8 +156,16 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         // Prefer stable identifier for activity "You" label.
         const id = String(u?.userId ?? u?.username ?? "");
         setCurrentUserId(id || null);
+
+        // signInDetails.loginId is the email the user signed in with (Amplify v6).
+        // Fall back to username if loginId not present.
+        const email =
+          String(u?.signInDetails?.loginId ?? u?.username ?? "").trim() || null;
+        // Only display if it looks like an email — never expose internal IDs.
+        setCurrentUserEmail(email && email.includes("@") ? email : null);
       } catch {
         setCurrentUserId(null);
+        setCurrentUserEmail(null);
         router.replace(`/login?next=${encodeURIComponent(currentUrlRef.current)}`);
       } finally {
         setAuthChecked(true);
@@ -885,7 +894,18 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {userMenuOpen ? (
-                <div className="absolute right-0 mt-2 w-44 rounded-md border border-bb-border bg-bb-surface-elevated shadow-md overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-56 rounded-md border border-bb-border bg-bb-surface-elevated shadow-md overflow-hidden z-50">
+                  {currentUserEmail ? (
+                    <div className="px-3 py-2 border-b border-bb-border-muted bg-bb-surface-soft">
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Signed in as
+                      </div>
+                      <div className="mt-0.5 text-sm font-medium text-foreground truncate" title={currentUserEmail}>
+                        {currentUserEmail}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <Link
                     href="/settings"
                     className="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/80 hover:bg-bb-table-row-hover"
@@ -957,6 +977,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {businessId ? (
+              <div className="px-3 pt-3">
+                <GlobalSearch
+                  businessId={businessId}
+                  accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
+                />
+              </div>
+            ) : null}
 
             {renderNavGroups(false, () => setMobileNavOpen(false))}
           </aside>
