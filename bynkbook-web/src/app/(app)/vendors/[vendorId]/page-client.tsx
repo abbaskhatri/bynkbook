@@ -548,22 +548,43 @@ export default function VendorDetailPageClient() {
 
   async function onSave() {
     if (!businessId || !vendorId) return;
-    const loadingToken = beginLoading();
     setErr(null);
+
+    // Optimistic: apply the edit immediately and close the dialog.
+    // Server runs in background; rollback + reopen on error.
+    const prevVendor = vendor;
+    const trimmedName = name.trim();
+    const trimmedNotes = notes.trim();
+    const nextCategoryId = defaultCategoryId || null;
+
+    setVendor((current: any) =>
+      current
+        ? {
+            ...current,
+            name: trimmedName,
+            notes: trimmedNotes,
+            default_category_id: nextCategoryId,
+          }
+        : current
+    );
+    setEditOpen(false);
+
     try {
       const res = await updateVendor({
         businessId,
         vendorId,
-        name: name.trim(),
-        notes: notes.trim(),
-        default_category_id: defaultCategoryId || null,
+        name: trimmedName,
+        notes: trimmedNotes,
+        default_category_id: nextCategoryId,
       });
+      // Replace optimistic state with server truth (in case server normalized values).
       setVendor(res.vendor);
-      setEditOpen(false);
     } catch (e: any) {
+      // Rollback to the prior vendor and reopen the dialog with the user's
+      // typed values still present (they're already in name/notes/defaultCategoryId state).
+      setVendor(prevVendor);
       setErr(e?.message ?? "Failed to update vendor");
-    } finally {
-      endLoading(loadingToken);
+      setEditOpen(true);
     }
   }
 

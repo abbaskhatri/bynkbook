@@ -5643,35 +5643,45 @@ const displayBankActiveList = useMemo(() => {
                     if (!selectedBusinessId || !selectedAccountId) return;
                     if (!adjustEntryId) return;
 
-                    setAdjustBusy(true);
+                    // Optimistic: mark adjusted + close dialog immediately.
+                    // markEntryAdjustment only flips a flag on the entry — it
+                    // doesn't change amount_cents — so the rollback is just
+                    // removing the id from the locallyAdjusted set.
+                    const optimisticEntryId = adjustEntryId;
                     setAdjustError(null);
                     clearMutErr();
-                    markPending(String(adjustEntryId));
+                    markPending(String(optimisticEntryId));
+                    setLocallyAdjusted((prev) => {
+                      const next = new Set(prev);
+                      next.add(optimisticEntryId);
+                      return next;
+                    });
+                    setOpenAdjust(false);
 
                     try {
                       await markEntryAdjustment({
                         businessId: selectedBusinessId,
                         accountId: selectedAccountId,
-                        entryId: adjustEntryId,
+                        entryId: optimisticEntryId,
                         reason: adjustReason.trim(),
-                      });
-
-                      setLocallyAdjusted((prev) => {
-                        const next = new Set(prev);
-                        next.add(adjustEntryId);
-                        return next;
                       });
 
                       refreshAllDebounced();
                       clearMutErr();
-                      setOpenAdjust(false);
                     } catch (e: any) {
+                      // Rollback: remove from locallyAdjusted, surface the error,
+                      // and reopen the dialog so the user sees what happened.
+                      setLocallyAdjusted((prev) => {
+                        const next = new Set(prev);
+                        next.delete(optimisticEntryId);
+                        return next;
+                      });
                       const r = applyMutationError(e, "Can’t update adjustment");
                       if (!r.isClosed) setAdjustError(r.msg);
                       else setAdjustError(null);
+                      setOpenAdjust(true);
                     } finally {
-                      clearPending(String(adjustEntryId));
-                      setAdjustBusy(false);
+                      clearPending(String(optimisticEntryId));
                     }
                   }}
                 >
