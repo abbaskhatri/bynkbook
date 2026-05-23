@@ -550,6 +550,10 @@ export default function DashboardPageClient() {
   });
 
   const [aiInsightsRequested, setAiInsightsRequested] = useState(false);
+  // Collapsible AI panel: when collapsed, only a single CTA shows.
+  // When expanded, the three sub-cards (Summary, Anomalies, Ask AI) appear.
+  // Defaults to collapsed so the dashboard isn't visually dominated by AI cards.
+  const [aiPanelExpanded, setAiPanelExpanded] = useState(false);
 
     // ---------- Bundle F: AI narrative + anomalies (read-only) ----------
   const aiNarrativeQ = useQuery({
@@ -1750,6 +1754,41 @@ export default function DashboardPageClient() {
             </CardContent>
           </Card>
 
+          {/* Collapsible AI Assistant — bundles AI Summary, Anomalies, and Ask AI
+              so the three sub-cards do not visually dominate the dashboard. */}
+          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
+            <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
+              <button
+                type="button"
+                className="flex items-center gap-2 text-left"
+                onClick={() => setAiPanelExpanded((v) => !v)}
+                aria-expanded={aiPanelExpanded}
+              >
+                <Sparkles className="h-4 w-4 text-primary" />
+                <CardTitle className="text-sm">AI Assistant</CardTitle>
+                <span className="text-[11px] text-muted-foreground">{aiPanelExpanded ? "Hide" : "Show"}</span>
+              </button>
+              <Button
+                variant={aiInsightsRequested ? "outline" : "default"}
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  if (!aiPanelExpanded) setAiPanelExpanded(true);
+                  requestAiInsights();
+                }}
+                disabled={!selectedBusinessId || aiNarrativeQ.isFetching || aiAnomaliesQ.isFetching}
+              >
+                {aiInsightsRequested ? "Refresh" : "Generate insights"}
+              </Button>
+            </CHeader>
+            {!aiPanelExpanded ? (
+              <CardContent className="px-3 py-2 text-[11px] text-muted-foreground">
+                Summary, anomaly detection, and Q&A — all read-only, opt-in to control AI cost.
+              </CardContent>
+            ) : null}
+          </Card>
+
+          {aiPanelExpanded ? (
+            <>
                 {/* AI Summary (read-only; aggregates only) */}
       <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
         <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
@@ -1892,6 +1931,8 @@ export default function DashboardPageClient() {
           </div>
         </CardContent>
       </Card>
+            </>
+          ) : null}
 
           {/* Monthly Summary (Base44 card structure) */}
           <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">

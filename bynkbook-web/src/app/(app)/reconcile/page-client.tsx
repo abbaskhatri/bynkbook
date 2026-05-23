@@ -3605,22 +3605,30 @@ const displayBankActiveList = useMemo(() => {
                         <div className="text-bb-text-muted">Method</div>
                         <div className="font-semibold text-bb-text">{newEntryPreview.method}</div>
                       </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Suggested method</div>
-                        <div className="font-semibold text-bb-text">{newEntryPreview.suggestedMethod}</div>
-                      </div>
+                      {newEntryPreview.suggestedMethod &&
+                        String(newEntryPreview.suggestedMethod).trim() !== "" &&
+                        String(newEntryPreview.suggestedMethod) !== String(newEntryPreview.method) ? (
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <div className="text-bb-text-muted">Suggested method</div>
+                          <div className="font-semibold text-bb-text">{newEntryPreview.suggestedMethod}</div>
+                        </div>
+                      ) : null}
                       <div className="flex items-center justify-between gap-2 mt-1">
                         <div className="text-bb-text-muted">Category</div>
                         <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.category}>
                           {newEntryPreview.category}
                         </div>
                       </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Suggested category</div>
-                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.suggestedCategory}>
-                          {newEntryPreview.suggestedCategory}
+                      {newEntryPreview.suggestedCategory &&
+                        String(newEntryPreview.suggestedCategory).trim() !== "" &&
+                        String(newEntryPreview.suggestedCategory) !== String(newEntryPreview.category) ? (
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <div className="text-bb-text-muted">Suggested category</div>
+                          <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.suggestedCategory}>
+                            {newEntryPreview.suggestedCategory}
+                          </div>
                         </div>
-                      </div>
+                      ) : null}
                       <div className="flex items-center justify-between gap-2 mt-1">
                         <div className="text-bb-text-muted">Ref</div>
                         <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.ref || "—"}>
