@@ -3233,7 +3233,7 @@ const displayBankActiveList = useMemo(() => {
           }}
           title={createEntryDuplicateCandidates.length ? "Possible duplicate ledger entry" : "Create entry"}
           size="lg"
-          footer={
+          footer={openCreateEntry ? (
             <DialogFooter
               left={
                 <div className="flex items-center gap-2">
@@ -3436,9 +3436,9 @@ const displayBankActiveList = useMemo(() => {
                 </>
               }
             />
-          }
+          ) : null}
         >
-          {(() => {
+          {openCreateEntry ? (() => {
             const bankId = createEntryBankTxnId ? String(createEntryBankTxnId) : "";
             const t = bankId ? bankTxSorted.find((x: any) => String(x.id) === bankId) : null;
 
@@ -3846,7 +3846,7 @@ const displayBankActiveList = useMemo(() => {
                 {null}
               </div>
             );
-          })()}
+          })() : null}
         </AppDialog>
       </div>
 
@@ -4858,7 +4858,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Snapshots"
         size="sm"
-        footer={
+        footer={openSnapshots ? (
           <DialogFooter
             left={
               <BusyButton
@@ -4871,8 +4871,9 @@ const displayBankActiveList = useMemo(() => {
             }
             right={null}
           />
-        }
+        ) : null}
       >
+        {openSnapshots ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Left: list */}
           <div className="rounded-md border border-bb-border overflow-hidden">
@@ -5142,6 +5143,7 @@ const displayBankActiveList = useMemo(() => {
             </div>
           </div>
         </div>
+        ) : null}
       </AppDialog>
 
       {/* Phase 4D: Match dialog (Bank txn → many entries) */}
@@ -5160,7 +5162,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Match bank transaction"
         size="lg"
-        footer={
+        footer={openMatch ? (
           <DialogFooter
             left={null}
             right={
@@ -5308,8 +5310,9 @@ const displayBankActiveList = useMemo(() => {
               </>
             }
           />
-        }
+        ) : null}
       >
+        {openMatch ? (
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount.</div>
@@ -5597,6 +5600,7 @@ const displayBankActiveList = useMemo(() => {
             </div>
           </div>
         </div>
+        ) : null}
       </AppDialog>
 
       {/* Adjustment dialog */}
@@ -5717,7 +5721,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Match entry"
         size="lg"
-        footer={
+        footer={openEntryMatch ? (
           <DialogFooter
             left={null}
             right={
@@ -5860,8 +5864,9 @@ const displayBankActiveList = useMemo(() => {
               </>
             }
           />
-        }
+        ) : null}
       >
+        {openEntryMatch ? (
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-bb-text-muted mb-2">
@@ -6175,6 +6180,7 @@ const displayBankActiveList = useMemo(() => {
 
           {null}
         </div>
+        ) : null}
       </AppDialog>
 
       {/* Reconciliation history dialog (Phase 5A, read-only) */}
@@ -6382,7 +6388,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Audit detail"
         size="md"
-        footer={
+        footer={openReconAuditDetail ?
           (() => {
             const ev = selectedReconAudit as any | null;
             const groupId = ev?.groupId ? String(ev.groupId) : null;
@@ -6429,9 +6435,10 @@ const displayBankActiveList = useMemo(() => {
                 }
               />
             );
-          })()
+          })() : null
         }
       >
+        {openReconAuditDetail ? (
         <div className="p-3">
           {(() => {
             const ev = selectedReconAudit as any | null;
@@ -6568,6 +6575,7 @@ const displayBankActiveList = useMemo(() => {
             })()}
           </div>
         </div>
+        ) : null}
       </AppDialog>
 
       <AppDialog
