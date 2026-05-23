@@ -60,7 +60,63 @@ import { aiSuggestReconcileBank, aiSuggestReconcileEntry } from "@/lib/api/ai";
 
 import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
 
-type BankTab = "unmatched" | "matched";
+import {
+  type BankTab,
+  type MatchSignalTone,
+  absBig,
+  accountLabelFor,
+  aiUiMessage,
+  bankCategoryLabel,
+  bankPostedTime,
+  bankSignature,
+  categorySuggestionConfidence,
+  categorySuggestionRequiresReview,
+  categorySuggestionSourceLabel,
+  categorySuggestionTierLabel,
+  compactText,
+  compareBankDateAsc,
+  compareBankDateDesc,
+  compareEntryDateAsc,
+  compareEntryDateDesc,
+  directionLabel,
+  duplicateReasonChips,
+  entriesSignature,
+  entryCategoryLabel,
+  extractCheckRefFromBankTransaction,
+  formatUsdFromCents,
+  inferMethodFromBankTransaction,
+  isInactiveEntryRecord,
+  isoToYmd,
+  matchGroupSignature,
+  matchGroupsFromPlacementSummary,
+  matchSignalChips,
+  matchSignalMeta,
+  mergeBankTransactions,
+  normalizeDesc,
+  pctConfidence,
+  replaceBankTransactionsForStatus,
+  sameAmountAbs,
+  sameDirection,
+  scoreBankCandidate,
+  scoreEntryCandidate,
+  tagBankTransactionsForStatus,
+  toBigIntSafe,
+  tokenOverlap,
+  tokenSet,
+  truncateAiReason,
+  upsertMatchGroup,
+  ymdFromBankTxn,
+  ymdFromUnknownDate,
+  ymdToTime,
+} from "@/lib/reconcile/helpers";
+import {
+  MatchPairPreview,
+  MatchSideCard,
+  MatchSignalChip,
+  TinySpinner,
+  UpdatingOverlay,
+} from "@/components/reconcile/match-cards";
+
 type RefreshBankAndMatchesOptions = {
   preserveOnEmpty?: boolean;
   skipLegacyMatches?: boolean;
@@ -105,143 +161,6 @@ const AutoReconcileDialog = dynamic(
   { loading: () => null }
 );
 
-function TinySpinner() {
-  return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
-}
-
-function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
-  return (
-    <div className="absolute inset-0 z-20 flex items-start justify-center bg-bb-surface-card/55 backdrop-blur-[1px]">
-      <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-bb-border bg-bb-surface-card px-3 py-1 text-xs font-medium text-bb-text shadow-sm">
-        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-        <span>{label}</span>
-      </div>
-    </div>
-  );
-}
-
-function toBigIntSafe(v: unknown): bigint {
-  try {
-    if (typeof v === "bigint") return v;
-    if (typeof v === "number") return BigInt(Math.trunc(v));
-    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch { }
-  return 0n;
-}
-
-function absBig(n: bigint) {
-  return n < 0n ? -n : n;
-}
-
-function formatUsdFromCents(cents: bigint) {
-  const neg = cents < 0n;
-  const abs = neg ? -cents : cents;
-  const dollars = abs / 100n;
-  const pennies = abs % 100n;
-  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
-  return neg ? `(${core})` : core;
-}
-
-function ymdToTime(ymd: string): number {
-  try {
-    const n = new Date(`${ymd}T00:00:00Z`).getTime();
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function isoToYmd(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toISOString().slice(0, 10);
-  } catch {
-    return "";
-  }
-}
-
-function normalizeDesc(s: string): string {
-  return (s ?? "")
-    .toLowerCase()
-    .replace(/\b(des|desc|id|indn|trn|conf#|conf)\b/g, " ")
-    .replace(/[0-9]/g, " ")
-    .replace(/[^a-z\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function tokenSet(s: string): Set<string> {
-  const t = normalizeDesc(s);
-  const parts = t.split(" ").filter(Boolean);
-  return new Set(parts.filter((p) => p.length >= 3));
-}
-
-function tokenOverlap(a: string, b: string): number {
-  const A = tokenSet(a);
-  const B = tokenSet(b);
-  if (A.size === 0 || B.size === 0) return 0;
-  let hit = 0;
-  for (const x of A) if (B.has(x)) hit++;
-  return hit;
-}
-
-function scoreEntryCandidate(bank: any, entry: any) {
-  const bankAmt = toBigIntSafe(bank?.amount_cents);
-  const bankAbs = absBig(bankAmt);
-  const bankTime = bank?.posted_date ? new Date(bank.posted_date).getTime() : 0;
-
-  const entryAmt = toBigIntSafe(entry?.amount_cents);
-  const entryAbs = absBig(entryAmt);
-
-  const diff = entryAbs > bankAbs ? entryAbs - bankAbs : bankAbs - entryAbs;
-  const dtMs = bankTime ? Math.abs(new Date(`${entry?.date}T00:00:00Z`).getTime() - bankTime) : 0;
-  const dtDays = bankTime ? Math.floor(dtMs / 86_400_000) : 9999;
-
-  const overlapRaw = tokenOverlap(String(bank?.name ?? ""), String(entry?.payee ?? ""));
-  const overlap = Math.min(overlapRaw, 3);
-
-  const diffN = Number(diff);
-  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
-
-  return {
-    score,
-    diff,
-    dtDays,
-    overlap,
-    exactAmount: diff === 0n,
-  };
-}
-
-function scoreBankCandidate(entry: any, bank: any) {
-  const entryAmt = toBigIntSafe(entry?.amount_cents);
-  const entryAbs = absBig(entryAmt);
-  const entryTime = entry?.date ? new Date(`${entry.date}T00:00:00Z`).getTime() : 0;
-
-  const bankAmt = toBigIntSafe(bank?.amount_cents);
-  const bankAbs = absBig(bankAmt);
-
-  const diff = bankAbs > entryAbs ? bankAbs - entryAbs : entryAbs - bankAbs;
-  const dtMs = entryTime ? Math.abs(new Date(bank?.posted_date).getTime() - entryTime) : 0;
-  const dtDays = entryTime ? Math.floor(dtMs / 86_400_000) : 9999;
-
-  const overlapRaw = tokenOverlap(String(entry?.payee ?? ""), String(bank?.name ?? ""));
-  const overlap = Math.min(overlapRaw, 3);
-
-  const diffN = Number(diff);
-  const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
-
-  return {
-    score,
-    diff,
-    dtDays,
-    overlap,
-    exactAmount: diff === 0n,
-  };
-}
-
 type ReconcileBankSuggestion = {
   entryId: string;
   confidence: number;
@@ -253,531 +172,6 @@ type ReconcileEntrySuggestion = {
   confidence: number;
   reason: string;
 };
-
-function pctConfidence(v: number) {
-  const n = Math.round(Math.max(0, Math.min(1, Number(v) || 0)) * 100);
-  return `${n}%`;
-}
-
-function categorySuggestionConfidence(raw: unknown) {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
-
-function categorySuggestionTierLabel(raw: unknown) {
-  const tier = String(raw ?? "").trim().toUpperCase();
-  if (tier === "SAFE_DETERMINISTIC") return "Strong suggestion";
-  if (tier === "STRONG_SUGGESTION") return "Strong suggestion";
-  if (tier === "ALTERNATE") return "Alternate";
-  if (tier === "REVIEW_BUCKET") return "Review needed";
-  return "Suggestion";
-}
-
-function categorySuggestionSourceLabel(raw: unknown) {
-  const source = String(raw ?? "").trim().toUpperCase();
-  if (source === "VENDOR_DEFAULT") return "Vendor default";
-  if (source === "MEMORY") return "Learned from your history";
-  if (source === "HEURISTIC") return "Pattern match";
-  if (source === "AI") return "AI suggestion";
-  return "Suggestion";
-}
-
-function categorySuggestionRequiresReview(suggestion: any) {
-  return (
-    suggestion?.requiresUserConfirmation === true ||
-    suggestion?.review_only === true ||
-    suggestion?.reviewOnly === true ||
-    suggestion?.protected === true ||
-    suggestion?.is_protected === true ||
-    suggestion?.isProtected === true ||
-    !!String(suggestion?.protected_class ?? suggestion?.protectedClass ?? "").trim()
-  );
-}
-
-function aiUiMessage(err: any, fallback = "Smart suggestions are unavailable right now.") {
-  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
-  const raw = String(
-    err?.message ??
-    err?.payload?.message ??
-    err?.response?.data?.message ??
-    ""
-  ).toLowerCase();
-
-  if (
-    status === 429 ||
-    raw.includes("quota") ||
-    raw.includes("rate limit") ||
-    raw.includes("too many requests")
-  ) {
-    return "AI quota reached. Try again in a little while.";
-  }
-
-  return fallback;
-}
-
-function truncateAiReason(reason: string, max = 120) {
-  const s = String(reason ?? "").replace(/\s+/g, " ").trim();
-  if (!s) return "";
-  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
-}
-
-type MatchSignalTone = "default" | "success" | "warning" | "danger";
-
-function MatchSignalChip({ label, tone = "default", title }: { label: string; tone?: MatchSignalTone; title?: string }) {
-  const cls =
-    tone === "success"
-      ? "border-primary/20 bg-primary/10 text-primary"
-      : tone === "warning"
-        ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
-        : tone === "danger"
-          ? "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg"
-          : "border-bb-border bg-bb-surface-card text-bb-text";
-
-  return (
-    <span
-      title={title}
-      className={`inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium ${cls}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function ymdFromBankTxn(bank: any) {
-  const raw = String(bank?.posted_date ?? "");
-  if (!raw) return "";
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  return isoToYmd(raw);
-}
-
-function ymdFromUnknownDate(value: unknown) {
-  const raw = String(value ?? "");
-  if (!raw) return "";
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  return isoToYmd(raw);
-}
-
-function compactText(value: unknown, fallback = "—") {
-  const s = String(value ?? "").trim();
-  return s || fallback;
-}
-
-const INACTIVE_ENTRY_STATUSES = new Set(["DELETED", "SOFT_DELETED", "VOIDED", "REMOVED"]);
-
-function isInactiveEntryRecord(row: any) {
-  if (!row) return false;
-  if (row.deleted_at || row.deletedAt) return true;
-  if (row.voided_at || row.voidedAt) return true;
-  if (row.removed_at || row.removedAt) return true;
-  const status = String(row?.status ?? row?.entry_status ?? row?.entryStatus ?? "").trim().toUpperCase();
-  return INACTIVE_ENTRY_STATUSES.has(status);
-}
-
-function extractCheckRefFromBankTransaction(bank: any) {
-  const explicit = compactText(
-    bank?.check_number ?? bank?.checkNumber ?? bank?.check_num ?? bank?.checkNum ?? "",
-    ""
-  ).replace(/[^0-9A-Za-z-]/g, "");
-  if (explicit) return explicit;
-
-  const text = [
-    bank?.name,
-    bank?.merchant_name,
-    bank?.original_description,
-    bank?.payment_channel,
-  ].map((v) => String(v ?? "")).join(" ");
-
-  const match = text.match(/\b(?:check|chk)\s*(?:#|no\.?|number)?\s*([0-9]{2,8})\b/i) ??
-    text.match(/\bdeposit\s+check\s*(?:#|no\.?|number)?\s*([0-9]{2,8})\b/i);
-  return compactText(match?.[1] ?? "", "");
-}
-
-function inferMethodFromBankTransaction(bank: any) {
-  if (extractCheckRefFromBankTransaction(bank)) return "CHECK";
-
-  const text = [
-    bank?.name,
-    bank?.merchant_name,
-    bank?.original_description,
-    bank?.payment_channel,
-  ].map((v) => String(v ?? "")).join(" ");
-
-  if (/\bzelle\b/i.test(text)) return "ZELLE";
-  if (/\bwire(?:\s+type)?\b/i.test(text)) return "WIRE";
-  if (/\bach\b/i.test(text)) return "ACH";
-  if (/\b(?:check|chk)\b/i.test(text)) return "CHECK";
-  if (/\btransfer\b/i.test(text)) return "TRANSFER";
-  return "OTHER";
-}
-
-function directionLabel(amountCents: unknown) {
-  return toBigIntSafe(amountCents) < 0n ? "Outflow" : "Inflow";
-}
-
-function sameAmountAbs(a: unknown, b: unknown) {
-  return absBig(toBigIntSafe(a)) === absBig(toBigIntSafe(b));
-}
-
-function sameDirection(a: unknown, b: unknown) {
-  const aVal = toBigIntSafe(a);
-  const bVal = toBigIntSafe(b);
-  if (aVal === 0n || bVal === 0n) return false;
-  return (aVal < 0n && bVal < 0n) || (aVal > 0n && bVal > 0n);
-}
-
-function duplicateReasonChips(bank: any, candidate: any, matchStatus: string) {
-  const chips: Array<{ label: string; tone?: MatchSignalTone; title?: string }> = [];
-  const candidateForScore = {
-    ...(candidate ?? {}),
-    date: ymdFromUnknownDate(candidate?.date),
-  };
-  const meta = scoreEntryCandidate(bank, candidateForScore);
-
-  if (sameAmountAbs(bank?.amount_cents, candidate?.amount_cents)) {
-    chips.push({ label: "same amount", tone: "success" });
-  }
-
-  if (Number(meta.dtDays ?? 9999) <= 3) {
-    chips.push({
-      label: "nearby date",
-      tone: "success",
-      title: `${meta.dtDays} day${meta.dtDays === 1 ? "" : "s"} apart`,
-    });
-  }
-
-  if (Number(meta.overlap ?? 0) > 0) {
-    chips.push({ label: "similar payee", tone: "success" });
-  }
-
-  if (sameDirection(bank?.amount_cents, candidate?.amount_cents)) {
-    chips.push({ label: "same direction", tone: "success" });
-  }
-
-  if (matchStatus) {
-    chips.push({
-      label: matchStatus.toLowerCase().includes("matched") ? "existing matched" : "existing unmatched",
-      tone: matchStatus.toLowerCase().includes("matched") ? "warning" : "default",
-    });
-  }
-
-  return chips.length ? chips : [{ label: "possible duplicate", tone: "warning" as const }];
-}
-
-function entryCategoryLabel(entry: any) {
-  return compactText(
-    entry?.category_name ??
-      entry?.categoryName ??
-      entry?.category?.name ??
-      entry?.category?.title ??
-      ""
-  );
-}
-
-function bankCategoryLabel(bank: any) {
-  return compactText(
-    bank?.category_name ??
-      bank?.categoryName ??
-      bank?.category?.name ??
-      bank?.merchant_category ??
-      bank?.personal_finance_category?.primary ??
-      ""
-  );
-}
-
-function accountLabelFor(row: any, fallbackAccountName?: string) {
-  return compactText(row?.account_name ?? row?.accountName ?? row?.account?.name ?? fallbackAccountName ?? "");
-}
-
-function matchSignalMeta(bank: any, entry: any, direction: "bankToEntry" | "entryToBank") {
-  return direction === "bankToEntry" ? scoreEntryCandidate(bank, entry) : scoreBankCandidate(entry, bank);
-}
-
-function matchSignalChips(meta: any, similarCandidateCount: number, aiConfidence?: number | null) {
-  const chips: Array<{ label: string; tone?: MatchSignalTone; title?: string }> = [];
-  const diff = toBigIntSafe(meta?.diff);
-  const dtDays = Number(meta?.dtDays ?? 9999);
-  const overlap = Number(meta?.overlap ?? 0);
-  const confidence = typeof aiConfidence === "number" ? Math.max(0, Math.min(1, aiConfidence)) : null;
-
-  if (diff === 0n) chips.push({ label: "Exact amount", tone: "success" });
-  else chips.push({ label: "Amount mismatch", tone: "danger", title: `Difference ${formatUsdFromCents(diff)}` });
-
-  if (dtDays === 0) chips.push({ label: "Same date", tone: "success" });
-  else if (dtDays <= 3) chips.push({ label: "Near date", tone: "default", title: `${dtDays} day${dtDays === 1 ? "" : "s"} apart` });
-  else chips.push({ label: "Date mismatch", tone: "warning", title: `${dtDays} day${dtDays === 1 ? "" : "s"} apart` });
-
-  if (overlap >= 2) chips.push({ label: "Similar payee", tone: "success" });
-  else if (overlap === 1) chips.push({ label: "Some payee overlap", tone: "default" });
-  else chips.push({ label: "Payee differs", tone: "warning" });
-
-  if (similarCandidateCount > 1) {
-    chips.push({
-      label: "Not unique",
-      tone: "warning",
-      title: `${similarCandidateCount} similar candidates are visible for review`,
-    });
-  }
-
-  if (confidence !== null && confidence < 0.75) {
-    chips.push({ label: "Review needed", tone: "warning", title: `Confidence ${pctConfidence(confidence)}` });
-  } else if (diff !== 0n || dtDays > 3 || overlap === 0 || similarCandidateCount > 1) {
-    chips.push({ label: "Review needed", tone: "warning" });
-  }
-
-  return chips;
-}
-
-function MatchSideCard({
-  label,
-  title,
-  date,
-  amountCents,
-  account,
-  categoryOrStatus,
-}: {
-  label: string;
-  title: string;
-  date: string;
-  amountCents: unknown;
-  account?: string;
-  categoryOrStatus?: string;
-}) {
-  const amount = toBigIntSafe(amountCents);
-  return (
-    <div className="min-w-0 rounded-md border border-bb-border bg-bb-surface-card p-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-bb-text" title={title}>
-        {compactText(title)}
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-        <div className="min-w-0">
-          <div className="text-bb-text-muted">Date</div>
-          <div className="truncate text-bb-text">{compactText(date)}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-bb-text-muted">Amount</div>
-          <div className={`tabular-nums font-semibold ${amount < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
-            {formatUsdFromCents(amount)}
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="text-bb-text-muted">Account</div>
-          <div className="truncate text-bb-text" title={account}>
-            {compactText(account)}
-          </div>
-        </div>
-        <div className="min-w-0 text-right">
-          <div className="text-bb-text-muted">Category/status</div>
-          <div className="truncate text-bb-text" title={categoryOrStatus}>
-            {compactText(categoryOrStatus)}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MatchPairPreview({
-  bank,
-  bankTxns,
-  entries,
-  accountName,
-  direction,
-  similarCandidateCount,
-  aiConfidence,
-}: {
-  bank: any | null;
-  bankTxns?: any[];
-  entries: any[];
-  accountName?: string;
-  direction: "bankToEntry" | "entryToBank";
-  similarCandidateCount: number;
-  aiConfidence?: number | null;
-}) {
-  const banks = bank ? [bank] : (bankTxns ?? []);
-  const firstBank = banks[0] ?? null;
-  if (!firstBank && entries.length === 0) return null;
-  const firstEntry = entries[0] ?? null;
-  const isSinglePair = Boolean(firstBank && firstEntry && entries.length === 1 && banks.length === 1);
-  const meta = isSinglePair ? matchSignalMeta(firstBank, firstEntry, direction) : null;
-  const chips = meta ? matchSignalChips(meta, similarCandidateCount, aiConfidence) : [];
-  const entryTotal = entries.reduce((sum, e) => sum + absBig(toBigIntSafe(e?.amount_cents)), 0n);
-  const bankTotal = banks.reduce((sum, t) => sum + absBig(toBigIntSafe(t?.amount_cents)), 0n);
-
-  return (
-    <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-semibold text-bb-text">Review the match pair</div>
-          <div className="text-[11px] text-bb-text-muted">Confirm exactly which ledger and bank records will be linked.</div>
-        </div>
-        <div className="flex flex-wrap justify-end gap-1.5">
-          {chips.map((chip) => (
-            <MatchSignalChip key={`${chip.label}-${chip.title ?? ""}`} {...chip} />
-          ))}
-          {!isSinglePair && entries.length > 1 ? <MatchSignalChip label={`${entries.length} ledger entries`} tone="warning" /> : null}
-          {!isSinglePair && banks.length > 1 ? <MatchSignalChip label={`${banks.length} bank transactions`} tone="warning" /> : null}
-        </div>
-      </div>
-
-      <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_1fr] md:items-stretch">
-        <MatchSideCard
-          label={entries.length > 1 ? "Ledger entries" : "Ledger entry"}
-          title={
-            entries.length > 1
-              ? entries.map((e) => compactText(e?.payee, "Entry")).join(", ")
-              : compactText(firstEntry?.payee, "Select a ledger entry")
-          }
-          date={entries.length > 1 ? `${entries.length} selected` : compactText(firstEntry?.date)}
-          amountCents={entries.length > 1 ? entryTotal : firstEntry?.amount_cents ?? 0n}
-          account={accountLabelFor(firstEntry, accountName)}
-          categoryOrStatus={entries.length > 1 ? "Selected" : entryCategoryLabel(firstEntry)}
-        />
-
-        <div className="hidden items-center justify-center text-[11px] font-semibold text-bb-text-subtle md:flex">to</div>
-
-        <MatchSideCard
-          label={banks.length > 1 ? "Bank transactions" : "Bank transaction"}
-          title={
-            banks.length > 1
-              ? banks.map((t) => compactText(t?.name, "Bank transaction")).join(", ")
-              : compactText(firstBank?.name, "Select a bank transaction")
-          }
-          date={banks.length > 1 ? `${banks.length} selected` : ymdFromBankTxn(firstBank)}
-          amountCents={banks.length > 1 ? bankTotal : firstBank?.amount_cents ?? 0n}
-          account={accountLabelFor(firstBank, accountName)}
-          categoryOrStatus={banks.length > 1 ? "Selected" : bankCategoryLabel(firstBank)}
-        />
-      </div>
-    </div>
-  );
-}
-
-function bankSignature(items: any[]): string {
-  const count = Array.isArray(items) ? items.length : 0;
-  let newest = "";
-  for (const t of items ?? []) {
-    const d = String(t?.posted_date ?? "");
-    if (d && d > newest) newest = d;
-  }
-  return `${count}|${newest}`;
-}
-
-function matchGroupSignature(items: any[]): string {
-  const active = (items ?? [])
-    .filter((g: any) => String(g?.status ?? "").toUpperCase() === "ACTIVE")
-    .map((g: any) => String(g?.id ?? ""))
-    .filter(Boolean)
-    .sort();
-  return active.join("|");
-}
-
-function upsertMatchGroup(items: any[], group: any): any[] {
-  const gid = String(group?.id ?? "");
-  if (!gid) return Array.isArray(items) ? items : [];
-
-  const next = Array.isArray(items) ? items.slice() : [];
-  const i = next.findIndex((g: any) => String(g?.id ?? "") === gid);
-  if (i >= 0) next[i] = group;
-  else next.unshift(group);
-  return next;
-}
-
-function matchGroupsFromPlacementSummary(summary: MatchGroupPlacementSummary | null): any[] {
-  const groupsById = new Map<string, any>();
-
-  for (const link of summary?.activeBankLinks ?? []) {
-    const groupId = String(link?.match_group_id ?? "").trim();
-    const bankId = String(link?.bank_transaction_id ?? "").trim();
-    if (!groupId || !bankId) continue;
-
-    const group = groupsById.get(groupId) ?? { id: groupId, status: "ACTIVE", banks: [], entries: [] };
-    group.banks.push({
-      match_group_id: groupId,
-      bank_transaction_id: bankId,
-      matched_amount_cents: link.matched_amount_cents,
-    });
-    groupsById.set(groupId, group);
-  }
-
-  for (const link of summary?.activeEntryLinks ?? []) {
-    const groupId = String(link?.match_group_id ?? "").trim();
-    const entryId = String(link?.entry_id ?? "").trim();
-    if (!groupId || !entryId) continue;
-
-    const group = groupsById.get(groupId) ?? { id: groupId, status: "ACTIVE", banks: [], entries: [] };
-    group.entries.push({
-      match_group_id: groupId,
-      entry_id: entryId,
-      matched_amount_cents: link.matched_amount_cents,
-    });
-    groupsById.set(groupId, group);
-  }
-
-  return Array.from(groupsById.values());
-}
-
-function entriesSignature(items: any[]): string {
-  const arr = Array.isArray(items) ? items : [];
-  return String(arr.length);
-}
-
-function mergeBankTransactions(...lists: any[][]): any[] {
-  const m = new Map<string, any>();
-  for (const list of lists) {
-    for (const row of list ?? []) {
-      const id = String(row?.id ?? "").trim();
-      if (id) m.set(id, row);
-    }
-  }
-  return Array.from(m.values());
-}
-
-function tagBankTransactionsForStatus(items: any[], status: BankTab): any[] {
-  return (items ?? []).map((row: any) => ({
-    ...row,
-    __reconcile_loaded_status: status,
-  }));
-}
-
-function replaceBankTransactionsForStatus(prev: any[], status: BankTab, nextItems: any[]): any[] {
-  const kept = (prev ?? []).filter((row: any) => row?.__reconcile_loaded_status !== status);
-  return mergeBankTransactions(kept, tagBankTransactionsForStatus(nextItems, status));
-}
-
-function compareEntryDateAsc(a: any, b: any) {
-  const da = ymdToTime(String(a?.date ?? ""));
-  const db = ymdToTime(String(b?.date ?? ""));
-  if (da !== db) return da - db;
-  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
-}
-
-function compareEntryDateDesc(a: any, b: any) {
-  const da = ymdToTime(String(a?.date ?? ""));
-  const db = ymdToTime(String(b?.date ?? ""));
-  if (da !== db) return db - da;
-  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
-}
-
-function bankPostedTime(t: any) {
-  const n = new Date(t?.posted_date).getTime();
-  return Number.isFinite(n) ? n : 0;
-}
-
-function compareBankDateAsc(a: any, b: any) {
-  const da = bankPostedTime(a);
-  const db = bankPostedTime(b);
-  if (da !== db) return da - db;
-  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
-}
-
-function compareBankDateDesc(a: any, b: any) {
-  const da = bankPostedTime(a);
-  const db = bankPostedTime(b);
-  if (da !== db) return db - da;
-  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
-}
 
 export default function ReconcilePageClient() {
   const router = useRouter();
