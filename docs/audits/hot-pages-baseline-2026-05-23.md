@@ -82,3 +82,20 @@ Subsequent PRs in Phase 2 will:
 4. Audit `@/components/ui/*` dynamic imports to remove unnecessary ones.
 
 Each PR should reduce the numbers above. We re-measure after each merge.
+
+## Update — Phase 2b (reconcile pure-helper extraction)
+
+Extracted pure helper functions and presentational sub-components out of
+`reconcile/page-client.tsx` to new modules. No logic changed; every function
+behaves identically.
+
+| Page         | Before (bytes) | After (bytes) | Δ          |
+|--------------|---------------:|--------------:|-----------:|
+| reconcile    |        348,296 |       326,153 | **−22 KB** |
+| └─ page-client.tsx |  348,075 |       325,932 | **−6.4%**  |
+
+New modules (importable / reusable):
+- `lib/reconcile/helpers.ts` (512 lines, 17 KB) — pure functions: BigInt math, date helpers, scoring, signatures, comparators, signal-chip builders.
+- `components/reconcile/match-cards.tsx` (179 lines, 7 KB) — pure presentational: TinySpinner, UpdatingOverlay, MatchSignalChip, MatchSideCard, MatchPairPreview.
+
+Modest size win, but the main `ReconcilePageClient` function lost ~600 lines from its body — meaningfully reducing render and JIT cost. Sets up the pattern for Phase 2c (dialog extraction with lazy loading), where the real bundle-size wins live.
