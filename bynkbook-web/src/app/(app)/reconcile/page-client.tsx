@@ -35,13 +35,12 @@ import { CategoryCombobox } from "@/components/categories/category-combobox";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
-import { listMatches, createMatch, createMatchBatch, unmatchBankTransaction, markEntryAdjustment } from "@/lib/api/matches";
+import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
 import {
   getMatchGroupPlacementSummary,
   previewGeneratedEntryRevert,
   confirmGeneratedEntryRevert,
   type MatchGroupRevertPreview,
-  type MatchGroupPlacementSummary,
 } from "@/lib/api/match-groups";
 import { createMatchGroupsBatch } from "@/lib/api/match-groups";
 import { listMatchGroups } from "@/lib/api/match-groups";
@@ -63,12 +62,9 @@ import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Pl
 
 import {
   type BankTab,
-  type MatchSignalTone,
   absBig,
   accountLabelFor,
   aiUiMessage,
-  bankCategoryLabel,
-  bankPostedTime,
   bankSignature,
   categorySuggestionConfidence,
   categorySuggestionRequiresReview,
@@ -90,32 +86,21 @@ import {
   isoToYmd,
   matchGroupSignature,
   matchGroupsFromPlacementSummary,
-  matchSignalChips,
-  matchSignalMeta,
   mergeBankTransactions,
-  normalizeDesc,
   pctConfidence,
   replaceBankTransactionsForStatus,
-  sameAmountAbs,
-  sameDirection,
   scoreBankCandidate,
   scoreEntryCandidate,
   tagBankTransactionsForStatus,
   toBigIntSafe,
-  tokenOverlap,
-  tokenSet,
   truncateAiReason,
   upsertMatchGroup,
-  ymdFromBankTxn,
   ymdFromUnknownDate,
-  ymdToTime,
 } from "@/lib/reconcile/helpers";
 import {
   MatchPairPreview,
-  MatchSideCard,
   MatchSignalChip,
   TinySpinner,
-  UpdatingOverlay,
 } from "@/components/reconcile/match-cards";
 
 type RefreshBankAndMatchesOptions = {

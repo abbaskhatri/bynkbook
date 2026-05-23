@@ -17,7 +17,7 @@ import { tabButtonClass } from "@/components/primitives/tokens";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
-import { AlertTriangle, CheckCircle2, FileText, Info, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart, Landmark } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileText, Info, TrendingUp, TrendingDown, Sigma, BarChart3, LineChart } from "lucide-react";
 
 import {
   getPnlSummary,

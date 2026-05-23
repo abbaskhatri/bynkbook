@@ -41,7 +41,6 @@ import {
 
 import { listCategories, createCategory, type CategoryRow } from "@/lib/api/categories";
 import { getCategorySuggestions } from "@/lib/api/ai";
-import { aiSuggestCategory } from "@/lib/api/ai";
 import { listClosedPeriods } from "@/lib/api/closedPeriods";
 import { createTransfer, updateTransfer, deleteTransfer, restoreTransfer } from "@/lib/api/transfers";
 import { listAccountIssues, listAccountIssuesForEntryIds, type EntryIssueRow } from "@/lib/api/issues";
@@ -115,7 +114,7 @@ import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
-import { ringFocus, inputH7, selectTriggerClass } from "@/components/primitives/tokens";
+import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { TotalsFooter } from "@/components/ledger/totals-footer";
 
@@ -146,7 +145,6 @@ import {
   Check,
   X,
   BookOpen,
-  Lock,
   RefreshCw,
   Download,
   Printer,
@@ -248,7 +246,7 @@ export default function LedgerPageClient() {
   const perfLog = (...args: any[]) => {
     if (!perfOn) return;
     if (process.env.NODE_ENV === "production") return;
-    // eslint-disable-next-line no-console
+     
     if (process.env.NODE_ENV === "development") {
       console.log(...args);
     }
