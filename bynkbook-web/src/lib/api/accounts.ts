@@ -50,20 +50,6 @@ export async function createAccount(
   } as Account;
 }
 
-export async function patchAccountName(businessId: string, accountId: string, name: string): Promise<{ id: string; name: string }> {
-  const res: any = await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ name }),
-  });
-  const a: any = res?.account;
-  if (!a) return a;
-  return {
-    ...a,
-    opening_balance_cents: Number(a.opening_balance_cents ?? 0),
-    opening_balance_date: normalizeDateOnly(a.opening_balance_date),
-    archived_at: a.archived_at ?? null,
-  } as Account;
-}
 
 export async function patchAccount(
   businessId: string,

@@ -34,21 +34,3 @@ export async function createGoal(
     body: JSON.stringify(payload),
   });
 }
-
-export async function patchGoal(
-  businessId: string,
-  goalId: string,
-  patch: Partial<{
-    name: string;
-    category_id: string;
-    month_start: string;
-    month_end: string | null;
-    target_cents: number;
-    status: string;
-  }>
-): Promise<{ ok: true; goal_id: string }> {
-  return apiFetch(`/v1/businesses/${businessId}/goals/${goalId}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
-}

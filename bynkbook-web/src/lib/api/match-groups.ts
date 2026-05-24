@@ -143,20 +143,6 @@ export async function createMatchGroupsBatch(args: {
   });
 }
 
-export async function voidMatchGroup(args: {
-  businessId: string;
-  accountId: string;
-  matchGroupId: string;
-  reason?: string;
-}) {
-  const { businessId, accountId, matchGroupId, reason } = args;
-
-  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/match-groups/${matchGroupId}/void`, {
-    method: "POST",
-    body: JSON.stringify({ reason: reason ?? "" }),
-  });
-}
-
 export async function previewGeneratedEntryRevert(args: {
   businessId: string;
   accountId: string;
