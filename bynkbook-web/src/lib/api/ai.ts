@@ -56,18 +56,6 @@ export async function applyCategoryBatch(args: {
   );
 }
 
-export async function getDashboardInsights(args: { businessId: string; from?: string; to?: string }) {
-  const { businessId, from, to } = args;
-  const qs = new URLSearchParams();
-  if (from) qs.set("from", from);
-  if (to) qs.set("to", to);
-
-  const q = qs.toString();
-  return apiFetch(`/v1/businesses/${encodeURIComponent(businessId)}/insights/dashboard${q ? `?${q}` : ""}`, {
-    method: "GET",
-  });
-}
-
 // ---------- Bundle E AI surfaces (LLM) ----------
 export async function aiExplainEntry(args: { businessId: string; entryId: string }) {
   const { businessId, entryId } = args;
@@ -167,14 +155,6 @@ export async function aiSuggestReconcileEntry(args: {
   return apiFetch(`/v1/ai/suggest-reconcile-entry`, {
     method: "POST",
     body: JSON.stringify({ businessId, entry, candidates }),
-  });
-}
-
-export async function aiChat(args: { businessId: string; question: string; accountId?: string; from?: string; to?: string }) {
-  const { businessId, question, accountId, from, to } = args;
-  return apiFetch(`/v1/ai/chat`, {
-    method: "POST",
-    body: JSON.stringify({ businessId, question, accountId, from, to }),
   });
 }
 

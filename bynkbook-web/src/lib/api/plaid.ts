@@ -66,17 +66,6 @@ export async function plaidApplyOpening(
   });
 }
 
-export async function plaidChangeOpeningDate(
-  businessId: string,
-  accountId: string,
-  body: { effectiveStartDate: string; confirmPrune?: boolean }
-) {
-  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/change-opening-date`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
 // New-account Plaid flow (review before create)
 export async function plaidLinkTokenBusiness(businessId: string) {
   return apiFetch(`/v1/businesses/${businessId}/plaid/link-token`, {
