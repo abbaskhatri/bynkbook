@@ -39,6 +39,7 @@ import {
 
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { InlineBanner } from "@/components/app/inline-banner";
+import { OnboardingChecklist } from "@/components/dashboard/onboarding-checklist";
 import { appErrorMessageOrNull, extractHttpStatus } from "@/lib/errors/app-error";
 
 const DashboardChartPanels = dynamic(() => import("./dashboard-chart-panels"), {
@@ -1469,8 +1470,29 @@ export default function DashboardPageClient() {
           const expensesKpi = fmtUsdAccountingFromCents(expensesCents ?? undefined);
           const netKpi = fmtUsdAccountingFromCents(netCents ?? undefined);
 
+          // Onboarding checklist signals: derived from data already fetched.
+          // accountsAllQ.data.rows is the list of accounts (empty for new biz).
+          // categoriesQ.data.rows is the categories list.
+          // pnlQ.data has period totals — any non-zero amount means at least
+          // one entry exists in this period; otherwise we fall back to
+          // "any non-empty categories series" as a softer hint.
+          const onboardingAccountsCount = (accountsAllQ.data?.rows ?? []).length;
+          const onboardingCategoriesCount = (categoriesQ.data?.rows ?? []).length;
+          const onboardingHasEntries =
+            !!(pnlQ.data?.period?.income_cents && pnlQ.data.period.income_cents !== "0") ||
+            !!(pnlQ.data?.period?.expense_cents && pnlQ.data.period.expense_cents !== "0") ||
+            (Array.isArray(pnlQ.data?.monthly) && pnlQ.data.monthly.length > 0);
+
           return (
         <>
+      {/* Onboarding checklist — only renders for businesses with incomplete setup */}
+      <OnboardingChecklist
+        businessId={selectedBusinessId ?? ""}
+        accountsCount={onboardingAccountsCount}
+        categoriesCount={onboardingCategoriesCount}
+        hasEntries={onboardingHasEntries}
+      />
+
       {/* KPI Strip */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
         {[
