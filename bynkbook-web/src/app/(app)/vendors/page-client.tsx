@@ -29,24 +29,9 @@ type SortKey = "name_asc" | "name_desc" | "updated_desc";
 
 const VENDOR_AP_SUMMARY_BATCH_SIZE = 100;
 
-function toBigIntSafe(v: any): bigint {
-  try {
-    if (typeof v === "bigint") return v;
-    if (typeof v === "number") return BigInt(Math.trunc(v));
-    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch {}
-  return 0n;
-}
+import { formatUsd, toBigIntSafe } from "@/lib/money";
 
-function formatUsdFromCents(cents: bigint) {
-  const neg = cents < 0n;
-  const abs = neg ? -cents : cents;
-  const dollars = abs / 100n;
-  const pennies = abs % 100n;
-  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
-  return neg ? `($${core})` : `$${core}`;
-}
+const formatUsdFromCents = (cents: bigint) => formatUsd(cents);
 
 function formatOptionalUsdFromCents(cents: any) {
   if (cents === null || cents === undefined) return null;

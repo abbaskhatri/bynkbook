@@ -18,17 +18,7 @@ type Suggestion = {
   entries: any[];
 };
 
-function toBigIntSafe(v: any): bigint {
-  try {
-    if (typeof v === "bigint") return v;
-    if (typeof v === "number") return BigInt(Math.trunc(v));
-    const s = String(v ?? "").trim();
-    if (!s) return 0n;
-    return BigInt(s);
-  } catch {
-    return 0n;
-  }
-}
+import { toBigIntSafe } from "@/lib/money";
 
 function absBig(n: bigint) {
   return n < 0n ? -n : n;

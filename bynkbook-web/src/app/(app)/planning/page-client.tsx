@@ -41,14 +41,13 @@ function ymAdd(month: string, delta: number): string {
   return `${y}-${m}`;
 }
 
+import { formatUsdSafe } from "@/lib/money";
+
+// Planning always displays absolute value (no sign indicator) — preserved.
 function formatUsdFromCents(raw: unknown) {
   const n = Number(raw);
   if (!Number.isFinite(n)) return "$0.00";
-  const abs = Math.abs(n);
-  const dollars = Math.floor(abs / 100);
-  const cents = Math.round(abs % 100);
-  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `$${withCommas}.${String(cents).padStart(2, "0")}`;
+  return formatUsdSafe(Math.abs(n));
 }
 
 function centsToInput(raw: string) {
