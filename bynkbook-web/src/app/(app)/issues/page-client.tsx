@@ -37,28 +37,9 @@ import { RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 
 const ZERO = BigInt(0);
 
-function toBigIntSafe(v: unknown): bigint {
-  try {
-    if (typeof v === "bigint") return v;
-    if (typeof v === "number") return BigInt(Math.trunc(v));
-    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch { }
-  return ZERO;
-}
+import { formatUsd, toBigIntSafe } from "@/lib/money";
 
-function formatUsdFromCents(cents: bigint) {
-  const neg = cents < ZERO;
-  const abs = neg ? -cents : cents;
-
-  const dollars = Number(abs / BigInt(100));
-  const centsPart = Number(abs % BigInt(100));
-  const value = dollars + centsPart / 100;
-
-  const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-  const s = fmt.format(value);
-
-  return neg ? `(${s})` : s;
-}
+const formatUsdFromCents = (cents: bigint) => formatUsd(cents);
 
 function titleCase(s: string) {
   const t = String(s || "").toLowerCase();

@@ -51,19 +51,12 @@ function toBigIntOrNull(value: string | number | bigint | null | undefined) {
   }
 }
 
+import { formatUsd } from "@/lib/money";
+
 function formatUsdFromCents(value: string | number | bigint | null | undefined) {
   const cents = toBigIntOrNull(value);
   if (cents === null) return "—";
-
-  const negative = cents < 0n;
-  const abs = negative ? -cents : cents;
-  const dollars = abs / 100n;
-  const pennies = abs % 100n;
-  const core = `$${dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${pennies
-    .toString()
-    .padStart(2, "0")}`;
-
-  return negative ? `(${core})` : core;
+  return formatUsd(cents);
 }
 
 function agingSignal(aging: {

@@ -13,25 +13,15 @@ import {
 import { useMobileOpenIssues } from "@/lib/mobile/reviewQueues";
 import type { EntryIssueRow } from "@/lib/api/issues";
 
+import { formatUsd } from "@/lib/money";
+
 function formatUsdFromCents(value: string | number | bigint | null | undefined) {
   if (value === null || value === undefined || value === "") return "Amount unavailable";
-
-  let cents: bigint;
   try {
-    cents = BigInt(String(value));
+    return formatUsd(BigInt(String(value)));
   } catch {
     return "Amount unavailable";
   }
-
-  const negative = cents < 0n;
-  const abs = negative ? -cents : cents;
-  const dollars = abs / 100n;
-  const pennies = abs % 100n;
-  const core = `$${dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${pennies
-    .toString()
-    .padStart(2, "0")}`;
-
-  return negative ? `(${core})` : core;
 }
 
 function labelize(raw: string | null | undefined) {

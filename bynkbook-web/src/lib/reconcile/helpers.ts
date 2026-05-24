@@ -12,27 +12,18 @@ export type BankTab = "unmatched" | "matched";
 
 export type MatchSignalTone = "default" | "success" | "warning" | "danger";
 
-export function toBigIntSafe(v: unknown): bigint {
-  try {
-    if (typeof v === "bigint") return v;
-    if (typeof v === "number") return BigInt(Math.trunc(v));
-    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch { }
-  return 0n;
-}
+// These delegate to the canonical lib/money.ts implementations.
+// They keep the same exported names so existing call sites don't change.
+// Reconcile's display style: NO dollar sign (denser tables), parens for negatives.
+import { formatUsd, toBigIntSafe as moneyToBigIntSafe } from "@/lib/money";
+export const toBigIntSafe = moneyToBigIntSafe;
 
 export function absBig(n: bigint) {
   return n < 0n ? -n : n;
 }
 
 export function formatUsdFromCents(cents: bigint) {
-  const neg = cents < 0n;
-  const abs = neg ? -cents : cents;
-  const dollars = abs / 100n;
-  const pennies = abs % 100n;
-  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
-  return neg ? `(${core})` : core;
+  return formatUsd(cents, { dollarSign: false });
 }
 
 export function ymdToTime(ymd: string): number {

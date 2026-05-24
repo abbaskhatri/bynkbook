@@ -251,46 +251,19 @@ export function escapeHtml(value: string) {
     .replace(/'/g, "&#39;");
 }
 
-export function toBigIntSafe(v: unknown): bigint {
-  try {
-    if (typeof v === "bigint") return v;
-    if (typeof v === "number") return BigInt(Math.trunc(v));
-    if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  } catch { }
-  return ZERO;
-}
+// These three delegate to the canonical lib/money.ts implementations.
+// They keep the same exported names so existing call sites don't change.
+// Ledger's display style: "$X.XX" / "($X.XX)" — dollar sign + parens for negatives.
+import { formatUsd, toBigIntSafe as moneyToBigIntSafe, parseMoneyToCents as moneyParseMoneyToCents } from "@/lib/money";
+export const toBigIntSafe = moneyToBigIntSafe;
+export const parseMoneyToCents = moneyParseMoneyToCents;
 
 export function absBigInt(n: bigint) {
   return n < 0n ? -n : n;
 }
 
 export function formatUsdFromCents(cents: bigint) {
-  const neg = cents < ZERO;
-  const abs = neg ? -cents : cents;
-  const dollars = abs / HUNDRED;
-  const pennies = abs % HUNDRED;
-  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const core = `${withCommas}.${pennies.toString().padStart(2, "0")}`;
-  return neg ? `($${core})` : `$${core}`;
-}
-
-export function parseMoneyToCents(input: string): number {
-  const raw = (input || "").trim();
-  if (!raw) return 0;
-
-  const parenNeg = raw.startsWith("(") && raw.endsWith(")");
-  const cleaned0 = raw.replace(/^\(|\)$/g, "").replace(/[\$,]/g, "").trim();
-  if (!cleaned0) return 0;
-
-  const m = cleaned0.match(/^(-)?(\d+)(?:\.(\d{0,2}))?$/);
-  if (!m) return 0;
-
-  const neg = parenNeg || !!m[1];
-  const dollars = Number(m[2] || "0");
-  const centsPart = (m[3] || "").padEnd(2, "0").slice(0, 2);
-  const cents = Number(centsPart || "0");
-  const total = dollars * 100 + cents;
-  return neg ? -total : total;
+  return formatUsd(cents); // default: { dollarSign: true, negStyle: "parens" }
 }
 
 export function sortEntriesDisplayDesc(a: Entry, b: Entry) {

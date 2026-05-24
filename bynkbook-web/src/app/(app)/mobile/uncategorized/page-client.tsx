@@ -15,24 +15,10 @@ import {
 } from "@/lib/mobile/workspaceContext";
 import { useMobileUncategorizedEntries } from "@/lib/mobile/reviewQueues";
 
-function formatUsdFromCents(value: string | number | bigint | null | undefined) {
-  let cents: bigint;
-  try {
-    cents = BigInt(String(value ?? "0"));
-  } catch {
-    return "$0.00";
-  }
+import { formatUsdSafe } from "@/lib/money";
 
-  const negative = cents < 0n;
-  const abs = negative ? -cents : cents;
-  const dollars = abs / 100n;
-  const pennies = abs % 100n;
-  const core = `$${dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${pennies
-    .toString()
-    .padStart(2, "0")}`;
-
-  return negative ? `(${core})` : core;
-}
+const formatUsdFromCents = (value: string | number | bigint | null | undefined) =>
+  formatUsdSafe(value);
 
 function typeLabel(raw: string | null | undefined) {
   const normalized = String(raw ?? "").replace(/_/g, " ").toLowerCase();

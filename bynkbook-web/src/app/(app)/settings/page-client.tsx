@@ -10,6 +10,7 @@ import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { userFacingErrorMessage } from "@/lib/errors";
 import { formatDateOnlyShort, normalizeDateOnly } from "@/lib/dateOnly";
+import { parseMoneyToCents } from "@/lib/money";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { patchBusiness, resetBusiness, deleteBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
@@ -756,7 +757,7 @@ export default function SettingsPageClient() {
     setSaving(true);
     setErr(null);
 
-    const cents = Math.round(Number(openingBalance || "0") * 100);
+    const cents = parseMoneyToCents(openingBalance || "0");
 
     const tempId = `temp_${Date.now()}`;
     const key = ["accounts", selectedBusinessId] as const;
@@ -2642,7 +2643,7 @@ export default function SettingsPageClient() {
                             const elig = deleteEligByAccount[editAccountId];
                             const canEditOpening = !!elig?.eligible;
 
-                            const cents = Math.round(Number(editOpeningBalance || "0") * 100);
+                            const cents = parseMoneyToCents(editOpeningBalance || "0");
 
                             const patch: any = { name: editName.trim(), type: editType };
                             if (canEditOpening) {
