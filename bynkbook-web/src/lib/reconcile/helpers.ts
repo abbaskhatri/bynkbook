@@ -166,25 +166,16 @@ export function categorySuggestionRequiresReview(suggestion: any) {
   );
 }
 
+// Delegates to the canonical lib/errors/ai helper. Preserves the
+// reconcile-specific wording ("Try again in a little while" implies
+// short-lived rate-limit, not daily) and the original fallback text.
+import { aiUserMessage } from "@/lib/errors/ai";
+
 export function aiUiMessage(err: any, fallback = "Smart suggestions are unavailable right now.") {
-  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
-  const raw = String(
-    err?.message ??
-    err?.payload?.message ??
-    err?.response?.data?.message ??
-    ""
-  ).toLowerCase();
-
-  if (
-    status === 429 ||
-    raw.includes("quota") ||
-    raw.includes("rate limit") ||
-    raw.includes("too many requests")
-  ) {
-    return "AI quota reached. Try again in a little while.";
-  }
-
-  return fallback;
+  return aiUserMessage(err, {
+    fallback,
+    quotaMessage: "AI quota reached. Try again in a little while.",
+  });
 }
 
 export function truncateAiReason(reason: string, max = 120) {

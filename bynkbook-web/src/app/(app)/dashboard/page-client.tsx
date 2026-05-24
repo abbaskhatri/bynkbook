@@ -40,6 +40,9 @@ import {
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { InlineBanner } from "@/components/app/inline-banner";
 import { appErrorMessageOrNull, extractHttpStatus } from "@/lib/errors/app-error";
+import { formatUsdSafe } from "@/lib/money";
+import { aiUserMessage } from "@/lib/errors/ai";
+import Link from "next/link";
 
 const DashboardChartPanels = dynamic(() => import("./dashboard-chart-panels"), {
   loading: () => <DashboardChartPanelsFallback />,
@@ -597,26 +600,13 @@ export default function DashboardPageClient() {
     },
   });
 
+  // Delegates to lib/errors/ai. Dashboard's wording assumes the prod
+  // limit is a per-business daily cap (matches the API's actual quota model).
   function dashboardAiMessage(err: any, fallback = "AI is unavailable right now.") {
-    const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
-    const raw = String(
-      err?.message ??
-      err?.payload?.message ??
-      err?.response?.data?.message ??
-      ""
-    ).toLowerCase();
-
-    if (
-      status === 429 ||
-      raw.includes("429") ||
-      raw.includes("quota") ||
-      raw.includes("rate limit") ||
-      raw.includes("too many requests")
-    ) {
-      return "AI daily limit reached for this business. Try again tomorrow.";
-    }
-
-    return fallback;
+    return aiUserMessage(err, {
+      fallback,
+      quotaMessage: "AI daily limit reached for this business. Try again tomorrow.",
+    });
   }
 
   const ai429 =
@@ -784,6 +774,41 @@ export default function DashboardPageClient() {
   const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatErr, setChatErr] = useState<string | null>(null);
+
+  // Persist Ask AI chat in sessionStorage so accidental refresh doesn't
+  // lose the conversation. Keyed by businessId + period scope; clears
+  // automatically when the user closes the tab.
+  const chatStorageKey = useMemo(() => {
+    if (!selectedBusinessId) return null;
+    return `bynkbook.askAi.chat.${selectedBusinessId}.${range.mode}.${range.from}.${range.to}`;
+  }, [selectedBusinessId, range.mode, range.from, range.to]);
+
+  // Hydrate from sessionStorage on key change (entering business / changing period).
+  useEffect(() => {
+    if (!chatStorageKey) return;
+    try {
+      const raw = window.sessionStorage.getItem(chatStorageKey);
+      if (!raw) {
+        setChatMsgs([]);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) setChatMsgs(parsed as ChatMsg[]);
+    } catch {
+      /* corrupt or unavailable storage; start empty */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatStorageKey]);
+
+  // Persist whenever messages change.
+  useEffect(() => {
+    if (!chatStorageKey) return;
+    try {
+      window.sessionStorage.setItem(chatStorageKey, JSON.stringify(chatMsgs));
+    } catch {
+      /* quota exceeded or unavailable; silently degrade */
+    }
+  }, [chatStorageKey, chatMsgs]);
 
   const chatAggregates = useMemo(() => {
     return {
@@ -1856,16 +1881,44 @@ export default function DashboardPageClient() {
             </div>
           ) : aiAnomaliesQ.data?.ok && Array.isArray(aiAnomaliesQ.data.anomalies) && aiAnomaliesQ.data.anomalies.length ? (
             <div className="divide-y divide-bb-border-muted rounded-md border border-bb-border overflow-hidden">
-              {aiAnomaliesQ.data.anomalies.slice(0, 5).map((a: any) => (
-                <div key={a.entryId} className="px-3 py-2">
-                  <div className="text-sm font-semibold text-foreground">{a.title ?? "Anomaly"}</div>
-                  <div className="mt-0.5 text-[11px] text-foreground/70">{a.reason ?? ""}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
-                    Baseline median: {a?.baseline?.median_abs_cents ?? "—"}¢ • Sample: {a?.baseline?.sample_size ?? "—"} • Confidence:{" "}
-                    {typeof a?.confidence === "number" ? Math.round(a.confidence * 100) + "%" : "—"}
+              {aiAnomaliesQ.data.anomalies.slice(0, 5).map((a: any) => {
+                const medianCentsStr = a?.baseline?.median_abs_cents;
+                const medianDisplay =
+                  medianCentsStr !== undefined && medianCentsStr !== null
+                    ? formatUsdSafe(medianCentsStr)
+                    : "—";
+                const ledgerHref =
+                  a?.entryId && selectedBusinessId
+                    ? `/ledger?businessId=${encodeURIComponent(selectedBusinessId)}${
+                        accountScopeId && accountScopeId !== "all"
+                          ? `&accountId=${encodeURIComponent(accountScopeId)}`
+                          : ""
+                      }`
+                    : null;
+                return (
+                  <div key={a.entryId} className="px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-foreground">{a.title ?? "Anomaly"}</div>
+                        <div className="mt-0.5 text-[11px] text-foreground/70">{a.reason ?? ""}</div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
+                          Baseline median: {medianDisplay} • Sample: {a?.baseline?.sample_size ?? "—"} • Confidence:{" "}
+                          {typeof a?.confidence === "number" ? Math.round(a.confidence * 100) + "%" : "—"}
+                        </div>
+                      </div>
+                      {ledgerHref ? (
+                        <Link
+                          href={ledgerHref}
+                          className="text-[11px] font-medium text-primary hover:underline shrink-0"
+                          title="Open ledger to inspect this entry"
+                        >
+                          View ledger →
+                        </Link>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="text-sm text-foreground/70">No unusual transactions detected in the current range.</div>
