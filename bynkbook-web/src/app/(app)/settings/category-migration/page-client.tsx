@@ -228,11 +228,11 @@ export default function CategoryMigrationPageClient() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-white shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<Tags className="h-4 w-4" />} title="Category Migration" afterTitle={accountCapsule} />
         </div>
-        <div className="mt-2 h-px bg-slate-200" />
+        <div className="mt-2 h-px bg-bb-border" />
       </div>
 
       <Card>
@@ -274,14 +274,14 @@ export default function CategoryMigrationPageClient() {
 
         <CardContent className="space-y-3">
           {!isOwner ? (
-            <div className="text-sm text-slate-600">Only the business owner can run migration.</div>
+            <div className="text-sm text-bb-text-muted">Only the business owner can run migration.</div>
           ) : null}
 
           <FilterBar
             left={
               <>
                 <div className="space-y-1">
-                  <div className="text-[11px] text-slate-600">Min count</div>
+                  <div className="text-[11px] text-bb-text-muted">Min count</div>
                   <Input
                     type="number"
                     className="h-7 w-[120px] text-xs"
@@ -292,8 +292,8 @@ export default function CategoryMigrationPageClient() {
                   />
                 </div>
                 <div className="ml-2 flex min-w-0 flex-col justify-end">
-                  <div className="text-[11px] text-slate-500">Source: entry memo</div>
-                  <div className="text-[11px] text-slate-400">Only entries with category_id = null are eligible</div>
+                  <div className="text-[11px] text-bb-text-muted">Source: entry memo</div>
+                  <div className="text-[11px] text-bb-text-subtle">Only entries with category_id = null are eligible</div>
                 </div>
               </>
             }
@@ -307,36 +307,36 @@ export default function CategoryMigrationPageClient() {
           ) : null}
 
           {dryRunSummary ? (
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-bb-text-muted">
               Dry run: {dryRunSummary.memoCount} mappings • would update{" "}
               <span className="font-semibold">{dryRunSummary.wouldUpdate}</span> entries
             </div>
           ) : null}
 
-          {loading ? <div className="text-sm text-slate-600">Working…</div> : null}
+          {loading ? <div className="text-sm text-bb-text-muted">Working…</div> : null}
 
           {!loading && rows.length === 0 ? (
-            <div className="text-sm text-slate-600">Load preview to see candidates.</div>
+            <div className="text-sm text-bb-text-muted">Load preview to see candidates.</div>
           ) : null}
 
           {rows.length > 0 ? (
-            <div className="rounded-lg border border-slate-200 overflow-x-auto overflow-y-hidden">
-              <div className="grid min-w-[560px] grid-cols-[minmax(0,1fr)_90px_240px] gap-0 bg-slate-50 border-b border-slate-200">
-                <div className="px-3 py-2 text-[11px] font-semibold text-slate-600">Memo value</div>
-                <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 text-right">Count</div>
-                <div className="px-3 py-2 text-[11px] font-semibold text-slate-600">Mapping</div>
+            <div className="rounded-lg border border-bb-border overflow-x-auto overflow-y-hidden">
+              <div className="grid min-w-[560px] grid-cols-[minmax(0,1fr)_90px_240px] gap-0 bg-bb-surface-soft border-b border-bb-border">
+                <div className="px-3 py-2 text-[11px] font-semibold text-bb-text-muted">Memo value</div>
+                <div className="px-3 py-2 text-[11px] font-semibold text-bb-text-muted text-right">Count</div>
+                <div className="px-3 py-2 text-[11px] font-semibold text-bb-text-muted">Mapping</div>
               </div>
 
               {rows.map((r) => {
                 const choice = choiceByMemo[r.memoValue] ?? { mode: "CREATE_SAME" as const };
                 return (
-                  <div key={r.memoValue} className="grid min-w-[560px] grid-cols-[minmax(0,1fr)_90px_240px] gap-0 border-b border-slate-200 last:border-b-0">
-                    <div className="px-3 py-2 text-sm text-slate-900 truncate">{r.memoValue}</div>
-                    <div className="px-3 py-2 text-sm text-slate-900 text-right tabular-nums">{r.count}</div>
+                  <div key={r.memoValue} className="grid min-w-[560px] grid-cols-[minmax(0,1fr)_90px_240px] gap-0 border-b border-bb-border last:border-b-0">
+                    <div className="px-3 py-2 text-sm text-bb-text truncate">{r.memoValue}</div>
+                    <div className="px-3 py-2 text-sm text-bb-text text-right tabular-nums">{r.count}</div>
 
                     <div className="px-3 py-2">
                       <select
-                        className="h-7 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                        className="h-7 w-full rounded-md border border-bb-border bg-white px-2 text-xs"
                         value={choice.mode === "CREATE_SAME" ? "__CREATE_SAME__" : choice.categoryId}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -354,7 +354,7 @@ export default function CategoryMigrationPageClient() {
                         ))}
                       </select>
                       {r.existingCategoryName ? (
-                        <div className="mt-1 text-[11px] text-slate-500">Exact match exists: {r.existingCategoryName}</div>
+                        <div className="mt-1 text-[11px] text-bb-text-muted">Exact match exists: {r.existingCategoryName}</div>
                       ) : null}
                     </div>
                   </div>
@@ -382,7 +382,7 @@ export default function CategoryMigrationPageClient() {
           </div>
         }
       >
-        <div className="text-sm text-slate-700">
+        <div className="text-sm text-bb-text-muted">
           This will assign categories to entries where the <span className="font-medium">memo</span> matches the selected mapping and{" "}
           <span className="font-medium">category_id is currently empty</span>. Memo text will not be removed.
         </div>

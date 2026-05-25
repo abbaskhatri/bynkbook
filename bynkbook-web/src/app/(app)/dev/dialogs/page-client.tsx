@@ -19,15 +19,15 @@ function LongContent() {
 
   return (
     <div className="space-y-2">
-      <div className="text-sm text-slate-700">
+      <div className="text-sm text-bb-text-muted">
         Scroll this body area. The header and footer must remain visible.
       </div>
 
-      <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-        <div className="text-xs text-slate-600 space-y-1">
+      <div className="rounded-md border border-bb-border bg-bb-surface-soft p-3">
+        <div className="text-xs text-bb-text-muted space-y-1">
           {lines.map((l) => (
             <div key={l.id}>
-              <span className="text-slate-500">{String(l.id).padStart(2, "0")}.</span> {l.text}
+              <span className="text-bb-text-muted">{String(l.id).padStart(2, "0")}.</span> {l.text}
             </div>
           ))}
         </div>
@@ -47,8 +47,8 @@ export default function DevDialogsPage() {
   return (
     <div className="max-w-3xl">
       <div className="mb-4">
-        <div className="text-lg font-semibold text-slate-900">Dev: Dialogs</div>
-        <div className="text-sm text-slate-600">
+        <div className="text-lg font-semibold text-bb-text">Dev: Dialogs</div>
+        <div className="text-sm text-bb-text-muted">
           Validate AppDialog / AppSidePanel: fixed header/footer, body-only scroll, ESC close, overlay close rules.
         </div>
       </div>
@@ -75,7 +75,7 @@ export default function DevDialogsPage() {
         </div>
 
 
-        <label className="flex items-center gap-2 text-sm text-slate-700 select-none">
+        <label className="flex items-center gap-2 text-sm text-bb-text-muted select-none">
           <input
             type="checkbox"
             className="h-4 w-4"
@@ -86,9 +86,9 @@ export default function DevDialogsPage() {
         </label>
       </div>
 
-      <div className="mt-6 rounded-md border border-slate-200 bg-white p-4">
-        <div className="text-sm font-semibold text-slate-900">Expected behavior</div>
-        <ul className="mt-2 list-disc pl-5 text-sm text-slate-700 space-y-1">
+      <div className="mt-6 rounded-md border border-bb-border bg-white p-4">
+        <div className="text-sm font-semibold text-bb-text">Expected behavior</div>
+        <ul className="mt-2 list-disc pl-5 text-sm text-bb-text-muted space-y-1">
           <li>Press ESC: closes only when onClose exists (it does here).</li>
           <li>Click overlay: closes unless disableOverlayClose is checked.</li>
           <li>Header and footer stay visible; only the body scrolls.</li>
