@@ -49,7 +49,7 @@ import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { listMatchGroups } from "@/lib/api/match-groups";
 
-import { aiExplainEntry, aiAnomalies, aiMerchantNormalize } from "@/lib/api/ai";
+import { aiExplainEntry, aiAnomalies } from "@/lib/api/ai";
 
 import {
   ENTRIES_API_MAX_LIMIT,
@@ -121,6 +121,7 @@ import { TotalsFooter } from "@/components/ledger/totals-footer";
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+import { aiUserMessage } from "@/lib/errors/ai";
 
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api/client";
@@ -1834,25 +1835,12 @@ export default function LedgerPageClient() {
     return `${d}d ago`;
   }
 
+  // Delegates to lib/errors/ai. Same wording the dashboard uses.
   function aiFriendlyMessage(err: any, fallback = "AI is unavailable right now.") {
-    const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? NaN);
-    const raw = String(
-      err?.message ??
-      err?.payload?.message ??
-      err?.response?.data?.message ??
-      ""
-    ).toLowerCase();
-
-    if (
-      status === 429 ||
-      raw.includes("quota") ||
-      raw.includes("rate limit") ||
-      raw.includes("too many requests")
-    ) {
-      return "AI daily limit reached for this business. Try again tomorrow.";
-    }
-
-    return fallback;
+    return aiUserMessage(err, {
+      fallback,
+      quotaMessage: "AI daily limit reached for this business. Try again tomorrow.",
+    });
   }
 
   function scanFriendlyMessage(err: any) {
@@ -1986,41 +1974,9 @@ export default function LedgerPageClient() {
 
   // ---------- Bundle F: AI Explain Entry (read-only) ----------
 
-  // ---------- Bundle F: Merchant normalization (suggestion-only) ----------
-  const merchantCacheRef = useRef<Record<string, { merchant: string; confidence: number; reason: string }>>({});
-
-  const [merchantBusyId, setMerchantBusyId] = useState<string | null>(null);
-  const [merchantErrId, setMerchantErrId] = useState<string | null>(null);
-
-  async function getMerchantSuggestion(entryId: string, payee: string, memo?: string) {
-    const cached = merchantCacheRef.current[entryId];
-    if (cached) return cached;
-
-    if (!selectedBusinessId) return null;
-
-    setMerchantBusyId(entryId);
-    setMerchantErrId(null);
-
-    try {
-      const res: any = await aiMerchantNormalize({ businessId: selectedBusinessId, payee, memo: memo ?? "" });
-      if (!res?.ok) throw new Error(res?.error || "Merchant normalize failed");
-
-      const out = {
-        merchant: String(res.merchant ?? "").trim(),
-        confidence: Number(res.confidence ?? 0),
-        reason: String(res.reason ?? "").trim(),
-      };
-
-      if (out.merchant) merchantCacheRef.current[entryId] = out;
-      return out;
-    } catch (e: any) {
-      const msg = String(e?.message ?? "Merchant normalize failed");
-      setMerchantErrId(msg.includes("429") ? "429" : "ERR");
-      return null;
-    } finally {
-      setMerchantBusyId(null);
-    }
-  }
+  // Merchant normalization was half-built (state existed but never read by JSX).
+  // Removed in audit-driven cleanup. The aiMerchantNormalize API helper
+  // remains available in lib/api/ai.ts for future use.
 
   const [aiExplainOpen, setAiExplainOpen] = useState(false);
   const [aiExplainEntryId, setAiExplainEntryId] = useState<string | null>(null);
