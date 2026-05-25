@@ -1588,6 +1588,7 @@ export default function CategoryReviewPageClient() {
                   <Input
                     className="h-7 w-[220px] text-xs"
                     placeholder="Payee or memo"
+                    aria-label="Search by payee or memo"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />

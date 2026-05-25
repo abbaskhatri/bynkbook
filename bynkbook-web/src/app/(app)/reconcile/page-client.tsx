@@ -3047,7 +3047,7 @@ const displayBankActiveList = useMemo(() => {
         <AppDatePicker value={to} onChange={setTo} ariaLabel="To date" />
       </div>
       <div className="w-[220px]">
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} className={inputClass} placeholder="Search…" />
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} className={inputClass} placeholder="Search…" aria-label="Search transactions" />
       </div>
       <button
         type="button"
@@ -5392,6 +5392,7 @@ const displayBankActiveList = useMemo(() => {
               <input
                 className="h-7 w-full px-2 text-xs border border-bb-border rounded-md"
                 placeholder="Search entries…"
+                aria-label="Search ledger entries"
                 value={matchSearch}
                 onChange={(e) => setMatchSearch(e.target.value)}
               />
@@ -5949,6 +5950,7 @@ const displayBankActiveList = useMemo(() => {
               <input
                 className="h-7 w-full px-2 text-xs border border-bb-border rounded-md"
                 placeholder="Search bank transactions…"
+                aria-label="Search bank transactions"
                 value={entryMatchSearch}
                 onChange={(e) => setEntryMatchSearch(e.target.value)}
               />
@@ -6284,6 +6286,7 @@ const displayBankActiveList = useMemo(() => {
               <input
                 className={["h-7 w-[200px] px-2 text-xs border border-bb-border rounded-md bg-bb-surface-card", ringFocus].join(" ")}
                 placeholder="Search history…"
+                aria-label="Search reconciliation history"
                 value={reconHistorySearch}
                 onChange={(e) => setReconHistorySearch(e.target.value)}
                 title="Search bank description, entry payee, or IDs"
@@ -6908,6 +6911,7 @@ const displayBankActiveList = useMemo(() => {
                 <input
                   className={["h-7 w-[240px] px-2 text-xs border border-bb-border rounded-md bg-bb-surface-card", ringFocus].join(" ")}
                   placeholder="Search issues…"
+                  aria-label="Search issues"
                   value={issuesSearch}
                   onChange={(e) => setIssuesSearch(e.target.value)}
                   title="Local-only search"

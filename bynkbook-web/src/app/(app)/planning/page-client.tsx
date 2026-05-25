@@ -551,13 +551,14 @@ export default function PlanningPageClient() {
         <div className="space-y-3">
           <div className="space-y-1">
             <div className="text-[11px] text-bb-text-muted">Name</div>
-            <Input value={createName} onChange={(e) => setCreateName(e.target.value)} className="h-8" placeholder="e.g. Keep Marketing under $2,000" />
+            <Input value={createName} onChange={(e) => setCreateName(e.target.value)} className="h-8" placeholder="e.g. Keep Marketing under $2,000" aria-label="Goal name" />
           </div>
 
           <div className="space-y-1">
             <div className="text-[11px] text-bb-text-muted">Category (required)</div>
             <select
               className="h-8 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-sm text-bb-text"
+              aria-label="Goal category"
               value={createCategoryId}
               onChange={(e) => setCreateCategoryId(e.target.value)}
             >
@@ -572,17 +573,17 @@ export default function PlanningPageClient() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <div className="text-[11px] text-bb-text-muted">Start month (YYYY-MM)</div>
-              <Input value={createMonthStart} onChange={(e) => setCreateMonthStart(e.target.value)} className="h-8" />
+              <Input value={createMonthStart} onChange={(e) => setCreateMonthStart(e.target.value)} className="h-8" aria-label="Start month (YYYY-MM)" />
             </div>
             <div className="space-y-1">
               <div className="text-[11px] text-bb-text-muted">End month (optional)</div>
-              <Input value={createMonthEnd} onChange={(e) => setCreateMonthEnd(e.target.value)} className="h-8" placeholder="YYYY-MM" />
+              <Input value={createMonthEnd} onChange={(e) => setCreateMonthEnd(e.target.value)} className="h-8" placeholder="YYYY-MM" aria-label="End month, optional (YYYY-MM)" />
             </div>
           </div>
 
           <div className="space-y-1">
             <div className="text-[11px] text-bb-text-muted">Target (USD)</div>
-            <Input value={createTarget} onChange={(e) => setCreateTarget(e.target.value)} className="h-8" inputMode="decimal" />
+            <Input value={createTarget} onChange={(e) => setCreateTarget(e.target.value)} className="h-8" inputMode="decimal" aria-label="Target amount in USD" />
           </div>
 
           <div className="text-[11px] text-bb-text-muted">Expense goals only (progress is based on EXPENSE entries).</div>

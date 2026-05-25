@@ -1407,7 +1407,7 @@ export default function SettingsPageClient() {
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
                     <div className="md:col-span-2">
                       <Label className="text-[11px]">Email</Label>
-                      <Input className={inputH7} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" />
+                      <Input className={inputH7} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" aria-label="Invite email address" />
                     </div>
                     <div>
                       <Label className="text-[11px]">Role</Label>
@@ -1962,6 +1962,7 @@ export default function SettingsPageClient() {
                   <Label className="text-[11px]">Add category</Label>
                   <Input
                     className={inputH7}
+                    aria-label="New category name"
                     value={catNewName}
                     onChange={(e) => setCatNewName(e.target.value)}
                     onKeyDown={async (e) => {
