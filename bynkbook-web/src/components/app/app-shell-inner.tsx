@@ -688,6 +688,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             }
             onClick={toggleCollapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? <ChevronsRight className="h-4 w-4" /> : (
               <>
@@ -755,6 +756,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                 type="button"
                 className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Activity"
+                aria-label="Activity"
                 onClick={() => {
                   // Close other menu; toggle activity
                   setUserMenuOpen(false);
@@ -866,6 +868,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                 type="button"
                 className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Account"
+                aria-label="Account menu"
                 onClick={() => setUserMenuOpen((v) => !v)}
               >
                 <UserCircle className={NAV_ICON_CLASS} />

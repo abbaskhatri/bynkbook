@@ -4378,6 +4378,7 @@ export default function LedgerPageClient() {
                     variant="outline"
                     className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                     title="Restore"
+                    aria-label="Restore entry"
                     onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                       restoreMut.mutate({
@@ -4393,6 +4394,7 @@ export default function LedgerPageClient() {
                     variant="outline"
                     className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                     title={deletingId === r.id || hardDeleteMut.isPending ? "Deleting…" : "Delete permanently"}
+                    aria-label="Delete entry permanently"
                     disabled={deletingId === r.id || hardDeleteMut.isPending}
                     onClick={() => {
                       if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
@@ -4404,10 +4406,10 @@ export default function LedgerPageClient() {
                 </>
               ) : isEditing ? (
                 <>
-                  <Button variant="outline" className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0" title="Cancel edit" onClick={cancelEdit}>
+                  <Button variant="outline" className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0" title="Cancel edit" aria-label="Cancel edit" onClick={cancelEdit}>
                     <X className="h-4 w-4" />
                   </Button>
-                  <Button className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0" title="Save edit" onClick={() => triggerSaveEdit(r.id)}>
+                  <Button className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0" title="Save edit" aria-label="Save edit" onClick={() => triggerSaveEdit(r.id)}>
                     <Check className="h-4 w-4" />
                   </Button>
                 </>
@@ -4419,6 +4421,7 @@ export default function LedgerPageClient() {
                         variant="outline"
                         className="h-6 w-7 p-0 inline-flex items-center justify-center shrink-0"
                         title="Actions"
+                        aria-label="Row actions menu"
                         onClick={() => setMenuOpenId(menuOpen ? null : r.id)}
                       >
                         <MoreVertical className="h-4 w-4" />
