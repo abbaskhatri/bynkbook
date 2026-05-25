@@ -5386,7 +5386,7 @@ const displayBankActiveList = useMemo(() => {
         {openMatch ? (
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount.</div>
+            <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount. The bar below turns green when you're ready.</div>
 
             <div className="mb-2">
               <input
@@ -5447,30 +5447,21 @@ const displayBankActiveList = useMemo(() => {
               const deltaAbs = bankAbs - selectedAbs;
 
               return (
-                <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-bb-text">Combined Match Summary</div>
-                    <div className="text-xs text-bb-text-muted tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
-                  </div>
-
-                  <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-bb-text-muted">Bank transaction</span>
-                      <span className={`tabular-nums ${bankAmt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(bankAmt)}</span>
+                <div className={`mb-3 rounded-md border px-3 py-2 transition-colors ${deltaAbs === 0n ? "border-bb-status-success-border bg-bb-status-success-bg" : "border-bb-border bg-bb-surface-soft"}`}>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-bb-text-muted">Bank</span>
+                      <span className={`tabular-nums font-medium ${bankAmt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(bankAmt)}</span>
+                      <span className="text-bb-text-muted">Selected</span>
+                      <span className="tabular-nums font-medium text-bb-text">{formatUsdFromCents(selectedAbs)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-bb-text-muted">Selected entries</span>
-                      <span className="tabular-nums text-bb-text">{formatUsdFromCents(selectedAbs)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-bb-text-muted">Remaining Δ</span>
-                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-bb-status-warning-fg"}`}>
-                        {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-bb-text-muted">Remaining</span>
+                      <span className={`tabular-nums font-semibold ${deltaAbs === 0n ? "text-bb-status-success-fg" : "text-bb-status-warning-fg"}`}>
+                        {deltaAbs === 0n ? "✓ Ready" : formatUsdFromCents(deltaAbs)}
                       </span>
                     </div>
                   </div>
-
-                  <div className="mt-1 text-[11px] text-bb-text-muted">Select multiple entries until Remaining Δ is exactly 0. No manual amount input.</div>
                 </div>
               );
             })()}
@@ -5951,7 +5942,7 @@ const displayBankActiveList = useMemo(() => {
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-bb-text-muted mb-2">
-              Select bank transactions that sum exactly to the ledger entry amount.
+              Select bank transactions that sum exactly to the ledger entry amount. The bar below turns green when you're ready.
             </div>
 
             <div className="mb-2">
@@ -6147,30 +6138,21 @@ const displayBankActiveList = useMemo(() => {
               const deltaAbs = entryAbs - selectedAbs;
 
               return (
-                <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-bb-text">Combine Match Summary</div>
-                    <div className="text-xs text-bb-text-muted tabular-nums">Δ {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}</div>
-                  </div>
-
-                  <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-xs">
-                    <div className="flex items-center justify-between">
+                <div className={`mb-3 rounded-md border px-3 py-2 transition-colors ${deltaAbs === 0n ? "border-bb-status-success-border bg-bb-status-success-bg" : "border-bb-border bg-bb-surface-soft"}`}>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <span className="text-bb-text-muted">Entry</span>
-                      <span className={`tabular-nums ${entryAmt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(entryAmt)}</span>
+                      <span className={`tabular-nums font-medium ${entryAmt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>{formatUsdFromCents(entryAmt)}</span>
+                      <span className="text-bb-text-muted">Selected</span>
+                      <span className="tabular-nums font-medium text-bb-text">{formatUsdFromCents(selectedAbs)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-bb-text-muted">Selected bank txns</span>
-                      <span className="tabular-nums text-bb-text">{formatUsdFromCents(selectedAbs)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-bb-text-muted">Remaining Δ</span>
-                      <span className={`tabular-nums ${deltaAbs === 0n ? "text-primary" : "text-bb-status-warning-fg"}`}>
-                        {deltaAbs === 0n ? "0.00" : formatUsdFromCents(deltaAbs)}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-bb-text-muted">Remaining</span>
+                      <span className={`tabular-nums font-semibold ${deltaAbs === 0n ? "text-bb-status-success-fg" : "text-bb-status-warning-fg"}`}>
+                        {deltaAbs === 0n ? "✓ Ready" : formatUsdFromCents(deltaAbs)}
                       </span>
                     </div>
                   </div>
-
-                  <div className="mt-1 text-[11px] text-bb-text-muted">Select multiple bank transactions until Remaining Δ is exactly 0. No manual amount input.</div>
                 </div>
               );
             })()}
