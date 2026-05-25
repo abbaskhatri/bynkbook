@@ -1720,6 +1720,70 @@ export default function ReconcilePageClient() {
 
   // (removed legacy matches-based revert marker; MatchGroups-based version is below)
 
+  // Quick-match helper for the "Auto-match" badge on bank rows.
+  // Performs the same createMatchGroupsBatch call the Match dialog uses,
+  // but in-place — no dialog open/close cycle. Used only for high-confidence
+  // unambiguous candidates surfaced by bankAutoMatchCandidateById.
+  async function quickMatchAt(bankTxnId: string, entryId: string) {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (!bankTxnId || !entryId) return;
+
+    clearMutErr();
+    markPending(bankTxnId);
+    markPending(entryId);
+
+    try {
+      const res: any = await createMatchGroupsBatch({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        items: [
+          {
+            client_id: `auto:${bankTxnId}:${Date.now()}`,
+            bankTransactionIds: [bankTxnId],
+            entryIds: [entryId],
+          },
+        ],
+      });
+
+      const results = Array.isArray(res?.results) ? res.results : [];
+      const first = results[0];
+      if (!first?.ok) {
+        setMutErrTitle("Can't auto-match");
+        setMutErr(String(first?.error ?? "Match failed"));
+        return;
+      }
+
+      const createdGroup =
+        (first as any)?.match_group ??
+        (first as any)?.matchGroup ??
+        (first as any)?.group ??
+        (first as any)?.item ??
+        null;
+
+      if (createdGroup?.id) {
+        setMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
+        if (allMatchGroupsHydrated) {
+          setAllMatchGroups((prev) => upsertMatchGroup(prev, createdGroup));
+        }
+      }
+
+      await refreshTablesFully({
+        preserveOnEmpty: true,
+        skipLegacyMatches: true,
+        silent: true,
+      });
+      clearMutErr();
+    } catch (e: any) {
+      const r = applyMutationError(e, "Can't auto-match");
+      if (r.isClosed) {
+        // CLOSED_PERIOD banner is handled by applyMutationError; no extra UI here.
+      }
+    } finally {
+      clearPending(bankTxnId);
+      clearPending(entryId);
+    }
+  }
+
   // MatchGroups (FULL match only): entry is matched iff it appears in an ACTIVE group
   const matchedEntryIdSet = useMemo(() => {
     return new Set<string>(Array.from(activeGroupByEntryId.keys()));
@@ -2687,6 +2751,67 @@ const displayBankActiveList = useMemo(() => {
     ? displayBankUnmatchedList
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
+
+  // Auto-match badge: for each unmatched bank txn, find an UNAMBIGUOUS
+  // candidate entry — exact same absolute amount, same direction, within
+  // 3 days, and exactly ONE such entry exists in the visible expected
+  // list. These are the "obvious" matches the user always confirms manually.
+  // The badge gives them a one-click match without opening the dialog.
+  //
+  // This is deterministic (no AI cost, no async). The dialog stays
+  // available for ambiguous cases.
+  const bankAutoMatchCandidateById = useMemo(() => {
+    const out = new Map<string, string>();
+    if (bankTab !== "unmatched") return out;
+    if (!Array.isArray(displayBankActiveList) || displayBankActiveList.length === 0) return out;
+    if (!Array.isArray(entriesExpectedList) || entriesExpectedList.length === 0) return out;
+
+    for (const t of displayBankActiveList) {
+      const txnId = String(t?.id ?? "");
+      if (!txnId) continue;
+      // Skip pending bank txns — they can't be matched.
+      if (t?.is_pending) continue;
+      // Skip already-matched (defensive — unmatched tab should never include these).
+      if (isBankTxnFullyMatched(t)) continue;
+
+      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
+      if (bankAbs === 0n) continue;
+      const bankIsOutflow = toBigIntSafe(t.amount_cents) < 0n;
+
+      let onlyMatchId: string | null = null;
+      let count = 0;
+
+      for (const e of entriesExpectedList) {
+        const entryId = String(e?.id ?? "");
+        if (!entryId) continue;
+        // Optimistic-pending entries are not stable candidates.
+        if (e?.__optimistic_pending) continue;
+
+        const entryAmt = toBigIntSafe(e?.amount_cents);
+        const entryAbs = absBig(entryAmt);
+        if (entryAbs !== bankAbs) continue; // exact amount only
+
+        // Same direction: bank outflow ⇔ entry expense (negative).
+        const entryIsOutflow = entryAmt < 0n;
+        if (entryIsOutflow !== bankIsOutflow) continue;
+
+        // Within 3 days of bank posted date.
+        const meta = scoreEntryCandidate(t, { ...e, date: String(e?.date ?? "").slice(0, 10) });
+        if (Number(meta.dtDays ?? 9999) > 3) continue;
+
+        count++;
+        if (count > 1) {
+          // Ambiguous — bail; auto-match only when exactly one candidate.
+          onlyMatchId = null;
+          break;
+        }
+        onlyMatchId = entryId;
+      }
+
+      if (count === 1 && onlyMatchId) out.set(txnId, onlyMatchId);
+    }
+    return out;
+  }, [bankTab, displayBankActiveList, entriesExpectedList, isBankTxnFullyMatched]);
 
   // Row virtualization for the two reconcile tables. Both can grow large
   // (no pagination), so windowing the rendered <tr> set keeps scroll smooth
@@ -4712,6 +4837,28 @@ const displayBankActiveList = useMemo(() => {
                                 </button>
                               ) : (
                                 <>
+                                  {(() => {
+                                    const autoCandidateEntryId = bankAutoMatchCandidateById.get(txnId);
+                                    if (!autoCandidateEntryId) return null;
+                                    if (!canWriteReconcileEffective) return null;
+                                    if (isPendingBankTxn || isRowPending) return null;
+                                    return (
+                                      <button
+                                        type="button"
+                                        className={`h-7 inline-flex items-center gap-1 px-2 text-[11px] rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
+                                        title="Auto-match this bank transaction with the only entry that exactly matches (amount, direction, within 3 days)"
+                                        aria-label="Auto-match"
+                                        onClick={(ev) => {
+                                          ev.stopPropagation();
+                                          void quickMatchAt(txnId, autoCandidateEntryId);
+                                        }}
+                                      >
+                                        <Sparkles className="h-3 w-3" />
+                                        Auto-match
+                                      </button>
+                                    );
+                                  })()}
+
                                   <HintWrap
                                      disabled={!canWriteReconcileEffective || isPendingBankTxn || isRowPending}
                                     reason={
