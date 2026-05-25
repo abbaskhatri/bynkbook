@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Building2, Landmark, Lightbulb, Tags } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Building2, CheckCircle, Landmark, Lightbulb, Loader2, Tags } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listCategories } from "@/lib/api/categories";
+import { updateEntry } from "@/lib/api/entries";
 import {
   hrefWithMobileContext,
   useMobileWorkspaceContext,
@@ -52,6 +53,24 @@ export default function MobileUncategorizedPageClient() {
     enabled: contextReady,
   });
   const entriesQ = uncategorizedQueue.query;
+  const queryClient = useQueryClient();
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [applyingIds, setApplyingIds] = useState<Set<string>>(new Set());
+  const [applyErrors, setApplyErrors] = useState<Record<string, string>>({});
+
+  const handleApply = useCallback(async (entryId: string, categoryId: string) => {
+    setApplyingIds((prev) => new Set([...prev, entryId]));
+    setApplyErrors((prev) => { const next = { ...prev }; delete next[entryId]; return next; });
+    try {
+      await updateEntry({ businessId: businessId!, accountId: accountId!, entryId, updates: { category_id: categoryId } });
+      setAppliedIds((prev) => new Set([...prev, entryId]));
+      queryClient.invalidateQueries({ queryKey: ["entries", businessId, accountId] });
+    } catch {
+      setApplyErrors((prev) => ({ ...prev, [entryId]: "Apply failed — tap to retry." }));
+    } finally {
+      setApplyingIds((prev) => { const next = new Set(prev); next.delete(entryId); return next; });
+    }
+  }, [businessId, accountId, queryClient]);
 
   const categoriesQ = useQuery({
     queryKey: ["mobileUncategorized", "categories", businessId],
@@ -69,7 +88,7 @@ export default function MobileUncategorizedPageClient() {
 
   const uncategorizedRows = uncategorizedQueue.rows;
 
-  const visibleRows = uncategorizedRows.slice(0, 40);
+  const visibleRows = uncategorizedRows.filter((e) => !appliedIds.has(e.id)).slice(0, 40);
   const reviewHref = hrefWithMobileContext({ path: "/mobile/review", businessId, accountId });
   const desktopHref = hrefWithMobileContext({ path: "/category-review", businessId, accountId });
 
@@ -147,11 +166,13 @@ export default function MobileUncategorizedPageClient() {
         <section className="rounded-md border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-foreground">Read-only queue</div>
+              <div className="text-sm font-semibold text-foreground">Category queue</div>
               <div className="mt-1 text-sm text-muted-foreground">
-                {uncategorizedRows.length > 0
-                  ? `Showing ${visibleRows.length} of ${uncategorizedRows.length} uncategorized entries for this account.`
-                  : "Loaded the same account-scoped uncategorized filter used by Review."}
+                {appliedIds.size > 0
+                  ? `${appliedIds.size} applied this session · ${visibleRows.length} remaining.`
+                  : uncategorizedRows.length > 0
+                    ? `${visibleRows.length} uncategorized entries for this account.`
+                    : "Loaded uncategorized entries for this account."}
               </div>
             </div>
             <Link
@@ -251,6 +272,28 @@ export default function MobileUncategorizedPageClient() {
                       )}
                     </div>
                   </div>
+
+                  {suggestionId ? (
+                    <div className="mt-3">
+                      {applyErrors[entry.id] ? (
+                        <div className="mb-2 rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
+                          {applyErrors[entry.id]}
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={applyingIds.has(entry.id)}
+                        onClick={() => handleApply(entry.id, suggestionId)}
+                        className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-bb-status-success-border bg-bb-status-success-bg px-3 text-sm font-medium text-bb-status-success-fg disabled:opacity-60"
+                      >
+                        {applyingIds.has(entry.id) ? (
+                          <><Loader2 className="h-4 w-4 animate-spin" /> Applying…</>
+                        ) : (
+                          <><CheckCircle className="h-4 w-4" /> Apply — {suggestionName}</>
+                        )}
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               );
             })
