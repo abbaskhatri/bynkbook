@@ -129,7 +129,7 @@ function ItemRow({ item, showAction = true }: { item: BulkIssuePreviewItem; show
           ) : null}
         </div>
 
-        <div className={`shrink-0 text-sm font-semibold ${amount.isNeg ? "text-red-600" : "text-bb-text"}`}>
+        <div className={`shrink-0 text-sm font-semibold ${amount.isNeg ? "text-bb-amount-negative" : "text-bb-text"}`}>
           {amount.text}
         </div>
       </div>
@@ -299,7 +299,7 @@ export function AutoFixIssuesDialog(props: {
     >
       <div className="space-y-4">
         {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-2xl border border-bb-status-danger-border bg-bb-status-danger-bg px-4 py-3 text-sm text-bb-status-danger-fg">
             {error}
           </div>
         ) : null}
