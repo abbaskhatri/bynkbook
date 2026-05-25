@@ -57,13 +57,13 @@ function sectionCard(title: string, count: number, body: React.ReactNode, tone: 
       ? "border-emerald-200 bg-emerald-50/60"
       : tone === "warning"
         ? "border-amber-200 bg-amber-50/70"
-        : "border-slate-200 bg-white";
+        : "border-bb-border bg-white";
 
   return (
     <section className={`rounded-2xl border ${toneCls}`}>
       <div className="flex items-center justify-between gap-3 border-b border-inherit/60 px-4 py-3">
-        <div className="text-sm font-semibold text-slate-900">{title}</div>
-        <div className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+        <div className="text-sm font-semibold text-bb-text">{title}</div>
+        <div className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
           {count}
         </div>
       </div>
@@ -96,40 +96,40 @@ function confidenceLabel(value: string | null | undefined) {
 function ItemRow({ item, showAction = true }: { item: BulkIssuePreviewItem; showAction?: boolean }) {
   const amount = formatUsdAccountingFromCents(item.amount_cents);
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+    <div className="rounded-xl border border-bb-border bg-white px-3 py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-slate-900">{item.payee || "Untitled payee"}</span>
-            <span className="inline-flex h-5 items-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-700">
+            <span className="text-sm font-medium text-bb-text">{item.payee || "Untitled payee"}</span>
+            <span className="inline-flex h-5 items-center rounded-md border border-bb-border bg-bb-surface-soft px-1.5 text-[10px] font-medium text-bb-text-muted">
               {issueTypeLabel(item.issue_type)}
             </span>
             {item.confidence_label ? (
-              <span className="inline-flex h-5 items-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-700">
+              <span className="inline-flex h-5 items-center rounded-md border border-bb-border bg-bb-surface-soft px-1.5 text-[10px] font-medium text-bb-text-muted">
                 {confidenceLabel(item.confidence_label)}
               </span>
             ) : null}
             {showAction ? (
-              <span className="inline-flex h-5 items-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-700">
+              <span className="inline-flex h-5 items-center rounded-md border border-bb-border bg-bb-surface-soft px-1.5 text-[10px] font-medium text-bb-text-muted">
                 {actionLabel(item.action)}
               </span>
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-bb-text-muted">
             <span>{formatDate(item.date)}</span>
             <span>{item.method || "—"}</span>
             {item.group_key ? <span className="truncate">Group: {item.group_key}</span> : null}
           </div>
 
           {item.explanation ? (
-            <div className="text-xs leading-5 text-slate-700">{item.explanation}</div>
+            <div className="text-xs leading-5 text-bb-text-muted">{item.explanation}</div>
           ) : item.details ? (
-            <div className="text-xs leading-5 text-slate-600">{item.details}</div>
+            <div className="text-xs leading-5 text-bb-text-muted">{item.details}</div>
           ) : null}
         </div>
 
-        <div className={`shrink-0 text-sm font-semibold ${amount.isNeg ? "text-red-600" : "text-slate-900"}`}>
+        <div className={`shrink-0 text-sm font-semibold ${amount.isNeg ? "text-red-600" : "text-bb-text"}`}>
           {amount.text}
         </div>
       </div>
@@ -147,7 +147,7 @@ function ItemsList({
   showAction?: boolean;
 }) {
   if (!items.length) {
-    return <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">{emptyText}</div>;
+    return <div className="rounded-xl border border-dashed border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-bb-text-muted">{emptyText}</div>;
   }
 
   return (
@@ -237,7 +237,7 @@ export function AutoFixIssuesDialog(props: {
 
   const footer = (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div className="text-xs text-slate-600">
+      <div className="text-xs text-bb-text-muted">
         {applyResult
           ? `${applyResult.applied_count} ${pluralize(applyResult.applied_count, "issue")} applied.`
           : preview
@@ -306,51 +306,51 @@ export function AutoFixIssuesDialog(props: {
 
         {loadingPreview ? (
           <div className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="rounded-2xl border border-bb-border bg-bb-surface-soft px-4 py-3 text-sm text-bb-text-muted">
               Loading deterministic preview…
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="h-24 rounded-2xl border border-slate-200 bg-slate-50" />
-              <div className="h-24 rounded-2xl border border-slate-200 bg-slate-50" />
-              <div className="h-24 rounded-2xl border border-slate-200 bg-slate-50" />
+              <div className="h-24 rounded-2xl border border-bb-border bg-bb-surface-soft" />
+              <div className="h-24 rounded-2xl border border-bb-border bg-bb-surface-soft" />
+              <div className="h-24 rounded-2xl border border-bb-border bg-bb-surface-soft" />
             </div>
           </div>
         ) : null}
 
         {!loadingPreview && !preview && !error ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <div className="rounded-2xl border border-bb-border bg-bb-surface-soft px-4 py-3 text-sm text-bb-text-muted">
             Select one or more issues to preview bulk fixes.
           </div>
         ) : null}
 
         {preview ? (
           <>
-            <section className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+            <section className="rounded-2xl border border-bb-border bg-bb-surface-soft/70 px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold text-slate-900">Preview summary</div>
-                <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                <div className="text-sm font-semibold text-bb-text">Preview summary</div>
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                   Requested {preview.requested_count}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                   Open {preview.valid_open_selected_count}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                   Safe {safeCount}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                   Likely duplicate {likelyDuplicateCount}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                   Needs review {needsReviewCount}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                   Unsupported {unsupportedCount}
                 </span>
               </div>
 
               <div className="mt-3 space-y-1.5">
                 {(preview.summary_lines ?? []).map((line, idx) => (
-                  <div key={`preview-line-${idx}`} className="text-sm text-slate-700">
+                  <div key={`preview-line-${idx}`} className="text-sm text-bb-text-muted">
                     {line}
                   </div>
                 ))}
@@ -359,21 +359,21 @@ export function AutoFixIssuesDialog(props: {
 
             {applyResult ? (
               <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
-                <div className="text-sm font-semibold text-slate-900">Apply result</div>
+                <div className="text-sm font-semibold text-bb-text">Apply result</div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex h-6 items-center rounded-md border border-emerald-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                  <span className="inline-flex h-6 items-center rounded-md border border-emerald-200 bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                     Applied {applyResult.applied_count}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                     Skipped {applyResult.skipped_count}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-700">
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
                     Blocked {applyResult.blocked_count}
                   </span>
                 </div>
                 <div className="mt-3 space-y-1.5">
                   {(applyResult.summary_lines ?? []).map((line, idx) => (
-                    <div key={`apply-line-${idx}`} className="text-sm text-slate-700">
+                    <div key={`apply-line-${idx}`} className="text-sm text-bb-text-muted">
                       {line}
                     </div>
                   ))}
