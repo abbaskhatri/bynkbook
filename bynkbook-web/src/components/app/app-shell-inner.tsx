@@ -453,6 +453,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
   const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.issue_count ?? 0) || 0);
+  const attnUncategorized = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.uncategorized_count ?? 0) || 0);
 
   // Activity feed (bell dropdown) — fetched on open with TTL caching.
   // useQuery handles per-business cache isolation via queryKey, so we no
@@ -492,7 +493,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   const renderNavGroups = (isCollapsed: boolean, onNavigate?: () => void) => (
     <div className="p-3 space-y-3 flex-1 overflow-y-auto">
-      {NAV_GROUPS.map((group) => {
+      {NAV_GROUPS.map((group, groupIndex) => {
         if (!group.items.length) return null;
 
         return (
@@ -513,6 +514,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   const showIssues =
                     item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0;
                   const showIssuesSkeleton = item.label === "Issues" && issuesCountQ.isLoading;
+                  const showUncategorized =
+                    item.label === "Category Review" && typeof attnUncategorized === "number" && attnUncategorized > 0;
+                  const showUncategorizedSkeleton = item.label === "Category Review" && issuesCountQ.isLoading;
 
                   return (
                     <Button
@@ -529,12 +533,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                       title={
                         item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0
                           ? `Issues (${attnIssues})`
-                          : item.label
+                          : item.label === "Category Review" && typeof attnUncategorized === "number" && attnUncategorized > 0
+                            ? `Category Review (${attnUncategorized} uncategorized)`
+                            : item.label
                       }
                     >
                       <Link
                         href={link}
-                                                className="relative flex items-center justify-center w-full"
+                        className="relative flex items-center justify-center w-full"
                         onClick={onNavigate}
                       >
                         <span>{item.icon}</span>
@@ -544,6 +550,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                             {attnIssues}
                           </span>
                         ) : showIssuesSkeleton ? (
+                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-bb-border bg-muted px-1 animate-pulse" />
+                        ) : null}
+
+                        {showUncategorized ? (
+                          <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md bg-bb-status-warning-bg px-1 text-[10px] font-semibold text-bb-status-warning-fg border border-bb-status-warning-border">
+                            {attnUncategorized}
+                          </span>
+                        ) : showUncategorizedSkeleton ? (
                           <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-md border border-bb-border bg-muted px-1 animate-pulse" />
                         ) : null}
                       </Link>
@@ -577,6 +591,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                         </span>
                       ) : item.label === "Issues" && issuesCountQ.isLoading ? (
                         <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-bb-border bg-muted px-1.5 animate-pulse" />
+                      ) : item.label === "Category Review" && typeof attnUncategorized === "number" && attnUncategorized > 0 ? (
+                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-bb-status-warning-bg px-1.5 text-[11px] font-semibold text-bb-status-warning-fg border border-bb-status-warning-border">
+                          {attnUncategorized}
+                        </span>
+                      ) : item.label === "Category Review" && issuesCountQ.isLoading ? (
+                        <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-md border border-bb-border bg-muted px-1.5 animate-pulse" />
                       ) : null}
                     </Link>
                   </Button>
@@ -584,8 +604,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               })}
             </div>
 
-            {/* Divider between groups */}
-            <div className="border-t border-bb-border pt-2" />
+            {groupIndex < NAV_GROUPS.length - 1 ? (
+              <div className="border-t border-bb-border pt-2" />
+            ) : null}
           </div>
         );
       })}

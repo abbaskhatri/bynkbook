@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useId } from "react";
 import { X } from "lucide-react";
 import { surfaceCardSoft, ringFocus } from "./tokens";
 
@@ -33,6 +34,7 @@ export function AppDialog({
   size = "md",
   disableOverlayClose = false,
 }: AppDialogProps) {
+  const titleId = useId();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
@@ -77,6 +79,7 @@ export function AppDialog({
           tabIndex={-1}
           role="dialog"
           aria-modal="true"
+          aria-labelledby={title ? titleId : undefined}
           className={[
             surfaceCardSoft,
             "w-full min-w-0 max-w-[calc(100vw-1rem)] sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-2xl border border-bb-border bg-bb-dialog-bg shadow-2xl",
@@ -87,7 +90,7 @@ export function AppDialog({
           ].join(" ")}
         >
           <div className="shrink-0 px-3.5 py-2.5 border-b border-bb-border-muted flex items-start justify-between gap-3 bg-bb-surface-card">
-            <div className="min-w-0 text-sm font-semibold text-bb-text leading-6">
+            <div id={titleId} className="min-w-0 text-sm font-semibold text-bb-text leading-6">
               {title}
             </div>
 
