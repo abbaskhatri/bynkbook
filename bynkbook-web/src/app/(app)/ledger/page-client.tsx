@@ -4970,21 +4970,6 @@ export default function LedgerPageClient() {
                 <button
                   type="button"
                   className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 inline-flex items-center gap-1.5"
-                  onClick={() => void anomaliesQ.refetch()}
-                  disabled={!selectedBusinessId || !selectedAccountId || anomaliesQ.isFetching}
-                  title={(anomaliesQ.data as any)?.anomalies ? "Rescan issue signals" : "Scan issue signals"}
-                >
-                  {anomaliesQ.isFetching ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                  {(anomaliesQ.data as any)?.anomalies ? "Rescan issues" : "Scan issues"}
-                </button>
-
-                <button
-                  type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50 inline-flex items-center gap-1.5"
                   onClick={() => void fetchLedgerCategorySuggestions({ force: true })}
                   disabled={!selectedBusinessId || !selectedAccountId || !ledgerSuggestionTargetIds || ledgerSugLoading}
                   title="Suggest categories for visible uncategorized entries"
