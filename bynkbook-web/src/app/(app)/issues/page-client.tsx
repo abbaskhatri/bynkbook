@@ -631,6 +631,7 @@ export default function IssuesPageClient() {
             value={payeeQuery}
             onChange={(e) => setPayeeQuery(e.target.value)}
             placeholder="Search payee..."
+            aria-label="Search by payee"
             className={[inputH7, "w-[220px] min-w-0"].join(" ")}
           />
         </div>

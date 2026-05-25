@@ -3158,6 +3158,7 @@ export default function LedgerPageClient() {
           <input
             className={[inputH7, "w-[220px] min-w-0"].join(" ")}
             placeholder="Search payee..."
+            aria-label="Search by payee"
             value={searchPayee}
             onChange={(e) => setSearchPayee(e.target.value)}
           />
@@ -3363,6 +3364,7 @@ export default function LedgerPageClient() {
                 className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
                 inputMode="decimal"
                 placeholder="0.00"
+                aria-label="Minimum amount filter"
                 value={filterAmountMin}
                 onChange={(e) => { setFilterAmountMin(e.target.value); setPage(1); }}
                 title="Min amount"
@@ -3375,6 +3377,7 @@ export default function LedgerPageClient() {
                 className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
                 inputMode="decimal"
                 placeholder="0.00"
+                aria-label="Maximum amount filter"
                 value={filterAmountMax}
                 onChange={(e) => { setFilterAmountMax(e.target.value); setPage(1); }}
                 title="Max amount"
@@ -3387,6 +3390,7 @@ export default function LedgerPageClient() {
                 className={[inputH7, "w-[108px] text-right tabular-nums"].join(" ")}
                 inputMode="decimal"
                 placeholder="0.00"
+                aria-label="Exact amount filter"
                 value={filterAmountExact}
                 onChange={(e) => { setFilterAmountExact(e.target.value); setPage(1); }}
                 title="Exact amount"
