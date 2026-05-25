@@ -55,7 +55,9 @@ function hasRiskyBulkApplyLanguage(suggestion: CategorySuggestionLike | null | u
     .map((x) => String(x ?? "").toLowerCase())
     .join(" ");
 
-  return /\b(irs|eftps|treasury|tax|payroll|adp|gusto|paychex|credit card|card payment|amex|american express|visa payment|mastercard|loan|principal|interest|refund|chargeback|owner draw|owner contribution|equity|zelle|ach|wire|transfer|online banking|card payoff)\b/.test(text);
+  // Core risky terms: government/tax, payroll, financial transfers, equity, reversals.
+  // Deliberately excludes "ach" and "american express" as standalone terms — too broad.
+  return /\b(irs|eftps|treasury|tax|payroll|adp|gusto|paychex|credit card payment|card payoff|visa payment|loan|principal|interest|refund|chargeback|owner draw|owner contribution|equity|zelle|wire transfer|intercompany transfer)\b/.test(text);
 }
 
 export function categorySuggestionConfidenceValue(raw: unknown) {

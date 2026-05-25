@@ -1352,13 +1352,23 @@ export default function CategoryReviewPageClient() {
     setExpandedAutoFixGroups(nextExpanded);
     setSelectedIds(idSet);
     setSelectedSuggestionByEntryId(next);
-    if (clearManualIds.length > 0) {
-      setManualCategoryByEntryId((prev) => {
-        const manualNext = { ...prev };
-        for (const id of clearManualIds) delete manualNext[id];
-        return manualNext;
-      });
-    }
+    const clearManualSet = new Set(clearManualIds);
+    setManualCategoryByEntryId((prev) => {
+      const manualNext = { ...prev };
+      for (const id of clearManualIds) delete manualNext[id];
+      // Pre-populate non-safe entries with their top suggestion so they show
+      // as selected by default — users deselect what they disagree with.
+      for (const e of visibleRows) {
+        const id = String(e.id);
+        if (!idSet.has(id)) continue;
+        if (clearManualSet.has(id)) continue; // already safe-selected
+        const suggestions = Array.isArray(suggestionsByEntryId[id]) ? suggestionsByEntryId[id] : [];
+        const top = suggestions[0] ?? null;
+        const topCategoryId = String(top?.category_id ?? top?.categoryId ?? "").trim();
+        if (topCategoryId && !manualNext[id]) manualNext[id] = topCategoryId;
+      }
+      return manualNext;
+    });
     setApplySummary(null);
     clearMutErr();
     setApplyOpen(true);
@@ -2467,14 +2477,14 @@ export default function CategoryReviewPageClient() {
                     })}
 
                     {autoFixReviewRows.length > 0 ? (
-                      <details className="bg-card" open={autoFixGroups.length === 0}>
+                      <details className="bg-card" open>
                         <summary className="cursor-pointer px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50">
                           Needs review ({autoFixReviewRows.length})
                         </summary>
 
                         <div className="border-t border-border bg-muted/40">
                           <div className="px-3 py-2 text-[11px] text-muted-foreground">
-                            Review-only suggestions are not preselected. Manual selections apply only selected loaded rows.
+                            AI suggestions are pre-selected below. Change or clear any you want to skip before applying.
                           </div>
 
                           {autoFixReviewRows.map((row) => {
@@ -2542,10 +2552,10 @@ export default function CategoryReviewPageClient() {
                                     });
                                   }}
                                 >
-                                  <option value="">Manual review…</option>
+                                  <option value="">— Skip this entry —</option>
                                   {topCategoryId ? (
                                     <option value={topCategoryId}>
-                                      {topCategoryName || "Suggested category"} (needs review)
+                                      {topCategoryName || "Suggested category"} ✓ AI
                                     </option>
                                   ) : null}
                                   {categories

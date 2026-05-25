@@ -295,7 +295,7 @@ export function FixIssueDialog(props: {
                       Saving…
                     </span>
                   ) : (
-                    "Legitimize"
+                    "Not a duplicate"
                   )}
                 </Button>
 
@@ -366,7 +366,7 @@ export function FixIssueDialog(props: {
                       Merging…
                     </span>
                   ) : (
-                    "Merge after review"
+                    "Merge entries"
                   )}
                 </Button>
               </>
@@ -453,22 +453,22 @@ export function FixIssueDialog(props: {
               </colgroup>
 
               <thead className="sticky top-0 bg-bb-surface-card">
-                <tr className="border-b border-bb-border text-xs text-bb-text-muted">
-                  <th className="text-left font-medium px-2 py-1">Date</th>
-                  <th className="text-left font-medium px-2 py-1">Payee</th>
-                  <th className="text-left font-medium px-2 py-1">Method</th>
-                  <th className="text-left font-medium px-2 py-1">Category</th>
-                  <th className="text-right font-medium px-2 py-1">Amount</th>
+                <tr className="border-b border-bb-border text-[11px] text-bb-text-muted">
+                  <th className="text-left font-medium px-2 py-1.5">Date</th>
+                  <th className="text-left font-medium px-2 py-1.5">Payee</th>
+                  <th className="text-left font-medium px-2 py-1.5">Method</th>
+                  <th className="text-left font-medium px-2 py-1.5">Category</th>
+                  <th className="text-right font-medium px-2 py-1.5">Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {affectedRows.map((r) => (
-                  <tr key={r.id} className="border-b border-bb-border-muted">
-                    <td className="px-2 py-1 tabular-nums">{r.date}</td>
-                    <td className="px-2 py-1 whitespace-normal break-normal">{r.payee}</td>
-                    <td className="px-2 py-1">{r.methodDisplay}</td>
-                    <td className="px-2 py-1">{r.category || "—"}</td>
-                    <td className="px-2 py-1 text-right tabular-nums">{r.amountStr}</td>
+                  <tr key={r.id} className="border-b border-bb-border-muted text-xs">
+                    <td className="px-2 py-1.5 tabular-nums">{r.date}</td>
+                    <td className="px-2 py-1.5 whitespace-normal break-normal">{r.payee}</td>
+                    <td className="px-2 py-1.5">{r.methodDisplay}</td>
+                    <td className="px-2 py-1.5">{r.category || "—"}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.amountStr}</td>
                   </tr>
                 ))}
                 {affectedRows.length === 0 ? (
@@ -487,8 +487,8 @@ export function FixIssueDialog(props: {
           <div className="space-y-2">
             <div className="text-xs text-bb-text-muted">
               {duplicateMentionsMatch
-                ? "Review the bank match before cleanup. Use Reconcile match/revert if the bank-created entry is the one that should be removed."
-                : "Review the entries before cleanup. Survivor amount stays unchanged if you choose to merge."}
+                ? "One entry is bank-matched. Use Reconcile → revert if the bank entry should be removed. Otherwise select which entry to keep (Survivor) and which to delete (Duplicate to remove)."
+                : "Select which entry to keep as the Survivor. The duplicate entry will be deleted. If both are legitimate, click \"Not a duplicate\" instead."}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -511,7 +511,7 @@ export function FixIssueDialog(props: {
               </div>
 
               <div className="text-xs">
-                <div className="text-[11px] text-bb-text-muted mb-1">Entry to merge after review</div>
+                <div className="text-[11px] text-bb-text-muted mb-1">Duplicate to remove</div>
                 <Select value={mergeDuplicateId} onValueChange={setMergeDuplicateId}>
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-bb-status-danger-border bg-bb-status-danger-bg">
                     <span className="truncate" title={mergeDuplicateId ? entryLabel(mergeDuplicateId) : ""}>
