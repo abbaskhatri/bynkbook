@@ -156,7 +156,10 @@ function hasNearDuplicateTokenMatch(aTokens: string[], bTokens: string[]) {
   const largerSet = aTokens.length <= bTokens.length ? bSet : aSet;
   if (smaller.every((token) => largerSet.has(token))) return true;
 
-  return shared.length >= 2 && shared.length / Math.min(aTokens.length, bTokens.length) >= 0.67;
+  // At this point shared.length is exactly 1 (0 and ≥2 were handled above),
+  // and the single shared token is not a full-subset match, so the pair is not
+  // similar enough to be a near-duplicate.
+  return false;
 }
 
 function duplicateTokenSignature(tokens: string[]) {
@@ -845,79 +848,89 @@ export async function handler(event: any) {
 
   const now = new Date();
 
-  // Load existing OPEN issues for this scope and these types
   const types = includeMissingCategory
     ? ["DUPLICATE", "STALE_CHECK", "MISSING_CATEGORY"]
     : ["DUPLICATE", "STALE_CHECK"];
 
-  const existing = await prisma.entryIssue.findMany({
+  // Load ALL existing issues for this scope in one query (OPEN + RESOLVED).
+  // We need RESOLVED rows too: a previously-resolved issue that re-fires should
+  // be updated back to OPEN rather than creating a duplicate row.
+  // This also eliminates the N+1 findFirst-per-issue loop below.
+  const allExisting = await prisma.entryIssue.findMany({
     where: {
       business_id: biz,
       account_id: acct,
-      status: "OPEN",
       issue_type: { in: types },
     },
-    select: { id: true, entry_id: true, issue_type: true },
+    select: { id: true, entry_id: true, issue_type: true, status: true },
   });
+
+  // Build a lookup: "entry_id|issue_type" → existing row id
+  const existingIdByKey = new Map<string, string>();
+  for (const row of allExisting as any[]) {
+    existingIdByKey.set(`${row.entry_id}|${row.issue_type}`, String(row.id));
+  }
 
   const detectedKeys = new Set(persistDetected.map((d) => `${d.entry_id}|${d.issue_type}`));
 
-  // Resolve issues no longer detected
-  const toResolveIds = existing
-    .filter((e: any) => !detectedKeys.has(`${e.entry_id}|${e.issue_type}`))
-    .map((e: any) => e.id);
+  // Resolve OPEN issues that are no longer detected
+  const toResolveIds = (allExisting as any[])
+    .filter((row: any) =>
+      String(row.status ?? "").toUpperCase() === "OPEN" &&
+      !detectedKeys.has(`${row.entry_id}|${row.issue_type}`)
+    )
+    .map((row: any) => String(row.id));
 
-  // Upsert detected issues
-  let upserted = 0;
+  // Split detected issues into updates (row already exists) and creates (new row needed)
+  const toUpdate: Array<{ id: string; d: Detected }> = [];
+  const toCreate: Detected[] = [];
   for (const d of persistDetected) {
-    // Manual upsert (avoid Prisma unique-selector name mismatch):
-// 1) find existing OPEN/RESOLVED row for this scope+entry+type
-// 2) update if found, otherwise create
-const existingIssue = await prisma.entryIssue.findFirst({
-  where: {
-    business_id: biz,
-    account_id: acct,
-    entry_id: d.entry_id,
-    issue_type: d.issue_type,
-  },
-  select: { id: true },
-});
-
-if (existingIssue?.id) {
-  await prisma.entryIssue.update({
-    where: { id: existingIssue.id },
-    data: {
-      status: "OPEN",
-      severity: "WARNING",
-      group_key: d.group_key,
-      details: d.details,
-      detected_at: now,
-      resolved_at: null,
-      updated_at: now,
-    },
-  });
-} else {
-  await prisma.entryIssue.create({
-    data: {
-      id: randomUUID(),
-      business_id: biz,
-      account_id: acct,
-      entry_id: d.entry_id,
-      issue_type: d.issue_type,
-      status: "OPEN",
-      severity: "WARNING",
-      group_key: d.group_key,
-      details: d.details,
-      detected_at: now,
-      resolved_at: null,
-      created_at: now,
-      updated_at: now,
-    },
-  });
-}
-
-    upserted++;
+    const existingId = existingIdByKey.get(`${d.entry_id}|${d.issue_type}`);
+    if (existingId) {
+      toUpdate.push({ id: existingId, d });
+    } else {
+      toCreate.push(d);
+    }
   }
+
+  // Execute all upserts in parallel — eliminates the previous N+1 sequential loop
+  await Promise.all([
+    ...toUpdate.map(({ id, d }) =>
+      prisma.entryIssue.update({
+        where: { id },
+        data: {
+          status: "OPEN",
+          severity: "WARNING",
+          group_key: d.group_key,
+          details: d.details,
+          detected_at: now,
+          resolved_at: null,
+          updated_at: now,
+        },
+      })
+    ),
+    ...toCreate.map((d) =>
+      prisma.entryIssue.create({
+        data: {
+          id: randomUUID(),
+          business_id: biz,
+          account_id: acct,
+          entry_id: d.entry_id,
+          issue_type: d.issue_type,
+          status: "OPEN",
+          severity: "WARNING",
+          group_key: d.group_key,
+          details: d.details,
+          detected_at: now,
+          resolved_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+      })
+    ),
+  ]);
+
+  const upserted = persistDetected.length;
 
   if (toResolveIds.length > 0) {
     await prisma.entryIssue.updateMany({
