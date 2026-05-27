@@ -959,7 +959,9 @@ export async function handler(event: any) {
                 amount_cents: entryAmountCents,
                 type: entryType,
                 method: methodFinal,
-                status: "EXPECTED",
+                // CLEARED when immediately matched to a posted bank transaction;
+                // EXPECTED when the user still needs to review and confirm the match.
+                status: autoMatch ? "CLEARED" : "EXPECTED",
                 category_id: categoryIdFinal,
                 deleted_at: null,
                 sourceBankTransactionId: bankId,
@@ -1299,7 +1301,9 @@ export async function handler(event: any) {
             amount_cents: entryAmountCents,
             type: entryType,
             method: methodFinal,
-            status: "EXPECTED",
+            // CLEARED when immediately matched to a posted bank transaction;
+            // EXPECTED when the user still needs to review and confirm the match.
+            status: autoMatch ? "CLEARED" : "EXPECTED",
             category_id: categoryIdFinal,
             deleted_at: null,
             created_at: now,
