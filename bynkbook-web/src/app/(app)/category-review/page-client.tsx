@@ -34,7 +34,7 @@ import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox, type CategoryComboboxOption } from "@/components/categories/category-combobox";
 
-import { Tags, Loader2 } from "lucide-react";
+import { Tags, Loader2, ChevronRight } from "lucide-react";
 
 function formatUsdAccountingFromCents(raw: unknown) {
   const n = Number(raw);
@@ -404,6 +404,10 @@ export default function CategoryReviewPageClient() {
   const [whyText, setWhyText] = useState<string | null>(null);
   const [whyErr, setWhyErr] = useState<string | null>(null);
 
+  // Category grouping
+  const [groupedByCategory, setGroupedByCategory] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
   // Now that entriesQ exists, include it in the banner mapping
   const bannerMsgWithEntries =
     bannerMsg || appErrorMessageOrNull(entriesQ.error) || null;
@@ -705,6 +709,105 @@ export default function CategoryReviewPageClient() {
   }, [suggestionsQ.data]);
 
   const sugByEntryId = suggestionMapByEntryId;
+
+  // -------------------------
+  // Category grouping — groups visibleRows by suggested or existing category
+  // -------------------------
+  type CategoryGroup = {
+    key: string;
+    categoryId: string | null;
+    categoryName: string;
+    entries: any[];
+    totalAmountCents: number;
+  };
+
+  const categoryGroupList = useMemo<CategoryGroup[]>(() => {
+    if (!groupedByCategory) return [];
+
+    const groupMap = new Map<string, CategoryGroup>();
+
+    for (const e of visibleRows) {
+      const id = String(e.id);
+      const suggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      const topSuggestion = suggestions[0] ?? null;
+      const topCategoryId = String(topSuggestion?.category_id ?? topSuggestion?.categoryId ?? "").trim();
+
+      // Group by current category (already categorized) or top suggestion (uncategorized)
+      const currentCatId = e.category_id ? String(e.category_id) : null;
+      const groupCatId = currentCatId || topCategoryId || null;
+      const sugLoaded = hasSuggestionEntry(sugByEntryId, id);
+      const key = groupCatId ?? (sugLoaded ? "no-match" : "no-suggestion");
+
+      if (!groupMap.has(key)) {
+        let categoryName: string;
+        if (groupCatId) {
+          categoryName =
+            categoryNameById[groupCatId] ||
+            topSuggestion?.category_name ||
+            topSuggestion?.categoryName ||
+            "Unknown category";
+        } else if (sugLoaded) {
+          categoryName = "No confident match";
+        } else {
+          categoryName = "No suggestion yet";
+        }
+        groupMap.set(key, { key, categoryId: groupCatId, categoryName, entries: [], totalAmountCents: 0 });
+      }
+
+      const group = groupMap.get(key)!;
+      group.entries.push(e);
+      group.totalAmountCents += Number(e.amount_cents ?? 0);
+    }
+
+    // Sort: named categories alphabetically, then "no confident match", then "no suggestion" last
+    return Array.from(groupMap.values()).sort((a, b) => {
+      if (a.key === "no-suggestion") return 1;
+      if (b.key === "no-suggestion") return -1;
+      if (a.key === "no-match") return 1;
+      if (b.key === "no-match") return -1;
+      return a.categoryName.localeCompare(b.categoryName);
+    });
+  }, [groupedByCategory, visibleRows, sugByEntryId, categoryNameById]);
+
+  // Flat list of render items — either group headers + entries (grouped) or raw entries (flat)
+  type RenderItem = { kind: "entry"; entry: any } | { kind: "group-header"; group: CategoryGroup };
+  const flatRenderItems = useMemo<RenderItem[]>(() => {
+    if (!groupedByCategory) {
+      return visibleRows.map((entry: any) => ({ kind: "entry" as const, entry }));
+    }
+    const items: RenderItem[] = [];
+    for (const group of categoryGroupList) {
+      items.push({ kind: "group-header", group });
+      if (!collapsedGroups.has(group.key)) {
+        for (const entry of group.entries) {
+          items.push({ kind: "entry", entry });
+        }
+      }
+    }
+    return items;
+  }, [groupedByCategory, visibleRows, categoryGroupList, collapsedGroups]);
+
+  function toggleGroupCollapse(key: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleSelectGroup(groupEntries: any[]) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = groupEntries.every((e) => next.has(String(e.id)));
+      for (const e of groupEntries) {
+        if (allSelected) next.delete(String(e.id));
+        else next.add(String(e.id));
+      }
+      return next;
+    });
+  }
+
   const sugLoading = !!suggestionsRequestedKey && suggestionsQ.isFetching && !suggestionsLoadedForCurrentFilters;
   const sugUpdating = !!suggestionsRequestedKey && suggestionsQ.isFetching && suggestionsLoadedForCurrentFilters;
   const autoFixPreparing = !!autoFixPendingIds && suggestionsQ.isFetching;
@@ -1689,6 +1792,18 @@ export default function CategoryReviewPageClient() {
 
             <div className="flex items-center gap-2">
               <Button
+                variant={groupedByCategory ? "default" : "outline"}
+                className="h-7 px-3 text-xs"
+                onClick={() => {
+                  setGroupedByCategory((v) => !v);
+                  setCollapsedGroups(new Set());
+                }}
+                title={groupedByCategory ? "Switch to flat list" : "Group entries by suggested category"}
+              >
+                Group by category
+              </Button>
+
+              <Button
                 variant="outline"
                 className="h-7 px-3 text-xs"
                 disabled={
@@ -1866,7 +1981,68 @@ export default function CategoryReviewPageClient() {
                     </thead>
 
                     <tbody>
-                      {visibleRows.map((e: any) => {
+                      {flatRenderItems.map((item: RenderItem) => {
+                        // ── Group header row ──────────────────────────────────────
+                        if (item.kind === "group-header") {
+                          const { group } = item;
+                          const isCollapsed = collapsedGroups.has(group.key);
+                          const allGroupSelected =
+                            group.entries.length > 0 &&
+                            group.entries.every((ge: any) => selectedIds.has(String(ge.id)));
+                          const someGroupSelected =
+                            !allGroupSelected &&
+                            group.entries.some((ge: any) => selectedIds.has(String(ge.id)));
+
+                          return (
+                            <tr
+                              key={`group-${group.key}`}
+                              className="bg-muted/40 border-b border-border sticky top-[25px] z-[5]"
+                            >
+                              <td className="px-0 py-1 text-center align-middle border-b border-border">
+                                <div className="flex items-center justify-center">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4"
+                                    checked={allGroupSelected}
+                                    ref={(el) => {
+                                      if (el) el.indeterminate = someGroupSelected;
+                                    }}
+                                    onChange={() => toggleSelectGroup(group.entries)}
+                                  />
+                                </div>
+                              </td>
+                              <td colSpan={2} className="px-2 py-1 border-b border-border">
+                                <button
+                                  type="button"
+                                  className="flex items-center gap-1.5 text-xs font-semibold text-foreground hover:text-primary transition-colors"
+                                  onClick={() => toggleGroupCollapse(group.key)}
+                                >
+                                  <ChevronRight
+                                    className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${isCollapsed ? "" : "rotate-90"}`}
+                                  />
+                                  <span className="truncate">{group.categoryName}</span>
+                                  <span className="ml-1.5 inline-flex h-4 min-w-[18px] items-center justify-center rounded bg-primary/10 px-1 text-[10px] font-medium text-primary border border-primary/20">
+                                    {group.entries.length}
+                                  </span>
+                                </button>
+                              </td>
+                              <td className="px-2 py-1 text-right border-b border-border">
+                                <span
+                                  className={`text-xs tabular-nums ${
+                                    group.totalAmountCents < 0
+                                      ? "text-bb-amount-negative"
+                                      : "text-bb-amount-neutral"
+                                  }`}
+                                >
+                                  {formatUsdAccountingFromCents(group.totalAmountCents)}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        // ── Entry row ──────────────────────────────────────────────
+                        const e = item.entry;
                         const id = String(e.id);
                         const payee = String(e.payee ?? "");
                         const dateYmd = String(e.date ?? "").slice(0, 10);
