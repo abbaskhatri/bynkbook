@@ -190,6 +190,36 @@ function duplicateEvidenceText(entry: any, bankDescriptions: string[] = []) {
   ].join(" ");
 }
 
+// Extract a labeled reference/trace number from a text string.
+// Only matches explicit labels (REF:, TRACE:, ID:, etc.) to avoid false
+// matches on store IDs, amounts, or account fragments.
+function extractRefFromText(text: string): string | null {
+  const s = String(text ?? "").trim();
+  if (!s) return null;
+  const patterns = [
+    /\bref\s*[:#]?\s*(\d{5,})/i,
+    /\btrace\s*[:#]?\s*(\d{5,})/i,
+    /\btrn\s*[:#]?\s*(\d{5,})/i,
+    /\bppd\s+id\s*[:#]?\s*(\d{5,})/i,
+    /\bweb\s+id\s*[:#]?\s*(\d{5,})/i,
+    /\bid\s*:\s*(\d{5,})/i,
+    /\bcheck\s*#?\s*(\d{2,8})\b/i,
+  ];
+  for (const p of patterns) {
+    const m = s.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+function extractEntryRef(entry: any, bankDescriptions: string[] = []): string | null {
+  for (const text of [entry?.memo ?? "", entry?.payee ?? "", ...bankDescriptions]) {
+    const ref = extractRefFromText(text);
+    if (ref) return ref;
+  }
+  return null;
+}
+
 function duplicateExactBaseKey(entry: any) {
   const methodUpper = (entry?.method || "").toString().toUpperCase();
   const isCheck = methodUpper === "CHECK";
@@ -496,7 +526,7 @@ export async function handler(event: any) {
   }
 
   // Duplicate groups: CHECK window 30d, non-check window 7d
-  const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean }>>();
+  const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean; bankTxnId: string; ref: string | null }>>();
 
   for (const e of entries) {
     if (!isDuplicateScanEligibleEntry(e)) continue;
@@ -506,7 +536,8 @@ export async function handler(event: any) {
 
     const payeeKey = normalizePayee(e.payee || "");
     const descriptorKey = normalizePayee(String((e as any).memo ?? ""));
-    const evidenceTokens = duplicateTokens(duplicateEvidenceText(e, entryBankDescriptions(e)));
+    const bankDescs = entryBankDescriptions(e);
+    const evidenceTokens = duplicateTokens(duplicateEvidenceText(e, bankDescs));
     if (evidenceTokens.length === 0) continue;
 
     // Reduce false positives: skip NONCHECK duplicate detection when payee is too short/generic.
@@ -528,9 +559,11 @@ export async function handler(event: any) {
       ? `${bucket}|${amt}|${payeeKey}`
       : `${bucket}|${amt}|${methodUpper}|${payeeKey}`;
 
+    const bankTxnId = sourceBankTxnId(e);
+    const ref = extractEntryRef(e, bankDescs);
     const arr = groups.get(key);
-    if (arr) arr.push({ id: e.id, day, ymd, isCheck });
-    else groups.set(key, [{ id: e.id, day, ymd, isCheck }]);
+    if (arr) arr.push({ id: e.id, day, ymd, isCheck, bankTxnId, ref });
+    else groups.set(key, [{ id: e.id, day, ymd, isCheck, bankTxnId, ref }]);
   }
 
   for (const [key, items] of groups.entries()) {
@@ -565,6 +598,10 @@ export async function handler(event: any) {
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         if (items[j].day - items[i].day > windowDays) break;
+        // Entries linked to different bank transactions are provably different real-world transactions
+        if (items[i].bankTxnId && items[j].bankTxnId && items[i].bankTxnId !== items[j].bankTxnId) continue;
+        // Different labeled reference numbers (REF:, TRACE:, ID:, etc.) mean different transactions
+        if (items[i].ref && items[j].ref && items[i].ref !== items[j].ref) continue;
         union(i, j);
       }
     }
@@ -615,6 +652,8 @@ export async function handler(event: any) {
     isCheck: boolean;
     type: string;
     exactKey: string;
+    bankTxnId: string;
+    ref: string | null;
   };
 
   const nearCandidates: NearDuplicateCandidate[] = [];
@@ -640,6 +679,8 @@ export async function handler(event: any) {
       isCheck: String(e.method ?? "").toUpperCase() === "CHECK",
       type: String(e.type ?? "").trim().toUpperCase(),
       exactKey: duplicateExactBaseKey(e),
+      bankTxnId: sourceBankTxnId(e),
+      ref: extractEntryRef(e, bankDescriptions),
     });
   }
 
@@ -677,6 +718,11 @@ export async function handler(event: any) {
 
       // Exact duplicate groups keep their original group_key, copy, and LEGIT_DUP suppression.
       if (a.exactKey && b.exactKey && a.exactKey === b.exactKey) continue;
+
+      // Entries linked to different bank transactions are provably different real-world transactions
+      if (a.bankTxnId && b.bankTxnId && a.bankTxnId !== b.bankTxnId) continue;
+      // Different labeled reference numbers mean different transactions
+      if (a.ref && b.ref && a.ref !== b.ref) continue;
 
       if (!hasNearDuplicateTokenMatch(a.tokens, b.tokens)) continue;
 

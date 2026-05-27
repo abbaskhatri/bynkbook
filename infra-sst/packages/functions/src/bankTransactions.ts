@@ -98,6 +98,28 @@ function normalizeCheckNumberCandidate(value: any) {
   return s;
 }
 
+// Extract a labeled reference/trace number from a text string.
+// Mirrors the same logic in issuesScan.ts — only matches explicit labels to
+// avoid false matches on store IDs, amounts, or masked account fragments.
+function extractRefFromText(text: string): string | null {
+  const s = String(text ?? "").trim();
+  if (!s) return null;
+  const patterns = [
+    /\bref\s*[:#]?\s*(\d{5,})/i,
+    /\btrace\s*[:#]?\s*(\d{5,})/i,
+    /\btrn\s*[:#]?\s*(\d{5,})/i,
+    /\bppd\s+id\s*[:#]?\s*(\d{5,})/i,
+    /\bweb\s+id\s*[:#]?\s*(\d{5,})/i,
+    /\bid\s*:\s*(\d{5,})/i,
+    /\bcheck\s*#?\s*(\d{2,8})\b/i,
+  ];
+  for (const p of patterns) {
+    const m = s.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
 function rawString(raw: any, keys: string[]) {
   if (!raw || typeof raw !== "object") return "";
   for (const key of keys) {
@@ -326,10 +348,24 @@ async function findPossibleCreateEntryDuplicates(args: {
     take: 10,
   });
 
+  // Extract a reference number from the bank transaction's description so we
+  // can compare it against any manual entry's memo below.
+  const bankRef = extractRefFromText(bankTxn.name ?? "");
+
   return rows
-    .filter((entry: any) => String(entry?.sourceBankTransactionId ?? "") !== bankTransactionId)
+    // An entry already linked to any bank transaction is a different real-world
+    // transaction by definition — including recurring charges with same amount/payee.
+    .filter((entry: any) => !String(entry?.sourceBankTransactionId ?? "").trim())
     .filter(isDuplicatePreflightEligibleEntry)
     .filter((entry: any) => hasSimilarPayee(bankTxn.name, entry))
+    // If the bank transaction and the manual entry both carry a labeled reference
+    // number and those numbers differ, they are definitely different transactions.
+    .filter((entry: any) => {
+      if (!bankRef) return true;
+      const entryRef = extractRefFromText(`${entry?.memo ?? ""} ${entry?.payee ?? ""}`);
+      if (!entryRef) return true;
+      return bankRef === entryRef;
+    })
     .slice(0, 5)
     .map(duplicateCandidatePayload);
 }
