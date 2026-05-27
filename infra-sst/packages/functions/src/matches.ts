@@ -269,14 +269,7 @@ export async function handler(event: any) {
     const items = Array.isArray(body?.items) ? body.items : [];
     if (!items.length) return json(400, { ok: false, error: "Missing items" });
 
-    // Closed period enforcement: batch must fail as a whole if ANY involved entry.date is closed
-    const allEntryIds: string[] = [];
-    for (const it of items) {
-      const s = String(it?.entryId ?? it?.entry_id ?? "").trim();
-      if (s) allEntryIds.push(s);
-    }
-    const cp = await assertNotClosedPeriodForEntryIds({ prisma, businessId, entryIds: allEntryIds });
-    if (!cp.ok) return cp.response;
+    // Note: closed-period enforcement for batch was already run above (before batch/single split)
 
     const results: any[] = [];
     let okN = 0;
@@ -320,9 +313,7 @@ export async function handler(event: any) {
   const matchType = (body?.matchType ?? "").toString().trim().toUpperCase();
   const matchedAmountRaw = body?.matchedAmountCents;
 
-  // Closed period enforcement: matching affects entry state -> block if entry.date is closed
-  const cp = await assertNotClosedPeriodForEntryIds({ prisma, businessId, entryIds: [entryId] });
-  if (!cp.ok) return cp.response;
+  // Note: closed-period enforcement was already run above (before batch/single split)
 
   try {
     const created = await prisma.$transaction(async (tx: any) => {

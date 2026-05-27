@@ -183,6 +183,8 @@ export async function handler(event: any) {
     const allSelectedRows = await prisma.entryIssue.findMany({
       where: {
         id: { in: issueIds },
+        business_id: biz,
+        account_id: acct,
       },
       select: {
         id: true,
@@ -302,10 +304,7 @@ export async function handler(event: any) {
         const count = Number(result?.count ?? 0);
         if (count > 0) {
           appliedCount += count;
-          pushCount(appliedByAction, action);
-          if (count > 1) {
-            appliedByAction[action] = count;
-          }
+          appliedByAction[action] = (appliedByAction[action] ?? 0) + count;
         }
       }
     });

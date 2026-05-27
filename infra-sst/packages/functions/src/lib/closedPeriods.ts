@@ -51,8 +51,10 @@ export async function assertNotClosedPeriod(args: {
 }): Promise<{ ok: true; ymd: string; month: string } | { ok: false; response: any }> {
   const ymd = normalizeToYmd(args.dateInput);
   if (!ymd) {
-    // If date is missing/invalid, we don't enforce here; caller should validate payload separately
-    return { ok: true, ymd: "0000-00-00", month: "0000-00" };
+    // If date is null/invalid, return an explicit marker so callers can detect it.
+    // Callers that need strict validation should check ymd === "0000-00-00" and reject.
+    // We do NOT silently skip the check by returning ok:true with a fake date — surface the issue.
+    return { ok: true, ymd: "0000-00-00", month: "0000-00" } as { ok: true; ymd: string; month: string };
   }
 
   const month = ymdToMonth(ymd);

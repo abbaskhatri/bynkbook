@@ -160,7 +160,7 @@ export async function handler(event: any) {
       // Block archiving when referenced (entries/budgets/goals). Unarchive is always allowed.
       if (archived) {
         const [entries, budgets, goals] = await Promise.all([
-          prisma.entry.count({ where: { business_id: biz, category_id: id } }),
+          prisma.entry.count({ where: { business_id: biz, category_id: id, deleted_at: null } }),
           prisma.budget.count({ where: { business_id: biz, category_id: id } }),
           prisma.goal.count({ where: { business_id: biz, category_id: id } }),
         ]);

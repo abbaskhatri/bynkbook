@@ -324,11 +324,8 @@ export async function handler(event: any) {
           data: { from_account_id: fromAccountId, to_account_id: toAccountIdFinal, updated_at: new Date() },
         });
 
-        // Set leg amounts so that the current account (acct) matches the signed amount user provided.
-        const currentLegAmount = direction === "OUT" ? -amtAbs : amtAbs;
-        const otherLegAmount = -currentLegAmount;
-
         // Reuse the two existing leg rows; set account_id + amount deterministically.
+        // from-leg always carries -amtAbs (debit), to-leg always carries +amtAbs (credit).
         await tx.entry.updateMany({
           where: { id: fromLeg.id, business_id: biz, transfer_id: tid },
           data: {
@@ -355,23 +352,6 @@ export async function handler(event: any) {
             ...(status !== undefined ? { status } : {}),
             updated_at: new Date(),
           },
-        });
-
-        // Ensure the *current account's* leg matches the signed amount.
-        // (Depending on direction, the current account is either the "from" leg or the "to" leg.)
-        const fixAcctLegId = fromAccountId === acct ? fromLeg.id : toLeg.id;
-        const fixAcctAmt = fromAccountId === acct ? currentLegAmount : currentLegAmount;
-
-        await tx.entry.updateMany({
-          where: { id: fixAcctLegId, business_id: biz, transfer_id: tid },
-          data: { amount_cents: currentLegAmount, updated_at: new Date() },
-        });
-
-        // And the other leg must be the inverse.
-        const fixOtherLegId = fixAcctLegId === fromLeg.id ? toLeg.id : fromLeg.id;
-        await tx.entry.updateMany({
-          where: { id: fixOtherLegId, business_id: biz, transfer_id: tid },
-          data: { amount_cents: -currentLegAmount, updated_at: new Date() },
         });
       });
 

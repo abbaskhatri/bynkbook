@@ -326,7 +326,7 @@ export async function handler(event: any) {
           continue;
         }
 
-        if (categoryId !== suggestedCategoryId || categoryId !== topCategoryId) {
+        if (categoryId !== topCategoryId) {
           results.push({
             entryId,
             ok: false,
@@ -903,9 +903,14 @@ export async function handler(event: any) {
     const limit = Math.max(1, Math.min(200, Number(limitRaw) || 200));
     const cursor = parseEntriesCursor(q.cursor);
 
+    const dateFromStr = q.date_from ? String(q.date_from).trim() : "";
+    const dateToStr = q.date_to ? String(q.date_to).trim() : "";
+    if (dateFromStr && dateToStr && dateFromStr > dateToStr) {
+      return json(400, { ok: false, error: "date_from must not be after date_to" });
+    }
     const dateWhere = {
-      ...(q.date_from ? { gte: new Date(String(q.date_from).trim() + "T00:00:00Z") } : {}),
-      ...(q.date_to ? { lte: new Date(String(q.date_to).trim() + "T00:00:00Z") } : {}),
+      ...(dateFromStr ? { gte: new Date(dateFromStr + "T00:00:00Z") } : {}),
+      ...(dateToStr ? { lte: new Date(dateToStr + "T00:00:00Z") } : {}),
     };
 
     const search = String(q.search ?? q.q ?? q.payee ?? "").trim();
@@ -1264,6 +1269,7 @@ export async function handler(event: any) {
 
     if (!Number.isFinite(Number(amountRaw))) return json(400, { ok: false, error: "amount_cents must be a number" });
     const amountIn = BigInt(Math.trunc(Number(amountRaw)));
+    if (amountIn === 0n) return json(400, { ok: false, error: "amount_cents cannot be zero" });
 
     let amount: bigint = amountIn;
 
@@ -1351,7 +1357,7 @@ export async function handler(event: any) {
 
     // AP invariant: block delete if this entry has ACTIVE bill applications.
     const activeApps = await prisma.billPaymentApplication.count({
-      where: { business_id: biz, entry_id: ent, is_active: true },
+      where: { business_id: biz, account_id: acct, entry_id: ent, is_active: true },
     });
     if (activeApps > 0) {
       return json(409, { ok: false, error: "APPLIED_PAYMENT_IMMUTABLE" });
@@ -1421,10 +1427,10 @@ export async function handler(event: any) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
 
     const existing = await prisma.entry.findFirst({
-      where: { id: ent, business_id: biz, account_id: acct },
+      where: { id: ent, business_id: biz, account_id: acct, deleted_at: { not: null } },
       select: { date: true },
     });
-    if (!existing) return json(404, { ok: false, error: "Entry not found" });
+    if (!existing) return json(404, { ok: false, error: "Entry not found or not deleted" });
 
     // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
     const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
@@ -1435,6 +1441,7 @@ export async function handler(event: any) {
         id: ent,
         business_id: biz,
         account_id: acct,
+        deleted_at: { not: null },
       },
       data: {
         deleted_at: null,
@@ -1567,7 +1574,7 @@ export async function handler(event: any) {
       },
       data: {
         is_adjustment: false,
-        type: existing.amount_cents >= 0 ? "INCOME" : "EXPENSE",
+        type: existing.amount_cents >= 0n ? "INCOME" : "EXPENSE",
         adjusted_at: null,
         adjusted_by_user_id: null,
         adjustment_reason: null,

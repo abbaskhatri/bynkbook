@@ -131,21 +131,26 @@
       if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
 
       // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
-      // If body.date provided, enforce on the new date (string). Otherwise enforce on existing entry date.
-      if (body.date !== undefined) {
-        const ymd = String(body.date ?? "").trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return json(400, { ok: false, error: "date must be YYYY-MM-DD" });
-        const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: ymd });
-        if (!cp.ok) return cp.response;
-      } else {
-        const existing = await prisma.entry.findFirst({
+      // Always check the existing entry's current date — cannot edit entries in closed periods.
+      // If body.date provided, also check the new date — cannot move entries into closed periods.
+      {
+        const existingForCp = await prisma.entry.findFirst({
           where: { id: ent, business_id: biz, account_id: acct },
           select: { date: true },
         });
-        if (!existing) return json(404, { ok: false, error: "Entry not found" });
+        if (!existingForCp) return json(404, { ok: false, error: "Entry not found" });
 
-        const cp = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existing.date });
-        if (!cp.ok) return cp.response;
+        // Block if the entry's current date is in a closed period
+        const cpExisting = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: existingForCp.date });
+        if (!cpExisting.ok) return cpExisting.response;
+
+        // If a new date is being provided, also block if the target date is closed
+        if (body.date !== undefined) {
+          const ymd = String(body.date ?? "").trim();
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return json(400, { ok: false, error: "date must be YYYY-MM-DD" });
+          const cpNew = await assertNotClosedPeriod({ prisma, businessId: biz, dateInput: ymd });
+          if (!cpNew.ok) return cpNew.response;
+        }
       }
 
       // AP invariant: If this entry has ACTIVE bill applications, it becomes immutable for key fields.
@@ -323,9 +328,12 @@ if (body.category_id !== undefined) {
         // Keep legacy adjustment flags in sync for backwards compatibility
         if (nextType === "ADJUSTMENT") {
           data.is_adjustment = true;
-          data.adjusted_at = new Date();
-          data.adjusted_by_user_id = sub;
-          if (data.adjustment_reason === undefined) data.adjustment_reason = current.is_adjustment ? undefined : "Manual adjustment";
+          // Only stamp audit fields when the type is actively being CHANGED to ADJUSTMENT
+          if (data.type !== undefined) {
+            data.adjusted_at = new Date();
+            data.adjusted_by_user_id = sub;
+            if (data.adjustment_reason === undefined) data.adjustment_reason = "Manual adjustment";
+          }
         } else if (current.is_adjustment) {
           // if moving away from ADJUSTMENT, clear flags
           if (data.type !== undefined) {
