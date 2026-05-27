@@ -63,8 +63,8 @@ function isUuid(v: string) {
 
 export function deriveBillStatus(args: { isVoid: boolean; amount: bigint; applied: bigint }) {
   if (args.isVoid) return "VOID";
-  if (args.applied <= 0n) return "OPEN";
-  if (args.applied >= args.amount) return args.applied === args.amount ? "PAID" : "OPEN";
+  if (args.applied <= 0n) return "OPEN"; // zero or negative applied → still OPEN
+  if (args.applied >= args.amount) return "PAID"; // fully or over-applied → PAID
   return "PARTIAL";
 }
 
@@ -645,7 +645,7 @@ export async function handler(event: any) {
         vendor_id: String(vendorId),
         invoice_date: {
           gte: new Date(from + "T00:00:00Z"),
-          lte: new Date(to + "T23:59:59Z"),
+          lte: new Date(to + "T00:00:00Z"),
         },
       },
       orderBy: [{ due_date: "asc" }, { created_at: "desc" }],
@@ -914,8 +914,10 @@ AND (
         .map((x: any) => String(x?.bill_id ?? "").trim())
         .filter((s: string) => !!s);
 
-      const uniqueBillIds: string[] = Array.from(new Set<string>(billIds)).slice(0, 200);
+      // Deduplicate BEFORE slicing so >200-item payloads don't hide duplicates
+      const uniqueBillIds: string[] = Array.from(new Set<string>(billIds));
       if (uniqueBillIds.length !== billIds.length) return { ok: false, status: 400, error: "Duplicate bill_id in applications" };
+      if (uniqueBillIds.length > 200) return { ok: false, status: 400, error: "Too many bill applications (max 200 per payment)" };
 
       const bills = await tx.bill.findMany({
         where: { business_id: biz, id: { in: uniqueBillIds }, vendor_id: entryVendorId, voided_at: null },

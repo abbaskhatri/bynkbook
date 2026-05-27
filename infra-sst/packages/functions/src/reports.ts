@@ -744,10 +744,12 @@ export async function handler(event: any) {
     const sums: Array<{ account_id: string; sum_cents: bigint }> = await prisma.$queryRaw`
       SELECT e.account_id::text as account_id, COALESCE(SUM(e.amount_cents), 0)::bigint as sum_cents
       FROM entry e
+      JOIN account a ON a.id = e.account_id
       WHERE e.business_id = ${biz}::uuid
         AND e.deleted_at IS NULL
         AND e.date <= ${asOfDate}::date
         AND e.account_id = ANY(${ids}::uuid[])
+        AND (a.opening_balance_date IS NULL OR e.date >= a.opening_balance_date::date)
         AND NOT (
           UPPER(coalesce(e.type, '')) = 'OPENING'
           OR lower(coalesce(e.payee, '')) = 'opening balance'
@@ -855,6 +857,13 @@ export async function handler(event: any) {
   if (path === `/v1/businesses/${biz}/reports/ap/aging/${String(pp(event)?.vendorId ?? "")}`) {
     const vendorId = String(pp(event)?.vendorId ?? "").trim();
     if (!vendorId) return json(400, { ok: false, error: "Missing vendorId" });
+
+    // Verify vendor belongs to this business before running raw SQL
+    const vendorOk = await prisma.vendor.findFirst({
+      where: { id: vendorId, business_id: biz },
+      select: { id: true },
+    });
+    if (!vendorOk) return json(404, { ok: false, error: "Vendor not found" });
 
     const asOfYmd = toYmd;
     const asOfDate = toUtcStart(asOfYmd);

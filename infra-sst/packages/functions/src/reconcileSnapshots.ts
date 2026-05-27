@@ -1,7 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 
@@ -409,9 +409,23 @@ export async function handler(event: any) {
       return json(400, { ok: false, error: e?.message || "Failed to compute snapshot" });
     }
 
-    // Create snapshot row first to get ID for the S3 key prefix
+    // Generate snapshot ID upfront so S3 keys can be computed before DB row is created.
+    // This avoids orphan DB rows if S3 upload fails (no row created until S3 succeeds).
+    const snapshotId = randomUUID();
+    const basePrefix = `private/biz/${biz}/reconcile-snapshots/${acct}/${month}/${snapshotId}`;
+    const bankKey = `${basePrefix}/bank.csv`;
+    const matchesKey = `${basePrefix}/matches.csv`;
+    const auditKey = `${basePrefix}/audit.csv`;
+
+    // Upload to S3 first — if this fails, no DB row is written and no orphan is created.
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: bankKey, Body: computed.csv.bankCsv, ContentType: "text/csv" }));
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: matchesKey, Body: computed.csv.matchesCsv, ContentType: "text/csv" }));
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: auditKey, Body: computed.csv.auditCsv, ContentType: "text/csv" }));
+
+    // All S3 uploads succeeded — now persist the DB row with correct S3 keys already filled in.
     const created = await prisma.reconcileSnapshot.create({
       data: {
+        id: snapshotId,
         business_id: biz,
         account_id: acct,
         month,
@@ -423,28 +437,14 @@ export async function handler(event: any) {
         entries_matched_count: computed.counts.entries_matched_count,
         revert_count: computed.counts.revert_count,
         remaining_abs_cents: computed.remaining_abs_cents,
-        bank_csv_s3_key: "",
-        matches_csv_s3_key: "",
-        audit_csv_s3_key: "",
+        bank_csv_s3_key: bankKey,
+        matches_csv_s3_key: matchesKey,
+        audit_csv_s3_key: auditKey,
         bank_csv_sha256: computed.csv.bankSha256,
         matches_csv_sha256: computed.csv.matchesSha256,
         audit_csv_sha256: computed.csv.auditSha256,
       },
       select: { id: true, created_at: true },
-    });
-
-    const basePrefix = `private/biz/${biz}/reconcile-snapshots/${acct}/${month}/${created.id}`;
-    const bankKey = `${basePrefix}/bank.csv`;
-    const matchesKey = `${basePrefix}/matches.csv`;
-    const auditKey = `${basePrefix}/audit.csv`;
-
-    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: bankKey, Body: computed.csv.bankCsv, ContentType: "text/csv" }));
-    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: matchesKey, Body: computed.csv.matchesCsv, ContentType: "text/csv" }));
-    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: auditKey, Body: computed.csv.auditCsv, ContentType: "text/csv" }));
-
-    await prisma.reconcileSnapshot.update({
-      where: { id: created.id },
-      data: { bank_csv_s3_key: bankKey, matches_csv_s3_key: matchesKey, audit_csv_s3_key: auditKey },
     });
 
     await logActivity(prisma, {

@@ -32,6 +32,11 @@ function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Returns midnight UTC of the next calendar day (exclusive upper bound for date-range queries). */
+function nextDayUtc(d: Date) {
+  return new Date(new Date(`${ymd(d)}T00:00:00Z`).getTime() + 24 * 60 * 60 * 1000);
+}
+
 function monthKey(d: Date) {
   return ymd(d).slice(0, 7);
 }
@@ -66,8 +71,10 @@ export async function handler(event: any) {
   const role = await requireMembership(prisma, businessId, sub);
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  // MoM baseline: compare this range vs prior equal-length range
-  const days = Math.max(7, Math.min(62, Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000)) || 30));
+  // MoM baseline: compare this range vs prior equal-length range.
+  // Use actual provided range length (no artificial cap — let caller decide the window).
+  const rawDays = Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
+  const days = rawDays > 0 ? rawDays : 30;
   const prevTo = new Date(from.getTime() - 1 * 24 * 60 * 60 * 1000);
   const prevFrom = new Date(prevTo.getTime() - days * 24 * 60 * 60 * 1000);
 
@@ -80,7 +87,7 @@ export async function handler(event: any) {
         type: { in: ["INCOME", "EXPENSE"] },
         date: {
           gte: new Date(`${ymd(a)}T00:00:00Z`),
-          lte: new Date(`${ymd(b)}T00:00:00Z`),
+          lt: nextDayUtc(b),
         },
       },
       _sum: { amount_cents: true },
@@ -103,7 +110,7 @@ export async function handler(event: any) {
         type,
         date: {
           gte: new Date(`${ymd(a)}T00:00:00Z`),
-          lte: new Date(`${ymd(b)}T00:00:00Z`),
+          lt: nextDayUtc(b),
         },
       },
       _sum: { amount_cents: true },
@@ -129,7 +136,7 @@ export async function handler(event: any) {
       type: "EXPENSE",
       date: {
         gte: new Date(`${ymd(from)}T00:00:00Z`),
-        lte: new Date(`${ymd(to)}T00:00:00Z`),
+        lt: nextDayUtc(to),
       },
       payee: { not: null },
     },
