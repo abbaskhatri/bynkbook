@@ -348,16 +348,20 @@ async function findPossibleCreateEntryDuplicates(args: {
     take: 10,
   });
 
-  // Extract a reference number from the bank transaction's description so we
-  // can compare it against any manual entry's memo below.
-  const bankRef = extractRefFromText(bankTxn.name ?? "");
+  // Build the richest possible description text for this bank transaction.
+  // bankTransactionSearchText includes name + raw.original_description, merchant_name,
+  // payment_channel, etc. — Plaid reference/trace numbers almost always live in
+  // original_description, not in the short name, so using the full text is essential
+  // for both payee similarity and reference-number extraction.
+  const bankFullText = bankTransactionSearchText(bankTxn);
+  const bankRef = extractRefFromText(bankFullText);
 
   return rows
     // An entry already linked to any bank transaction is a different real-world
     // transaction by definition — including recurring charges with same amount/payee.
     .filter((entry: any) => !String(entry?.sourceBankTransactionId ?? "").trim())
     .filter(isDuplicatePreflightEligibleEntry)
-    .filter((entry: any) => hasSimilarPayee(bankTxn.name, entry))
+    .filter((entry: any) => hasSimilarPayee(bankFullText, entry))
     // If the bank transaction and the manual entry both carry a labeled reference
     // number and those numbers differ, they are definitely different transactions.
     .filter((entry: any) => {

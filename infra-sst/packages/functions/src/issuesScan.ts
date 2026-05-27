@@ -459,23 +459,30 @@ export async function handler(event: any) {
   // Business rules:
   // - OPENING: never requires category
   // - ADJUSTMENT: never requires category
-  // - TRANSFER: never requires category
+  // - TRANSFER: never requires category (including entries with transfer_id or entry_kind=TRANSFER)
   // - CASH account entries: never require category
+  // - VOID/VOIDED/DELETED entries: should never surface issues
   if (includeMissingCategory) {
     for (const e of entries) {
       const typeUpper = String((e as any).type ?? "").toUpperCase();
+      const statusUpper = String((e as any).status ?? "").toUpperCase();
+      const kindUpper = String((e as any).entry_kind ?? "").toUpperCase();
       const accountTypeUpper = String((e as any)?.account?.type ?? "").toUpperCase();
       const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
 
       const isOpening =
         typeUpper === "OPENING" ||
+        kindUpper === "OPENING" ||
         payeeLower.startsWith("opening balance");
 
-      const isAdjustment = typeUpper === "ADJUSTMENT";
-      const isTransfer = typeUpper === "TRANSFER";
+      const isAdjustment = typeUpper === "ADJUSTMENT" || (e as any).is_adjustment === true;
+      // Catch all transfer variants: type=TRANSFER, entry_kind=TRANSFER, or transfer_id is set
+      const isTransfer = typeUpper === "TRANSFER" || kindUpper === "TRANSFER" || !!(e as any).transfer_id;
       const isCashAccount = accountTypeUpper === "CASH";
+      // Voided/deleted entries should never surface category issues
+      const isVoided = statusUpper === "VOID" || statusUpper === "VOIDED" || statusUpper === "DELETED";
 
-      if (isOpening || isAdjustment || isTransfer || isCashAccount) {
+      if (isOpening || isAdjustment || isTransfer || isCashAccount || isVoided) {
         continue;
       }
 
@@ -496,7 +503,11 @@ export async function handler(event: any) {
   // Stale checks
   for (const e of entries) {
     const typeUpper = String((e as any).type ?? "").toUpperCase();
+    const statusUpper = String((e as any).status ?? "").toUpperCase();
     const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
+
+    // Voided/deleted entries should never surface stale-check issues
+    if (statusUpper === "VOID" || statusUpper === "VOIDED" || statusUpper === "DELETED") continue;
 
     if (
       typeUpper === "OPENING" ||
@@ -525,8 +536,25 @@ export async function handler(event: any) {
     }
   }
 
+  // Returns every bank transaction ID that is linked to an entry, combining:
+  //   1. sourceBankTransactionId  — set when the entry was created via the create-entry flow
+  //   2. active match groups      — set when a manually-created entry was later reconciled
+  // Using both sources ensures that entries reconciled either way are treated as
+  // "belongs to a specific bank transaction" and are never flagged as duplicates of
+  // entries belonging to a different bank transaction.
+  function getEntryLinkedBankIds(entryId: string, directBankTxnId: string): string[] {
+    const ids: string[] = [];
+    if (directBankTxnId) ids.push(directBankTxnId);
+    const groupIds = activeMatchGroupIdsByEntryId.get(entryId) ?? new Set<string>();
+    for (const groupId of groupIds) {
+      const bIds = bankIdsByMatchGroupId.get(groupId) ?? new Set<string>();
+      for (const bId of bIds) ids.push(bId);
+    }
+    return Array.from(new Set(ids));
+  }
+
   // Duplicate groups: CHECK window 30d, non-check window 7d
-  const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean; bankTxnId: string; ref: string | null }>>();
+  const groups = new Map<string, Array<{ id: string; day: number; ymd: string; isCheck: boolean; linkedBankIds: string[]; ref: string | null }>>();
 
   for (const e of entries) {
     if (!isDuplicateScanEligibleEntry(e)) continue;
@@ -559,11 +587,11 @@ export async function handler(event: any) {
       ? `${bucket}|${amt}|${payeeKey}`
       : `${bucket}|${amt}|${methodUpper}|${payeeKey}`;
 
-    const bankTxnId = sourceBankTxnId(e);
+    const linkedBankIds = getEntryLinkedBankIds(String(e.id), sourceBankTxnId(e));
     const ref = extractEntryRef(e, bankDescs);
     const arr = groups.get(key);
-    if (arr) arr.push({ id: e.id, day, ymd, isCheck, bankTxnId, ref });
-    else groups.set(key, [{ id: e.id, day, ymd, isCheck, bankTxnId, ref }]);
+    if (arr) arr.push({ id: e.id, day, ymd, isCheck, linkedBankIds, ref });
+    else groups.set(key, [{ id: e.id, day, ymd, isCheck, linkedBankIds, ref }]);
   }
 
   for (const [key, items] of groups.entries()) {
@@ -598,8 +626,12 @@ export async function handler(event: any) {
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         if (items[j].day - items[i].day > windowDays) break;
-        // Entries linked to different bank transactions are provably different real-world transactions
-        if (items[i].bankTxnId && items[j].bankTxnId && items[i].bankTxnId !== items[j].bankTxnId) continue;
+        // If both entries are linked to bank transactions (via sourceBankTransactionId or match groups)
+        // and none of those bank transactions overlap, they are provably different real-world events.
+        if (items[i].linkedBankIds.length > 0 && items[j].linkedBankIds.length > 0) {
+          const jIds = new Set(items[j].linkedBankIds);
+          if (!items[i].linkedBankIds.some(id => jIds.has(id))) continue;
+        }
         // Different labeled reference numbers (REF:, TRACE:, ID:, etc.) mean different transactions
         if (items[i].ref && items[j].ref && items[i].ref !== items[j].ref) continue;
         union(i, j);
@@ -652,7 +684,7 @@ export async function handler(event: any) {
     isCheck: boolean;
     type: string;
     exactKey: string;
-    bankTxnId: string;
+    linkedBankIds: string[];
     ref: string | null;
   };
 
@@ -679,7 +711,7 @@ export async function handler(event: any) {
       isCheck: String(e.method ?? "").toUpperCase() === "CHECK",
       type: String(e.type ?? "").trim().toUpperCase(),
       exactKey: duplicateExactBaseKey(e),
-      bankTxnId: sourceBankTxnId(e),
+      linkedBankIds: getEntryLinkedBankIds(String(e.id), sourceBankTxnId(e)),
       ref: extractEntryRef(e, bankDescriptions),
     });
   }
@@ -719,8 +751,12 @@ export async function handler(event: any) {
       // Exact duplicate groups keep their original group_key, copy, and LEGIT_DUP suppression.
       if (a.exactKey && b.exactKey && a.exactKey === b.exactKey) continue;
 
-      // Entries linked to different bank transactions are provably different real-world transactions
-      if (a.bankTxnId && b.bankTxnId && a.bankTxnId !== b.bankTxnId) continue;
+      // If both entries are linked to bank transactions (via sourceBankTransactionId or match groups)
+      // and none of those bank transactions overlap, they are provably different real-world events.
+      if (a.linkedBankIds.length > 0 && b.linkedBankIds.length > 0) {
+        const bIds = new Set(b.linkedBankIds);
+        if (!a.linkedBankIds.some(id => bIds.has(id))) continue;
+      }
       // Different labeled reference numbers mean different transactions
       if (a.ref && b.ref && a.ref !== b.ref) continue;
 
