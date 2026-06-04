@@ -604,7 +604,7 @@ api.route(
 // Bundle E/F: AI surfaces (read-only + suggestion-only; businessId in body)
 api.route("POST /v1/ai/explain-entry", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/ai/explain-report", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-api.route("POST /v1/ai/suggest-category", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+// POST /v1/ai/suggest-category retired 2026-06-04. Use POST /v1/businesses/{businessId}/ai/category-suggestions instead.
 api.route("POST /v1/ai/suggest-reconcile-bank", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/ai/suggest-reconcile-entry", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("POST /v1/ai/chat", aiHandler, { auth: { jwt: { authorizer: authorizer.id } } });
