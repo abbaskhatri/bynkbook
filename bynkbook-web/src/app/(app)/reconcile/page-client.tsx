@@ -3799,19 +3799,24 @@ const displayBankActiveList = useMemo(() => {
                           );
                         })}
                       </div>
-                      <label className="mt-2 block">
-                        <span className="text-[11px] font-semibold text-bb-text-muted">
-                          Type "Create a separate ledger entry" to create anyway.
-                        </span>
+                      <div className="mt-2 flex items-start gap-2 rounded-md border border-bb-border bg-bb-surface-card px-2 py-2">
                         <input
-                          className={[
-                            "mt-1 h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card text-bb-text",
-                            ringFocus,
-                          ].join(" ")}
-                          value={createEntryDuplicateConfirm}
-                          onChange={(e) => setCreateEntryDuplicateConfirm(e.target.value)}
+                          id="reconcile-create-entry-allow-duplicate"
+                          type="checkbox"
+                          className={`mt-0.5 h-4 w-4 ${ringFocus}`}
+                          checked={createEntryDuplicateConfirm === "Create a separate ledger entry"}
+                          onChange={(e) =>
+                            setCreateEntryDuplicateConfirm(
+                              e.target.checked ? "Create a separate ledger entry" : ""
+                            )
+                          }
                         />
-                      </label>
+                        <label htmlFor="reconcile-create-entry-allow-duplicate" className="text-[11px] leading-4 text-bb-text">
+                          I&apos;m sure this is a separate transaction. Common case: recurring charges
+                          (bank fees, NTTA tolls, subscriptions) that look similar to a prior entry but
+                          are a new real-world event. Check this box, then click <b>Create separate entry anyway</b>.
+                        </label>
+                      </div>
                     </div>
                   ) : null}
 
@@ -4811,14 +4816,72 @@ const displayBankActiveList = useMemo(() => {
                             <div className="flex items-center justify-end gap-1">
                               {pendingById[String(t.id)] ? <TinySpinner /> : null}
 
-                              {bulkCreateResultByBankTxnId[String(t.id)] ? (
-                                <span
-                                  className="text-[11px] px-2 py-0.5 rounded-full border border-bb-border text-bb-text"
-                                  title={String(bulkCreateResultByBankTxnId[String(t.id)]?.error ?? "")}
-                                >
-                                  {String(bulkCreateResultByBankTxnId[String(t.id)]?.status ?? "")}
-                                </span>
-                              ) : null}
+                              {bulkCreateResultByBankTxnId[String(t.id)] ? (() => {
+                                const bulkRes = bulkCreateResultByBankTxnId[String(t.id)];
+                                const bulkStatus = String(bulkRes?.status ?? "");
+                                const bulkCode = String(bulkRes?.code ?? "");
+                                const isPossibleDup =
+                                  bulkStatus === "SKIPPED" && bulkCode === "POSSIBLE_DUPLICATE_ENTRY";
+                                return (
+                                  <>
+                                    <span
+                                      className="text-[11px] px-2 py-0.5 rounded-full border border-bb-border text-bb-text"
+                                      title={String(
+                                        bulkRes?.error ??
+                                          (isPossibleDup
+                                            ? "An existing entry near this date looks similar. Click 'Create anyway' if this is a separate recurring charge (NTTA, bank fee, subscription)."
+                                            : "")
+                                      )}
+                                    >
+                                      {isPossibleDup ? "Skipped (possible duplicate)" : bulkStatus}
+                                    </span>
+                                    {isPossibleDup ? (
+                                      <button
+                                        type="button"
+                                        className={`text-[11px] px-2 py-0.5 rounded-md border border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed ${ringFocus}`}
+                                        disabled={pendingById[String(t.id)] === true}
+                                        title="Create separate entry anyway (use for recurring charges)"
+                                        onClick={async (ev) => {
+                                          ev.stopPropagation();
+                                          if (!selectedBusinessId || !selectedAccountId) return;
+                                          const bid = String(t.id);
+                                          markPending(bid);
+                                          try {
+                                            await createEntryFromBankTransaction({
+                                              businessId: selectedBusinessId,
+                                              accountId: selectedAccountId,
+                                              bankTransactionId: bid,
+                                              autoMatch: bulkCreateAutoMatch === true,
+                                              memo: "",
+                                              method: "",
+                                              category_id: "",
+                                              suggested_category_id: "",
+                                              allowPossibleDuplicate: true,
+                                            });
+                                            setBulkCreateResultByBankTxnId((m) => {
+                                              const next = { ...m };
+                                              next[bid] = { ...next[bid], status: "CREATED", code: "" };
+                                              return next;
+                                            });
+                                            await refreshTablesFully({
+                                              preserveOnEmpty: true,
+                                              skipLegacyMatches: true,
+                                              silent: true,
+                                            });
+                                            await refreshIssuesAfterBankEntryCreate();
+                                          } catch (err: any) {
+                                            applyMutationError(err, "Can’t create entry");
+                                          } finally {
+                                            clearPending(bid);
+                                          }
+                                        }}
+                                      >
+                                        Create anyway
+                                      </button>
+                                    ) : null}
+                                  </>
+                                );
+                              })() : null}
 
                               {bankTab === "matched" ? (
                                 <button
