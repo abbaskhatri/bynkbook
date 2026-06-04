@@ -763,14 +763,9 @@ export default function DashboardPageClient() {
     });
   }, [cashflowQ.data, cashBalanceCents]);
 
-  // Hover (tooltip) for Cash Position chart
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [hoverX, setHoverX] = useState<number | null>(null);
-
   // ---------- Bundle F: Ask Your Business (aggregates-only chat) ----------
   type ChatMsg = { role: "user" | "assistant"; text: string; ts: number };
 
-  const [chatOpen, setChatOpen] = useState(false);
   const [chatQ, setChatQ] = useState("");
   const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);

@@ -35,8 +35,6 @@ import {
 
 import { RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 
-const ZERO = BigInt(0);
-
 import { formatUsd, toBigIntSafe } from "@/lib/money";
 
 const formatUsdFromCents = (cents: bigint) => formatUsd(cents);
