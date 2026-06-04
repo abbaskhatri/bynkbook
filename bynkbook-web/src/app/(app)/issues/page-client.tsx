@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchAuthSession } from "aws-amplify/auth";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 
+import { apiFetch } from "@/lib/api/client";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { listAccountIssues } from "@/lib/api/issues";
 
@@ -202,36 +202,16 @@ export default function IssuesPageClient() {
     setScanBusy(true);
 
     try {
-      const session = await fetchAuthSession();
-      const token = session.tokens?.accessToken?.toString();
-      if (!token) throw new Error("Missing access token");
-
-      const base =
-        process.env.NEXT_PUBLIC_API_URL ||
-        process.env.NEXT_PUBLIC_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_ENDPOINT ||
-        "";
-
-      if (!base) throw new Error("Missing NEXT_PUBLIC_API_URL");
-
-      const url = `${base}/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`;
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          includeMissingCategory: false,
-          dryRun: false,
-        }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`Scan failed: ${res.status} ${text}`.trim());
-      }
+      await apiFetch(
+        `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            includeMissingCategory: false,
+            dryRun: false,
+          }),
+        }
+      );
 
       // Targeted invalidation only
       void qc.invalidateQueries({

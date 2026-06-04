@@ -21,7 +21,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchAuthSession } from "aws-amplify/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -1879,40 +1878,16 @@ export default function LedgerPageClient() {
     setScanBusy(true);
 
     try {
-      const session = await fetchAuthSession();
-      const token = session.tokens?.accessToken?.toString();
-      if (!token) throw new Error("Missing access token");
-
-      const base =
-        process.env.NEXT_PUBLIC_API_URL ||
-        process.env.NEXT_PUBLIC_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_ENDPOINT ||
-        "";
-
-      if (!base) throw new Error("Missing NEXT_PUBLIC_API_URL");
-
-      const url = `${base}/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`;
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          includeMissingCategory: true,
-          dryRun: false,
-        }),
-      });
-
-      if (!res.ok) {
-        try {
-          await res.text();
-        } catch { }
-        const err: any = new Error("Issue scan failed");
-        err.status = res.status;
-        throw err;
-      }
+      await apiFetch(
+        `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/issues/scan`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            includeMissingCategory: true,
+            dryRun: false,
+          }),
+        }
+      );
 
       // Targeted refresh: only issues queries for this account (no storms)
       void qc.invalidateQueries({
