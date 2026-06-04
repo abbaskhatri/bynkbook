@@ -346,10 +346,10 @@ export default function CategoryMigrationPageClient() {
                           });
                         }}
                       >
-                        <option value="__CREATE_SAME__">Create "{r.memoValue}"</option>
+                        <option value="__CREATE_SAME__">Create &ldquo;{r.memoValue}&rdquo;</option>
                         {categories.map((c) => (
                           <option key={c.id} value={c.id}>
-                            Use "{c.name}"
+                            Use &ldquo;{c.name}&rdquo;
                           </option>
                         ))}
                       </select>

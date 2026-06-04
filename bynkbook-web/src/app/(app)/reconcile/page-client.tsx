@@ -5596,7 +5596,7 @@ const displayBankActiveList = useMemo(() => {
         {openMatch ? (
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount. The bar below turns green when you're ready.</div>
+            <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount. The bar below turns green when you&apos;re ready.</div>
 
             <div className="mb-2">
               <input
@@ -6153,7 +6153,7 @@ const displayBankActiveList = useMemo(() => {
         <div className="flex flex-col max-h-[70vh]">
           <div className="flex-1 overflow-y-auto pr-1">
             <div className="text-xs text-bb-text-muted mb-2">
-              Select bank transactions that sum exactly to the ledger entry amount. The bar below turns green when you're ready.
+              Select bank transactions that sum exactly to the ledger entry amount. The bar below turns green when you&apos;re ready.
             </div>
 
             <div className="mb-2">

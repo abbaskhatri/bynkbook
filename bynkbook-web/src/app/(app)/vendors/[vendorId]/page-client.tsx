@@ -9,7 +9,6 @@ import { AppDialog } from "@/components/primitives/AppDialog";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
 import { BusyButton } from "@/components/primitives/BusyButton";
-import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { ringFocus } from "@/components/primitives/tokens";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +35,6 @@ import {
 import { apiFetch } from "@/lib/api/client";
 
 import { UploadPanel } from "@/components/uploads/UploadPanel";
-import { UploadsList } from "@/components/uploads/UploadsList";
 
 import { formatUsd, parseMoneyToCents, toBigIntSafe } from "@/lib/money";
 
