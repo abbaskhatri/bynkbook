@@ -5367,7 +5367,7 @@ export default function LedgerPageClient() {
         }
       >
         <div className="space-y-4 text-sm text-bb-text">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+          <div className="rounded-lg border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-bb-status-warning-fg">
             Deleting will first unmatch the bank transaction, then move this ledger entry to Deleted. The bank transaction will return to the unmatched table.
           </div>
 
@@ -5380,7 +5380,7 @@ export default function LedgerPageClient() {
                 <dt className="text-bb-text-muted">Payee</dt>
                 <dd className="min-w-0 break-words">{matchedDeleteRow?.payee || "—"}</dd>
                 <dt className="text-bb-text-muted">Amount</dt>
-                <dd className={matchedDeleteRow?.amountNeg ? "text-red-700" : "text-emerald-700"}>
+                <dd className={matchedDeleteRow?.amountNeg ? "text-bb-amount-negative" : "text-bb-amount-positive"}>
                   {matchedDeleteRow?.amountStr ?? "—"}
                 </dd>
                 <dt className="text-bb-text-muted">Ref</dt>
@@ -5427,7 +5427,7 @@ export default function LedgerPageClient() {
           </div>
 
           {matchedDeleteDialog?.error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {matchedDeleteDialog.error}
             </div>
           ) : null}

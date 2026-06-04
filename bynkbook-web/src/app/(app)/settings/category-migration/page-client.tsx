@@ -301,7 +301,7 @@ export default function CategoryMigrationPageClient() {
           />
 
           {err ? (
-            <div className="text-sm text-red-600" role="alert">
+            <div className="text-sm text-destructive" role="alert">
               {err}
             </div>
           ) : null}

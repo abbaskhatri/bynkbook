@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
-import { userFacingErrorMessage } from "@/lib/errors";
+import { userFacingErrorMessage } from "@/lib/errors/app-error";
 import { formatDateOnlyShort, normalizeDateOnly } from "@/lib/dateOnly";
 import { parseMoneyToCents } from "@/lib/money";
 
