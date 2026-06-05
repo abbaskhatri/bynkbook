@@ -5134,6 +5134,7 @@ export default function LedgerPageClient() {
                   canLoadMore={canLoadMoreEntries}
                   isLoadingMore={entriesQ.isFetching}
                   onLoadMore={() => setLoadedPageCount((n) => n + 1)}
+                  autoLoadMore={!isNeedsReconcileView}
                   canPrev={canPrev}
                   canNext={canNext}
                   totalsScopeLabel={isNeedsReconcileView ? "Queue totals" : "Page totals"}
