@@ -1919,6 +1919,39 @@ export default function LedgerPageClient() {
   }
 
   const payeeInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Keyboard shortcuts:
+  // - "n" focuses the add-row payee input (start a new entry)
+  // - "/" focuses the search-by-payee input
+  // Both ignore when the user is already typing somewhere (input / textarea /
+  // contentEditable) or when a modifier key is held, so they never steal
+  // focus from typing.
+  useEffect(() => {
+    function isEditableTarget(t: EventTarget | null): boolean {
+      const el = t as HTMLElement | null;
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (el.isContentEditable) return true;
+      return false;
+    }
+    function onKey(ev: KeyboardEvent) {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if (isEditableTarget(ev.target)) return;
+      if (ev.key === "n" || ev.key === "N") {
+        ev.preventDefault();
+        payeeInputRef.current?.focus();
+        payeeInputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      } else if (ev.key === "/") {
+        ev.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select?.();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const categoryInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
 
@@ -3087,8 +3120,9 @@ export default function LedgerPageClient() {
           </div>
 
           <input
+            ref={searchInputRef}
             className={[inputH7, "w-[220px] min-w-0"].join(" ")}
-            placeholder="Search payee..."
+            placeholder="Search payee… (press /)"
             aria-label="Search by payee"
             value={searchPayee}
             onChange={(e) => setSearchPayee(e.target.value)}
@@ -4458,9 +4492,13 @@ export default function LedgerPageClient() {
                                 return;
                               }
 
+                              // Duplicate uses TODAY's date (typical "create same entry again"
+                              // semantics for recurring charges). Original date can be edited
+                              // immediately because afterCreateEdit drops the new row into
+                              // edit mode.
                               createMut.mutate({
                                 tempId: `dup_${Date.now()}`,
-                                date: r.date,
+                                date: todayYmd(),
                                 ref: "",
                                 payee: r.payee,
                                 type: uiTypeFromRaw(r.rawType),
