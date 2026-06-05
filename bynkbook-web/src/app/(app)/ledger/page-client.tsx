@@ -1271,8 +1271,14 @@ export default function LedgerPageClient() {
     () => (isNeedsReconcileView ? reconcileQueueRowsAll : filteredRowsAll),
     [isNeedsReconcileView, reconcileQueueRowsAll, filteredRowsAll]
   );
-  const startIdx = (page - 1) * rowsPerPage;
-  const endIdx = page * rowsPerPage;
+  // Needs Reconcile view: show the whole queue on a single page (combined with
+  // the auto-load effect above, the user sees every unreconciled entry without
+  // paginating or clicking Load more). Virtualization keeps render cheap.
+  const effectiveRowsPerPage = isNeedsReconcileView
+    ? Math.max(rowsPerPage, displayRowsAll.length || rowsPerPage)
+    : rowsPerPage;
+  const startIdx = (page - 1) * effectiveRowsPerPage;
+  const endIdx = page * effectiveRowsPerPage;
   const pageRows = useMemo(() => displayRowsAll.slice(startIdx, endIdx), [displayRowsAll, startIdx, endIdx]);
 
   // Stable key for suggestion targets (prevents effect loops)
@@ -1429,9 +1435,24 @@ export default function LedgerPageClient() {
   const totalEntryCount = typeof entriesMeta?.totalCount === "number" ? entriesMeta.totalCount : undefined;
   const hasMoreOnServer = !!entriesMeta?.hasMore;
   const canLoadMoreEntries = hasMoreOnServer && !entriesQ.isFetching;
+
+  // Needs Reconcile view: auto-load every page so the user sees ALL EXPECTED /
+  // PARTIAL entries at once. The list is filtered to a small subset locally
+  // (only EXPECTED / PARTIAL income/expense rows), so making the user click
+  // "Load more" to surface entries they then have to act on is pure friction.
+  // Cap the auto-load at a sanity ceiling so a corrupted hasMore loop can't
+  // pin the browser. 50 pages * 200 rows/page = 10,000 entries — well above
+  // what any real-world account holds in the unreconciled queue.
+  useEffect(() => {
+    if (!isNeedsReconcileView) return;
+    if (!hasMoreOnServer) return;
+    if (entriesQ.isFetching) return;
+    if (loadedPageCount >= 50) return;
+    setLoadedPageCount((n) => n + 1);
+  }, [isNeedsReconcileView, hasMoreOnServer, entriesQ.isFetching, loadedPageCount]);
   const canNext = endIdx < displayRowsAll.length;
   const canPrev = page > 1;
-  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / effectiveRowsPerPage));
   const loadedCountLabel =
     totalEntryCount !== undefined
       ? `${loadedEntryCount} of ${totalEntryCount} loaded`
