@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -29,6 +29,13 @@ export function TotalsFooter(props: {
   onLoadMore?: () => void;
   canLoadMore?: boolean;
   isLoadingMore?: boolean;
+  /**
+   * When true, automatically calls onLoadMore() as soon as the Load-More
+   * button scrolls into view (infinite scroll). The button stays visible
+   * as a fallback while the next page is loading and as a manual
+   * trigger if the observer ever misses.
+   */
+  autoLoadMore?: boolean;
   canPrev: boolean;
   canNext: boolean;
 
@@ -55,6 +62,7 @@ export function TotalsFooter(props: {
     onLoadMore,
     canLoadMore,
     isLoadingMore,
+    autoLoadMore,
     canPrev,
     canNext,
     incomeText,
@@ -67,6 +75,39 @@ export function TotalsFooter(props: {
   } = props;
 
   const navBtnClass = iconButtonH7;
+
+  // Infinite scroll: when autoLoadMore is on, observe the Load-More button
+  // and fire onLoadMore once it enters the viewport. Guards prevent the
+  // observer from re-firing while a fetch is in-flight, and re-arm when
+  // the button leaves the viewport so we only trigger on fresh enters.
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const firedForCurrentVisitRef = useRef(false);
+  useEffect(() => {
+    if (!autoLoadMore) return;
+    if (!loadMoreText) return;
+    const target = loadMoreRef.current;
+    if (!target) return;
+    if (typeof IntersectionObserver === "undefined") return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) {
+            firedForCurrentVisitRef.current = false;
+            continue;
+          }
+          if (firedForCurrentVisitRef.current) continue;
+          if (!canLoadMore) continue;
+          if (isLoadingMore) continue;
+          firedForCurrentVisitRef.current = true;
+          onLoadMore?.();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    obs.observe(target);
+    return () => obs.disconnect();
+  }, [autoLoadMore, loadMoreText, canLoadMore, isLoadingMore, onLoadMore]);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 text-xs text-bb-text-muted">
@@ -134,14 +175,16 @@ export function TotalsFooter(props: {
         ) : null}
 
         {loadMoreText ? (
-          <Button
-            variant="outline"
-            className="h-7 rounded-md px-2 text-xs"
-            disabled={!canLoadMore || isLoadingMore}
-            onClick={() => onLoadMore?.()}
-          >
-            {loadMoreText}
-          </Button>
+          <div ref={loadMoreRef}>
+            <Button
+              variant="outline"
+              className="h-7 rounded-md px-2 text-xs"
+              disabled={!canLoadMore || isLoadingMore}
+              onClick={() => onLoadMore?.()}
+            >
+              {isLoadingMore ? "Loading…" : loadMoreText}
+            </Button>
+          </div>
         ) : null}
       </div>
 
