@@ -611,34 +611,6 @@ export default function LedgerPageClient() {
     setPage(1);
   }, [ledgerViewMode]);
 
-  // Smart default: when the user opens the ledger for an account that has
-  // EXPECTED / PARTIAL entries waiting, land on the Needs Reconcile tab so
-  // they see the work to do, not the full history. Only fires once per
-  // (business, account) combo - subsequent manual tab choices stick.
-  const autoTabAppliedKey = useRef<string>("");
-  useEffect(() => {
-    if (!selectedBusinessId || !selectedAccountId) return;
-    if (entriesQ.isLoading) return;
-
-    const key = `${selectedBusinessId}:${selectedAccountId}`;
-    if (autoTabAppliedKey.current === key) return;
-
-    const list = entriesQ.data ?? [];
-    if (!list.length) {
-      // Mark as applied so we don't re-evaluate every time data refetches.
-      autoTabAppliedKey.current = key;
-      return;
-    }
-
-    const hasUnreconciled = list.some((e: any) => {
-      const status = String(e?.status ?? "EXPECTED").toUpperCase();
-      return status === "EXPECTED" || status === "PARTIAL";
-    });
-
-    autoTabAppliedKey.current = key;
-    if (hasUnreconciled) setLedgerViewMode("needsReconcile");
-  }, [selectedBusinessId, selectedAccountId, entriesQ.data, entriesQ.isLoading]);
-
   // ---------- Bundle F: Ledger anomalies (read-only) ----------
   const anomaliesQ = useQuery({
     queryKey: ["ledgerAnomalies", selectedBusinessId, selectedAccountId, filterFrom || allTimeStartYmd(), filterTo || todayYmd()],
@@ -1299,14 +1271,8 @@ export default function LedgerPageClient() {
     () => (isNeedsReconcileView ? reconcileQueueRowsAll : filteredRowsAll),
     [isNeedsReconcileView, reconcileQueueRowsAll, filteredRowsAll]
   );
-  // Needs Reconcile view: show the whole queue on a single page (combined with
-  // the auto-load effect above, the user sees every unreconciled entry without
-  // paginating or clicking Load more). Virtualization keeps render cheap.
-  const effectiveRowsPerPage = isNeedsReconcileView
-    ? Math.max(rowsPerPage, displayRowsAll.length || rowsPerPage)
-    : rowsPerPage;
-  const startIdx = (page - 1) * effectiveRowsPerPage;
-  const endIdx = page * effectiveRowsPerPage;
+  const startIdx = (page - 1) * rowsPerPage;
+  const endIdx = page * rowsPerPage;
   const pageRows = useMemo(() => displayRowsAll.slice(startIdx, endIdx), [displayRowsAll, startIdx, endIdx]);
 
   // Stable key for suggestion targets (prevents effect loops)
@@ -1463,24 +1429,9 @@ export default function LedgerPageClient() {
   const totalEntryCount = typeof entriesMeta?.totalCount === "number" ? entriesMeta.totalCount : undefined;
   const hasMoreOnServer = !!entriesMeta?.hasMore;
   const canLoadMoreEntries = hasMoreOnServer && !entriesQ.isFetching;
-
-  // Needs Reconcile view: auto-load every page so the user sees ALL EXPECTED /
-  // PARTIAL entries at once. The list is filtered to a small subset locally
-  // (only EXPECTED / PARTIAL income/expense rows), so making the user click
-  // "Load more" to surface entries they then have to act on is pure friction.
-  // Cap the auto-load at a sanity ceiling so a corrupted hasMore loop can't
-  // pin the browser. 50 pages * 200 rows/page = 10,000 entries — well above
-  // what any real-world account holds in the unreconciled queue.
-  useEffect(() => {
-    if (!isNeedsReconcileView) return;
-    if (!hasMoreOnServer) return;
-    if (entriesQ.isFetching) return;
-    if (loadedPageCount >= 50) return;
-    setLoadedPageCount((n) => n + 1);
-  }, [isNeedsReconcileView, hasMoreOnServer, entriesQ.isFetching, loadedPageCount]);
   const canNext = endIdx < displayRowsAll.length;
   const canPrev = page > 1;
-  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / effectiveRowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / rowsPerPage));
   const loadedCountLabel =
     totalEntryCount !== undefined
       ? `${loadedEntryCount} of ${totalEntryCount} loaded`
