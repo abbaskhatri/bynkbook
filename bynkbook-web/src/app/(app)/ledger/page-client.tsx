@@ -113,7 +113,7 @@ import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
-import { inputH7, selectTriggerClass } from "@/components/primitives/tokens";
+import { inputH7, ringFocus, selectTriggerClass } from "@/components/primitives/tokens";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { TotalsFooter } from "@/components/ledger/totals-footer";
 
@@ -3337,6 +3337,94 @@ export default function LedgerPageClient() {
               </div>
             ) : null}
           </div>
+
+          {/* Active filter chips — visible even when Advanced is collapsed,
+              so the user never loses track of what is filtering the table. */}
+          {(() => {
+            type Chip = { key: string; label: string; clear: () => void };
+            const chips: Chip[] = [];
+
+            if (debouncedPayee.trim()) {
+              chips.push({
+                key: "payee",
+                label: `Payee: ${debouncedPayee.trim()}`,
+                clear: () => { setSearchPayee(""); setPage(1); },
+              });
+            }
+            if (filterType !== "ALL") {
+              chips.push({
+                key: "type",
+                label: `Type: ${titleCase(filterType)}`,
+                clear: () => { setFilterType("ALL"); setPage(1); },
+              });
+            }
+            if (filterMethod !== "ALL") {
+              chips.push({
+                key: "method",
+                label: `Method: ${uiMethodLabel(uiMethodFromRaw(filterMethod))}`,
+                clear: () => { setFilterMethod("ALL"); setPage(1); },
+              });
+            }
+            if (filterCategory !== "ALL") {
+              const catLabel =
+                filterCategory === "__UNCATEGORIZED__"
+                  ? "Uncategorized"
+                  : categoryNameById.get(filterCategory) ?? "Category";
+              chips.push({
+                key: "category",
+                label: `Category: ${catLabel}`,
+                clear: () => { setFilterCategory("ALL"); setPage(1); },
+              });
+            }
+            if (filterFrom || filterTo) {
+              const range = `${filterFrom || "…"} → ${filterTo || "…"}`;
+              chips.push({
+                key: "daterange",
+                label: `Date: ${range}`,
+                clear: () => { setFilterFrom(""); setFilterTo(""); setPage(1); },
+              });
+            }
+            if (filterAmountExact.trim()) {
+              chips.push({
+                key: "amount-exact",
+                label: `Amount = $${filterAmountExact.trim()}`,
+                clear: () => { setFilterAmountExact(""); setPage(1); },
+              });
+            } else if (filterAmountMin.trim() || filterAmountMax.trim()) {
+              const min = filterAmountMin.trim() ? `$${filterAmountMin.trim()}` : "…";
+              const max = filterAmountMax.trim() ? `$${filterAmountMax.trim()}` : "…";
+              chips.push({
+                key: "amount-range",
+                label: `Amount: ${min} – ${max}`,
+                clear: () => { setFilterAmountMin(""); setFilterAmountMax(""); setPage(1); },
+              });
+            }
+
+            if (!chips.length) return null;
+
+            return (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 px-1 pb-1">
+                <span className="text-[11px] font-semibold text-bb-text-muted">Filters:</span>
+                {chips.map((c) => (
+                  <span
+                    key={c.key}
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] text-bb-text"
+                  >
+                    {c.label}
+                    <button
+                      type="button"
+                      className={`-mr-1 ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-bb-text-muted hover:bg-bb-table-row-hover hover:text-bb-text ${ringFocus}`}
+                      onClick={c.clear}
+                      aria-label={`Clear ${c.label}`}
+                      title={`Clear ${c.label}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
