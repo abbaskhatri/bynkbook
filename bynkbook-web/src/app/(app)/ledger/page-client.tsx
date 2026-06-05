@@ -23,6 +23,7 @@ import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useIdleReady } from "@/lib/useIdleReady";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
@@ -512,11 +513,17 @@ export default function LedgerPageClient() {
 
   const [closedThroughDate, setClosedThroughDate] = useState<string | null>(null);
 
+  // Defer non-critical fetches (closedPeriods header chip, attentionSummary
+  // badge) until the browser is idle. Keeps the initial paint and the
+  // first entries request from competing for the network.
+  const idleReady = useIdleReady(!!selectedBusinessId, 1200);
+
   useEffect(() => {
     if (!selectedBusinessId) {
       setClosedThroughDate(null);
       return;
     }
+    if (!idleReady) return;
 
     let cancelled = false;
     (async () => {
@@ -531,7 +538,7 @@ export default function LedgerPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBusinessId]);
+  }, [selectedBusinessId, idleReady]);
 
   // Advanced filters (UI-only; local filtering on cached rows)
   const [filterType, setFilterType] = useState<"ALL" | UiType>("ALL");
@@ -703,10 +710,11 @@ export default function LedgerPageClient() {
     return m;
   }, [matchGroupsQ.data]);
 
-  // Issues: backend truth (open issues + header button)
+  // Issues: backend truth (open issues + header button).
+  // Deferred to idle so it doesn't compete with the entries fetch on first paint.
   const issuesCountQ = useQuery({
     queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId),
-    enabled: !!selectedBusinessId && !!selectedAccountId,
+    enabled: !!selectedBusinessId && !!selectedAccountId && idleReady,
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId) {
         return { ok: true as const, issue_count: 0, uncategorized_count: 0 };
