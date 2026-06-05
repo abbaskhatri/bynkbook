@@ -1413,54 +1413,64 @@ export async function handler(event: any) {
   const cursor = rawCursor ? parseCursorParam(rawCursor) : null;
   if (rawCursor && !cursor) return json(400, { ok: false, error: "Invalid cursor" });
 
-  const where: any = {
+  // whereBase = filters without the cursor (used for the count).
+  // where = whereBase + cursor (used for the page fetch).
+  const whereBase: any = {
     business_id: businessId,
     account_id: accountId,
     is_removed: false,
   };
   if (from || to) {
-    where.posted_date = {};
-    if (from) where.posted_date.gte = from;
-    if (to) where.posted_date.lte = to;
-  }
-
-  if (cursor) {
-    where.AND = [...(where.AND ?? []), cursorWhere(cursor)];
+    whereBase.posted_date = {};
+    if (from) whereBase.posted_date.gte = from;
+    if (to) whereBase.posted_date.lte = to;
   }
 
   if (status !== "all") {
     const matchedIds = await activeMatchedBankTransactionIds(prisma, businessId, accountId);
 
     if (status === "matched") {
-      if (matchedIds.length === 0) return json(200, { ok: true, items: [], nextCursor: null });
-      where.id = { in: matchedIds };
+      if (matchedIds.length === 0) {
+        return json(200, { ok: true, items: [], nextCursor: null, totalCount: 0 });
+      }
+      whereBase.id = { in: matchedIds };
     } else {
-      where.id = { notIn: matchedIds };
+      whereBase.id = { notIn: matchedIds };
     }
   }
 
-  const rows = await prisma.bankTransaction.findMany({
-    where,
-    orderBy: [{ posted_date: "desc" }, { created_at: "desc" }, { id: "desc" }],
-    take: limit + 1,
-    select: {
-      id: true,
-      posted_date: true,
-      name: true,
-      amount_cents: true,
-      is_pending: true,
-      iso_currency_code: true,
-      source: true,
-      source_parser: true,
-      source_upload_id: true,
-      import_hash: true,
-      created_at: true,
-    },
-  });
+  const where: any = cursor
+    ? { ...whereBase, AND: [...(whereBase.AND ?? []), cursorWhere(cursor)] }
+    : whereBase;
+
+  // PERF: count + findMany in parallel. Lets the frontend show "Showing N of
+  // M" without doing a 20-page probe loop just to compute M. The count uses
+  // the un-cursored whereBase so it's stable across paging.
+  const [rows, totalCount] = await Promise.all([
+    prisma.bankTransaction.findMany({
+      where,
+      orderBy: [{ posted_date: "desc" }, { created_at: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      select: {
+        id: true,
+        posted_date: true,
+        name: true,
+        amount_cents: true,
+        is_pending: true,
+        iso_currency_code: true,
+        source: true,
+        source_parser: true,
+        source_upload_id: true,
+        import_hash: true,
+        created_at: true,
+      },
+    }),
+    prisma.bankTransaction.count({ where: whereBase }),
+  ]);
 
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : null;
 
-  return json(200, { ok: true, items, nextCursor });
+  return json(200, { ok: true, items, nextCursor, totalCount });
 }
