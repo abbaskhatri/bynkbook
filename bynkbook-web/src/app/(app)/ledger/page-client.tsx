@@ -222,7 +222,7 @@ export default function LedgerPageClient() {
 
   // Vendor payment suggestion (deterministic, no AI)
   // Vendor suggestion is shown post-save on the created row only.
-  const [uploadType] = useState<"RECEIPT">("RECEIPT");
+  const [uploadType, setUploadType] = useState<"RECEIPT" | "BANK_STATEMENT">("RECEIPT");
   const [openUpload, setOpenUpload] = useState(false);
   const [lastCreatedEntryId, setLastCreatedEntryId] = useState<string | null>(null);
 
@@ -610,6 +610,34 @@ export default function LedgerPageClient() {
   useEffect(() => {
     setPage(1);
   }, [ledgerViewMode]);
+
+  // Smart default: when the user opens the ledger for an account that has
+  // EXPECTED / PARTIAL entries waiting, land on the Needs Reconcile tab so
+  // they see the work to do, not the full history. Only fires once per
+  // (business, account) combo - subsequent manual tab choices stick.
+  const autoTabAppliedKey = useRef<string>("");
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (entriesQ.isLoading) return;
+
+    const key = `${selectedBusinessId}:${selectedAccountId}`;
+    if (autoTabAppliedKey.current === key) return;
+
+    const list = entriesQ.data ?? [];
+    if (!list.length) {
+      // Mark as applied so we don't re-evaluate every time data refetches.
+      autoTabAppliedKey.current = key;
+      return;
+    }
+
+    const hasUnreconciled = list.some((e: any) => {
+      const status = String(e?.status ?? "EXPECTED").toUpperCase();
+      return status === "EXPECTED" || status === "PARTIAL";
+    });
+
+    autoTabAppliedKey.current = key;
+    if (hasUnreconciled) setLedgerViewMode("needsReconcile");
+  }, [selectedBusinessId, selectedAccountId, entriesQ.data, entriesQ.isLoading]);
 
   // ---------- Bundle F: Ledger anomalies (read-only) ----------
   const anomaliesQ = useQuery({
@@ -5054,6 +5082,30 @@ export default function LedgerPageClient() {
             description="Add an account to start importing and categorizing transactions."
             primary={{ label: "Add account", href: "/settings?tab=accounts" }}
             secondary={{ label: "Reload", onClick: () => retrySurfaceLoads() }}
+          />
+        </div>
+      ) : null}
+
+      {selectedBusinessId &&
+      selectedAccountId &&
+      !entriesQ.isLoading &&
+      (entriesQ.data ?? []).filter(
+        (e: any) =>
+          e?.id !== "opening_balance" &&
+          String(e?.type ?? "").toUpperCase() !== "OPENING"
+      ).length === 0 ? (
+        <div className="px-3 mt-2">
+          <EmptyStateCard
+            title="No entries in this account yet"
+            description="Connect your bank to sync transactions automatically, upload a CSV / PDF statement, or use the row at the top of the table to add one manually."
+            primary={{ label: "Connect bank", href: "/settings?tab=accounts" }}
+            secondary={{
+              label: "Upload statement",
+              onClick: () => {
+                setUploadType("BANK_STATEMENT");
+                setOpenUpload(true);
+              },
+            }}
           />
         </div>
       ) : null}
