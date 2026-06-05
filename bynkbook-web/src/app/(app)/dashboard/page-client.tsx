@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+import { useIdleReady } from "@/lib/useIdleReady";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
@@ -435,6 +436,11 @@ export default function DashboardPageClient() {
 
   const dashEnabled = !!selectedBusinessId;
 
+  // Defer non-critical widgets (Next actions badge) until idle so primary
+  // dashboard content (P&L chart, Cashflow chart, account cards) gets the
+  // network bandwidth on first paint.
+  const dashIdleReady = useIdleReady(dashEnabled, 1200);
+
   // Account scope selector: All accounts vs a specific account
   const [accountScopeId, setAccountScopeId] = useState<string>("all");
 
@@ -514,7 +520,7 @@ export default function DashboardPageClient() {
   const attentionSummaryQ = useQuery({
     queryKey: attentionSummaryKey(selectedBusinessId, issuesAccountScopeId),
     queryFn: () => getAttentionSummary({ businessId: selectedBusinessId as string, accountId: issuesAccountScopeId }),
-    enabled: dashEnabled && !!issuesAccountScopeId,
+    enabled: dashEnabled && !!issuesAccountScopeId && dashIdleReady,
     staleTime: 20_000,
     placeholderData: (prev) => prev,
   });
