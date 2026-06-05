@@ -121,7 +121,31 @@ async function loadHandler(rowsInput: any[]) {
         const taken = typeof args?.take === "number" ? filtered.slice(0, args.take) : filtered;
         return taken.map((row) => project(row, args?.select));
       }),
+      findFirst: vi.fn(async (args: any) => {
+        const order = args?.orderBy?.[0]?.date === "asc" ? "asc" : "desc";
+        const filtered = sortRows(rows.filter((row) => rowMatchesWhere(row, args?.where)), order);
+        if (!filtered.length) return null;
+        return project(filtered[0], args?.select);
+      }),
       count: vi.fn(async (args: any) => rows.filter((row) => rowMatchesWhere(row, args?.where)).length),
+      aggregate: vi.fn(async (args: any) => {
+        const filtered = rows.filter((row) => rowMatchesWhere(row, args?.where));
+        const out: any = {};
+        if (args?._sum) {
+          out._sum = {};
+          for (const key of Object.keys(args._sum)) {
+            if (args._sum[key]) {
+              out._sum[key] = filtered.reduce((acc: bigint, row: any) => {
+                const v = row?.[key];
+                if (typeof v === "bigint") return acc + v;
+                if (v == null) return acc;
+                return acc + BigInt(String(v));
+              }, 0n);
+            }
+          }
+        }
+        return out;
+      }),
     },
     transfer: {
       findMany: vi.fn(async () => []),

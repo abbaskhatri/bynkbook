@@ -970,7 +970,15 @@ export async function handler(event: any) {
         }
       : whereBase;
 
-    const [rowsPlusOne, totalCount, accountForBalance, allActiveRows] = await Promise.all([
+    // PERF: previously this fetched ALL active entries for the account just
+    // to compute running balance per row. For large accounts that's a 5k+
+    // row scan on every page request. Replaced with:
+    //   - one tiny findFirst to detect a "real" Opening Balance entry
+    //     anywhere in the account (controls the seed)
+    //   - one aggregate SUM scoped to entries strictly older than the
+    //     oldest row on the page (the cumulative-before-page balance)
+    // Walking the page itself supplies the rest. Same math, way less data.
+    const [rowsPlusOne, totalCount, accountForBalance, realOpeningRow] = await Promise.all([
       prisma.entry.findMany({
         where,
         orderBy: [{ date: "desc" }, { created_at: "desc" }, { id: "desc" }],
@@ -981,14 +989,15 @@ export async function handler(event: any) {
         where: { id: acct, business_id: biz },
         select: { opening_balance_cents: true },
       }),
-      prisma.entry.findMany({
+      prisma.entry.findFirst({
         where: {
           business_id: biz,
           account_id: acct,
           deleted_at: null,
+          // Matches isOpeningLikePayee: case-insensitive prefix "opening balance".
+          payee: { startsWith: "Opening Balance", mode: "insensitive" },
         },
-        select: { id: true, date: true, created_at: true, amount_cents: true, payee: true },
-        orderBy: [{ date: "asc" }, { created_at: "asc" }, { id: "asc" }],
+        select: { id: true },
       }),
     ]);
 
@@ -996,11 +1005,16 @@ export async function handler(event: any) {
     const rows = hasMore ? rowsPlusOne.slice(0, limit) : rowsPlusOne;
     const nextCursor = hasMore && rows.length ? encodeEntriesCursor(rows[rows.length - 1]) : null;
 
-    const hasRealOpening = allActiveRows.some((r: any) => isOpeningLikePayee(r?.payee));
-    let running = hasRealOpening ? 0n : BigInt(String(accountForBalance?.opening_balance_cents ?? 0));
+    const hasRealOpening = !!realOpeningRow;
+    const openingSeed = hasRealOpening
+      ? 0n
+      : BigInt(String(accountForBalance?.opening_balance_cents ?? 0));
+
     const runningBalanceByEntryId = new Map<string, bigint>();
 
-    const activeSorted = allActiveRows.slice().sort((a: any, b: any) => {
+    // Compute running balance only for rows on this page.
+    // page-asc = page rows reversed to ascending order.
+    const pageAsc = rows.slice().sort((a: any, b: any) => {
       const ak = entrySortKey(a);
       const bk = entrySortKey(b);
       if (ak[0] !== bk[0]) return ak[0] - bk[0];
@@ -1008,7 +1022,46 @@ export async function handler(event: any) {
       return ak[2] < bk[2] ? -1 : ak[2] > bk[2] ? 1 : 0;
     });
 
-    for (const row of activeSorted) {
+    const oldestOnPage = pageAsc[0] ?? null;
+    let beforePageSum = 0n;
+    if (oldestOnPage) {
+      // Sum non-deleted entries with sort key STRICTLY less than oldestOnPage.
+      const agg = await prisma.entry.aggregate({
+        where: {
+          business_id: biz,
+          account_id: acct,
+          deleted_at: null,
+          OR: [
+            { date: { lt: oldestOnPage.date } },
+            {
+              AND: [
+                { date: oldestOnPage.date },
+                { created_at: { lt: oldestOnPage.created_at } },
+              ],
+            },
+            {
+              AND: [
+                { date: oldestOnPage.date },
+                { created_at: oldestOnPage.created_at },
+                { id: { lt: String(oldestOnPage.id) } },
+              ],
+            },
+          ],
+        },
+        _sum: { amount_cents: true },
+      });
+      const summed = agg._sum?.amount_cents ?? 0n;
+      beforePageSum = typeof summed === "bigint" ? summed : BigInt(String(summed));
+    }
+
+    let running = openingSeed + beforePageSum;
+    for (const row of pageAsc) {
+      // Deleted rows must not contribute to running balance (matches the
+      // previous algorithm, which iterated active-only rows). When the
+      // user has include_deleted=true, deleted rows are present in the
+      // page for audit display but their per-row running_balance_cents
+      // is null in the response (see e.deleted_at check below).
+      if ((row as any)?.deleted_at) continue;
       running += BigInt(String(row?.amount_cents ?? 0));
       runningBalanceByEntryId.set(String(row.id), running);
     }
