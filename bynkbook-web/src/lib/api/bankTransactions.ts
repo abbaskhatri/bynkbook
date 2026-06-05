@@ -6,6 +6,12 @@ export type BankTransactionsListResponse = {
   ok?: boolean;
   items: any[];
   nextCursor?: string | null;
+  /**
+   * Total bank-transactions matching the (filtered) where-base, ignoring
+   * cursor. Populated server-side starting with the perf/bank-tx-total-count
+   * deploy. Older deploys won't return this field.
+   */
+  totalCount?: number;
 };
 
 export async function listBankTransactions(args: {

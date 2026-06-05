@@ -221,6 +221,9 @@ async function loadHandler(options: {
         const found = options.rows.find((row) => rowMatchesWhere(row, args?.where));
         return found ? project(found, args?.select) : null;
       }),
+      count: vi.fn(async (args: any) =>
+        options.rows.filter((row) => rowMatchesWhere(row, args?.where)).length
+      ),
       findMany: vi.fn(async (args: any) => {
         const filtered = options.rows
           .filter((row) => rowMatchesWhere(row, args?.where))

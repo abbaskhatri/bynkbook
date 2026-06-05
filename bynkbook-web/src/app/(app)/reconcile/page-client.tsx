@@ -1014,33 +1014,38 @@ export default function ReconcilePageClient() {
     }
   }
 
+  // PERF: previously this looped through up to 20 paginated requests (10k
+  // rows each) just to count unmatched bank transactions for the badge.
+  // The backend now returns totalCount directly on the list endpoint, so
+  // a single 1-row request gives us the count and the latest item.
+  //
+  // If the backend hasn't been deployed yet (no totalCount field), we fall
+  // back to reporting the loaded page size as a lower-bound estimate
+  // marked capped=true, so the UI still shows something useful instead of
+  // refusing to render.
   const countUnmatchedBankTransactionsForScope = useCallback(async (args: {
     businessId: string;
     accountId: string;
     from?: string;
     to?: string;
   }): Promise<CountProbeResult> => {
-    let cursor: string | null = null;
-    let count = 0;
+    const res = await listBankTransactions({
+      businessId: args.businessId,
+      accountId: args.accountId,
+      from: args.from || undefined,
+      to: args.to || undefined,
+      status: "unmatched",
+      limit: 1, // we only need the totalCount field, not actual rows
+    });
 
-    for (let page = 0; page < BANK_COUNT_PROBE_MAX_PAGES; page++) {
-      const res = await listBankTransactions({
-        businessId: args.businessId,
-        accountId: args.accountId,
-        from: args.from || undefined,
-        to: args.to || undefined,
-        status: "unmatched",
-        limit: BANK_TRANSACTION_PAGE_LIMIT,
-        cursor,
-      });
-
-      count += Array.isArray(res?.items) ? res.items.length : 0;
-      cursor = res?.nextCursor ?? null;
-      if (!cursor) return { count, capped: false };
+    if (typeof res?.totalCount === "number") {
+      return { count: res.totalCount, capped: false };
     }
 
-    return { count, capped: true };
-  }, [BANK_COUNT_PROBE_MAX_PAGES, BANK_TRANSACTION_PAGE_LIMIT]);
+    // Fallback for pre-deploy backends.
+    const partial = Array.isArray(res?.items) ? res.items.length : 0;
+    return { count: partial, capped: !!res?.nextCursor };
+  }, []);
 
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) {
