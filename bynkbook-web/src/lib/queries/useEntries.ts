@@ -12,11 +12,12 @@ export function useEntries(params: {
   date_to?: string;
   uncategorized?: boolean;
   excludeOpening?: boolean;
+  unmatchedOnly?: boolean;
 }) {
-  const { businessId, accountId, limit, pageCount, includeDeleted, search, date_from, date_to, uncategorized, excludeOpening } = params;
+  const { businessId, accountId, limit, pageCount, includeDeleted, search, date_from, date_to, uncategorized, excludeOpening, unmatchedOnly } = params;
 
   return useQuery({
-    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, search ?? "", date_from ?? "", date_to ?? "", pageCount ?? 1, !!uncategorized, !!excludeOpening],
+    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, search ?? "", date_from ?? "", date_to ?? "", pageCount ?? 1, !!uncategorized, !!excludeOpening, !!unmatchedOnly],
     queryFn: () =>
       listEntries({
         businessId: businessId as string,
@@ -29,6 +30,7 @@ export function useEntries(params: {
         date_to,
         uncategorized,
         excludeOpening,
+        unmatchedOnly,
       }),
     enabled: !!businessId && !!accountId,
 
