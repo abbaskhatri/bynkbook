@@ -47,7 +47,7 @@ import { listAccountIssues, listAccountIssuesForEntryIds, type EntryIssueRow } f
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
-import { listMatchGroups } from "@/lib/api/match-groups";
+import { getMatchGroupPlacementSummary } from "@/lib/api/match-groups";
 
 import { aiExplainEntry, aiAnomalies } from "@/lib/api/ai";
 
@@ -668,67 +668,64 @@ export default function LedgerPageClient() {
   }, [anomaliesQ.data]);
 
   // MatchGroups (ACTIVE) drive the canonical Ledger status pill for bank-match state.
-  const matchGroupsQ = useQuery({
-    queryKey: ["matchGroups", selectedBusinessId, selectedAccountId],
-    enabled: !!selectedBusinessId && !!selectedAccountId,
-    queryFn: async () => {
-      if (!selectedBusinessId || !selectedAccountId) return { items: [] as any[] };
-      // status=active is sufficient for Ledger's displayed bank-match status.
-      return listMatchGroups({ businessId: selectedBusinessId, accountId: selectedAccountId, status: "active" } as any);
-    },
+  // Match state MUST come from the same source the Reconcile page uses,
+  // otherwise the two pages disagree (entries shown matched in Reconcile but
+  // "Expected" in the Ledger). Reconcile reads the match-group PLACEMENT
+  // SUMMARY scoped to the entries it has loaded. The Ledger previously read
+  // GET /match-groups, which returns EVERY active group for the account
+  // unbounded — for large accounts that response truncates/times out, so the
+  // Ledger saw no matches and marked matched entries "Expected".
+  //
+  // We now query the same placement-summary endpoint, scoped to the entries
+  // actually loaded here. The endpoint caps at 500 ids per call, so we batch
+  // and merge to stay correct for accounts with many entries.
+  const matchPlacementQ = useQuery({
+    queryKey: ["matchPlacement", selectedBusinessId, selectedAccountId, issueEntryIdsSignature],
+    enabled: !!selectedBusinessId && !!selectedAccountId && issueEntryIds.length > 0,
     staleTime: 15_000,
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      if (!selectedBusinessId || !selectedAccountId || issueEntryIds.length === 0) {
+        return { activeEntryLinks: [] as any[] };
+      }
+      const CHUNK = 500; // matches PLACEMENT_SUMMARY_ENTRY_ID_MAX on the backend
+      const chunks: string[][] = [];
+      for (let i = 0; i < issueEntryIds.length; i += CHUNK) {
+        chunks.push(issueEntryIds.slice(i, i + CHUNK));
+      }
+      const results = await Promise.all(
+        chunks.map((ids) =>
+          getMatchGroupPlacementSummary({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            entryIds: ids,
+          })
+        )
+      );
+      const activeEntryLinks: any[] = [];
+      for (const r of results) {
+        for (const link of r?.activeEntryLinks ?? []) activeEntryLinks.push(link);
+      }
+      return { activeEntryLinks };
+    },
   });
 
-  // An entry is MATCHED iff it belongs to an ACTIVE match group — exactly the
-  // same definition the Reconcile page uses (matchedEntryIdSet). Match groups
-  // are FULL-MATCH-ONLY and balanced (bank sum == entry sum), so there is no
-  // such thing as a partially-matched entry. The previous implementation
-  // re-derived MATCHED/PARTIAL by comparing the stored matched_amount_cents
-  // against the entry's CURRENT amount; if an entry's amount was edited after
-  // matching, that comparison drifted and the Ledger showed "not matched" /
-  // "partial" for entries the Reconcile page correctly showed as matched.
-  // Using group membership keeps the two pages consistent.
+  // An entry is MATCHED iff it is linked to an ACTIVE match group, exactly the
+  // definition the Reconcile page uses. Match groups are FULL-MATCH-ONLY and
+  // balanced (bank sum == entry sum), so there is no partial-match concept.
   const matchedEntryIdSet = useMemo(() => {
     const s = new Set<string>();
-    const items = (matchGroupsQ.data as any)?.items ?? [];
-    for (const g of items) {
-      if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
-      for (const e of (g?.entries ?? [])) {
-        const id = String(e?.entry_id ?? "");
-        if (id) s.add(id);
-      }
+    for (const link of (matchPlacementQ.data as any)?.activeEntryLinks ?? []) {
+      const id = String(link?.entry_id ?? "");
+      if (id) s.add(id);
     }
     return s;
-  }, [matchGroupsQ.data]);
+  }, [matchPlacementQ.data]);
 
-  const hasAdjustmentByEntryId = useMemo(() => {
-    const m = new Map<string, boolean>();
-
-    const items = (matchGroupsQ.data as any)?.items ?? [];
-    for (const g of items) {
-      if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
-
-      const entries = Array.isArray(g?.entries) ? g.entries : [];
-      let groupHasAdj = false;
-
-      for (const e of entries) {
-        if (Boolean(e?.is_adjustment) || Boolean(e?.entry?.is_adjustment) || Boolean((e as any)?.entry_is_adjustment)) {
-          groupHasAdj = true;
-          break;
-        }
-      }
-
-      if (!groupHasAdj) continue;
-
-      for (const e of entries) {
-        const id = String(e?.entry_id ?? "");
-        if (!id) continue;
-        m.set(id, true);
-      }
-    }
-
-    return m;
-  }, [matchGroupsQ.data]);
+  // The placement-summary endpoint does not carry per-entry adjustment flags
+  // (and the previous GET /match-groups select didn't either, so this was
+  // already always-empty). Kept as an empty map for the rowModels consumer.
+  const hasAdjustmentByEntryId = useMemo(() => new Map<string, boolean>(), []);
 
   // Issues: backend truth (open issues + header button).
   // Deferred to idle so it doesn't compete with the entries fetch on first paint.
@@ -2519,7 +2516,7 @@ export default function LedgerPageClient() {
       setMatchedDeleteDialog(null);
 
       scheduleEntriesRefresh(selectedBusinessId, selectedAccountId, "matchedUnmatchDelete");
-      void qc.invalidateQueries({ queryKey: ["matchGroups", selectedBusinessId, selectedAccountId], exact: false });
+      void qc.invalidateQueries({ queryKey: ["matchPlacement", selectedBusinessId, selectedAccountId], exact: false });
       void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
       void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
       void qc.invalidateQueries({ queryKey: summaryKey, exact: false });
