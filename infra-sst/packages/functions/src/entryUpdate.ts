@@ -119,6 +119,11 @@
 
       const suggestedCategoryRaw = body?.suggested_category_id ?? body?.suggestedCategoryId ?? null;
       const suggested_category_id = suggestedCategoryRaw ? String(suggestedCategoryRaw).trim() : null;
+      const categoryOnlyUpdate =
+        body?.category_id !== undefined &&
+        Object.keys(body ?? {}).every((key) =>
+          ["category_id", "categoryId", "suggested_category_id", "suggestedCategoryId"].includes(key)
+        );
 
       const prisma = await getPrisma();
 
@@ -130,10 +135,10 @@
       const acctOk = await requireAccountInBusiness(prisma, biz, acct);
       if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
 
-      // Stage 2A: closed period enforcement (409 CLOSED_PERIOD)
-      // Always check the existing entry's current date — cannot edit entries in closed periods.
-      // If body.date provided, also check the new date — cannot move entries into closed periods.
-      {
+      // Stage 2A: closed period enforcement (409 CLOSED_PERIOD).
+      // Category-only cleanup is metadata and does not change accounting totals,
+      // so it stays allowed even when the entry date is in a closed period.
+      if (!categoryOnlyUpdate) {
         const existingForCp = await prisma.entry.findFirst({
           where: { id: ent, business_id: biz, account_id: acct },
           select: { date: true },

@@ -214,27 +214,11 @@ export async function handler(event: any) {
     });
 
     const entryById = new Map<string, any>();
-    const dateById = new Map<string, any>();
-    const months = new Set<string>();
     for (const r of rows) {
       const id = String(r?.id ?? "").trim();
       if (!id) continue;
       entryById.set(id, r);
-      dateById.set(id, r?.date);
-
-      const ymd = normalizeToYmd(r?.date);
-      const month = ymd ? ymd.slice(0, 7) : "";
-      if (month) months.add(month);
     }
-
-    const closedRows = months.size
-      ? await prisma.closedPeriod.findMany({
-          where: { business_id: biz, month: { in: Array.from(months) } },
-          select: { month: true },
-        })
-      : [];
-
-    const closedMonths = new Set<string>(closedRows.map((x: any) => String(x?.month ?? "").trim()).filter(Boolean));
 
     // Validate categories exist (and not archived) for this business
     const isUuid = (s: string) =>
@@ -283,7 +267,7 @@ export async function handler(event: any) {
       const entryId = it.entryId;
       const categoryId = it.category_id;
 
-      if (!dateById.has(entryId)) {
+      if (!entryById.has(entryId)) {
         results.push({ entryId, ok: false, code: "NOT_FOUND", error: "Entry not found" });
         blocked++;
         continue;
@@ -339,23 +323,6 @@ export async function handler(event: any) {
           blocked++;
           continue;
         }
-      }
-
-      // CLOSED_PERIOD per row: check entry.date month
-      let month = "";
-      const ymd = normalizeToYmd(dateById.get(entryId));
-      month = ymd ? ymd.slice(0, 7) : "";
-
-      if (month && closedMonths.has(month)) {
-        results.push({
-          entryId,
-          ok: false,
-          code: "CLOSED_PERIOD",
-          error: "This period is closed. Reopen period to modify.",
-          month,
-        });
-        blocked++;
-        continue;
       }
 
       try {
