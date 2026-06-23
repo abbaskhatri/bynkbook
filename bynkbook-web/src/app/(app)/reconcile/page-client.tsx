@@ -37,7 +37,7 @@ import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
 import {
-  getMatchGroupPlacementSummary,
+  getChunkedMatchGroupPlacementSummary,
   previewGeneratedEntryRevert,
   confirmGeneratedEntryRevert,
   type MatchGroupRevertPreview,
@@ -1642,7 +1642,7 @@ export default function ReconcilePageClient() {
     (async () => {
       setMatchGroupsLoading(true);
       try {
-        const summary = await getMatchGroupPlacementSummary({
+        const summary = await getChunkedMatchGroupPlacementSummary({
           businessId: selectedBusinessId,
           accountId: selectedAccountId,
           bankTransactionIds,
@@ -3228,7 +3228,6 @@ const displayBankActiveList = useMemo(() => {
     return bal !== null ? formatUsdFromCents(bal) : "—";
   }, [plaid?.lastKnownBalanceCents]);
   const transactionSyncText = plaid?.lastSyncAt ? new Date(plaid.lastSyncAt).toLocaleString() : "";
-  const balanceCheckedText = plaid?.lastKnownBalanceAt ? new Date(plaid.lastKnownBalanceAt).toLocaleString() : "";
   const bankUpdatesAvailable =
     !!plaid?.connected &&
     !!plaid?.hasNewTransactions &&
@@ -3260,54 +3259,33 @@ const displayBankActiveList = useMemo(() => {
   );
 
   const differenceBar = (
-    <div className="px-3 py-2">
-      <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-x-6 gap-y-2 text-xs">
-          <div className="leading-tight">
-            <div className="text-bb-text-muted">Remaining loaded</div>
-            <div className="font-semibold text-bb-text tabular-nums inline-flex items-center gap-2">
-              {formatUsdFromCents(bankStateSummary.remainingAbsTotal)}
-              {refreshBusy ? <TinySpinner /> : null}
-            </div>
-          </div>
-
-          <div className="leading-tight">
-            <div className="text-bb-text-muted">Bank unmatched</div>
-            <div className="font-semibold text-bb-text">
-              {bankUnmatchedScopeSummary}
-            </div>
-            <div className="text-[11px] text-bb-text-muted">
-              {bankUnmatchedRowsSummary}
-            </div>
-          </div>
-
-          <div className="leading-tight">
-            <div className="text-bb-text-muted">Entries</div>
-            <div className="font-semibold text-bb-text inline-flex items-center gap-2">
-              Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}
-              {entriesSummarySettling ? <TinySpinner /> : null}
-            </div>
-          </div>
-
-          <div className="leading-tight">
-            <div className="text-bb-text-muted">Reverts</div>
-            <div className="font-semibold text-bb-text">{revertsInScopeLabel}</div>
-          </div>
-
-          {plaid?.connected ? (
-            <div className="leading-tight">
-              <div className="text-bb-text-muted">Current balance</div>
-              <div className="font-semibold text-bb-text tabular-nums">{balanceText}</div>
-            </div>
-          ) : null}
-
-          {plaid?.connected && transactionSyncText ? (
-            <div className="leading-tight">
-              <div className="text-bb-text-muted">Txn sync</div>
-              <div className="font-semibold text-bb-text">{transactionSyncText}</div>
-            </div>
-          ) : null}
-        </div>
+    <div className="px-3 pb-1">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4">
+        <span className="inline-flex items-center gap-1 text-bb-text-muted">
+          Remaining <span className="font-semibold text-bb-text tabular-nums">{formatUsdFromCents(bankStateSummary.remainingAbsTotal)}</span>
+          {refreshBusy ? <TinySpinner /> : null}
+        </span>
+        <span className="text-bb-text-muted">
+          Bank <span className="font-semibold text-bb-text">{bankUnmatchedScopeSummary}</span>
+          <span className="text-bb-text-muted"> / {bankUnmatchedRowsSummary}</span>
+        </span>
+        <span className="inline-flex items-center gap-1 text-bb-text-muted">
+          Entries <span className="font-semibold text-bb-text">Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}</span>
+          {entriesSummarySettling ? <TinySpinner /> : null}
+        </span>
+        <span className="text-bb-text-muted">
+          Reverts <span className="font-semibold text-bb-text">{revertsInScopeLabel}</span>
+        </span>
+        {plaid?.connected ? (
+          <span className="text-bb-text-muted">
+            Balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
+          </span>
+        ) : null}
+        {plaid?.connected && transactionSyncText ? (
+          <span className="text-bb-text-muted">
+            Sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -3349,9 +3327,9 @@ const displayBankActiveList = useMemo(() => {
   }
 
   return (
-    <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
+    <div className="flex flex-col gap-1.5 overflow-hidden" style={containerStyle}>
       <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
-        <div className="px-3 pt-2">
+        <div className="px-3 py-1.5">
           <PageHeader
             icon={<GitMerge className="h-4 w-4" />}
             title="Reconcile"
@@ -3366,9 +3344,9 @@ const displayBankActiveList = useMemo(() => {
           />
         </div>
 
-        <div className="mt-2 h-px bg-bb-border" />
+        <div className="h-px bg-bb-border" />
 
-        <div className="px-3 py-2">
+        <div className="px-3 py-1.5">
           <FilterBar left={filterLeft} right={null} />
         </div>
 
@@ -3394,9 +3372,9 @@ const displayBankActiveList = useMemo(() => {
         ) : null}
 
         {placementSummaryPartial ? (
-          <div className="px-3 pb-2">
+          <div className="px-3 pb-1">
             <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] leading-4 text-bb-status-warning-fg">
-              Placement summary is partial for the loaded rows. Matched and unmatched counts reflect the rows currently loaded and the capped placement response.
+              Placement summary is still partial for the loaded rows.
             </div>
           </div>
         ) : null}
@@ -4091,14 +4069,14 @@ const displayBankActiveList = useMemo(() => {
         </AppDialog>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-hidden">
         {/* Expected Entries */}
         <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-bb-surface-card">
-          <div className="px-3 py-2">
-            <div className="flex items-start justify-between gap-2">
-              <div>
+          <div className="px-3 py-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <div className="text-sm font-semibold text-bb-text">Expected Entries</div>
-                <div className="text-xs text-bb-text-muted">Ledger entries awaiting reconciliation</div>
+                <div className="hidden sm:block text-[11px] text-bb-text-muted">Ledger entries awaiting reconciliation</div>
               </div>
               <div className="text-[11px] text-bb-text-muted min-h-[16px]">
                 {entriesTruthSettling || entriesUpdating ? (
@@ -4111,8 +4089,8 @@ const displayBankActiveList = useMemo(() => {
             </div>
           </div>
 
-          <div className="px-3 pb-2">
-            <div className="flex items-center gap-2">
+          <div className="px-3 pb-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className={`h-7 px-3 text-xs rounded-md border ${expectedTab === "expected" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
@@ -4129,11 +4107,10 @@ const displayBankActiveList = useMemo(() => {
               >
                 {matchedEntriesTabLabel}
               </button>
-            </div>
-
-            <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
-              <span className="font-semibold text-bb-text">Ledger scope:</span>{" "}
-              {entriesScopeCopy}
+              <div className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
+                <span className="font-semibold text-bb-text">Ledger:</span>
+                <span className="truncate">{entriesScopeCopy}</span>
+              </div>
             </div>
 
             {bankTab === "unmatched" && selectedBankTxnIds.size > 0 ? (
@@ -4307,8 +4284,20 @@ const displayBankActiveList = useMemo(() => {
                       const g = !isOptimisticPending ? (activeGroupByEntryId.get(String(e.id)) ?? null) : null;
                       const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
 
-                      const rowTone = isMatched ? " bg-primary/10" : isOptimisticPending ? " bg-bb-status-warning-bg" : "";
-                      const actionCellBg = isMatched ? "bg-primary/10" : isOptimisticPending ? "bg-bb-status-warning-bg" : "bg-bb-surface-card";
+                      const rowTone = isMatched
+                        ? " bg-primary/10"
+                        : isOptimisticPending
+                          ? " bg-bb-status-warning-bg"
+                          : expectedTab === "expected"
+                            ? " bg-primary/5"
+                            : "";
+                      const actionCellBg = isMatched
+                        ? "bg-primary/10"
+                        : isOptimisticPending
+                          ? "bg-bb-status-warning-bg"
+                          : expectedTab === "expected"
+                            ? "bg-primary/5"
+                            : "bg-bb-surface-card";
 
                       const deEmphasis = expectedTab === "matched" ? " text-bb-text-muted" : "";
 
@@ -4475,24 +4464,17 @@ const displayBankActiveList = useMemo(() => {
 
         {/* Bank Transactions */}
         <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-bb-surface-card">
-          <div className="px-3 py-[7px]">
-            <div className="flex items-start justify-between gap-2 min-w-0">
-              <div className="min-w-0">
+          <div className="px-3 py-1.5">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <div className="min-w-0 flex items-center gap-2">
                 <div className="flex items-baseline gap-2">
                   <div className="text-sm font-semibold text-bb-text">Bank Transactions</div>
                   {connectedPill}
                 </div>
-
-                <div className="mt-0 text-xs text-bb-text-muted min-w-0 truncate whitespace-nowrap">
+                <div className="hidden xl:block text-[11px] text-bb-text-muted min-w-0 truncate whitespace-nowrap">
                   {plaid?.connected ? (
                     <>
                       {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
-                      <span className="text-bb-text-subtle"> • </span>
-                      <span className="tabular-nums">Balance: {balanceText}</span>
-                      {balanceCheckedText ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {balanceCheckedText ? <span>Balance checked: {balanceCheckedText}</span> : null}
-                      {transactionSyncText ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {transactionSyncText ? <span>Transactions synced: {transactionSyncText}</span> : null}
                       {bankUpdatesAvailable ? <span className="text-bb-text-subtle"> • </span> : null}
                       {bankUpdatesAvailable ? <span className="text-bb-status-warning-fg">Bank reports new activity; sync to refresh transactions.</span> : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
@@ -4657,8 +4639,8 @@ const displayBankActiveList = useMemo(() => {
             </div>
           ) : null}
 
-          <div className="px-3 pb-2">
-            <div className="flex items-center gap-2">
+          <div className="px-3 pb-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               {bankPanelShowStatusWhileRows ? (
                 <span className="text-[11px] text-bb-text-muted inline-flex items-center gap-1.5">
                   <TinySpinner />
@@ -4686,22 +4668,20 @@ const displayBankActiveList = useMemo(() => {
               >
                 {bankMatchedTabLabel}
               </button>
+              {(bankTab === "unmatched" || activeBankStatusLoaded || activeBankStatusLoading) ? (
+                <div className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
+                  <span className="font-semibold text-bb-text">Bank:</span>
+                  <span className="truncate">
+                    {bankScopeCopy}
+                    {bankPendingCopy ? ` • ${bankPendingCopy}` : ""}
+                    {activeBankHiddenBySearch > 0 ? ` • ${activeBankHiddenBySearch} hidden by search` : ""}
+                    {bankTab === "unmatched" && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0
+                      ? ` • ${bankUnmatchedOutsideDateRange}${bankUnmatchedScopeCounts.allTime?.capped ? "+" : ""} outside date range`
+                      : ""}
+                  </span>
+                </div>
+              ) : null}
             </div>
-            {bankTab === "unmatched" || activeBankStatusLoaded || activeBankStatusLoading ? (
-              <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1 text-[11px] leading-4 text-bb-text-muted">
-                <span className="font-semibold text-bb-text">Bank scope:</span>{" "}
-                {bankScopeCopy}
-                {bankPendingCopy ? (
-                  <span className="text-bb-status-warning-fg"> • {bankPendingCopy}</span>
-                ) : null}
-                {activeBankHiddenBySearch > 0 ? (
-                  <span> • {activeBankHiddenBySearch} hidden by search</span>
-                ) : null}
-                {bankTab === "unmatched" && bankUnmatchedOutsideDateRange != null && bankUnmatchedOutsideDateRange > 0 ? (
-                  <span> • {bankUnmatchedOutsideDateRange}{bankUnmatchedScopeCounts.allTime?.capped ? "+" : ""} outside date range</span>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
           <div className="h-px bg-bb-border" />
