@@ -299,6 +299,23 @@ describe("bank transactions list status and pagination", () => {
     expect(body.items.map((row: any) => row.id)).toEqual(["u-002", "u-001"]);
   });
 
+  test("status=unmatched excludes zero-amount transactions (fee waivers) from list and count", async () => {
+    const rows = [
+      tx("real-1", "2026-05-10", "2026-05-10T12:00:00.000Z", { amount_cents: -2500n }),
+      tx("zero-1", "2026-05-18", "2026-05-18T12:00:00.000Z", { amount_cents: 0n, name: "Fee Waiver" }),
+      tx("zero-2", "2026-05-19", "2026-05-19T12:00:00.000Z", { amount_cents: 0n, name: "Fee Waiver" }),
+    ];
+    const { handler } = await loadHandler({ rows, matchGroupBankIds: [] });
+
+    const unmatched = JSON.parse((await handler(event({ status: "unmatched", limit: "50" }))).body);
+    expect(unmatched.items.map((row: any) => row.id)).toEqual(["real-1"]);
+    expect(unmatched.totalCount).toBe(1);
+
+    // Zero-amount rows are still visible under the "All" tab.
+    const all = JSON.parse((await handler(event({ status: "all", limit: "50" }))).body);
+    expect(all.items.map((row: any) => row.id).sort()).toEqual(["real-1", "zero-1", "zero-2"]);
+  });
+
   test("status=matched returns active MatchGroup and legacy BankMatch rows", async () => {
     const rows = [
       tx("matched-group", "2026-04-28", "2026-04-28T12:00:00.000Z"),

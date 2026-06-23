@@ -1436,6 +1436,12 @@ export async function handler(event: any) {
       whereBase.id = { in: matchedIds };
     } else {
       whereBase.id = { notIn: matchedIds };
+      // Zero-amount bank transactions (e.g. Plaid "fee waiver" reward line
+      // items) can never be matched — match groups reject a $0 bank side —
+      // so they would sit in the Unmatched queue forever as noise. Exclude
+      // them from the needs-action (unmatched) view and its count. They are
+      // still visible under the "All" tab.
+      whereBase.amount_cents = { not: 0n };
     }
   }
 
