@@ -571,6 +571,20 @@ export default function LedgerPageClient() {
   const maxFetch = ENTRIES_API_MAX_LIMIT;
   const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage), [rowsPerPage]);
 
+  // Server-side find: payee/memo search and date range are pushed to the
+  // backend so finding an old entry is one request instead of clicking
+  // "Load more" through the whole history. When any of these is active we're
+  // in "filter mode" (running balance is hidden — it is only meaningful in a
+  // full chronological list; see balanceStr below).
+  const serverSearch = debouncedPayee.trim();
+  const serverDateFrom = (filterFrom || "").trim();
+  const serverDateTo = (filterTo || "").trim();
+  const isServerFiltered = !!serverSearch || !!serverDateFrom || !!serverDateTo;
+
+  // IMPORTANT: entriesKey MUST stay byte-for-byte identical to the queryKey
+  // useEntries builds internally — it is used for optimistic getQueryData /
+  // setQueryData, not just prefix invalidation. Any field added here must be
+  // added there (and vice-versa) in the same position.
   const entriesKey = useMemo(
     () =>
       [
@@ -579,13 +593,14 @@ export default function LedgerPageClient() {
         selectedAccountId,
         fetchLimit,
         showDeleted,
-        "",
-        "",
+        serverSearch,
+        serverDateFrom,
+        serverDateTo,
         loadedPageCount,
         false,
         false,
       ] as const,
-    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, loadedPageCount]
+    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, serverSearch, serverDateFrom, serverDateTo, loadedPageCount]
   );
 
   const entriesQ = useEntries({
@@ -594,6 +609,9 @@ export default function LedgerPageClient() {
     limit: fetchLimit,
     pageCount: loadedPageCount,
     includeDeleted: showDeleted,
+    search: serverSearch || undefined,
+    date_from: serverDateFrom || undefined,
+    date_to: serverDateTo || undefined,
   });
 
   const issueEntryIds = useMemo(() => {
@@ -612,6 +630,13 @@ export default function LedgerPageClient() {
     setPage(1);
     setLoadedPageCount(1);
   }, [selectedBusinessId, selectedAccountId, showDeleted, rowsPerPage]);
+
+  // When server-side filters change, restart paging from the first page of
+  // matches (don't carry a large loadedPageCount over from browsing history).
+  useEffect(() => {
+    setPage(1);
+    setLoadedPageCount(1);
+  }, [serverSearch, serverDateFrom, serverDateTo]);
 
   useEffect(() => {
     setPage(1);
@@ -1008,8 +1033,12 @@ export default function LedgerPageClient() {
         amountCents: amt.toString(),
         amountStr: formatUsdFromCents(amt),
         amountNeg: amt < ZERO,
-        balanceStr: isDeleted || rowBal === undefined ? "—" : formatUsdFromCents(rowBal),
-        balanceNeg: !isDeleted && rowBal !== undefined ? rowBal < ZERO : false,
+        // Running balance is only meaningful in a full chronological list:
+        // each row's balance depends on every prior row. Once results are
+        // filtered server-side (search / date range) the rows are no longer
+        // contiguous, so we hide the balance rather than show a misleading one.
+        balanceStr: isServerFiltered || isDeleted || rowBal === undefined ? "—" : formatUsdFromCents(rowBal),
+        balanceNeg: !isServerFiltered && !isDeleted && rowBal !== undefined ? rowBal < ZERO : false,
 
         status: statusLabel(displayRawStatus),
 
@@ -1027,7 +1056,7 @@ export default function LedgerPageClient() {
         isOpeningBalanceEntry,
       };
     });
-  }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedEntryIdSet, hasAdjustmentByEntryId]);
+  }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedEntryIdSet, hasAdjustmentByEntryId, isServerFiltered]);
 
   const rowModelById = useMemo(() => {
     const map = new Map<string, (typeof rowModels)[number]>();
@@ -1184,8 +1213,11 @@ export default function LedgerPageClient() {
     const hasMax = maxCentsAbs !== null && Number.isFinite(maxCentsAbs);
 
     return rowsUi.filter((r) => {
-      // Payee search (debounced)
-      if (q && !r.payee.toLowerCase().includes(q)) return false;
+      // Payee/text search: when server-filtered, the backend already applied
+      // it (against payee AND memo), so re-filtering here would hide valid
+      // memo-only matches and make the count disagree with the rows. Only run
+      // the client payee filter in browse mode.
+      if (!isServerFiltered && q && !r.payee.toLowerCase().includes(q)) return false;
 
       // Type filter (rawType expected to be "INCOME"/"EXPENSE" for real rows)
       if (filterType !== "ALL") {
@@ -1211,12 +1243,13 @@ export default function LedgerPageClient() {
         }
       }
 
-      // Date range filter (skip if no bounds)
-      if (from) {
+      // Date range filter (skip if no bounds). When server-filtered the
+      // backend already applied the range, so skip the redundant client pass.
+      if (!isServerFiltered && from) {
         const d = (r.date || "").slice(0, 10);
         if (d && d < from) return false;
       }
-      if (to) {
+      if (!isServerFiltered && to) {
         const d = (r.date || "").slice(0, 10);
         if (d && d > to) return false;
       }
@@ -1235,7 +1268,7 @@ export default function LedgerPageClient() {
 
       return true;
     });
-  }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact]);
+  }, [rowsUi, debouncedPayee, filterType, filterMethod, filterCategory, filterFrom, filterTo, filterAmountMin, filterAmountMax, filterAmountExact, isServerFiltered]);
 
   const reconcileQueueReviewRows = useMemo(() => {
     return sortLedgerReviewRowsAsc(filteredRowsAll.filter((r) => {
@@ -3118,7 +3151,7 @@ export default function LedgerPageClient() {
           <input
             ref={searchInputRef}
             className={[inputH7, "w-[220px] min-w-0"].join(" ")}
-            placeholder="Search payee… (press /)"
+            placeholder="Search all entries — payee or memo (press /)"
             aria-label="Search by payee"
             value={searchPayee}
             onChange={(e) => setSearchPayee(e.target.value)}
@@ -3369,6 +3402,11 @@ export default function LedgerPageClient() {
                     </button>
                   </span>
                 ))}
+                {isServerFiltered ? (
+                  <span className="text-[11px] text-bb-text-muted">
+                    · Running balance hidden while filtering
+                  </span>
+                ) : null}
               </div>
             );
           })()}
@@ -5162,6 +5200,7 @@ export default function LedgerPageClient() {
       {selectedBusinessId &&
       selectedAccountId &&
       !entriesQ.isLoading &&
+      !isServerFiltered &&
       (entriesQ.data ?? []).filter(
         (e: any) =>
           e?.id !== "opening_balance" &&
