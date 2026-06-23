@@ -149,6 +149,10 @@ export default function IssuesPageClient() {
   }, [selectedBusinessId, selectedAccountId]);
 
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
+  // Tracks which scanKey's localStorage value has actually been read, so the
+  // auto-scan below doesn't fire against the initial null before we know the
+  // real last-scan timestamp.
+  const [lastScanLoadedFor, setLastScanLoadedFor] = useState<string>("");
   useEffect(() => {
     if (!scanKey) return;
     try {
@@ -156,6 +160,7 @@ export default function IssuesPageClient() {
     } catch {
       // ignore
     }
+    setLastScanLoadedFor(scanKey);
   }, [scanKey]);
 
   const [scanBusy, setScanBusy] = useState(false);
@@ -239,6 +244,31 @@ export default function IssuesPageClient() {
       if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
   }
+
+  // Auto-scan on first visit: detection of duplicates / stale checks used to
+  // only run when the user manually clicked "Scan", so accounts that were
+  // never scanned showed no issues even when duplicates existed. We now run
+  // the scan automatically once per account when it has never been scanned in
+  // this browser, or the last scan is older than the staleness window. The
+  // visible "Scanning…" state comes from the shared scanBusy flag.
+  const AUTO_SCAN_STALE_MS = 6 * 60 * 60 * 1000; // 6 hours
+  const autoScanDoneRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId || !scanKey) return;
+    // Wait until localStorage has been read for THIS account.
+    if (lastScanLoadedFor !== scanKey) return;
+    if (autoScanDoneRef.current.has(scanKey)) return;
+    if (scanBusy) return;
+
+    const lastMs = lastScanAt ? Date.parse(lastScanAt) : NaN;
+    const isStale = !Number.isFinite(lastMs) || Date.now() - lastMs > AUTO_SCAN_STALE_MS;
+    if (!isStale) return;
+
+    autoScanDoneRef.current.add(scanKey);
+    void runManualScan();
+    // runManualScan is a stable handler; deps intentionally exclude it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBusinessId, selectedAccountId, scanKey, lastScanLoadedFor, lastScanAt, scanBusy]);
 
   // Real categories (needed for FixIssueDialog: missing category fix)
   const categoriesQ = useQuery({
