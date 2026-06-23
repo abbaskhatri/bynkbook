@@ -55,6 +55,7 @@ type PreviewItem = {
   bucket: PreviewBucket;
   action: SafeAction | null;
   date: string | null;
+  ref: string | null;
   payee: string;
   amount_cents: string;
   method: string | null;
@@ -74,6 +75,15 @@ function toYmd(value: any): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+function extractEntryRef(entry: any): string | null {
+  const explicit = String(entry?.ref ?? entry?.reference ?? entry?.reference_number ?? entry?.referenceNumber ?? "").trim();
+  if (explicit) return explicit;
+
+  const memo = String(entry?.memo ?? "");
+  const match = memo.match(/\bref\s*:\s*([^\n\r;|,]+)/i);
+  return match?.[1]?.trim() || null;
+}
+
 function makePreviewItem(
   issue: any,
   entry: any,
@@ -88,6 +98,7 @@ function makePreviewItem(
     bucket,
     action,
     date: toYmd(entry?.date),
+    ref: extractEntryRef(entry),
     payee: String(entry?.payee ?? "").trim(),
     amount_cents: String(entry?.amount_cents ?? "0"),
     method: entry?.method ? String(entry.method) : null,

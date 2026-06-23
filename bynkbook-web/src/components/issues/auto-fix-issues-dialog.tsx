@@ -118,6 +118,7 @@ function ItemRow({ item, showAction = true }: { item: BulkIssuePreviewItem; show
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-bb-text-muted">
             <span>{formatDate(item.date)}</span>
+            <span>Ref: {item.ref || "—"}</span>
             <span>{item.method || "—"}</span>
             {item.group_key ? <span className="truncate">Group: {item.group_key}</span> : null}
           </div>

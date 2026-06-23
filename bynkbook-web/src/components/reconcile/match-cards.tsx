@@ -10,6 +10,8 @@ import {
   bankCategoryLabel,
   compactText,
   entryCategoryLabel,
+  extractCheckRefFromBankTransaction,
+  extractEntryRefFromEntry,
   formatUsdFromCents,
   matchSignalChips,
   matchSignalMeta,
@@ -57,6 +59,7 @@ export function MatchSideCard({
   title,
   date,
   amountCents,
+  refText,
   account,
   categoryOrStatus,
 }: {
@@ -64,6 +67,7 @@ export function MatchSideCard({
   title: string;
   date: string;
   amountCents: unknown;
+  refText?: string;
   account?: string;
   categoryOrStatus?: string;
 }) {
@@ -92,6 +96,12 @@ export function MatchSideCard({
           </div>
         </div>
         <div className="min-w-0 text-right">
+          <div className="text-bb-text-muted">Ref</div>
+          <div className="truncate text-bb-text" title={refText}>
+            {compactText(refText)}
+          </div>
+        </div>
+        <div className="min-w-0">
           <div className="text-bb-text-muted">Category/status</div>
           <div className="truncate text-bb-text" title={categoryOrStatus}>
             {compactText(categoryOrStatus)}
@@ -155,6 +165,7 @@ export function MatchPairPreview({
           }
           date={entries.length > 1 ? `${entries.length} selected` : compactText(firstEntry?.date)}
           amountCents={entries.length > 1 ? entryTotal : firstEntry?.amount_cents ?? 0n}
+          refText={entries.length > 1 ? "Multiple" : extractEntryRefFromEntry(firstEntry)}
           account={accountLabelFor(firstEntry, accountName)}
           categoryOrStatus={entries.length > 1 ? "Selected" : entryCategoryLabel(firstEntry)}
         />
@@ -170,6 +181,7 @@ export function MatchPairPreview({
           }
           date={banks.length > 1 ? `${banks.length} selected` : ymdFromBankTxn(firstBank)}
           amountCents={banks.length > 1 ? bankTotal : firstBank?.amount_cents ?? 0n}
+          refText={banks.length > 1 ? "Multiple" : extractCheckRefFromBankTransaction(firstBank)}
           account={accountLabelFor(firstBank, accountName)}
           categoryOrStatus={banks.length > 1 ? "Selected" : bankCategoryLabel(firstBank)}
         />

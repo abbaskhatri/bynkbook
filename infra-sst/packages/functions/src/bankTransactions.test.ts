@@ -409,6 +409,61 @@ describe("bank transactions list status and pagination", () => {
 });
 
 describe("bank transaction create-entry duplicate preflight", () => {
+  test("blocks generic imported deposit when same amount manual customer entry exists nearby", async () => {
+    const rows = [
+      tx("bank-generic-deposit", "2026-05-12", "2026-05-12T12:00:00.000Z", {
+        name: "BKOFAMERICA MOBILE 05/12 3837147080 DEPOSIT",
+        amount_cents: 245900n,
+      }),
+    ];
+    const manual = entry("entry-shop", "2026-05-10", 245900n, {
+      payee: "SHOP N BAG",
+      memo: "customer deposit",
+      type: "INCOME",
+    });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(postCreateEntryEvent("bank-generic-deposit", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("POSSIBLE_DUPLICATE_ENTRY");
+    expect(body.possible_duplicate_candidates).toEqual([
+      expect.objectContaining({
+        entry_id: "entry-shop",
+        payee: "SHOP N BAG",
+        duplicate_reason: "generic_bank_manual_same_amount",
+        duplicate_confidence: "high",
+        date_distance_days: 2,
+      }),
+    ]);
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("does not block generic imported deposit when nearby manual entry has different amount", async () => {
+    const rows = [
+      tx("bank-generic-safe", "2026-05-12", "2026-05-12T12:00:00.000Z", {
+        name: "BKOFAMERICA MOBILE 05/12 3837147080 DEPOSIT",
+        amount_cents: 245900n,
+      }),
+    ];
+    const manual = entry("entry-shop-different", "2026-05-10", 246000n, {
+      payee: "SHOP N BAG",
+      memo: "customer deposit",
+      type: "INCOME",
+    });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(postCreateEntryEvent("bank-generic-safe", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.ok).toBe(true);
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+    expect(prisma.matchGroup.create).toHaveBeenCalledTimes(1);
+  });
+
   test("blocks when same account/date/amount/similar payee manual entry exists", async () => {
     const rows = [tx("bank-dup", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
     const manual = entry("entry-dup", "2026-04-26", -1250n, { payee: "Coffee House", memo: "Manual expected entry" });
@@ -711,6 +766,10 @@ describe("bank transaction create-entry method inference", () => {
       tx("bank-ach", "2026-04-28", "2026-04-28T12:00:00.000Z", { name: "ACH DEBIT VENDOR" }),
       tx("bank-check", "2026-04-29", "2026-04-29T12:00:00.000Z", { name: "CHK 1042" }),
       tx("bank-transfer", "2026-04-30", "2026-04-30T12:00:00.000Z", { name: "Online Transfer" }),
+      tx("bank-bankcard", "2026-05-01", "2026-05-01T12:00:00.000Z", { name: "BANKCARD DEPOSIT" }),
+      tx("bank-mobile-deposit", "2026-05-02", "2026-05-02T12:00:00.000Z", { name: "BKOFAMERICA MOBILE 05/02 DEPOSIT" }),
+      tx("bank-preencoded", "2026-05-03", "2026-05-03T12:00:00.000Z", { name: "Preencoded Deposit" }),
+      tx("bank-direct-deposit", "2026-05-04", "2026-05-04T12:00:00.000Z", { name: "DIRECT DEPOSIT PAYROLL" }),
     ];
     const { handler, prisma } = await loadHandler({ rows });
 
@@ -720,7 +779,31 @@ describe("bank transaction create-entry method inference", () => {
     }
 
     const methods = prisma.entry.create.mock.calls.map((call: any) => call[0].data.method);
-    expect(methods).toEqual(["ZELLE", "WIRE", "ACH", "CHECK", "TRANSFER"]);
+    expect(methods).toEqual([
+      "ZELLE",
+      "WIRE",
+      "ACH",
+      "CHECK",
+      "TRANSFER",
+      "CARD",
+      "CHECK",
+      "CHECK",
+      "DIRECT_DEPOSIT",
+    ]);
+  });
+
+  test("uses inferred method when UI sends default OTHER", async () => {
+    const rows = [
+      tx("bank-default-other", "2026-04-26", "2026-04-26T12:00:00.000Z", {
+        name: "BANKCARD DEPOSIT",
+      }),
+    ];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const res = await handler(postCreateEntryEvent("bank-default-other", { autoMatch: false, method: "OTHER" }));
+
+    expect(res.statusCode).toBe(201);
+    expect(prisma.entry.create.mock.calls[0][0].data.method).toBe("CARD");
   });
 
   test("preserves explicit method override over inferred bank text", async () => {

@@ -78,6 +78,7 @@ const PENDING_BANK_TRANSACTION_CODE = "PENDING_BANK_TRANSACTION_NOT_ACTIONABLE";
 const PENDING_BANK_TRANSACTION_MESSAGE =
   "Pending bank transactions can be reviewed once they post.";
 const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
+const CREATE_ENTRY_GENERIC_BANK_DUPLICATE_WINDOW_DAYS = 7;
 const ALLOWED_BANK_ENTRY_METHODS = new Set([
   "CASH",
   "CARD",
@@ -148,13 +149,25 @@ function inferMethodFromBankTransaction(bankTxn: any) {
   if (extractCheckNumberFromBankTransaction(bankTxn)) return "CHECK";
 
   const text = bankTransactionSearchText(bankTxn);
+  if (/\b(?:bank\s*card|bankcard|merchant\s+services?|card\s+settlement|card\s+deposit)\b/i.test(text)) {
+    return "CARD";
+  }
   if (/\bzelle\b/i.test(text)) return "ZELLE";
   if (/\bwire(?:\s+type)?\b/i.test(text)) return "WIRE";
   if (/\bach\b/i.test(text)) return ALLOWED_BANK_ENTRY_METHODS.has("ACH") ? "ACH" : "OTHER";
   if (/\b(?:check|chk)\b/i.test(text)) return "CHECK";
+  if (/\b(?:mobile|remote|pre\s*encoded|preencoded)\b[\s\S]{0,40}\bdeposit\b/i.test(text)) return "CHECK";
+  if (/\bdeposit\b[\s\S]{0,40}\b(?:mobile|remote|pre\s*encoded|preencoded)\b/i.test(text)) return "CHECK";
+  if (/\bdirect\s+deposit\b/i.test(text)) return "DIRECT_DEPOSIT";
   if (/\btransfer\b/i.test(text)) return ALLOWED_BANK_ENTRY_METHODS.has("TRANSFER") ? "TRANSFER" : "OTHER";
 
   return "OTHER";
+}
+
+function resolveBankEntryMethod(methodOverride: string, inferredMethod: string) {
+  if (!ALLOWED_BANK_ENTRY_METHODS.has(methodOverride)) return inferredMethod;
+  if (methodOverride === "OTHER" && inferredMethod && inferredMethod !== "OTHER") return inferredMethod;
+  return methodOverride;
 }
 
 function extractCheckNumberFromBankTransaction(bankTxn: any) {
@@ -286,7 +299,63 @@ function hasSimilarPayee(bankDescription: any, entry: any) {
     entryTokens.some((token) => token.length >= 4 && bankText.includes(token));
 }
 
-function duplicateCandidatePayload(entry: any) {
+function hasGenericBankDescriptor(value: any) {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+
+  return [
+    /\bbk\s*of\s*america\b/i,
+    /\bbkofamerica\b/i,
+    /\bbank\s*of\s*america\b/i,
+    /\bboa\b/i,
+    /\bmobile\b/i,
+    /\bpre\s*encoded\b/i,
+    /\bpreencoded\b/i,
+    /\bremote\b/i,
+    /\bdeposit\b/i,
+    /\bbankcard\b/i,
+    /\bmerchant\s+services?\b/i,
+    /\bcheck\s*#?\s*\d+\b/i,
+  ].some((pattern) => pattern.test(text));
+}
+
+function dateDistanceDays(a: any, bYmd: string) {
+  const aDate = a instanceof Date ? a : new Date(a);
+  const bDate = dateOnlyUtc(bYmd);
+  if (Number.isNaN(aDate.getTime()) || Number.isNaN(bDate.getTime())) return Number.POSITIVE_INFINITY;
+
+  const aDay = Math.floor(Date.UTC(aDate.getUTCFullYear(), aDate.getUTCMonth(), aDate.getUTCDate()) / 86400000);
+  const bDay = Math.floor(Date.UTC(bDate.getUTCFullYear(), bDate.getUTCMonth(), bDate.getUTCDate()) / 86400000);
+  return Math.abs(aDay - bDay);
+}
+
+function hasManualDuplicateText(entry: any) {
+  return duplicateTokens(`${entry?.payee ?? ""} ${entry?.memo ?? ""}`).length > 0;
+}
+
+function isGenericBankManualDuplicateCandidate(args: {
+  bankFullText: string;
+  bankRef: string | null;
+  entry: any;
+  entryAmountCents: bigint;
+  entryDateYmd: string;
+}) {
+  const { bankFullText, bankRef, entry, entryAmountCents, entryDateYmd } = args;
+  if (!hasGenericBankDescriptor(bankFullText)) return false;
+  if (!hasManualDuplicateText(entry)) return false;
+  if (BigInt(entry?.amount_cents ?? 0) !== entryAmountCents) return false;
+  if (dateDistanceDays(entry?.date, entryDateYmd) > CREATE_ENTRY_GENERIC_BANK_DUPLICATE_WINDOW_DAYS) return false;
+
+  const entryRef = extractRefFromText(`${entry?.memo ?? ""} ${entry?.payee ?? ""}`);
+  if (bankRef && entryRef && bankRef !== entryRef) return false;
+
+  return true;
+}
+
+function duplicateCandidatePayload(
+  entry: any,
+  evidence: { reason?: string; confidence?: "high" | "medium" | "review"; date_distance_days?: number } = {}
+) {
   return {
     entry_id: entry.id,
     date: isoToYmd(entry.date),
@@ -299,6 +368,9 @@ function duplicateCandidatePayload(entry: any) {
     category_id: entry.category_id ?? null,
     amount_cents: entry.amount_cents,
     status: entry.status ?? null,
+    duplicate_reason: evidence.reason ?? "similar_payee",
+    duplicate_confidence: evidence.confidence ?? "medium",
+    date_distance_days: evidence.date_distance_days ?? null,
   };
 }
 
@@ -317,6 +389,7 @@ async function findPossibleCreateEntryDuplicates(args: {
 
   const bankAbs = absBig(BigInt(bankTxn.amount_cents));
   const amountCandidates = Array.from(new Set([entryAmountCents, bankAbs, -bankAbs].map((v) => v.toString()))).map((v) => BigInt(v));
+  const duplicateWindowDays = CREATE_ENTRY_GENERIC_BANK_DUPLICATE_WINDOW_DAYS;
 
   const rows = await prisma.entry.findMany({
     where: {
@@ -324,8 +397,8 @@ async function findPossibleCreateEntryDuplicates(args: {
       account_id: accountId,
       deleted_at: null,
       date: {
-        gte: addUtcDays(entryDate, -CREATE_ENTRY_DUPLICATE_WINDOW_DAYS),
-        lte: addUtcDays(entryDate, CREATE_ENTRY_DUPLICATE_WINDOW_DAYS),
+        gte: addUtcDays(entryDate, -duplicateWindowDays),
+        lte: addUtcDays(entryDate, duplicateWindowDays),
       },
       amount_cents: { in: amountCandidates },
     } as any,
@@ -361,17 +434,43 @@ async function findPossibleCreateEntryDuplicates(args: {
     // transaction by definition — including recurring charges with same amount/payee.
     .filter((entry: any) => !String(entry?.sourceBankTransactionId ?? "").trim())
     .filter(isDuplicatePreflightEligibleEntry)
-    .filter((entry: any) => hasSimilarPayee(bankFullText, entry))
+    .map((entry: any) => {
+      const dateDistance = dateDistanceDays(entry?.date, entryDateYmd);
+      const similarPayee = dateDistance <= CREATE_ENTRY_DUPLICATE_WINDOW_DAYS && hasSimilarPayee(bankFullText, entry);
+      const genericBankManual = isGenericBankManualDuplicateCandidate({
+        bankFullText,
+        bankRef,
+        entry,
+        entryAmountCents,
+        entryDateYmd,
+      });
+
+      return {
+        entry,
+        dateDistance,
+        duplicateReason: genericBankManual ? "generic_bank_manual_same_amount" : "similar_payee",
+        duplicateConfidence: genericBankManual ? "high" : "medium",
+        isDuplicateCandidate: similarPayee || genericBankManual,
+      };
+    })
+    .filter((candidate: any) => candidate.isDuplicateCandidate)
     // If the bank transaction and the manual entry both carry a labeled reference
     // number and those numbers differ, they are definitely different transactions.
-    .filter((entry: any) => {
+    .filter((candidate: any) => {
       if (!bankRef) return true;
+      const entry = candidate.entry;
       const entryRef = extractRefFromText(`${entry?.memo ?? ""} ${entry?.payee ?? ""}`);
       if (!entryRef) return true;
       return bankRef === entryRef;
     })
     .slice(0, 5)
-    .map(duplicateCandidatePayload);
+    .map((candidate: any) =>
+      duplicateCandidatePayload(candidate.entry, {
+        reason: candidate.duplicateReason,
+        confidence: candidate.duplicateConfidence,
+        date_distance_days: candidate.dateDistance,
+      })
+    );
 }
 
 function isoToYmd(iso: any): string {
@@ -805,7 +904,7 @@ export async function handler(event: any) {
           const categoryIdOverride = rawCategoryId.trim() ? rawCategoryId.trim() : "";
 
           const inferredMethod = inferMethodFromBankTransaction(bankTxn);
-          const methodFinal = ALLOWED_BANK_ENTRY_METHODS.has(methodOverride) ? methodOverride : inferredMethod;
+          const methodFinal = resolveBankEntryMethod(methodOverride, inferredMethod);
           const categoryIdFinal = categoryIdOverride || null;
 
           const now = new Date();
@@ -1157,7 +1256,7 @@ export async function handler(event: any) {
       const memo = memoWithCheckRef(memoOverride || defaultMemo, extractCheckNumberFromBankTransaction(bankTxn));
 
       const inferredMethod = inferMethodFromBankTransaction(bankTxn);
-      const methodFinal = ALLOWED_BANK_ENTRY_METHODS.has(methodOverride) ? methodOverride : inferredMethod;
+      const methodFinal = resolveBankEntryMethod(methodOverride, inferredMethod);
       const categoryIdFinal = categoryIdOverride || null;
 
       const now = new Date();
