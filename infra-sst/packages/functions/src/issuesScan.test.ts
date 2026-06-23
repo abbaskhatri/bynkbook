@@ -361,3 +361,69 @@ describe("issues scan duplicate detection", () => {
     expect(issues[0].details).toBe("Potential duplicate (within 7 days)");
   });
 });
+
+describe("issues scan stale-check detection", () => {
+  // A very old check date so the >45-day stale window always trips regardless
+  // of when the test runs (todayYmd uses the real clock).
+  const OLD_CHECK_DATE = "2020-01-01";
+
+  test("flags an old, unreconciled check as stale", async () => {
+    const check = entry("check-1", OLD_CHECK_DATE, -10000n, {
+      payee: "Plumber LLC",
+      method: "CHECK",
+    });
+
+    const { handler, prisma } = await loadHandler({ entries: [check] });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const stale = createdIssues(prisma).filter((row: any) => row.issue_type === "STALE_CHECK");
+    expect(stale.map((row: any) => row.entry_id)).toEqual(["check-1"]);
+  });
+
+  test("does NOT flag an old check that is matched to a bank transaction", async () => {
+    const check = entry("check-matched", OLD_CHECK_DATE, -10000n, {
+      payee: "Plumber LLC",
+      method: "CHECK",
+    });
+
+    const { handler, prisma } = await loadHandler({
+      entries: [check],
+      matchedEntryIds: ["check-matched"],
+    });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const stale = createdIssues(prisma).filter((row: any) => row.issue_type === "STALE_CHECK");
+    expect(stale).toEqual([]);
+  });
+
+  test("does NOT flag an old check created from a bank transaction (sourceBankTransactionId)", async () => {
+    const check = entry("check-bank-sourced", OLD_CHECK_DATE, -10000n, {
+      payee: "Plumber LLC",
+      method: "CHECK",
+      sourceBankTransactionId: "bank-99",
+    });
+
+    const { handler, prisma } = await loadHandler({
+      entries: [check],
+      sourceBankRows: [
+        {
+          id: "bank-99",
+          posted_date: new Date(`${OLD_CHECK_DATE}T00:00:00.000Z`),
+          name: "CHECK 1234",
+          amount_cents: -10000n,
+          is_removed: false,
+        },
+      ],
+    });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const stale = createdIssues(prisma).filter((row: any) => row.issue_type === "STALE_CHECK");
+    expect(stale).toEqual([]);
+  });
+});

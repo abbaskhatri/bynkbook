@@ -54,7 +54,6 @@ import { aiExplainEntry, aiAnomalies } from "@/lib/api/ai";
 import {
   ENTRIES_API_MAX_LIMIT,
   ZERO,
-  absBigInt,
   allTimeStartYmd,
   centsFromDollarsInput,
   computeAutoAlloc,
@@ -655,30 +654,26 @@ export default function LedgerPageClient() {
     staleTime: 15_000,
   });
 
-  const matchedAbsByEntryId = useMemo(() => {
-    const m = new Map<string, bigint>();
-
+  // An entry is MATCHED iff it belongs to an ACTIVE match group — exactly the
+  // same definition the Reconcile page uses (matchedEntryIdSet). Match groups
+  // are FULL-MATCH-ONLY and balanced (bank sum == entry sum), so there is no
+  // such thing as a partially-matched entry. The previous implementation
+  // re-derived MATCHED/PARTIAL by comparing the stored matched_amount_cents
+  // against the entry's CURRENT amount; if an entry's amount was edited after
+  // matching, that comparison drifted and the Ledger showed "not matched" /
+  // "partial" for entries the Reconcile page correctly showed as matched.
+  // Using group membership keeps the two pages consistent.
+  const matchedEntryIdSet = useMemo(() => {
+    const s = new Set<string>();
     const items = (matchGroupsQ.data as any)?.items ?? [];
     for (const g of items) {
       if (String(g?.status ?? "").toUpperCase() !== "ACTIVE") continue;
-
       for (const e of (g?.entries ?? [])) {
         const id = String(e?.entry_id ?? "");
-        if (!id) continue;
-
-        const cents = toBigIntSafe(
-          e?.matched_amount_cents ??
-          e?.matched_amount_abs_cents ??
-          e?.matched_amount_cents_abs ??
-          e?.amount_abs_cents ??
-          0
-        );
-        const prev = m.get(id) ?? 0n;
-        m.set(id, prev + (cents < 0n ? -cents : cents));
+        if (id) s.add(id);
       }
     }
-
-    return m;
+    return s;
   }, [matchGroupsQ.data]);
 
   const hasAdjustmentByEntryId = useMemo(() => {
@@ -949,14 +944,7 @@ export default function LedgerPageClient() {
       const tDir = ((e as any).transfer_direction ?? null) as ("IN" | "OUT" | null);
       const isOpeningBalanceEntry =
         String(e.type ?? "").toUpperCase() === "OPENING" || isOpeningLikePayee(e.payee);
-      const entryAbs = absBigInt(toBigIntSafe(e.amount_cents));
-      const matchedAbs = matchedAbsByEntryId.get(String(e.id)) ?? 0n;
-      const bankMatchRawStatus =
-        matchedAbs >= entryAbs && entryAbs > 0n
-          ? "MATCHED"
-          : matchedAbs > 0n && matchedAbs < entryAbs
-            ? "PARTIAL"
-            : "";
+      const bankMatchRawStatus = matchedEntryIdSet.has(String(e.id)) ? "MATCHED" : "";
       const entryRawStatus = String(e.status ?? "EXPECTED").trim().toUpperCase() || "EXPECTED";
       const displayRawStatus = (() => {
         if (isDeleted) return "DELETED";
@@ -1039,7 +1027,7 @@ export default function LedgerPageClient() {
         isOpeningBalanceEntry,
       };
     });
-  }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedAbsByEntryId, hasAdjustmentByEntryId]);
+  }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedEntryIdSet, hasAdjustmentByEntryId]);
 
   const rowModelById = useMemo(() => {
     const map = new Map<string, (typeof rowModels)[number]>();
