@@ -32,6 +32,7 @@ import {
   createEntry,
   deleteEntry,
   hardDeleteEntry,
+  listAllEntries,
   listEntries,
   restoreEntry,
   unmatchAndDeleteEntry,
@@ -4814,10 +4815,9 @@ export default function LedgerPageClient() {
       throw new Error("From date must be on or before To date.");
     }
 
-    const rows = await listEntries({
+    const rows = await listAllEntries({
       businessId: selectedBusinessId,
       accountId: selectedAccountId,
-      limit: 200,
       includeDeleted: showDeleted,
       date_from: ledgerRangeFrom,
       date_to: ledgerRangeTo,

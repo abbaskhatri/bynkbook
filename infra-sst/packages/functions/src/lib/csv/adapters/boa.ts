@@ -30,6 +30,38 @@ function parseAmountToCents(s: string): bigint | null {
   return isParenNeg ? -cents : cents;
 }
 
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        field += '"';
+        i += 1;
+        continue;
+      }
+
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (ch === "," && !inQuotes) {
+      fields.push(field);
+      field = "";
+      continue;
+    }
+
+    field += ch;
+  }
+
+  fields.push(field);
+  return fields;
+}
+
 export function matchesBoa(lines: string[]): boolean {
   // Look for header line: Date,Description,Amount,Running Bal.
   return lines.some((ln) => ln.trim().toLowerCase() === "date,description,amount,running bal.");
@@ -45,7 +77,7 @@ export function parseBoa(lines: string[]) {
     const line = lines[i];
     if (!line || !line.trim()) continue;
 
-    const parts = line.split(",");
+    const parts = parseCsvLine(line);
     if (parts.length < 3) continue;
 
     const dateRaw = parts[0] ?? "";

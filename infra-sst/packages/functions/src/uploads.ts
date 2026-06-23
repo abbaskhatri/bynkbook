@@ -6,7 +6,7 @@ import { TextractClient, AnalyzeExpenseCommand } from "@aws-sdk/client-textract"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { streamToString } from "./lib/csv/streamToString";
 import { parseBankStatementCsv } from "./lib/csv/parseBankStatementCsv";
-import { computeImportHash } from "./lib/csv/importHash";
+import { computeImportHash, normalizeDesc } from "./lib/csv/importHash";
 
 function json(statusCode: number, body: any) {
   return {
@@ -1185,6 +1185,7 @@ export async function handler(event: any) {
       let importedCount = 0;
       let duplicateCount = 0;
       let skippedByRetentionCount = 0;
+      const occurrenceByImportKey = new Map<string, number>();
 
       for (const r of parsed.rows) {
         if (!r.postedDate) continue;
@@ -1195,6 +1196,10 @@ export async function handler(event: any) {
           continue;
         }
 
+        const occurrenceKey = [r.postedDate, r.amountCents.toString(), normalizeDesc(r.description), parser].join("|");
+        const occurrence = (occurrenceByImportKey.get(occurrenceKey) ?? 0) + 1;
+        occurrenceByImportKey.set(occurrenceKey, occurrence);
+
         const importHash = computeImportHash({
           businessId: biz,
           accountId: row.account_id,
@@ -1202,6 +1207,7 @@ export async function handler(event: any) {
           amountCents: r.amountCents.toString(),
           description: r.description,
           parser,
+          occurrence,
         });
 
         const raw = {
