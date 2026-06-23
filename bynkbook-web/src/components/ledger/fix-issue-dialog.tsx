@@ -78,6 +78,19 @@ export function FixIssueDialog(props: {
   const [mergeSurvivorId, setMergeSurvivorId] = useState<string>("");
   const [mergeDuplicateId, setMergeDuplicateId] = useState<string>("");
 
+  useEffect(() => {
+    if (!open) {
+      setErr(null);
+      setActiveAction(null);
+      setPickedCategoryId("");
+      setMergeSurvivorId("");
+      setMergeDuplicateId("");
+      return;
+    }
+
+    setErr(null);
+  }, [open, kind, entryId]);
+
   const relevant = useMemo(() => {
     if (!kind || !entryId) return { issueIds: [] as string[], entryIds: [] as string[] };
 
@@ -355,7 +368,7 @@ export function FixIssueDialog(props: {
                       if (code === "MERGE_BLOCKED" && reason === "SOURCE_MISMATCH") {
                         setErr("Merge blocked: these entries have different source linkage. Review both entries first. If both are legitimate, keep them. If one is not needed, use the appropriate cleanup action after review.");
                       } else if (code === "MERGE_BLOCKED" && (reason === "ENTRY_RECONCILED" || rawUpper.includes("RECONCILED"))) {
-                        setErr("Entry is reconciled; merge blocked. Unmatch it first if this is truly a duplicate, otherwise keep both or Legitimize.");
+                        setErr("The selected duplicate is already reconciled. Make the reconciled/bank-matched entry the Survivor and choose the manual duplicate as the one to remove, or click Not a duplicate if both are valid.");
                       } else {
                         setErr(String(payload?.error ?? raw ?? "Merge failed"));
                       }
@@ -433,7 +446,33 @@ export function FixIssueDialog(props: {
           <div className="bg-bb-table-header px-3 py-2 text-xs font-medium text-bb-text">
             Affected entries ({affectedRows.length})
           </div>
-          <div className="overflow-x-hidden overflow-y-hidden">
+          <div className="space-y-2 p-2 sm:hidden">
+            {affectedRows.map((r) => {
+              const ref = String((r as any).ref ?? "").trim();
+              return (
+                <div key={r.id} className="rounded-md border border-bb-border-muted bg-bb-surface-card p-3 text-xs text-bb-text">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold" title={r.payee}>{r.payee}</div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-bb-text-muted">
+                        <span>{r.date}</span>
+                        <span>Ref: {ref || "—"}</span>
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right font-semibold tabular-nums">{r.amountStr}</div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                    <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.methodDisplay || "Other"}</span>
+                    <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.category || "No category"}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {affectedRows.length === 0 ? (
+              <div className="px-2 py-3 text-sm text-bb-text-muted">No affected entries found.</div>
+            ) : null}
+          </div>
+          <div className="hidden overflow-x-hidden overflow-y-hidden sm:block">
             <table className="w-full text-sm table-fixed">
               <colgroup>
                 {/* md: squeeze non-payee columns so Payee has room */}
@@ -505,7 +544,13 @@ export function FixIssueDialog(props: {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="text-xs">
                 <div className="text-[11px] text-bb-text-muted mb-1">Survivor</div>
-                <Select value={mergeSurvivorId} onValueChange={setMergeSurvivorId}>
+                <Select
+                  value={mergeSurvivorId}
+                  onValueChange={(value) => {
+                    setMergeSurvivorId(value);
+                    setErr(null);
+                  }}
+                >
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-primary/30 bg-primary/5">
                     <span className="truncate" title={mergeSurvivorId ? entryLabel(mergeSurvivorId) : ""}>
                       {mergeSurvivorId ? entryLabel(mergeSurvivorId) : "Pick survivor"}
@@ -523,7 +568,13 @@ export function FixIssueDialog(props: {
 
               <div className="text-xs">
                 <div className="text-[11px] text-bb-text-muted mb-1">Duplicate to remove</div>
-                <Select value={mergeDuplicateId} onValueChange={setMergeDuplicateId}>
+                <Select
+                  value={mergeDuplicateId}
+                  onValueChange={(value) => {
+                    setMergeDuplicateId(value);
+                    setErr(null);
+                  }}
+                >
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-bb-status-danger-border bg-bb-status-danger-bg">
                     <span className="truncate" title={mergeDuplicateId ? entryLabel(mergeDuplicateId) : ""}>
                       {mergeDuplicateId ? entryLabel(mergeDuplicateId) : "Pick duplicate"}

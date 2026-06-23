@@ -953,7 +953,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         {/* Content: ledger must not page-scroll. Extra bottom padding on
             mobile reserves space for the fixed bottom tab bar. */}
-        <main className={(noPageScroll ? "p-4 pb-[4.75rem] md:p-6 md:pb-6 overflow-hidden flex-1 min-h-0" : "p-4 pb-[4.75rem] md:p-6 md:pb-6 overflow-y-auto flex-1 min-h-0")}>
+        <main className={(noPageScroll ? "p-3 pb-[5.25rem] md:p-6 md:pb-6 overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-6 md:pb-6 overflow-y-auto flex-1 min-h-0")}>
           {children}
         </main>
       </div>
@@ -961,7 +961,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Mobile bottom tab bar — primary navigation, thumb-friendly. Hidden on
           md+ where the sidebar is shown. */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.25rem] border-t border-bb-border bg-bb-surface-card/95 backdrop-blur flex items-stretch justify-around px-1 pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/95 backdrop-blur flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)]"
         aria-label="Primary"
       >
         {[
@@ -978,8 +978,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               key={item.path}
               href={href(item.path, item.needsAccountId)}
               className={[
-                "relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium",
-                active ? "text-primary" : "text-foreground/60",
+                "relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-semibold leading-none",
+                active ? "bg-bb-nav-active-bg text-bb-nav-active-fg shadow-sm" : "text-foreground/60 hover:bg-bb-surface-soft hover:text-foreground",
               ].join(" ")}
               aria-current={active ? "page" : undefined}
             >
@@ -998,7 +998,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         <button
           type="button"
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-medium text-foreground/60"
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-semibold leading-none text-foreground/60 hover:bg-bb-surface-soft hover:text-foreground"
           onClick={openMobileNav}
           aria-label="More navigation"
         >

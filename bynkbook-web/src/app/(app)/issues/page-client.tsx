@@ -36,6 +36,7 @@ import {
 import { RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 
 import { formatUsd, toBigIntSafe } from "@/lib/money";
+import { extractEntryRef } from "@/lib/ledger/helpers";
 
 const formatUsdFromCents = (cents: bigint) => formatUsd(cents);
 
@@ -1120,6 +1121,7 @@ export default function IssuesPageClient() {
               {
                 id: it.entry_id,
                 date: it.entry_date ?? "",
+                ref: extractEntryRef({ memo: it.entry_memo }),
                 payee: it.entry_payee ?? "",
                 amountStr: it.entry_amount_cents != null ? formatUsdFromCents(amt) : "—",
                 methodDisplay: titleCase((it.entry_method ?? "").toString()),

@@ -239,6 +239,42 @@ describe("category keyword suggestions", () => {
     });
   });
 
+  test("suggests Shipping/Postage for carriers when matching category exists", () => {
+    const suggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({ payee: "USPS POSTAGE", memo: "postal service" }),
+      categories: [
+        { id: "cat-shipping", name: "Shipping & Postage" },
+        { id: "cat-office", name: "Office Supplies" },
+      ],
+      limit: 3,
+    });
+
+    expect(suggestions[0]).toMatchObject({
+      category_id: "cat-shipping",
+      category_name: "Shipping & Postage",
+      confidence: 84,
+      reason: expect.stringContaining("Matched shipping or postage keyword"),
+    });
+  });
+
+  test("suggests Utilities for utility provider language when matching category exists", () => {
+    const suggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({ payee: "XFINITY", memo: "internet bill" }),
+      categories: [
+        { id: "cat-utilities", name: "Utilities" },
+        { id: "cat-software", name: "Software & Subscriptions" },
+      ],
+      limit: 3,
+    });
+
+    expect(suggestions[0]).toMatchObject({
+      category_id: "cat-utilities",
+      category_name: "Utilities",
+      confidence: 84,
+      reason: expect.stringContaining("Matched utility provider keyword"),
+    });
+  });
+
   test("suggests Sale/Sales income category for bankcard or btot deposit when direction is INCOME", () => {
     const bankcardSuggestions = buildKeywordCategorySuggestions({
       item: keywordItem({

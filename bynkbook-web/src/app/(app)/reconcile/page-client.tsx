@@ -102,6 +102,12 @@ import {
   MatchSignalChip,
   TinySpinner,
 } from "@/components/reconcile/match-cards";
+import {
+  categorySuggestionId,
+  categorySuggestionName,
+  isBulkSafeCategorySuggestion,
+  safeTopCategorySuggestion,
+} from "@/lib/categorySuggestions";
 
 type RefreshBankAndMatchesOptions = {
   preserveOnEmpty?: boolean;
@@ -486,9 +492,13 @@ export default function ReconcilePageClient() {
   // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
   const PAGE_CHUNK = 200;
   const ENTRIES_API_LIMIT = 200;
+  const ENTRIES_INITIAL_PAGE_COUNT = 1;
+  const ENTRIES_BACKGROUND_MAX_PAGE_COUNT = 500;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
   const BANK_COUNT_PROBE_MAX_PAGES = 20;
 
+  const [entriesPageCount, setEntriesPageCount] = useState(ENTRIES_INITIAL_PAGE_COUNT);
+  const [entriesPageScopeKey, setEntriesPageScopeKey] = useState("");
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
   const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
 
@@ -498,6 +508,10 @@ export default function ReconcilePageClient() {
     selectedBusinessId && selectedAccountId
       ? `${selectedBusinessId}:${selectedAccountId}:${from || ""}:${to || ""}`
       : "";
+  const effectiveEntriesPageCount =
+    bankScopeKey && entriesPageScopeKey === bankScopeKey
+      ? entriesPageCount
+      : ENTRIES_INITIAL_PAGE_COUNT;
   const [bankLoadedScopeByStatus, setBankLoadedScopeByStatus] = useState<Record<BankTab, string>>({
     unmatched: "",
     matched: "",
@@ -547,9 +561,39 @@ export default function ReconcilePageClient() {
     businessId: selectedBusinessId,
     accountId: selectedAccountId,
     limit: ENTRIES_API_LIMIT,
+    pageCount: effectiveEntriesPageCount,
     date_from: from || undefined,
     date_to: to || undefined,
   });
+
+  useEffect(() => {
+    setEntriesPageCount(ENTRIES_INITIAL_PAGE_COUNT);
+    setEntriesPageScopeKey(bankScopeKey);
+  }, [bankScopeKey]);
+
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId) return;
+    if (entriesQ.isLoading || entriesQ.isFetching) return;
+    if (!((entriesQ.data as any)?.meta?.hasMore)) return;
+    if (effectiveEntriesPageCount >= ENTRIES_BACKGROUND_MAX_PAGE_COUNT) return;
+
+    const timer = window.setTimeout(() => {
+      setEntriesPageCount((current) =>
+        Math.min(ENTRIES_BACKGROUND_MAX_PAGE_COUNT, Math.max(current + 1, current * 2))
+      );
+      setEntriesPageScopeKey(bankScopeKey);
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    selectedBusinessId,
+    selectedAccountId,
+    entriesQ.isLoading,
+    entriesQ.isFetching,
+    entriesQ.data,
+    effectiveEntriesPageCount,
+    bankScopeKey,
+  ]);
 
   const [bankTxLoading, setBankTxLoading] = useState(false);
   const [bankTx, setBankTx] = useState<any[]>([]);
@@ -1290,6 +1334,7 @@ export default function ReconcilePageClient() {
   const [createEntryMethod, setCreateEntryMethod] = useState("OTHER");
   const [createEntryCategoryId, setCreateEntryCategoryId] = useState<string>("");
   const [createEntryCategoryName, setCreateEntryCategoryName] = useState<string>("");
+  const [createEntryCategoryTouched, setCreateEntryCategoryTouched] = useState(false);
 
   // Bundle B: canonical category suggestions (suggestion-only; user must click)
   const [createEntrySugLoading, setCreateEntrySugLoading] = useState(false);
@@ -1394,6 +1439,40 @@ export default function ReconcilePageClient() {
       cancelled = true;
     };
   }, [openCreateEntry, createEntryBankTxnId, selectedBusinessId, selectedAccountId, bankTx]);
+
+  const createEntrySafeSuggestion = useMemo(
+    () => safeTopCategorySuggestion(createEntrySuggestions as any),
+    [createEntrySuggestions]
+  );
+
+  const createEntrySafeSuggestionId = useMemo(
+    () => categorySuggestionId(createEntrySafeSuggestion as any),
+    [createEntrySafeSuggestion]
+  );
+
+  const createEntrySafeSuggestionName = useMemo(
+    () =>
+      categorySuggestionName(createEntrySafeSuggestion as any) ||
+      String(categories.find((c: any) => String(c?.id ?? "") === createEntrySafeSuggestionId)?.name ?? "").trim(),
+    [createEntrySafeSuggestion, createEntrySafeSuggestionId, categories]
+  );
+
+  useEffect(() => {
+    if (!openCreateEntry) return;
+    if (createEntryCategoryTouched) return;
+    if (createEntryCategoryId) return;
+    if (!createEntrySafeSuggestionId) return;
+
+    setCreateEntryCategoryId(createEntrySafeSuggestionId);
+    setCreateEntryCategoryName(createEntrySafeSuggestionName);
+    setCategoryQuery("");
+  }, [
+    openCreateEntry,
+    createEntryCategoryTouched,
+    createEntryCategoryId,
+    createEntrySafeSuggestionId,
+    createEntrySafeSuggestionName,
+  ]);
 
   // Load bank txns + match groups for the current reconcile scope.
   useEffect(() => {
@@ -1531,7 +1610,7 @@ export default function ReconcilePageClient() {
   // Keep raw entries; tab-level filtering decides visibility (Expected hides Adjusted-unmatched)
   const allEntries = useMemo(() => (entriesQ.data ?? []).filter((entry: any) => !isInactiveEntryRecord(entry)), [entriesQ.data]);
   const entriesLoadedCount = allEntries.length;
-  const entriesHitApiLimit = entriesLoadedCount >= ENTRIES_API_LIMIT;
+  const entriesHitApiLimit = !!((entriesQ.data as any)?.meta?.hasMore);
 
   const allEntriesSorted = useMemo(() => {
     const arr = [...allEntries];
@@ -2483,8 +2562,9 @@ export default function ReconcilePageClient() {
     return (hay ?? "").toLowerCase().includes(searchQ);
   };
 
-  // Tabs: Expected Entries (Phase 2: cap rendered rows for instant tab switches)
-  const entriesExpectedList = useMemo(() => {
+  // Tabs: Expected Entries. Keep the full filtered lists available for matching,
+  // counts, and reconciliation truth. Slice only the rendered rows.
+  const entriesExpectedAllList = useMemo(() => {
     const out: any[] = [];
     const orderedEntries = [...optimisticPendingEntryDrafts, ...allEntriesSorted].sort(compareEntryDateAsc);
 
@@ -2497,12 +2577,11 @@ export default function ReconcilePageClient() {
       if (!matchesRowSearch(hay)) continue;
 
       out.push(e);
-      if (out.length >= expectedVisibleN) break;
     }
     return out;
-  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, expectedVisibleN, isAdjustedEntry, isReconcileExemptEntry]);
+  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, isAdjustedEntry, isReconcileExemptEntry]);
 
-  const entriesMatchedList = useMemo(() => {
+  const entriesMatchedAllList = useMemo(() => {
     const out: any[] = [];
     for (const e of allEntriesNewestFirst) {
       if (!matchedEntryIdSet.has(e.id)) continue;
@@ -2512,36 +2591,22 @@ export default function ReconcilePageClient() {
       if (!matchesRowSearch(hay)) continue;
 
       out.push(e);
-      if (out.length >= matchedVisibleN) break;
     }
     return out;
-  }, [allEntriesNewestFirst, matchedEntryIdSet, searchQ, matchedVisibleN, isReconcileExemptEntry]);
+  }, [allEntriesNewestFirst, matchedEntryIdSet, searchQ, isReconcileExemptEntry]);
 
-  // Counts (uncapped) for tab labels — computed cheaply in one pass
-  const { expectedCount, matchedCount } = useMemo(() => {
-    let exp = 0;
-    let mat = 0;
+  const entriesExpectedList = useMemo(
+    () => entriesExpectedAllList.slice(0, expectedVisibleN),
+    [entriesExpectedAllList, expectedVisibleN]
+  );
 
-    for (const e of optimisticPendingEntryDrafts) {
-      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
-      if (!matchesRowSearch(hay)) continue;
-      exp++;
-    }
+  const entriesMatchedList = useMemo(
+    () => entriesMatchedAllList.slice(0, matchedVisibleN),
+    [entriesMatchedAllList, matchedVisibleN]
+  );
 
-    for (const e of allEntriesSorted) {
-      if (isReconcileExemptEntry(e)) continue;
-
-      const isMat = matchedEntryIdSet.has(e.id);
-      if (!isMat && isAdjustedEntry(e)) continue;
-
-      const hay = `${String(e.date ?? "")} ${String(e.payee ?? "")} ${String(e.amount_cents ?? "")}`;
-      if (!matchesRowSearch(hay)) continue;
-
-      if (isMat) mat++;
-      else exp++;
-    }
-    return { expectedCount: exp, matchedCount: mat };
-  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, isAdjustedEntry, isReconcileExemptEntry]);
+  const expectedCount = entriesExpectedAllList.length;
+  const matchedCount = entriesMatchedAllList.length;
 
   // Tabs: Bank Transactions (Phase 2: cap rendered rows for instant tab switches)
   const bankUnmatchedList = useMemo(() => {
@@ -2786,7 +2851,7 @@ const displayBankActiveList = useMemo(() => {
       let onlyMatchId: string | null = null;
       let count = 0;
 
-      for (const e of entriesExpectedList) {
+      for (const e of entriesExpectedAllList) {
         const entryId = String(e?.id ?? "");
         if (!entryId) continue;
         // Optimistic-pending entries are not stable candidates.
@@ -2816,7 +2881,7 @@ const displayBankActiveList = useMemo(() => {
       if (count === 1 && onlyMatchId) out.set(txnId, onlyMatchId);
     }
     return out;
-  }, [bankTab, displayBankActiveList, entriesExpectedList, isBankTxnFullyMatched]);
+  }, [bankTab, displayBankActiveList, entriesExpectedAllList, isBankTxnFullyMatched]);
 
   // Row virtualization for the two reconcile tables. Both can grow large
   // (no pagination), so windowing the rendered <tr> set keeps scroll smooth
@@ -2929,7 +2994,8 @@ const displayBankActiveList = useMemo(() => {
     bankTab === "unmatched" && bankPendingUnmatchedCount > 0
       ? `${bankPendingUnmatchedCount} pending shown read-only until posted.`
       : null;
-  const entriesScopeCopy = `Range ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded • Visible ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
+  const entriesHistoryLoading = entriesQ.isFetching && effectiveEntriesPageCount > ENTRIES_INITIAL_PAGE_COUNT;
+  const entriesScopeCopy = `Ledger ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded${entriesHistoryLoading ? " • Loading older history" : ""} • Showing ${expectedTab === "expected" ? displayEntriesExpectedList.length : displayEntriesMatchedList.length} of ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
       ? Math.max(0, activeBankLoadedRowsCount - (bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount))
@@ -3375,6 +3441,7 @@ const displayBankActiveList = useMemo(() => {
             setCreateEntryAutoMatch(true);
             setCreateEntryDuplicateCandidates([]);
             setCreateEntryDuplicateConfirm("");
+            setCreateEntryCategoryTouched(false);
           }}
           title={createEntryDuplicateCandidates.length ? "Possible duplicate ledger entry" : "Create entry"}
           size="lg"
@@ -3504,9 +3571,9 @@ const displayBankActiveList = useMemo(() => {
 
                         try {
                           const topSuggestion = createEntrySuggestions[0] ?? null;
-                          const suggestedCategoryId = String(
-                            topSuggestion?.category_id ?? topSuggestion?.categoryId ?? ""
-                          ).trim();
+                          const suggestedCategoryId = categorySuggestionId(topSuggestion as any);
+                          const safeSuggestionId = categorySuggestionId(createEntrySafeSuggestion as any);
+                          const categoryIdFinal = createEntryCategoryId.trim() || safeSuggestionId || "";
 
                           await createEntryFromBankTransaction({
                             businessId: selectedBusinessId,
@@ -3515,7 +3582,7 @@ const displayBankActiveList = useMemo(() => {
                             autoMatch: !!createEntryAutoMatch,
                             memo: createEntryMemo,
                             method: createEntryMethod,
-                            category_id: createEntryCategoryId.trim() || "",
+                            category_id: categoryIdFinal,
                             suggested_category_id: suggestedCategoryId || "",
                             allowPossibleDuplicate: createEntryDuplicateCandidates.length > 0,
                           });
@@ -3541,6 +3608,7 @@ const displayBankActiveList = useMemo(() => {
                           setCreateEntryBankTxnId(null);
                           setCreateEntryDuplicateCandidates([]);
                           setCreateEntryDuplicateConfirm("");
+                          setCreateEntryCategoryTouched(false);
                         } catch (e: any) {
                           setOptimisticPendingEntryDrafts((prev) =>
                             prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
@@ -3873,6 +3941,8 @@ const displayBankActiveList = useMemo(() => {
                                 const warningText = String(s?.warning ?? "").trim();
                                 const requiresReview = categorySuggestionRequiresReview(s);
                                 const selected = createEntryCategoryId && createEntryCategoryId === id;
+                                const safeSuggestion = isBulkSafeCategorySuggestion(s, idx);
+                                const autoSelected = selected && safeSuggestion && !createEntryCategoryTouched;
 
                                 return (
                                   <button
@@ -3894,14 +3964,24 @@ const displayBankActiveList = useMemo(() => {
                                       if (!id) return;
                                       setCreateEntryCategoryId(id);
                                       setCreateEntryCategoryName(name);
+                                      setCreateEntryCategoryTouched(true);
                                       setCategoryQuery("");
                                     }}
-                                  >
-                                    <span className="font-medium truncate max-w-[150px]">{name}</span>
-                                    <span
-                                      className={[
-                                        "inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-semibold",
-                                        selected ? "bg-primary/10 text-primary" : "bg-bb-border-muted text-bb-text-muted",
+                                    >
+                                      <span className="font-medium truncate max-w-[150px]">{name}</span>
+                                      {autoSelected ? (
+                                        <span className="rounded-full border border-primary/20 bg-primary/10 px-1 text-[9px] font-semibold">
+                                          Auto
+                                        </span>
+                                      ) : safeSuggestion ? (
+                                        <span className="rounded-full border border-primary/20 bg-background/40 px-1 text-[9px] font-semibold">
+                                          Safe
+                                        </span>
+                                      ) : null}
+                                      <span
+                                        className={[
+                                          "inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-semibold",
+                                          selected ? "bg-primary/10 text-primary" : "bg-bb-border-muted text-bb-text-muted",
                                       ].join(" ")}
                                     >
                                       {confLabel || `${conf}%`}
@@ -3941,7 +4021,7 @@ const displayBankActiveList = useMemo(() => {
                         ) : createEntrySugErr ? (
                           <div className="text-[11px] text-bb-text-muted">Suggestions unavailable</div>
                         ) : (
-                          <div className="text-[11px] text-bb-text-muted">No strong suggestion yet. You can still choose a category below.</div>
+                          <div className="text-[11px] text-bb-text-muted">No safe suggestion yet. You can still choose a category below.</div>
                         )}
                       </div>
 
@@ -3958,12 +4038,14 @@ const displayBankActiveList = useMemo(() => {
                           if (option) {
                             setCreateEntryCategoryId(option.id ?? "");
                             setCreateEntryCategoryName(option.name);
+                            setCreateEntryCategoryTouched(true);
                             setCategoryQuery("");
                             return;
                           }
 
                           setCreateEntryCategoryId("");
                           setCreateEntryCategoryName("");
+                          setCreateEntryCategoryTouched(true);
                           setCategoryQuery(value);
                         }}
                       />
@@ -3977,6 +4059,7 @@ const displayBankActiveList = useMemo(() => {
                             onClick={() => {
                               setCreateEntryCategoryId("");
                               setCreateEntryCategoryName("");
+                              setCreateEntryCategoryTouched(true);
                               setCategoryQuery("");
                             }}
                           >
@@ -5026,6 +5109,7 @@ const displayBankActiveList = useMemo(() => {
                                     setCreateEntryMethod(inferMethodFromBankTransaction(t));
                                     setCreateEntryCategoryId("");
                                     setCreateEntryCategoryName("");
+                                    setCreateEntryCategoryTouched(false);
                                     setCategoryQuery("");
 
                                     setOpenCreateEntry(true);

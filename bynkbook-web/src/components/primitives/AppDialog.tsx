@@ -18,11 +18,11 @@ type AppDialogProps = {
 };
 
 const dialogWidthBySize: Record<AppDialogSize, string> = {
-  xs: "sm:min-w-[22rem] max-w-[24rem]",
-  sm: "sm:min-w-[24rem] max-w-[28rem]",
-  md: "sm:min-w-[28rem] max-w-[34rem]",
-  lg: "sm:min-w-[34rem] max-w-[42rem]",
-  xl: "sm:min-w-[42rem] max-w-[56rem]",
+  xs: "sm:min-w-[22rem] sm:max-w-[24rem]",
+  sm: "sm:min-w-[24rem] sm:max-w-[28rem]",
+  md: "sm:min-w-[28rem] sm:max-w-[34rem]",
+  lg: "sm:min-w-[34rem] sm:max-w-[42rem]",
+  xl: "sm:min-w-[42rem] sm:max-w-[56rem]",
 };
 
 export function AppDialog({
@@ -73,7 +73,7 @@ export function AppDialog({
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-center justify-center overflow-x-hidden p-2 sm:p-4">
+      <div className="absolute inset-0 flex items-end justify-center overflow-x-hidden p-0 sm:items-center sm:p-4">
         <div
           ref={containerRef}
           tabIndex={-1}
@@ -82,15 +82,15 @@ export function AppDialog({
           aria-labelledby={title ? titleId : undefined}
           className={[
             surfaceCardSoft,
-            "w-full min-w-0 max-w-[calc(100vw-1rem)] sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-2xl border border-bb-border bg-bb-dialog-bg shadow-2xl",
-            "max-h-[calc(100dvh-1rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
+            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-2xl sm:rounded-2xl border border-bb-border bg-bb-dialog-bg shadow-2xl",
+            "max-h-[calc(100dvh-0.75rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
             "transition-all duration-200 ease-out",
-            "animate-in fade-in zoom-in-95",
+            "animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 sm:slide-in-from-bottom-0",
             widthClass,
           ].join(" ")}
         >
-          <div className="shrink-0 px-3.5 py-2.5 border-b border-bb-border-muted flex items-start justify-between gap-3 bg-bb-surface-card">
-            <div id={titleId} className="min-w-0 text-sm font-semibold text-bb-text leading-6">
+          <div className="shrink-0 px-4 py-3 border-b border-bb-border-muted flex items-start justify-between gap-3 bg-bb-surface-card">
+            <div id={titleId} className="min-w-0 text-base sm:text-sm font-semibold text-bb-text leading-6">
               {title}
             </div>
 
@@ -110,10 +110,10 @@ export function AppDialog({
             ) : null}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-3.5 py-2.5">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3 sm:overflow-x-auto sm:px-3.5 sm:py-2.5">{children}</div>
 
           {footer ? (
-            <div className="min-w-0 shrink-0 px-3.5 py-2.5 border-t border-bb-border-muted bg-bb-surface-soft">
+            <div className="min-w-0 shrink-0 px-4 py-3 border-t border-bb-border-muted bg-bb-surface-soft [&>div]:flex-wrap [&>div]:gap-2 [&_button]:min-h-10 [&_button]:shrink-0 sm:px-3.5 sm:py-2.5">
               {footer}
             </div>
           ) : null}

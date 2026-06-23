@@ -2359,7 +2359,15 @@ export default function CategoryReviewPageClient() {
             title="Review Auto Fix"
             size="lg"
             footer={
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs text-muted-foreground">
+                  {selectedApplyItems.length > 0
+                    ? `${selectedApplyItems.length} safe ${selectedApplyItems.length === 1 ? "fix" : "fixes"} ready`
+                    : manuallySelectedApplyItems.length > 0
+                      ? `${manuallySelectedApplyItems.length} reviewed ${manuallySelectedApplyItems.length === 1 ? "selection" : "selections"} ready`
+                      : "Review suggestions before applying."}
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
                 <Button variant="outline" onClick={() => setApplyOpen(false)} disabled={applyBusy}>
                   Cancel
                 </Button>
@@ -2372,7 +2380,7 @@ export default function CategoryReviewPageClient() {
                   disabled={applyBusy || manuallySelectedApplyItems.length === 0}
                   onClick={applyManuallySelectedCategories}
                 >
-                  {`Apply manual selections (${manuallySelectedApplyItems.length})`}
+                  {`Apply reviewed (${manuallySelectedApplyItems.length})`}
                 </BusyButton>
 
                 <BusyButton
@@ -2474,8 +2482,9 @@ export default function CategoryReviewPageClient() {
                     }
                   }}
                 >
-                  {`Apply ${selectedApplyItems.length} safe fix${selectedApplyItems.length === 1 ? "" : "es"}`}
+                  {`Apply safe fixes (${selectedApplyItems.length})`}
                 </BusyButton>
+                </div>
               </div>
             }
           >
@@ -2506,16 +2515,16 @@ export default function CategoryReviewPageClient() {
 
               {autoFixSafeSelectedCount === 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
-                  No safe bulk fixes yet. Review suggestions manually.
+                  No safe bulk fixes yet. Choose categories in Needs review, then apply reviewed selections.
                 </div>
               ) : autoFixReviewNeededCount > 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
                   {autoFixReviewNeededCount} need{autoFixReviewNeededCount === 1 ? "s" : ""} review.
-                  Auto Fix applies selected safe suggestions only. Manual selections apply only selected loaded rows.
+                  Safe fixes can be applied now; reviewed rows apply only after you choose a category.
                 </div>
               ) : (
                 <div className="text-[11px] text-muted-foreground">
-                  Safe suggestions are preselected for loaded rows. Uncheck any group or row before applying.
+                  Safe suggestions are grouped and preselected. Uncheck any group or row before applying.
                 </div>
               )}
 

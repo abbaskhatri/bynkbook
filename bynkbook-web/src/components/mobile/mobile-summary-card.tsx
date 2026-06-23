@@ -25,21 +25,21 @@ export function MobileSummaryCard({
   tone = "neutral",
 }: MobileSummaryCardProps) {
   return (
-    <section className={cn("rounded-md border p-4 shadow-sm", toneClasses[tone])}>
+    <section className={cn("rounded-md border p-3.5 shadow-sm", toneClasses[tone])}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
             {title}
           </div>
-          <div className="mt-2 truncate text-2xl font-semibold leading-none">{value}</div>
+          <div className="mt-2 break-words text-xl font-semibold leading-6 tabular-nums">{value}</div>
         </div>
         {icon ? (
-          <div className="mobile-token-card-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border text-muted-foreground shadow-sm">
+          <div className="mobile-token-card-control inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-muted-foreground shadow-sm">
             {icon}
           </div>
         ) : null}
       </div>
-      {detail ? <div className="mt-3 text-sm leading-5 text-muted-foreground">{detail}</div> : null}
+      {detail ? <div className="mt-2 text-[13px] leading-5 text-muted-foreground">{detail}</div> : null}
     </section>
   );
 }
