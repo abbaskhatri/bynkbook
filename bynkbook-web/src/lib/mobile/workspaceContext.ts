@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 
 const LAST_BUSINESS_KEY = "bynkbook:lastBusinessId";
 
@@ -72,18 +73,12 @@ export function useMobileWorkspaceContext() {
     [accountsQ.data]
   );
 
-  const accountId = useMemo(() => {
-    if (accountIdFromUrl && accountIdFromUrl !== "all") return accountIdFromUrl;
-    if (!businessId) return null;
-
-    const storedAccountId = readLocalStorage(`bynkbook:lastAccountId:${businessId}`);
-    if (storedAccountId && storedAccountId !== "all") {
-      const ok = activeAccounts.some((account) => account.id === storedAccountId);
-      if (ok) return storedAccountId;
-    }
-
-    return activeAccounts[0]?.id ?? null;
-  }, [accountIdFromUrl, activeAccounts, businessId]);
+  const accountId =
+    usePreferredAccountId({
+      businessId,
+      accounts: activeAccounts,
+      accountIdFromUrl,
+    }) || null;
 
   const account = useMemo(() => {
     if (!accountId) return null;
@@ -101,11 +96,6 @@ export function useMobileWorkspaceContext() {
     if (!businessId || businessNotFound) return;
     writeLocalStorage(LAST_BUSINESS_KEY, businessId);
   }, [businessId, businessNotFound]);
-
-  useEffect(() => {
-    if (!businessId || !accountId || accountNotFound) return;
-    writeLocalStorage(`bynkbook:lastAccountId:${businessId}`, accountId);
-  }, [accountId, accountNotFound, businessId]);
 
   const isLoading =
     businessesQ.isLoading ||

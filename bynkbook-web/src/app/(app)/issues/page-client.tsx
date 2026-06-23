@@ -7,6 +7,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { issueCountKey } from "@/lib/queries/issueKeys";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 
 import { apiFetch } from "@/lib/api/client";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
@@ -114,11 +115,11 @@ export default function IssuesPageClient() {
 
   const accountsQ = useAccounts(selectedBusinessId);
 
-  const selectedAccountId = useMemo(() => {
-    const list = accountsQ.data ?? [];
-    if (accountIdFromUrl) return accountIdFromUrl;
-    return list.find((a) => !a.archived_at)?.id ?? "";
-  }, [accountsQ.data, accountIdFromUrl]);
+  const selectedAccountId = usePreferredAccountId({
+    businessId: selectedBusinessId,
+    accounts: accountsQ.data ?? [],
+    accountIdFromUrl,
+  });
 
   // ================================
   // Filters (UI-only, local)
