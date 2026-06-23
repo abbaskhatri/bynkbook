@@ -289,6 +289,46 @@ export async function listEntries(params: {
   return all;
 }
 
+export async function listAllEntries(params: {
+  businessId: string;
+  accountId: string;
+  includeDeleted?: boolean;
+  type?: string;
+  vendorId?: string;
+  categoryId?: string;
+  status?: string;
+  search?: string;
+  date_from?: string;
+  date_to?: string;
+  uncategorized?: boolean;
+  excludeOpening?: boolean;
+  unmatchedOnly?: boolean;
+  maxPages?: number;
+}): Promise<EntryList> {
+  const perPageLimit = 200;
+  const maxPages = Math.max(1, Math.floor(params.maxPages ?? 500));
+  const all: EntryList = [] as EntryList;
+  let cursor: string | null = null;
+  let meta: ListEntriesMeta = { limit: perPageLimit, hasMore: false, nextCursor: null };
+
+  for (let page = 0; page < maxPages; page++) {
+    const res = await listEntriesPage({ ...params, limit: perPageLimit, cursor });
+    all.push(...res.items);
+    meta = res.meta;
+    cursor = res.meta.nextCursor ?? null;
+    if (!res.meta.hasMore || !cursor) break;
+  }
+
+  all.meta = {
+    ...meta,
+    hasMore: !!meta.hasMore && !!cursor,
+    nextCursor: cursor,
+    limit: perPageLimit,
+  };
+
+  return all;
+}
+
 export async function createEntry(params: {
   businessId: string;
   accountId: string;

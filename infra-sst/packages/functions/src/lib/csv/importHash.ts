@@ -14,6 +14,7 @@ export function computeImportHash(args: {
   amountCents: string; // bigint as string
   description: string;
   parser: string;
+  occurrence?: number; // 1-based occurrence for same date/amount/description/parser within a statement
 }) {
   const key = [
     args.businessId,
@@ -22,6 +23,7 @@ export function computeImportHash(args: {
     args.amountCents,
     normalizeDesc(args.description),
     args.parser,
+    ...(args.occurrence && args.occurrence > 1 ? [`occurrence:${args.occurrence}`] : []),
   ].join("|");
 
   return createHash("sha256").update(key, "utf8").digest("hex");
