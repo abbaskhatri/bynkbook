@@ -43,6 +43,7 @@ function entry(overrides: Record<string, any> = {}) {
     amount_cents: -12345n,
     type: "EXPENSE",
     method: "card",
+    status: "EXPECTED",
     category_id: "cat-1",
     category: { name: "Office" },
     deleted_at: null,
@@ -216,6 +217,7 @@ describe("issues list", () => {
       entry_amount_cents: "-12345",
       entry_type: "EXPENSE",
       entry_method: "card",
+      entry_status: "EXPECTED",
       entry_category_id: "cat-1",
       entry_category_name: "Office",
     });
