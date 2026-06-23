@@ -48,7 +48,7 @@ import { listAccountIssues, listAccountIssuesForEntryIds, type EntryIssueRow } f
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
-import { getMatchGroupPlacementSummary } from "@/lib/api/match-groups";
+import { getChunkedMatchGroupPlacementSummary } from "@/lib/api/match-groups";
 
 import { aiExplainEntry, aiAnomalies } from "@/lib/api/ai";
 
@@ -696,25 +696,11 @@ export default function LedgerPageClient() {
       if (!selectedBusinessId || !selectedAccountId || issueEntryIds.length === 0) {
         return { activeEntryLinks: [] as any[] };
       }
-      const CHUNK = 500; // matches PLACEMENT_SUMMARY_ENTRY_ID_MAX on the backend
-      const chunks: string[][] = [];
-      for (let i = 0; i < issueEntryIds.length; i += CHUNK) {
-        chunks.push(issueEntryIds.slice(i, i + CHUNK));
-      }
-      const results = await Promise.all(
-        chunks.map((ids) =>
-          getMatchGroupPlacementSummary({
-            businessId: selectedBusinessId,
-            accountId: selectedAccountId,
-            entryIds: ids,
-          })
-        )
-      );
-      const activeEntryLinks: any[] = [];
-      for (const r of results) {
-        for (const link of r?.activeEntryLinks ?? []) activeEntryLinks.push(link);
-      }
-      return { activeEntryLinks };
+      return getChunkedMatchGroupPlacementSummary({
+        businessId: selectedBusinessId,
+        accountId: selectedAccountId,
+        entryIds: issueEntryIds,
+      });
     },
   });
 
@@ -3761,13 +3747,15 @@ export default function LedgerPageClient() {
       const rowTone =
         deletedRow
           ? "!bg-bb-table-header text-bb-text-subtle "
+          : r.hasDup
+            ? "!bg-bb-status-warning-bg hover:!bg-bb-status-warning-bg "
+          : r.hasStale
+            ? "!bg-bb-status-info-bg hover:!bg-bb-status-info-bg "
+          : isNeedsReconcileView && String(r.rawStatus ?? "").toUpperCase() === "EXPECTED"
+            ? "!bg-primary/5 hover:!bg-primary/10 "
           : r.isClosedPeriod
             ? "!bg-bb-status-success-bg hover:!bg-bb-status-success-bg "
-            : r.hasDup
-              ? "!bg-bb-status-warning-bg hover:!bg-bb-status-warning-bg "
-              : r.hasStale
-                ? "!bg-bb-status-info-bg hover:!bg-bb-status-info-bg "
-                : "hover:bg-bb-table-row-hover ";
+          : "hover:bg-bb-table-row-hover ";
 
       const rowClass =
         "min-h-[24px] border-b border-bb-border bg-bb-surface-card " + rowTone;

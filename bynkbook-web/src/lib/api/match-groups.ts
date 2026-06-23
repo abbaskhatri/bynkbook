@@ -124,6 +124,74 @@ export async function getMatchGroupPlacementSummary(args: {
   });
 }
 
+const PLACEMENT_SUMMARY_BANK_ID_CHUNK = 1000;
+const PLACEMENT_SUMMARY_ENTRY_ID_CHUNK = 500;
+
+function uniqueIds(ids: string[] | undefined) {
+  return Array.from(new Set((ids ?? []).map((id) => String(id ?? "").trim()).filter(Boolean)));
+}
+
+function chunks<T>(items: T[], size: number) {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function mergePlacementSummaries(items: MatchGroupPlacementSummary[]): MatchGroupPlacementSummary {
+  const bankLinks = new Map<string, MatchGroupPlacementSummary["activeBankLinks"][number]>();
+  const entryLinks = new Map<string, MatchGroupPlacementSummary["activeEntryLinks"][number]>();
+  let partial = false;
+
+  for (const item of items) {
+    if (item?.partial) partial = true;
+
+    for (const link of item?.activeBankLinks ?? []) {
+      const key = `${String(link.match_group_id ?? "")}:${String(link.bank_transaction_id ?? "")}`;
+      if (key !== ":") bankLinks.set(key, link);
+    }
+
+    for (const link of item?.activeEntryLinks ?? []) {
+      const key = `${String(link.match_group_id ?? "")}:${String(link.entry_id ?? "")}`;
+      if (key !== ":") entryLinks.set(key, link);
+    }
+  }
+
+  return {
+    ok: true,
+    activeBankLinks: Array.from(bankLinks.values()),
+    activeEntryLinks: Array.from(entryLinks.values()),
+    partial,
+  };
+}
+
+export async function getChunkedMatchGroupPlacementSummary(args: {
+  businessId: string;
+  accountId: string;
+  bankTransactionIds?: string[];
+  entryIds?: string[];
+  from?: string;
+  to?: string;
+}): Promise<MatchGroupPlacementSummary> {
+  const bankTransactionIds = uniqueIds(args.bankTransactionIds);
+  const entryIds = uniqueIds(args.entryIds);
+
+  const requests: Promise<MatchGroupPlacementSummary>[] = [];
+
+  for (const bankChunk of chunks(bankTransactionIds, PLACEMENT_SUMMARY_BANK_ID_CHUNK)) {
+    requests.push(getMatchGroupPlacementSummary({ ...args, bankTransactionIds: bankChunk, entryIds: [] }));
+  }
+
+  for (const entryChunk of chunks(entryIds, PLACEMENT_SUMMARY_ENTRY_ID_CHUNK)) {
+    requests.push(getMatchGroupPlacementSummary({ ...args, bankTransactionIds: [], entryIds: entryChunk }));
+  }
+
+  if (requests.length === 0) {
+    return { ok: true, activeBankLinks: [], activeEntryLinks: [], partial: false };
+  }
+
+  return mergePlacementSummaries(await Promise.all(requests));
+}
+
 export async function createMatchGroupsBatch(args: {
   businessId: string;
   accountId: string;
