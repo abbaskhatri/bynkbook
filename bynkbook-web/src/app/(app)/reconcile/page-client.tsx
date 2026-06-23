@@ -10,6 +10,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { apiFetch } from "@/lib/api/client";
 import { listCategories } from "@/lib/api/categories";
@@ -322,25 +323,13 @@ export default function ReconcilePageClient() {
     return WRITE_ALLOWLIST.has(r); // unknown/missing => false
   }, [businessRole]);
 
-  const selectedAccountId = useMemo(() => {
-    const list = accountsQ.data ?? [];
-
-    if (accountIdFromUrl && !String(accountIdFromUrl).startsWith("temp_")) {
-      const picked = list.find((a: any) => String(a.id) === String(accountIdFromUrl));
-      if (picked && !picked.archived_at && String(picked.type ?? "").toUpperCase() !== "CASH") {
-        return accountIdFromUrl;
-      }
-    }
-
-    // Reconcile excludes temp_ and CASH accounts.
-    const real = list.find(
-      (a: any) =>
-        !a.archived_at &&
-        !String(a.id ?? "").startsWith("temp_") &&
-        String(a.type ?? "").toUpperCase() !== "CASH"
-    );
-    return real?.id ?? "";
-  }, [accountsQ.data, accountIdFromUrl]);
+  const selectedAccountId = usePreferredAccountId({
+    businessId: selectedBusinessId,
+    accounts: accountsQ.data ?? [],
+    accountIdFromUrl,
+    excludeCash: true,
+    excludeTemp: true,
+  });
 
   const selectedBusinessRole = useMemo(() => {
     const list = businessesQ.data ?? [];

@@ -33,6 +33,12 @@ import { getConfiguredAppEnvironment } from "@/lib/appEnvironment";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  pickPreferredAccountId,
+  readLastSelectedAccountId,
+  usePreferredAccountId,
+  writeLastSelectedAccountId,
+} from "@/lib/accountSelection";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
@@ -296,33 +302,21 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     if (!accountIdFromUrl) return;
     if (accountIdFromUrl === "all") return;
 
-    try {
-      const key = `bynkbook:lastAccountId:${businessId}`;
-      localStorage.setItem(key, accountIdFromUrl);
-    } catch {}
+    writeLastSelectedAccountId(businessId, accountIdFromUrl);
   }, [businessId, accountIdFromUrl]);
 
-  // If URL has accountId=all and route requires a single account:
+  // If URL is missing an account or has accountId=all and the route requires a single account:
   // fallback to last real account for that business (localStorage) or first active account.
   useEffect(() => {
     if (!businessId) return;
-    if (accountIdFromUrl !== "all") return;
+    if (accountIdFromUrl && accountIdFromUrl !== "all") return;
     if (!routeRequiresSingleAccount) return;
     if (accountsQ.isLoading) return;
 
-    const accounts = accountsQ.data ?? [];
-    let fallback: string | null = null;
-
-    try {
-      const key = `bynkbook:lastAccountId:${businessId}`;
-      const stored = localStorage.getItem(key);
-      if (stored && stored !== "all") {
-        const ok = accounts.some((a) => a.id === stored && !a.archived_at);
-        if (ok) fallback = stored;
-      }
-    } catch {}
-
-    if (!fallback) fallback = firstActiveAccountId ?? null;
+    const fallback = pickPreferredAccountId({
+      accounts: accountsQ.data ?? [],
+      storedAccountId: readLastSelectedAccountId(businessId),
+    });
     if (!fallback) return;
 
     const params = new URLSearchParams(sp.toString());
@@ -337,13 +331,17 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     routeRequiresSingleAccount,
     accountsQ.isLoading,
     accountsQ.data,
-    firstActiveAccountId,
     pathname,
     router,
     sp,
   ]);
 
-  const effectiveAccountId = accountIdFromUrl ?? firstActiveAccountId ?? null;
+  const preferredAccountId = usePreferredAccountId({
+    businessId: showChrome ? businessId : null,
+    accounts: accountsQ.data ?? [],
+    accountIdFromUrl,
+  });
+  const effectiveAccountId = preferredAccountId || accountIdFromUrl || firstActiveAccountId || null;
   const currentAccountId = effectiveAccountId ?? "";
   const issuesCountScopeKey = showChrome && businessId && currentAccountId ? `${businessId}:${currentAccountId}` : "";
   const [issuesCountReadyKey, setIssuesCountReadyKey] = useState<string | null>(null);
@@ -381,26 +379,18 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     if (!effectiveAccountId) return "";
     if (effectiveAccountId !== "all") return effectiveAccountId;
 
-    const accounts = accountsQ.data ?? [];
-
-    try {
-      const key = `bynkbook:lastAccountId:${businessId}`;
-      const stored = localStorage.getItem(key);
-      if (stored && stored !== "all") {
-        const ok = accounts.some((a) => a.id === stored && !a.archived_at);
-        if (ok) return stored;
-      }
-    } catch {}
-
-    return firstActiveAccountId ?? "";
-  }, [businessId, effectiveAccountId, accountsQ.data, firstActiveAccountId]);
+    return pickPreferredAccountId({
+      accounts: accountsQ.data ?? [],
+      storedAccountId: readLastSelectedAccountId(businessId),
+    });
+  }, [businessId, effectiveAccountId, accountsQ.data]);
 
   const attentionAccountId =
     currentAccountId && currentAccountId !== "all" ? currentAccountId : navAccountId;
 
   const autopickRef = useRef<{ bizId: string | null; timer: any }>({ bizId: null, timer: null });
 
-  // Auto-pick first account after accounts load (single debounced URL write)
+  // Auto-pick remembered account after accounts load (single debounced URL write)
   useEffect(() => {
     if (!businessId) return;
 
@@ -415,7 +405,6 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     }
 
     if (accountsQ.isLoading) return;
-    if (!firstActiveAccountId) return;
 
     // One-shot per business selection
     if (autopickRef.current.bizId === businessId) return;
@@ -423,10 +412,19 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     if (autopickRef.current.timer) clearTimeout(autopickRef.current.timer);
 
     autopickRef.current.timer = setTimeout(() => {
+      const fallback = pickPreferredAccountId({
+        accounts: accountsQ.data ?? [],
+        storedAccountId: readLastSelectedAccountId(businessId),
+      });
+      if (!fallback) {
+        autopickRef.current.timer = null;
+        return;
+      }
+
       const params = new URLSearchParams(sp.toString());
       params.set("businessId", businessId);
       params.delete("businessesId");
-      params.set("accountId", firstActiveAccountId);
+      params.set("accountId", fallback);
 
       router.replace(`${pathname}?${params.toString()}`);
       autopickRef.current.bizId = businessId;
@@ -440,7 +438,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         ref.timer = null;
       }
     };
-  }, [accountsQ.isLoading, accountIdFromUrl, businessId, firstActiveAccountId, pathname, router, sp]);
+  }, [accountsQ.isLoading, accountsQ.data, accountIdFromUrl, businessId, pathname, router, sp]);
 
   // Sidebar Issues count (authoritative; server-derived)
   const issuesCountQ = useQuery({

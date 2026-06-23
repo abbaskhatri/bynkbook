@@ -18,6 +18,7 @@ import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getVendorsApSummary } from "@/lib/api/ap";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 
@@ -153,10 +154,12 @@ export default function MobileVendorsPageClient() {
     [accountsQ.data]
   );
 
-  const accountId = useMemo(() => {
-    if (accountIdFromUrl && accountIdFromUrl !== "all") return accountIdFromUrl;
-    return activeAccounts[0]?.id ?? null;
-  }, [accountIdFromUrl, activeAccounts]);
+  const accountId =
+    usePreferredAccountId({
+      businessId,
+      accounts: activeAccounts,
+      accountIdFromUrl,
+    }) || null;
 
   const account = useMemo(() => {
     if (!accountId) return activeAccounts[0] ?? null;

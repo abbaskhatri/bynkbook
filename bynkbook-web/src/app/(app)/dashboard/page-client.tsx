@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useIdleReady } from "@/lib/useIdleReady";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
@@ -443,12 +444,16 @@ export default function DashboardPageClient() {
 
   // Account scope selector: All accounts vs a specific account
   const [accountScopeId, setAccountScopeId] = useState<string>("all");
+  const preferredAccountId = usePreferredAccountId({
+    businessId: selectedBusinessId,
+    accounts: accountsQ.data ?? [],
+    accountIdFromUrl: sp.get("accountId"),
+  });
 
   const issuesAccountScopeId = useMemo(() => {
     if (accountScopeId && accountScopeId !== "all") return accountScopeId;
-    const list = accountsQ.data ?? [];
-    return list.find((a) => !a.archived_at)?.id ?? "";
-  }, [accountScopeId, accountsQ.data]);
+    return preferredAccountId;
+  }, [accountScopeId, preferredAccountId]);
 
   const issuesHref = useMemo(() => {
     if (!selectedBusinessId) return "/issues";

@@ -8,6 +8,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { issueCountKey } from "@/lib/queries/issueKeys";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 import { listEntriesPage, updateEntry } from "@/lib/api/entries";
 import { listCategories, type CategoryRow } from "@/lib/api/categories";
 import { applyCategoryBatch, aiSuggestCategory } from "@/lib/api/ai";
@@ -238,11 +239,11 @@ export default function CategoryReviewPageClient() {
     return String(b?.name ?? "Business");
   }, [businessesQ.data, selectedBusinessId]);
 
-  const selectedAccountId = useMemo(() => {
-    const list = accountsQ.data ?? [];
-    if (accountIdFromUrl) return accountIdFromUrl;
-    return list.find((a) => !a.archived_at)?.id ?? "";
-  }, [accountsQ.data, accountIdFromUrl]);
+  const selectedAccountId = usePreferredAccountId({
+    businessId: selectedBusinessId,
+    accounts: accountsQ.data ?? [],
+    accountIdFromUrl,
+  });
 
   // Local selection state to prevent SelectTrigger/router feedback loops
   const [accountSelectId, setAccountSelectId] = useState<string>("");

@@ -27,6 +27,7 @@ import { useIdleReady } from "@/lib/useIdleReady";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
+import { usePreferredAccountId } from "@/lib/accountSelection";
 
 import {
   createEntry,
@@ -446,11 +447,11 @@ export default function LedgerPageClient() {
     appErrorMessageOrNull(accountsQ.error) ||
     null;
 
-  const selectedAccountId = useMemo(() => {
-    const list = accountsQ.data ?? [];
-    if (accountIdFromUrl) return accountIdFromUrl;
-    return list.find((a) => !a.archived_at)?.id ?? "";
-  }, [accountsQ.data, accountIdFromUrl]);
+  const selectedAccountId = usePreferredAccountId({
+    businessId: selectedBusinessId,
+    accounts: accountsQ.data ?? [],
+    accountIdFromUrl,
+  });
 
   // Keep refs in sync for early effects
   useEffect(() => {
