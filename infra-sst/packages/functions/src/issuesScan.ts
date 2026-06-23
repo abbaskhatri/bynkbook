@@ -504,6 +504,13 @@ export async function handler(event: any) {
   }
 
   // Stale checks
+  //
+  // A "stale check" means a check you wrote that has NOT cleared the bank yet
+  // (outstanding / uncashed). A check that has cleared — i.e. it was matched to
+  // a bank transaction, or the entry was created directly from an imported bank
+  // transaction (sourceBankTransactionId) — is reconciled, not stale. Flagging
+  // reconciled checks here produced false positives on the Issues page where
+  // entries shown as matched in Reconcile still appeared as "stale checks".
   for (const e of entries) {
     const typeUpper = String((e as any).type ?? "").toUpperCase();
     const statusUpper = String((e as any).status ?? "").toUpperCase();
@@ -522,6 +529,11 @@ export async function handler(event: any) {
 
     const methodUpper = (e.method || "").toString().toUpperCase();
     if (methodUpper !== "CHECK") continue;
+
+    // Reconciled checks have cleared the bank and are never stale.
+    const isMatched = activeMatchGroupIdsByEntryId.has(String(e.id));
+    const hasBankSource = !!sourceBankTxnId(e);
+    if (isMatched || hasBankSource) continue;
 
     const day = Math.floor(Date.UTC(e.date.getUTCFullYear(), e.date.getUTCMonth(), e.date.getUTCDate()) / 86400000);
     if (!Number.isFinite(todayDay) || !Number.isFinite(day)) continue;
