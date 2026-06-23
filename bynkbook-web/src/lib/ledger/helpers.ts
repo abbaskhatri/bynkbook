@@ -20,6 +20,8 @@ export type FixIssueDialogRow = {
   methodDisplay: string;
   category: string;
   categoryId: string | null;
+  status?: string | null;
+  rawStatus?: string | null;
 };
 
 export type LedgerRangePreset =
@@ -357,6 +359,8 @@ export function issueSnapshotToFixIssueRow(issue: EntryIssueRow): FixIssueDialog
     methodDisplay: titleCase(String(issue.entry_method ?? "")),
     category: String(issue.entry_category_name ?? ""),
     categoryId: issue.entry_category_id ?? null,
+    status: statusLabel(String(issue.entry_status ?? "")),
+    rawStatus: String(issue.entry_status ?? "").trim().toUpperCase() || "EXPECTED",
   };
 }
 

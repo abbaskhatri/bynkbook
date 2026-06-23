@@ -36,7 +36,7 @@ import {
 import { RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 
 import { formatUsd, toBigIntSafe } from "@/lib/money";
-import { extractEntryRef } from "@/lib/ledger/helpers";
+import { extractEntryRef, statusLabel } from "@/lib/ledger/helpers";
 
 const formatUsdFromCents = (cents: bigint) => formatUsd(cents);
 
@@ -84,6 +84,7 @@ type ApiIssue = {
   entry_amount_cents?: string | null;
   entry_type?: string | null;
   entry_method?: string | null;
+  entry_status?: string | null;
   entry_category_id?: string | null;
   entry_category_name?: string | null;
 };
@@ -1127,6 +1128,8 @@ export default function IssuesPageClient() {
                 methodDisplay: titleCase((it.entry_method ?? "").toString()),
                 category: it.entry_category_name ?? "",
                 categoryId: it.entry_category_id ?? null,
+                status: statusLabel((it.entry_status ?? "EXPECTED").toString()),
+                rawStatus: (it.entry_status ?? "EXPECTED").toString().trim().toUpperCase(),
               },
             ];
           })

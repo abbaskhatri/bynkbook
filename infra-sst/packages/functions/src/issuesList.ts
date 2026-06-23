@@ -381,6 +381,7 @@ export async function handler(event: any) {
         amount_cents: true,
         type: true,
         method: true,
+        status: true,
         category_id: true,
         category: { select: { name: true } },
       },
@@ -398,6 +399,7 @@ export async function handler(event: any) {
       entry_amount_cents: cents(e?.amount_cents),
       entry_type: e?.type ?? null,
       entry_method: e?.method ?? null,
+      entry_status: e?.status ?? null,
       entry_category_id: e?.category_id ?? null,
       entry_category_name: e?.category?.name ?? null,
     };

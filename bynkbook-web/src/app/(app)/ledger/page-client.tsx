@@ -3574,6 +3574,8 @@ export default function LedgerPageClient() {
           methodDisplay: r.methodDisplay,
           category: r.category || "",
           categoryId: r.categoryId,
+          status: r.status,
+          rawStatus: r.rawStatus,
         },
       ])
     );

@@ -11,11 +11,11 @@ import {
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { resolveIssue, type EntryIssueRow } from "@/lib/api/issues";
-import { mergeEntry } from "@/lib/api/entries";
-import { Loader2 } from "lucide-react";
+import { deleteEntry, mergeEntry, unmatchAndDeleteEntry } from "@/lib/api/entries";
+import { Loader2, Trash2 } from "lucide-react";
 
 type Kind = "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
-type ActiveAction = "legitimize" | "merge" | "fix-category" | "ack-stale" | null;
+type ActiveAction = "legitimize" | "merge" | "delete" | "fix-category" | "ack-stale" | null;
 
 export function FixIssueDialog(props: {
   open: boolean;
@@ -40,6 +40,8 @@ export function FixIssueDialog(props: {
       methodDisplay: string;
       category: string;
       categoryId: string | null;
+      status?: string | null;
+      rawStatus?: string | null;
     }
   >;
 
@@ -77,6 +79,8 @@ export function FixIssueDialog(props: {
   // Merge (Duplicate only)
   const [mergeSurvivorId, setMergeSurvivorId] = useState<string>("");
   const [mergeDuplicateId, setMergeDuplicateId] = useState<string>("");
+  const [deleteConfirmEntryId, setDeleteConfirmEntryId] = useState<string>("");
+  const [forceUnmatchDeleteEntryId, setForceUnmatchDeleteEntryId] = useState<string>("");
 
   useEffect(() => {
     if (!open) {
@@ -85,10 +89,14 @@ export function FixIssueDialog(props: {
       setPickedCategoryId("");
       setMergeSurvivorId("");
       setMergeDuplicateId("");
+      setDeleteConfirmEntryId("");
+      setForceUnmatchDeleteEntryId("");
       return;
     }
 
     setErr(null);
+    setDeleteConfirmEntryId("");
+    setForceUnmatchDeleteEntryId("");
   }, [open, kind, entryId]);
 
   const relevant = useMemo(() => {
@@ -160,6 +168,29 @@ export function FixIssueDialog(props: {
 
     return `${date} • ${ref ? `Ref ${ref} • ` : ""}${payeeShort} • ${amt}`;
   };
+
+  const entryStatusLabel = (id: string) => {
+    const r = rowsById?.[id] as any;
+    const label = String(r?.status ?? "").trim();
+    return label || "Expected";
+  };
+
+  const isMatchedEntry = (id: string) => {
+    const r = rowsById?.[id] as any;
+    const raw = String(r?.rawStatus ?? r?.status ?? "").trim().toUpperCase();
+    return raw === "MATCHED" || raw === "RECONCILED" || raw === "CLEARED";
+  };
+
+  async function resolveRelevantDuplicateIssues() {
+    for (const issueId of relevant.issueIds) {
+      await resolveIssue({
+        businessId,
+        accountId,
+        issueId,
+        action: "LEGITIMIZE",
+      });
+    }
+  }
 
   const dialogSize = useMemo<"xs" | "sm" | "md">(() => {
     if (kind === "STALE_CHECK") return "xs";
@@ -257,7 +288,7 @@ export function FixIssueDialog(props: {
       footer={
         <div className="flex items-center justify-between gap-2 w-full">
           <div className="text-xs text-bb-status-danger-fg">{err ?? ""}</div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
               Close
             </Button>
@@ -314,6 +345,80 @@ export function FixIssueDialog(props: {
                     </span>
                   ) : (
                     "Not a duplicate"
+                  )}
+                </Button>
+
+                <Button
+                  variant={deleteConfirmEntryId === mergeDuplicateId ? "destructive" : "outline"}
+                  onClick={async () => {
+                    if (!mergeDuplicateId) {
+                      setErr("Pick the duplicate to delete.");
+                      return;
+                    }
+                    if (duplicateContextBlocked) {
+                      setErr("Load the full duplicate context before deleting.");
+                      return;
+                    }
+                    if (deleteConfirmEntryId !== mergeDuplicateId) {
+                      setDeleteConfirmEntryId(mergeDuplicateId);
+                      const matched = isMatchedEntry(mergeDuplicateId);
+                      setErr(
+                        matched
+                          ? `Confirm delete will unmatch and move ${entryLabel(mergeDuplicateId)} to Deleted.`
+                          : `Confirm delete will move ${entryLabel(mergeDuplicateId)} to Deleted.`
+                      );
+                      return;
+                    }
+
+                    setActiveAction("delete");
+                    setErr(null);
+                    try {
+                      if (isMatchedEntry(mergeDuplicateId) || forceUnmatchDeleteEntryId === mergeDuplicateId) {
+                        await unmatchAndDeleteEntry({
+                          businessId,
+                          accountId,
+                          entryId: mergeDuplicateId,
+                          reason: "Delete duplicate from issue review",
+                        });
+                      } else {
+                        await deleteEntry({ businessId, accountId, entryId: mergeDuplicateId });
+                      }
+
+                      await resolveRelevantDuplicateIssues().catch(() => undefined);
+                      onDidMutate?.();
+                      onOpenChange(false);
+                      setPickedCategoryId("");
+                      setMergeSurvivorId("");
+                      setMergeDuplicateId("");
+                      setDeleteConfirmEntryId("");
+                      setForceUnmatchDeleteEntryId("");
+                    } catch (e: any) {
+                      const raw = String(e?.message ?? "Delete failed");
+                      const payload = e?.payload ?? null;
+                      const code = String(payload?.code ?? "").toUpperCase();
+                      if (code === "ENTRY_MATCHED_REQUIRES_UNMATCH" || raw.includes("ENTRY_MATCHED_REQUIRES_UNMATCH")) {
+                        setErr("This entry is bank-matched. Click Confirm delete again to unmatch and delete it from here.");
+                        setDeleteConfirmEntryId(mergeDuplicateId);
+                        setForceUnmatchDeleteEntryId(mergeDuplicateId);
+                      } else {
+                        setErr(String(payload?.error ?? raw ?? "Delete failed"));
+                      }
+                    } finally {
+                      setActiveAction(null);
+                    }
+                  }}
+                  disabled={busy || duplicateContextBlocked || relevant.entryIds.length < 2 || !mergeDuplicateId}
+                >
+                  {activeAction === "delete" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Deleting…
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {deleteConfirmEntryId === mergeDuplicateId ? "Confirm delete" : "Delete duplicate"}
+                    </span>
                   )}
                 </Button>
 
@@ -462,6 +567,7 @@ export function FixIssueDialog(props: {
                     <div className="shrink-0 text-right font-semibold tabular-nums">{r.amountStr}</div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                    <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{entryStatusLabel(r.id)}</span>
                     <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.methodDisplay || "Other"}</span>
                     <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.category || "No category"}</span>
                   </div>
@@ -482,6 +588,7 @@ export function FixIssueDialog(props: {
                     <col style={{ width: 90 }} />
                     <col style={{ width: 82 }} />
                     <col />
+                    <col style={{ width: 86 }} />
                     <col style={{ width: 84 }} />
                     <col style={{ width: 96 }} />
                     <col style={{ width: 98 }} />
@@ -491,6 +598,7 @@ export function FixIssueDialog(props: {
                     <col style={{ width: 96 }} />
                     <col style={{ width: 88 }} />
                     <col />
+                    <col style={{ width: 100 }} />
                     <col style={{ width: 96 }} />
                     <col style={{ width: 120 }} />
                     <col style={{ width: 110 }} />
@@ -503,6 +611,7 @@ export function FixIssueDialog(props: {
                   <th className="text-left font-medium px-2 py-1.5">Date</th>
                   <th className="text-left font-medium px-2 py-1.5">Ref</th>
                   <th className="text-left font-medium px-2 py-1.5">Payee</th>
+                  <th className="text-left font-medium px-2 py-1.5">Status</th>
                   <th className="text-left font-medium px-2 py-1.5">Method</th>
                   <th className="text-left font-medium px-2 py-1.5">Category</th>
                   <th className="text-right font-medium px-2 py-1.5">Amount</th>
@@ -516,6 +625,7 @@ export function FixIssueDialog(props: {
                       {String((r as any).ref ?? "").trim() || "—"}
                     </td>
                     <td className="px-2 py-1.5 whitespace-normal break-normal">{r.payee}</td>
+                    <td className="px-2 py-1.5">{entryStatusLabel(r.id)}</td>
                     <td className="px-2 py-1.5">{r.methodDisplay}</td>
                     <td className="px-2 py-1.5">{r.category || "—"}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{r.amountStr}</td>
@@ -523,7 +633,7 @@ export function FixIssueDialog(props: {
                 ))}
                 {affectedRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={6}>
+                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={7}>
                       No affected entries found.
                     </td>
                   </tr>
@@ -549,6 +659,8 @@ export function FixIssueDialog(props: {
                   onValueChange={(value) => {
                     setMergeSurvivorId(value);
                     setErr(null);
+                    setDeleteConfirmEntryId("");
+                    setForceUnmatchDeleteEntryId("");
                   }}
                 >
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-primary/30 bg-primary/5">
@@ -573,6 +685,8 @@ export function FixIssueDialog(props: {
                   onValueChange={(value) => {
                     setMergeDuplicateId(value);
                     setErr(null);
+                    setDeleteConfirmEntryId("");
+                    setForceUnmatchDeleteEntryId("");
                   }}
                 >
                   <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-bb-status-danger-border bg-bb-status-danger-bg">

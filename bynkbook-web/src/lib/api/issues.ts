@@ -19,6 +19,7 @@ export type EntryIssueRow = {
   entry_amount_cents?: string | null;
   entry_type?: string | null;
   entry_method?: string | null;
+  entry_status?: string | null;
   entry_category_id?: string | null;
   entry_category_name?: string | null;
 };
