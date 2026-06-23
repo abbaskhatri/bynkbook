@@ -110,6 +110,8 @@ function createdIssues(prisma: any) {
 }
 
 const NEAR_DUPLICATE_COPY = "Potential duplicate: similar payee, same amount, close date. Review before merging or cleanup.";
+const BANK_MANUAL_DUPLICATE_COPY =
+  "Potential duplicate: bank-imported transaction and manual entry share the same amount and close dates. Review before merging or cleanup.";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -117,6 +119,76 @@ afterEach(() => {
 });
 
 describe("issues scan duplicate detection", () => {
+  test("flags generic imported deposit and manual customer entry with same amount near date", async () => {
+    const manual = entry("manual-shop", "2026-05-12", 245900n, {
+      payee: "SHOP N BAG",
+      memo: "customer deposit",
+      method: "CASH",
+      type: "INCOME",
+    });
+    const importedDeposit = entry("bank-deposit", "2026-05-12", 245900n, {
+      payee: "BKOFAMERICA MOBILE 05/12 DEPOSIT",
+      memo: "Bank-created row",
+      method: "OTHER",
+      type: "INCOME",
+      sourceBankTransactionId: "bank-dep-1",
+    });
+
+    const { handler, prisma } = await loadHandler({
+      entries: [manual, importedDeposit],
+      sourceBankRows: [
+        {
+          id: "bank-dep-1",
+          posted_date: new Date("2026-05-12T00:00:00.000Z"),
+          name: "BKOFAMERICA MOBILE 05/12 3837147080 DEPOSIT",
+          amount_cents: 245900n,
+          is_removed: false,
+        },
+      ],
+    });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const issues = createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE");
+    expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["bank-deposit", "manual-shop"]);
+    expect(issues.every((row: any) => String(row.group_key).startsWith("BANK_MANUAL_DUP|"))).toBe(true);
+    expect(issues.every((row: any) => row.details === BANK_MANUAL_DUPLICATE_COPY)).toBe(true);
+  });
+
+  test("does not flag manual customer entry against generic imported deposit with different amount", async () => {
+    const manual = entry("manual-shop", "2026-05-12", 245900n, {
+      payee: "SHOP N BAG",
+      memo: "customer deposit",
+      method: "CASH",
+      type: "INCOME",
+    });
+    const importedDeposit = entry("bank-deposit", "2026-05-12", 246000n, {
+      payee: "BKOFAMERICA MOBILE 05/12 DEPOSIT",
+      memo: "Bank-created row",
+      method: "OTHER",
+      type: "INCOME",
+      sourceBankTransactionId: "bank-dep-1",
+    });
+
+    const { handler, prisma } = await loadHandler({
+      entries: [manual, importedDeposit],
+      sourceBankRows: [
+        {
+          id: "bank-dep-1",
+          posted_date: new Date("2026-05-12T00:00:00.000Z"),
+          name: "BKOFAMERICA MOBILE 05/12 3837147080 DEPOSIT",
+          amount_cents: 246000n,
+          is_removed: false,
+        },
+      ],
+    });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
   test("flags manual and bank-generated matched entries with same amount near date and similar payee", async () => {
     const manual = entry("manual-1", "2026-04-26", -1250n, {
       payee: "Coffee House",

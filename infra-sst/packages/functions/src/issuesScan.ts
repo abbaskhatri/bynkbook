@@ -193,6 +193,76 @@ function duplicateEvidenceText(entry: any, bankDescriptions: string[] = []) {
   ].join(" ");
 }
 
+function hasGenericBankDescriptor(bankDescriptions: string[]) {
+  const genericPatterns = [
+    /\bbk\s*of\s*america\b/i,
+    /\bbkofamerica\b/i,
+    /\bbank\s*of\s*america\b/i,
+    /\bboa\b/i,
+    /\bmobile\b/i,
+    /\bpre\s*encoded\b/i,
+    /\bpreencoded\b/i,
+    /\bremote\b/i,
+    /\bdeposit\b/i,
+    /\bbankcard\b/i,
+    /\bmerchant\s+services?\b/i,
+    /\bcheck\s*#?\s*\d+\b/i,
+  ];
+
+  for (const desc of bankDescriptions) {
+    const text = String(desc ?? "").trim();
+    if (!text) continue;
+    if (genericPatterns.some((pattern) => pattern.test(text))) return true;
+  }
+
+  return false;
+}
+
+function isGenericBankManualDuplicatePair(
+  a: {
+    day: number;
+    amount: bigint;
+    sign: -1 | 0 | 1;
+    type: string;
+    tokens: string[];
+    linkedBankIds: string[];
+    bankDescriptions: string[];
+    ref: string | null;
+  },
+  b: {
+    day: number;
+    amount: bigint;
+    sign: -1 | 0 | 1;
+    type: string;
+    tokens: string[];
+    linkedBankIds: string[];
+    bankDescriptions: string[];
+    ref: string | null;
+  }
+) {
+  if (a.amount !== b.amount) return false;
+  if (a.sign === 0 || b.sign === 0 || a.sign !== b.sign) return false;
+  if (a.type && b.type && a.type !== b.type) return false;
+  if (Math.abs(b.day - a.day) > 7) return false;
+
+  const aLinked = a.linkedBankIds.length > 0;
+  const bLinked = b.linkedBankIds.length > 0;
+  if (aLinked === bLinked) return false;
+
+  const bankSide = aLinked ? a : b;
+  const manualSide = aLinked ? b : a;
+  if (!hasGenericBankDescriptor(bankSide.bankDescriptions)) return false;
+
+  // Require at least one meaningful manual token so two generic deposit rows do not
+  // become a duplicate family just because the amount is the same.
+  if (manualSide.tokens.length === 0) return false;
+
+  // Different explicit references are strong evidence that these are separate events.
+  if (a.ref && b.ref && a.ref !== b.ref) return false;
+
+  return true;
+}
+
 // Extract a labeled reference/trace number from a text string.
 // Only matches explicit labels (REF:, TRACE:, ID:, etc.) to avoid false
 // matches on store IDs, amounts, or account fragments.
@@ -700,6 +770,7 @@ export async function handler(event: any) {
     type: string;
     exactKey: string;
     linkedBankIds: string[];
+    bankDescriptions: string[];
     ref: string | null;
   };
 
@@ -727,6 +798,7 @@ export async function handler(event: any) {
       type: String(e.type ?? "").trim().toUpperCase(),
       exactKey: duplicateExactBaseKey(e),
       linkedBankIds: getEntryLinkedBankIds(String(e.id), sourceBankTxnId(e)),
+      bankDescriptions,
       ref: extractEntryRef(e, bankDescriptions),
     });
   }
@@ -807,6 +879,74 @@ export async function handler(event: any) {
         status: "OPEN",
         group_key: groupKey,
         details: nearDuplicateDetails,
+      });
+    }
+  }
+
+  const bankManualDuplicateDetails =
+    "Potential duplicate: bank-imported transaction and manual entry share the same amount and close dates. Review before merging or cleanup.";
+
+  const bankManualParent = new Array<number>(nearCandidates.length);
+  for (let i = 0; i < bankManualParent.length; i++) bankManualParent[i] = i;
+
+  const bankManualFind = (x: number): number => {
+    while (bankManualParent[x] !== x) {
+      bankManualParent[x] = bankManualParent[bankManualParent[x]];
+      x = bankManualParent[x];
+    }
+    return x;
+  };
+
+  const bankManualUnion = (a: number, b: number) => {
+    const ra = bankManualFind(a);
+    const rb = bankManualFind(b);
+    if (ra !== rb) bankManualParent[rb] = ra;
+  };
+
+  for (let i = 0; i < nearCandidates.length; i++) {
+    const a = nearCandidates[i];
+    for (let j = i + 1; j < nearCandidates.length; j++) {
+      const b = nearCandidates[j];
+      if (b.day - a.day > 7) break;
+
+      // Exact duplicate groups keep their original group_key, copy, and LEGIT_DUP suppression.
+      if (a.exactKey && b.exactKey && a.exactKey === b.exactKey) continue;
+
+      if (!isGenericBankManualDuplicatePair(a, b)) continue;
+      bankManualUnion(i, j);
+    }
+  }
+
+  const bankManualComps = new Map<number, number[]>();
+  for (let i = 0; i < nearCandidates.length; i++) {
+    const r = bankManualFind(i);
+    const arr = bankManualComps.get(r);
+    if (arr) arr.push(i);
+    else bankManualComps.set(r, [i]);
+  }
+
+  for (const idxs of bankManualComps.values()) {
+    if (idxs.length < 2) continue;
+
+    const rows = idxs.map((ix) => nearCandidates[ix]);
+    const hasLinked = rows.some((row) => row.linkedBankIds.length > 0);
+    const hasManual = rows.some((row) => row.linkedBankIds.length === 0);
+    if (!hasLinked || !hasManual) continue;
+
+    const minDay = Math.min(...rows.map((row) => row.day));
+    const signedAmount = rows[0]?.amount?.toString() ?? "0";
+    const typeSig = Array.from(new Set(rows.map((row) => row.type).filter(Boolean))).sort().join("+") || "ANY";
+    const idSig = rows.map((row) => row.id).sort().slice(0, 6).join("-");
+    const groupKey = `BANK_MANUAL_DUP|${signedAmount}|${typeSig}|${minDay}|${idSig}`;
+
+    for (const row of rows) {
+      detected.push({
+        entry_id: row.id,
+        issue_type: "DUPLICATE",
+        severity: "WARNING",
+        status: "OPEN",
+        group_key: groupKey,
+        details: bankManualDuplicateDetails,
       });
     }
   }
