@@ -301,7 +301,7 @@ describe("apply-category-batch category safety", () => {
     expect(computeCategorySuggestionsForItems).not.toHaveBeenCalled();
   });
 
-  test("reports closed-period blocks by code for affected rows", async () => {
+  test("applies category updates even when the entry month is closed", async () => {
     const { handler, prisma, request } = await loadHandler({
       body: { items: [{ entryId, category_id: safeCatId }] },
       closedMonths: ["2026-04"],
@@ -310,11 +310,11 @@ describe("apply-category-batch category safety", () => {
     const res = await handler(request);
     const body = JSON.parse(res.body);
 
-    expect(body.applied).toBe(0);
-    expect(body.blocked).toBe(1);
-    expect(body.blockedByCode).toEqual({ CLOSED_PERIOD: 1 });
-    expect(body.results[0]).toMatchObject({ ok: false, code: "CLOSED_PERIOD", month: "2026-04" });
-    expect(prisma.entry.update).not.toHaveBeenCalled();
+    expect(body.applied).toBe(1);
+    expect(body.blocked).toBe(0);
+    expect(body.blockedByCode).toEqual({});
+    expect(body.results[0]).toMatchObject({ ok: true });
+    expect(prisma.entry.update).toHaveBeenCalledOnce();
   });
 
   test("permission behavior is unchanged", async () => {
