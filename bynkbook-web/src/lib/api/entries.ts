@@ -211,6 +211,7 @@ export async function listEntriesPage(params: {
   date_to?: string;
   uncategorized?: boolean;
   excludeOpening?: boolean;
+  unmatchedOnly?: boolean;
 }): Promise<{ items: Entry[]; meta: ListEntriesMeta }> {
   const { businessId, accountId, limit, cursor, includeDeleted } = params;
 
@@ -227,6 +228,7 @@ export async function listEntriesPage(params: {
   if (params.date_to) qs.set("date_to", params.date_to);
   if (params.uncategorized) qs.set("uncategorized", "true");
   if (params.excludeOpening) qs.set("exclude_opening", "true");
+  if (params.unmatchedOnly) qs.set("unmatched_only", "true");
 
   const url = `/v1/businesses/${businessId}/accounts/${accountId}/entries?${qs.toString()}`;
 
@@ -261,6 +263,7 @@ export async function listEntries(params: {
   date_to?: string;
   uncategorized?: boolean;
   excludeOpening?: boolean;
+  unmatchedOnly?: boolean;
 }): Promise<EntryList> {
   const pageCount = Math.max(1, Math.floor(params.pageCount ?? 1));
   const perPageLimit = Math.max(1, Math.min(200, params.limit));

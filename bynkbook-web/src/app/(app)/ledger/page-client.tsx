@@ -581,6 +581,11 @@ export default function LedgerPageClient() {
   const serverDateTo = (filterTo || "").trim();
   const isServerFiltered = !!serverSearch || !!serverDateFrom || !!serverDateTo;
 
+  // Needs Reconcile view fetches only entries that are NOT in an active match
+  // group (server-side), so the whole unmatched queue loads in one shot
+  // instead of paging through the entire account history.
+  const serverUnmatchedOnly = isNeedsReconcileView;
+
   // IMPORTANT: entriesKey MUST stay byte-for-byte identical to the queryKey
   // useEntries builds internally — it is used for optimistic getQueryData /
   // setQueryData, not just prefix invalidation. Any field added here must be
@@ -599,8 +604,9 @@ export default function LedgerPageClient() {
         loadedPageCount,
         false,
         false,
+        serverUnmatchedOnly,
       ] as const,
-    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, serverSearch, serverDateFrom, serverDateTo, loadedPageCount]
+    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, serverSearch, serverDateFrom, serverDateTo, loadedPageCount, serverUnmatchedOnly]
   );
 
   const entriesQ = useEntries({
@@ -612,6 +618,7 @@ export default function LedgerPageClient() {
     search: serverSearch || undefined,
     date_from: serverDateFrom || undefined,
     date_to: serverDateTo || undefined,
+    unmatchedOnly: serverUnmatchedOnly || undefined,
   });
 
   const issueEntryIds = useMemo(() => {
@@ -636,7 +643,7 @@ export default function LedgerPageClient() {
   useEffect(() => {
     setPage(1);
     setLoadedPageCount(1);
-  }, [serverSearch, serverDateFrom, serverDateTo]);
+  }, [serverSearch, serverDateFrom, serverDateTo, serverUnmatchedOnly]);
 
   useEffect(() => {
     setPage(1);
@@ -1297,8 +1304,14 @@ export default function LedgerPageClient() {
     () => (isNeedsReconcileView ? reconcileQueueRowsAll : filteredRowsAll),
     [isNeedsReconcileView, reconcileQueueRowsAll, filteredRowsAll]
   );
-  const startIdx = (page - 1) * rowsPerPage;
-  const endIdx = page * rowsPerPage;
+  // Needs Reconcile is a bounded work queue (only unmatched entries, server-
+  // filtered + auto-loaded), so show the whole queue on one virtualized page
+  // — no "Load more" and no page navigation. Chronological keeps normal paging.
+  const effectiveRowsPerPage = isNeedsReconcileView
+    ? Math.max(rowsPerPage, displayRowsAll.length || rowsPerPage)
+    : rowsPerPage;
+  const startIdx = (page - 1) * effectiveRowsPerPage;
+  const endIdx = page * effectiveRowsPerPage;
   const pageRows = useMemo(() => displayRowsAll.slice(startIdx, endIdx), [displayRowsAll, startIdx, endIdx]);
 
   // Stable key for suggestion targets (prevents effect loops)
@@ -1455,9 +1468,22 @@ export default function LedgerPageClient() {
   const totalEntryCount = typeof entriesMeta?.totalCount === "number" ? entriesMeta.totalCount : undefined;
   const hasMoreOnServer = !!entriesMeta?.hasMore;
   const canLoadMoreEntries = hasMoreOnServer && !entriesQ.isFetching;
+
+  // Needs Reconcile view: the server already returns only unmatched entries
+  // (a small set), so auto-load every page to show the whole queue with no
+  // "Load more" clicks. Bounded to 20 pages (20 * fetchLimit) as a corruption
+  // fuse — far beyond any realistic unmatched backlog.
+  useEffect(() => {
+    if (!serverUnmatchedOnly) return;
+    if (!hasMoreOnServer) return;
+    if (entriesQ.isFetching) return;
+    if (loadedPageCount >= 20) return;
+    setLoadedPageCount((n) => n + 1);
+  }, [serverUnmatchedOnly, hasMoreOnServer, entriesQ.isFetching, loadedPageCount]);
+
   const canNext = endIdx < displayRowsAll.length;
   const canPrev = page > 1;
-  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(displayRowsAll.length / effectiveRowsPerPage));
   const loadedCountLabel =
     totalEntryCount !== undefined
       ? `${loadedEntryCount} of ${totalEntryCount} loaded`
@@ -5255,7 +5281,7 @@ export default function LedgerPageClient() {
                   paginationActionLabel={loadMoreNavigationNote ? "Go to older rows" : undefined}
                   onPaginationAction={loadMoreNavigationNote ? () => setPage(olderLoadedPageTarget) : undefined}
                   emphasizeNext={!!loadMoreNavigationNote}
-                  loadMoreText={hasMoreOnServer ? "Load more entries" : undefined}
+                  loadMoreText={hasMoreOnServer && !isNeedsReconcileView ? "Load more entries" : undefined}
                   canLoadMore={canLoadMoreEntries}
                   isLoadingMore={entriesQ.isFetching}
                   onLoadMore={() => setLoadedPageCount((n) => n + 1)}

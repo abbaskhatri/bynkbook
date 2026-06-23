@@ -916,6 +916,10 @@ export async function handler(event: any) {
     const search = String(q.search ?? q.q ?? q.payee ?? "").trim();
     const categoryId = String(q.category_id ?? q.categoryId ?? "").trim();
     const uncategorizedOnly = ["true", "1", "yes"].includes(String(q.uncategorized ?? "").trim().toLowerCase());
+    // Needs-Reconcile queue: return only entries that are NOT in an active match
+    // group (i.e. still awaiting reconciliation). Lets the Ledger show the whole
+    // unmatched queue in one query instead of paging through all history.
+    const unmatchedOnly = ["true", "1", "yes"].includes(String(q.unmatched_only ?? q.unmatchedOnly ?? "").trim().toLowerCase());
     const excludeOpening = ["true", "1", "yes"].includes(String(q.exclude_opening ?? q.excludeOpening ?? "").trim().toLowerCase());
     const statusFilter = String(q.status ?? "").trim();
     const statusValues = statusFilter
@@ -934,6 +938,9 @@ export async function handler(event: any) {
         : {}),
       ...(q.vendorId ? { vendor_id: String(q.vendorId).trim() } : {}),
       ...(uncategorizedOnly ? { category_id: null } : categoryId ? { category_id: categoryId } : {}),
+      ...(unmatchedOnly
+        ? { matchGroupEntries: { none: { matchGroup: { status: "ACTIVE" } } } }
+        : {}),
       ...(statusValues.length
         ? { status: { in: statusValues } }
         : {}),
