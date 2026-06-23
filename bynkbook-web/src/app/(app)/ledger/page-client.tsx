@@ -5207,18 +5207,34 @@ export default function LedgerPageClient() {
           String(e?.type ?? "").toUpperCase() !== "OPENING"
       ).length === 0 ? (
         <div className="px-3 mt-2">
-          <EmptyStateCard
-            title="No entries in this account yet"
-            description="Connect your bank to sync transactions automatically, upload a CSV / PDF statement, or use the row at the top of the table to add one manually."
-            primary={{ label: "Connect bank", href: "/settings?tab=accounts" }}
-            secondary={{
-              label: "Upload statement",
-              onClick: () => {
-                setUploadType("BANK_STATEMENT");
-                setOpenUpload(true);
-              },
-            }}
-          />
+          {String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? (
+            // Cash accounts have no bank to connect — guide to manual entry /
+            // statement upload instead of an irrelevant "Connect bank" CTA.
+            <EmptyStateCard
+              title="No entries in this account yet"
+              description="This is a cash account. Add entries using the row at the top of the table, or upload a CSV / PDF statement to import them."
+              primary={{
+                label: "Upload statement",
+                onClick: () => {
+                  setUploadType("BANK_STATEMENT");
+                  setOpenUpload(true);
+                },
+              }}
+            />
+          ) : (
+            <EmptyStateCard
+              title="No entries in this account yet"
+              description="Connect your bank to sync transactions automatically, upload a CSV / PDF statement, or use the row at the top of the table to add one manually."
+              primary={{ label: "Connect bank", href: "/settings?tab=accounts" }}
+              secondary={{
+                label: "Upload statement",
+                onClick: () => {
+                  setUploadType("BANK_STATEMENT");
+                  setOpenUpload(true);
+                },
+              }}
+            />
+          )}
         </div>
       ) : null}
 
