@@ -66,6 +66,14 @@ export function categorySuggestionConfidenceValue(raw: unknown) {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
+export function categorySuggestionId(suggestion: CategorySuggestionLike | null | undefined) {
+  return String(suggestion?.category_id ?? suggestion?.categoryId ?? "").trim();
+}
+
+export function categorySuggestionName(suggestion: CategorySuggestionLike | null | undefined) {
+  return String(suggestion?.category_name ?? suggestion?.categoryName ?? "").trim();
+}
+
 export function isBulkSafeCategorySuggestion(
   suggestion: CategorySuggestionLike | null | undefined,
   suggestionIndex: number
@@ -84,5 +92,14 @@ export function isBulkSafeCategorySuggestion(
     .toUpperCase();
 
   return tier === "SAFE_DETERMINISTIC" || tier === "STRONG_SUGGESTION";
+}
+
+export function topCategorySuggestion(suggestions: CategorySuggestionLike[] | null | undefined) {
+  return Array.isArray(suggestions) ? suggestions[0] ?? null : null;
+}
+
+export function safeTopCategorySuggestion(suggestions: CategorySuggestionLike[] | null | undefined) {
+  const top = topCategorySuggestion(suggestions);
+  return isBulkSafeCategorySuggestion(top, 0) ? top : null;
 }
 

@@ -501,15 +501,15 @@ export function AutoReconcileDialog(props: {
       title="Auto-reconcile"
       size="lg"
       footer={
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-bb-text-muted">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs leading-5 text-bb-text-muted">
             {applySummary ? applySummary : counts.total === 0 ? "No suggestions found." : `${counts.total} suggestions`}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Button
               variant="outline"
-              className="h-7 px-3 text-xs"
+              className="w-full sm:w-auto"
               onClick={() => onOpenChange(false)}
               disabled={applyBusy}
             >
@@ -518,7 +518,7 @@ export function AutoReconcileDialog(props: {
 
             {!confirmStep ? (
               <Button
-                className="h-7 px-3 text-xs"
+                className="w-full sm:w-auto"
                 disabled={!canWrite || selected.size === 0 || counts.total === 0}
                 title={!canWrite ? canWriteReason : "Review then confirm"}
                 onClick={() => setConfirmStep(true)}
@@ -527,7 +527,7 @@ export function AutoReconcileDialog(props: {
               </Button>
             ) : (
               <Button
-                className="h-7 px-3 text-xs"
+                className="w-full sm:w-auto"
                 disabled={!canWrite || selected.size === 0 || counts.total === 0 || applyBusy}
                 title={!canWrite ? canWriteReason : "Confirm and apply selected suggestions"}
                 onClick={applySelected}
@@ -540,7 +540,7 @@ export function AutoReconcileDialog(props: {
       }
     >
       <div className="flex flex-col max-h-[70vh]">
-        <div className="px-3 py-2 flex items-center gap-3 text-xs text-bb-text-muted border-b border-bb-border">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-bb-border px-3 py-2 text-xs text-bb-text-muted">
           <span>
             1-to-1: <span className="font-medium text-bb-text">{counts.one}</span>
           </span>
@@ -550,7 +550,7 @@ export function AutoReconcileDialog(props: {
           <span>
             Combine: <span className="font-medium text-bb-text">{(counts as any).combine ?? 0}</span>
           </span>
-          <span className="ml-auto text-[11px] text-bb-text-muted">
+          <span className="basis-full text-[11px] text-bb-text-muted sm:ml-auto sm:basis-auto">
             Deterministic suggestions (no AI). Review before applying.
           </span>
         </div>
@@ -581,7 +581,7 @@ export function AutoReconcileDialog(props: {
                 const why = getSuggestionWhy(s);
 
                 return (
-                  <div key={s.id} className="px-3 py-2 flex gap-3 items-start">
+                  <div key={s.id} className="flex items-start gap-3 px-3 py-3">
                     <input
                       type="checkbox"
                       className="mt-1 h-4 w-4"
@@ -598,11 +598,11 @@ export function AutoReconcileDialog(props: {
                     />
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-medium text-bb-text truncate">{bankName || "Bank transaction"}</div>
+                      <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                        <div className="min-w-0 flex-1 basis-full text-sm font-medium text-bb-text sm:basis-auto sm:truncate">{bankName || "Bank transaction"}</div>
                         <div className="text-xs text-bb-text-muted tabular-nums">{bankDate}</div>
                         <div
-                          className={`ml-auto text-xs tabular-nums font-semibold ${
+                          className={`text-xs tabular-nums font-semibold sm:ml-auto ${
                             bankAmtFmt.isNeg ? "text-bb-amount-negative" : "text-bb-text"
                           }`}
                         >
@@ -610,7 +610,7 @@ export function AutoReconcileDialog(props: {
                         </div>
                       </div>
 
-                      <div className="mt-1 text-xs text-bb-text-muted">
+                      <div className="mt-1 text-xs leading-5 text-bb-text-muted">
                         Suggested:{" "}
                         <span className="font-medium text-bb-text">
                           {s.kind === "COMBINE"
