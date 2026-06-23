@@ -192,6 +192,65 @@ export function FixIssueDialog(props: {
     }
   }
 
+  async function deleteDuplicateEntry(entryIdToDelete: string) {
+    if (!entryIdToDelete) {
+      setErr("Pick the entry to delete.");
+      return;
+    }
+    if (duplicateContextBlocked) {
+      setErr("Load the full duplicate context before deleting.");
+      return;
+    }
+
+    if (deleteConfirmEntryId !== entryIdToDelete) {
+      setDeleteConfirmEntryId(entryIdToDelete);
+      const matched = isMatchedEntry(entryIdToDelete);
+      setErr(
+        matched
+          ? `Confirm delete will unmatch and move ${entryLabel(entryIdToDelete)} to Deleted.`
+          : `Confirm delete will move ${entryLabel(entryIdToDelete)} to Deleted.`
+      );
+      return;
+    }
+
+    setActiveAction("delete");
+    setErr(null);
+    try {
+      if (isMatchedEntry(entryIdToDelete) || forceUnmatchDeleteEntryId === entryIdToDelete) {
+        await unmatchAndDeleteEntry({
+          businessId,
+          accountId,
+          entryId: entryIdToDelete,
+          reason: "Delete duplicate from issue review",
+        });
+      } else {
+        await deleteEntry({ businessId, accountId, entryId: entryIdToDelete });
+      }
+
+      await resolveRelevantDuplicateIssues().catch(() => undefined);
+      onDidMutate?.();
+      onOpenChange(false);
+      setPickedCategoryId("");
+      setMergeSurvivorId("");
+      setMergeDuplicateId("");
+      setDeleteConfirmEntryId("");
+      setForceUnmatchDeleteEntryId("");
+    } catch (e: any) {
+      const raw = String(e?.message ?? "Delete failed");
+      const payload = e?.payload ?? null;
+      const code = String(payload?.code ?? "").toUpperCase();
+      if (code === "ENTRY_MATCHED_REQUIRES_UNMATCH" || raw.includes("ENTRY_MATCHED_REQUIRES_UNMATCH")) {
+        setErr("This entry is bank-matched. Click Confirm on that row again to unmatch and delete it from here.");
+        setDeleteConfirmEntryId(entryIdToDelete);
+        setForceUnmatchDeleteEntryId(entryIdToDelete);
+      } else {
+        setErr(String(payload?.error ?? raw ?? "Delete failed"));
+      }
+    } finally {
+      setActiveAction(null);
+    }
+  }
+
   const dialogSize = useMemo<"xs" | "sm" | "md">(() => {
     if (kind === "STALE_CHECK") return "xs";
     if (kind !== "DUPLICATE") return "sm";
@@ -349,80 +408,6 @@ export function FixIssueDialog(props: {
                 </Button>
 
                 <Button
-                  variant={deleteConfirmEntryId === mergeDuplicateId ? "destructive" : "outline"}
-                  onClick={async () => {
-                    if (!mergeDuplicateId) {
-                      setErr("Pick the duplicate to delete.");
-                      return;
-                    }
-                    if (duplicateContextBlocked) {
-                      setErr("Load the full duplicate context before deleting.");
-                      return;
-                    }
-                    if (deleteConfirmEntryId !== mergeDuplicateId) {
-                      setDeleteConfirmEntryId(mergeDuplicateId);
-                      const matched = isMatchedEntry(mergeDuplicateId);
-                      setErr(
-                        matched
-                          ? `Confirm delete will unmatch and move ${entryLabel(mergeDuplicateId)} to Deleted.`
-                          : `Confirm delete will move ${entryLabel(mergeDuplicateId)} to Deleted.`
-                      );
-                      return;
-                    }
-
-                    setActiveAction("delete");
-                    setErr(null);
-                    try {
-                      if (isMatchedEntry(mergeDuplicateId) || forceUnmatchDeleteEntryId === mergeDuplicateId) {
-                        await unmatchAndDeleteEntry({
-                          businessId,
-                          accountId,
-                          entryId: mergeDuplicateId,
-                          reason: "Delete duplicate from issue review",
-                        });
-                      } else {
-                        await deleteEntry({ businessId, accountId, entryId: mergeDuplicateId });
-                      }
-
-                      await resolveRelevantDuplicateIssues().catch(() => undefined);
-                      onDidMutate?.();
-                      onOpenChange(false);
-                      setPickedCategoryId("");
-                      setMergeSurvivorId("");
-                      setMergeDuplicateId("");
-                      setDeleteConfirmEntryId("");
-                      setForceUnmatchDeleteEntryId("");
-                    } catch (e: any) {
-                      const raw = String(e?.message ?? "Delete failed");
-                      const payload = e?.payload ?? null;
-                      const code = String(payload?.code ?? "").toUpperCase();
-                      if (code === "ENTRY_MATCHED_REQUIRES_UNMATCH" || raw.includes("ENTRY_MATCHED_REQUIRES_UNMATCH")) {
-                        setErr("This entry is bank-matched. Click Confirm delete again to unmatch and delete it from here.");
-                        setDeleteConfirmEntryId(mergeDuplicateId);
-                        setForceUnmatchDeleteEntryId(mergeDuplicateId);
-                      } else {
-                        setErr(String(payload?.error ?? raw ?? "Delete failed"));
-                      }
-                    } finally {
-                      setActiveAction(null);
-                    }
-                  }}
-                  disabled={busy || duplicateContextBlocked || relevant.entryIds.length < 2 || !mergeDuplicateId}
-                >
-                  {activeAction === "delete" ? (
-                    <span className="inline-flex items-center gap-2">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Deleting…
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-2">
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {deleteConfirmEntryId === mergeDuplicateId ? "Confirm delete" : "Delete duplicate"}
-                    </span>
-                  )}
-                </Button>
-
-                <Button
                   onClick={async () => {
                     if (!mergeSurvivorId || !mergeDuplicateId) {
                       setErr("Pick survivor and duplicate.");
@@ -571,6 +556,28 @@ export function FixIssueDialog(props: {
                     <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.methodDisplay || "Other"}</span>
                     <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.category || "No category"}</span>
                   </div>
+                  {kind === "DUPLICATE" ? (
+                    <div className="mt-3 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant={deleteConfirmEntryId === r.id ? "destructive" : "outline"}
+                        onClick={() => deleteDuplicateEntry(r.id)}
+                        disabled={busy || duplicateContextBlocked}
+                      >
+                        {activeAction === "delete" && deleteConfirmEntryId === r.id ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Deleting…
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2">
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deleteConfirmEntryId === r.id ? "Confirm" : "Delete"}
+                          </span>
+                        )}
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -592,6 +599,7 @@ export function FixIssueDialog(props: {
                     <col style={{ width: 84 }} />
                     <col style={{ width: 96 }} />
                     <col style={{ width: 98 }} />
+                    {kind === "DUPLICATE" ? <col style={{ width: 94 }} /> : null}
                   </>
                 ) : (
                   <>
@@ -602,6 +610,7 @@ export function FixIssueDialog(props: {
                     <col style={{ width: 96 }} />
                     <col style={{ width: 120 }} />
                     <col style={{ width: 110 }} />
+                    {kind === "DUPLICATE" ? <col style={{ width: 98 }} /> : null}
                   </>
                 )}
               </colgroup>
@@ -615,6 +624,9 @@ export function FixIssueDialog(props: {
                   <th className="text-left font-medium px-2 py-1.5">Method</th>
                   <th className="text-left font-medium px-2 py-1.5">Category</th>
                   <th className="text-right font-medium px-2 py-1.5">Amount</th>
+                  {kind === "DUPLICATE" ? (
+                    <th className="text-right font-medium px-2 py-1.5">Actions</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -629,11 +641,35 @@ export function FixIssueDialog(props: {
                     <td className="px-2 py-1.5">{r.methodDisplay}</td>
                     <td className="px-2 py-1.5">{r.category || "—"}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{r.amountStr}</td>
+                    {kind === "DUPLICATE" ? (
+                      <td className="px-2 py-1.5 text-right">
+                        <Button
+                          size="sm"
+                          variant={deleteConfirmEntryId === r.id ? "destructive" : "outline"}
+                          className="h-7 px-2 text-xs"
+                          onClick={() => deleteDuplicateEntry(r.id)}
+                          disabled={busy || duplicateContextBlocked}
+                          title={`Delete ${entryLabel(r.id)}`}
+                        >
+                          {activeAction === "delete" && deleteConfirmEntryId === r.id ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Deleting…
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5">
+                              <Trash2 className="h-3.5 w-3.5" />
+                              {deleteConfirmEntryId === r.id ? "Confirm" : "Delete"}
+                            </span>
+                          )}
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
                 {affectedRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={7}>
+                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={kind === "DUPLICATE" ? 8 : 7}>
                       No affected entries found.
                     </td>
                   </tr>
@@ -647,8 +683,8 @@ export function FixIssueDialog(props: {
           <div className="space-y-2">
             <div className="text-xs text-bb-text-muted">
               {duplicateMentionsMatch
-                ? "One entry is bank-matched. Use Reconcile → revert if the bank entry should be removed. Otherwise select which entry to keep (Survivor) and which to delete (Duplicate to remove)."
-                : "Select which entry to keep as the Survivor. The duplicate entry will be deleted. If both are legitimate, click \"Not a duplicate\" instead."}
+                ? "One entry is bank-matched. Use the row Delete action for the exact entry to remove, or use the selectors below to merge two rows."
+                : "Use the row Delete action for the exact entry to remove, or select Survivor and Duplicate to merge. If both are legitimate, click \"Not a duplicate\" instead."}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

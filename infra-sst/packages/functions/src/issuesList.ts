@@ -389,8 +389,49 @@ export async function handler(event: any) {
     : [];
 
   const entryById = new Map(entries.map((e: any) => [e.id, e]));
+  const activeMatchedEntryIds = new Set<string>();
+  if (snapshotEntryIds.length) {
+    const candidateEntryLinks = await prisma.matchGroupEntry.findMany({
+      where: {
+        business_id: biz,
+        account_id: acct,
+        entry_id: { in: snapshotEntryIds },
+      },
+      select: { match_group_id: true, entry_id: true },
+    });
+
+    const candidateGroupIds = Array.from(
+      new Set(
+        candidateEntryLinks
+          .map((link: any) => String(link?.match_group_id ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const activeGroups = candidateGroupIds.length
+      ? await prisma.matchGroup.findMany({
+        where: {
+          id: { in: candidateGroupIds },
+          business_id: biz,
+          account_id: acct,
+          status: "ACTIVE",
+          voided_at: null,
+        },
+        select: { id: true },
+      })
+      : [];
+
+    const activeGroupIds = new Set(activeGroups.map((group: any) => String(group?.id ?? "").trim()).filter(Boolean));
+    for (const link of candidateEntryLinks) {
+      const groupId = String(link?.match_group_id ?? "").trim();
+      const entryId = String(link?.entry_id ?? "").trim();
+      if (entryId && activeGroupIds.has(groupId)) activeMatchedEntryIds.add(entryId);
+    }
+  }
+
   const withEntrySnapshots = rows.map((r) => {
     const e = entryById.get(r.entry_id) ?? null;
+    const entryId = String(r?.entry_id ?? "").trim();
     return {
       ...r,
       entry_date: ymd(e?.date),
@@ -399,7 +440,7 @@ export async function handler(event: any) {
       entry_amount_cents: cents(e?.amount_cents),
       entry_type: e?.type ?? null,
       entry_method: e?.method ?? null,
-      entry_status: e?.status ?? null,
+      entry_status: entryId && activeMatchedEntryIds.has(entryId) ? "MATCHED" : e?.status ?? null,
       entry_category_id: e?.category_id ?? null,
       entry_category_name: e?.category?.name ?? null,
     };

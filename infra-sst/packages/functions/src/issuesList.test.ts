@@ -154,11 +154,13 @@ function project(row: any, select: Record<string, boolean> | undefined) {
   return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, row[key]]));
 }
 
-async function loadHandler(options: { issues?: any[]; entries?: any[] } = {}) {
+async function loadHandler(options: { issues?: any[]; entries?: any[]; matchGroupEntries?: any[]; matchGroups?: any[] } = {}) {
   vi.resetModules();
 
   const issueRows = [...(options.issues ?? defaultIssues())];
   const entryRows = [...(options.entries ?? defaultEntries())];
+  const matchGroupEntryRows = [...(options.matchGroupEntries ?? [])];
+  const matchGroupRows = [...(options.matchGroups ?? [])];
 
   const prisma = {
     userBusinessRole: {
@@ -180,6 +182,20 @@ async function loadHandler(options: { issues?: any[]; entries?: any[] } = {}) {
     entry: {
       findMany: vi.fn(async (args: any) =>
         entryRows
+          .filter((row) => rowMatchesWhere(row, args?.where ?? {}))
+          .map((row) => project(row, args?.select))
+      ),
+    },
+    matchGroupEntry: {
+      findMany: vi.fn(async (args: any) =>
+        matchGroupEntryRows
+          .filter((row) => rowMatchesWhere(row, args?.where ?? {}))
+          .map((row) => project(row, args?.select))
+      ),
+    },
+    matchGroup: {
+      findMany: vi.fn(async (args: any) =>
+        matchGroupRows
           .filter((row) => rowMatchesWhere(row, args?.where ?? {}))
           .map((row) => project(row, args?.select))
       ),
@@ -226,6 +242,42 @@ describe("issues list", () => {
         id: { in: expect.arrayContaining(["entry-1", "entry-2", "entry-3"]) },
       }),
     }));
+  });
+
+  test("marks issue snapshots as matched when an active match group links the entry", async () => {
+    const { handler } = await loadHandler({
+      matchGroupEntries: [
+        {
+          id: "mge-1",
+          business_id: "biz-1",
+          account_id: "acct-1",
+          entry_id: "entry-1",
+          match_group_id: "mg-active",
+        },
+      ],
+      matchGroups: [
+        {
+          id: "mg-active",
+          business_id: "biz-1",
+          account_id: "acct-1",
+          status: "ACTIVE",
+          voided_at: null,
+        },
+      ],
+    });
+
+    const res = await handler(event());
+    expect(res.statusCode).toBe(200);
+
+    const body = JSON.parse(res.body);
+    expect(body.issues.find((row: any) => row.id === "issue-1")).toMatchObject({
+      entry_id: "entry-1",
+      entry_status: "MATCHED",
+    });
+    expect(body.issues.find((row: any) => row.id === "issue-2")).toMatchObject({
+      entry_id: "entry-2",
+      entry_status: "EXPECTED",
+    });
   });
 
   test("first page returns limit rows with hasMore and nextCursor", async () => {
