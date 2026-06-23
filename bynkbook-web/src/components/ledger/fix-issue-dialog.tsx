@@ -34,6 +34,7 @@ export function FixIssueDialog(props: {
     {
       id: string;
       date: string;
+      ref?: string;
       payee: string;
       amountStr: string;
       methodDisplay: string;
@@ -141,9 +142,10 @@ export function FixIssueDialog(props: {
     const payeeShort = payee.length > 48 ? `${payee.slice(0, 45)}…` : payee;
 
     const date = String(r.date ?? "");
+    const ref = String((r as any).ref ?? "").trim();
     const amt = String((r as any).amountStr ?? "");
 
-    return `${date} • ${payeeShort} • ${amt}`;
+    return `${date} • ${ref ? `Ref ${ref} • ` : ""}${payeeShort} • ${amt}`;
   };
 
   const dialogSize = useMemo<"xs" | "sm" | "md">(() => {
@@ -155,8 +157,11 @@ export function FixIssueDialog(props: {
 
     for (const r of affectedRows) {
       const p = String(r.payee ?? "").trim();
+      const ref = String((r as any).ref ?? "").trim();
       maxPayeeLen = Math.max(maxPayeeLen, p.length);
+      maxPayeeLen = Math.max(maxPayeeLen, ref.length + 8);
       for (const tok of p.split(/\s+/)) maxTokenLen = Math.max(maxTokenLen, tok.length);
+      for (const tok of ref.split(/\s+/)) maxTokenLen = Math.max(maxTokenLen, tok.length);
     }
 
     if (maxPayeeLen >= 26) return "md";
@@ -436,6 +441,7 @@ export function FixIssueDialog(props: {
                 {dialogSize === "md" ? (
                   <>
                     <col style={{ width: 90 }} />
+                    <col style={{ width: 82 }} />
                     <col />
                     <col style={{ width: 84 }} />
                     <col style={{ width: 96 }} />
@@ -444,6 +450,7 @@ export function FixIssueDialog(props: {
                 ) : (
                   <>
                     <col style={{ width: 96 }} />
+                    <col style={{ width: 88 }} />
                     <col />
                     <col style={{ width: 96 }} />
                     <col style={{ width: 120 }} />
@@ -455,6 +462,7 @@ export function FixIssueDialog(props: {
               <thead className="sticky top-0 bg-bb-surface-card">
                 <tr className="border-b border-bb-border text-[11px] text-bb-text-muted">
                   <th className="text-left font-medium px-2 py-1.5">Date</th>
+                  <th className="text-left font-medium px-2 py-1.5">Ref</th>
                   <th className="text-left font-medium px-2 py-1.5">Payee</th>
                   <th className="text-left font-medium px-2 py-1.5">Method</th>
                   <th className="text-left font-medium px-2 py-1.5">Category</th>
@@ -465,6 +473,9 @@ export function FixIssueDialog(props: {
                 {affectedRows.map((r) => (
                   <tr key={r.id} className="border-b border-bb-border-muted text-xs">
                     <td className="px-2 py-1.5 tabular-nums">{r.date}</td>
+                    <td className="px-2 py-1.5 tabular-nums truncate" title={String((r as any).ref ?? "")}>
+                      {String((r as any).ref ?? "").trim() || "—"}
+                    </td>
                     <td className="px-2 py-1.5 whitespace-normal break-normal">{r.payee}</td>
                     <td className="px-2 py-1.5">{r.methodDisplay}</td>
                     <td className="px-2 py-1.5">{r.category || "—"}</td>
@@ -473,7 +484,7 @@ export function FixIssueDialog(props: {
                 ))}
                 {affectedRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={5}>
+                    <td className="px-3 py-3 text-sm text-bb-text-muted" colSpan={6}>
                       No affected entries found.
                     </td>
                   </tr>
@@ -503,7 +514,7 @@ export function FixIssueDialog(props: {
                   <SelectContent align="start" className="text-xs">
                     {relevant.entryIds.map((id) => (
                       <SelectItem key={id} value={id}>
-                        {rowsById[id]?.date} • {rowsById[id]?.payee} • {rowsById[id]?.amountStr}
+                        {entryLabel(id)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -521,7 +532,7 @@ export function FixIssueDialog(props: {
                   <SelectContent align="start" className="text-xs">
                     {relevant.entryIds.map((id) => (
                       <SelectItem key={id} value={id}>
-                        {rowsById[id]?.date} • {rowsById[id]?.payee} • {rowsById[id]?.amountStr}
+                        {entryLabel(id)}
                       </SelectItem>
                     ))}
                   </SelectContent>

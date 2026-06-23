@@ -233,6 +233,18 @@ export function extractCheckRefFromBankTransaction(bank: any) {
   return compactText(match?.[1] ?? "", "");
 }
 
+export function extractEntryRefFromEntry(entry: any) {
+  const explicit = compactText(
+    entry?.ref ?? entry?.reference ?? entry?.reference_number ?? entry?.referenceNumber ?? "",
+    ""
+  );
+  if (explicit) return explicit;
+
+  const memo = String(entry?.memo ?? "");
+  const match = memo.match(/\bref\s*:\s*([^\n\r;|,]+)/i);
+  return compactText(match?.[1] ?? "", "");
+}
+
 export function inferMethodFromBankTransaction(bank: any) {
   if (extractCheckRefFromBankTransaction(bank)) return "CHECK";
 
@@ -243,10 +255,14 @@ export function inferMethodFromBankTransaction(bank: any) {
     bank?.payment_channel,
   ].map((v) => String(v ?? "")).join(" ");
 
+  if (/\b(?:bank\s*card|bankcard|merchant\s+services?|card\s+settlement|card\s+deposit)\b/i.test(text)) return "CARD";
   if (/\bzelle\b/i.test(text)) return "ZELLE";
   if (/\bwire(?:\s+type)?\b/i.test(text)) return "WIRE";
   if (/\bach\b/i.test(text)) return "ACH";
   if (/\b(?:check|chk)\b/i.test(text)) return "CHECK";
+  if (/\b(?:mobile|remote|pre\s*encoded|preencoded)\b[\s\S]{0,40}\bdeposit\b/i.test(text)) return "CHECK";
+  if (/\bdeposit\b[\s\S]{0,40}\b(?:mobile|remote|pre\s*encoded|preencoded)\b/i.test(text)) return "CHECK";
+  if (/\bdirect\s+deposit\b/i.test(text)) return "DIRECT_DEPOSIT";
   if (/\btransfer\b/i.test(text)) return "TRANSFER";
   return "OTHER";
 }
@@ -273,6 +289,20 @@ export function duplicateReasonChips(bank: any, candidate: any, matchStatus: str
     date: ymdFromUnknownDate(candidate?.date),
   };
   const meta = scoreEntryCandidate(bank, candidateForScore);
+  const duplicateReason = String(candidate?.duplicate_reason ?? candidate?.duplicateReason ?? "").trim();
+  const duplicateConfidence = String(candidate?.duplicate_confidence ?? candidate?.duplicateConfidence ?? "").trim().toLowerCase();
+
+  if (duplicateReason === "generic_bank_manual_same_amount") {
+    chips.push({
+      label: "generic bank deposit",
+      tone: "warning",
+      title: "Bank description is generic, but amount/date match an existing manual ledger entry.",
+    });
+  }
+
+  if (duplicateConfidence === "high") {
+    chips.push({ label: "high confidence", tone: "warning" });
+  }
 
   if (sameAmountAbs(bank?.amount_cents, candidate?.amount_cents)) {
     chips.push({ label: "same amount", tone: "success" });

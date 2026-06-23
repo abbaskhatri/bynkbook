@@ -3568,6 +3568,7 @@ export default function LedgerPageClient() {
         {
           id: r.id,
           date: r.date,
+          ref: r.ref || "",
           payee: r.payee,
           amountStr: r.amountStr,
           methodDisplay: r.methodDisplay,

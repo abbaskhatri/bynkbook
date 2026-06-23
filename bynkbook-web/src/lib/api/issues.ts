@@ -48,6 +48,7 @@ export type BulkIssuePreviewItem = {
   bucket: BulkIssuePreviewBucket;
   action: BulkIssueSafeAction | null;
   date: string | null;
+  ref?: string | null;
   payee: string;
   amount_cents: string;
   method: string | null;

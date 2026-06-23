@@ -3617,7 +3617,7 @@ const displayBankActiveList = useMemo(() => {
                 <div className="flex-1 overflow-y-auto overflow-x-hidden">
                   <div className="text-xs text-bb-text-muted">
                     {createEntryDuplicateCandidates.length
-                      ? "A possible existing ledger entry was found. Review the bank transaction, suggested existing match, and new entry preview before choosing what to do."
+                      ? "A likely existing ledger entry was found. Match the existing entry first unless this bank transaction is truly a separate event."
                       : createEntryAutoMatch
                         ? createEntryAndMatchConfirmationCopy
                         : "This will create a new ledger entry from this bank transaction. Review the category, amount, and date before continuing."}
@@ -3760,7 +3760,7 @@ const displayBankActiveList = useMemo(() => {
                         Match an existing entry when it represents this bank transaction. Create a separate entry only when these are truly separate transactions.
                       </div>
                       <div className="mt-1 text-bb-text-muted">
-                        Duplication is suspected because the candidate has the same amount, a nearby date, a similar payee, or the same inflow/outflow direction.
+                        Duplication is suspected because the candidate has the same amount, a nearby date, a similar payee, or a generic bank description that commonly hides customer names.
                       </div>
                       <div className="mt-2 flex flex-col gap-2">
                         {createEntryDuplicateCandidates.slice(0, 5).map((candidate: any) => {
@@ -3798,7 +3798,7 @@ const displayBankActiveList = useMemo(() => {
                                 <span>{cDate}</span>
                                 <span>{directionLabel(cAmountValue)}</span>
                                 {cCategory ? <span>Category: {cCategory}</span> : null}
-                                {cRef ? <span>Ref: {cRef}</span> : null}
+                                <span>Ref: {cRef || "—"}</span>
                               </div>
                             </div>
                           );

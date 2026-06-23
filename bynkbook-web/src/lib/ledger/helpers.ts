@@ -14,6 +14,7 @@ export type FixIssueKind = "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
 export type FixIssueDialogRow = {
   id: string;
   date: string;
+  ref: string;
   payee: string;
   amountStr: string;
   methodDisplay: string;
@@ -347,6 +348,7 @@ export function issueSnapshotToFixIssueRow(issue: EntryIssueRow): FixIssueDialog
   return {
     id,
     date: String(issue.entry_date ?? ""),
+    ref: extractEntryRef({ memo: issue.entry_memo }),
     payee: String(issue.entry_payee ?? ""),
     amountStr:
       issue.entry_amount_cents === undefined || issue.entry_amount_cents === null
