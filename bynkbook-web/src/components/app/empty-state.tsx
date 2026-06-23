@@ -11,7 +11,7 @@ export function EmptyStateCard({
 }: {
   title: string;
   description: string;
-  primary: { label: string; href: string };
+  primary: { label: string; href: string } | { label: string; onClick: () => void };
   secondary?: { label: string; onClick: () => void } | null;
 }) {
   return (
@@ -20,9 +20,15 @@ export function EmptyStateCard({
       <div className="mt-1 text-sm text-foreground/70">{description}</div>
 
       <div className="mt-3 flex items-center gap-2">
-        <Button asChild className="h-7">
-          <Link href={primary.href}>{primary.label}</Link>
-        </Button>
+        {"href" in primary ? (
+          <Button asChild className="h-7">
+            <Link href={primary.href}>{primary.label}</Link>
+          </Button>
+        ) : (
+          <Button className="h-7" onClick={primary.onClick}>
+            {primary.label}
+          </Button>
+        )}
 
         {secondary ? (
           <Button variant="outline" className="h-7" onClick={secondary.onClick}>
