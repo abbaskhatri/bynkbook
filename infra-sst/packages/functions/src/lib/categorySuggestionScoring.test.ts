@@ -375,6 +375,24 @@ describe("category keyword suggestions", () => {
         categories: [{ id: "cat-dues", name: "Dues and Subscriptions" }],
         expected: "cat-dues",
       },
+      {
+        payee: "Smith Legal",
+        memo: "legal fees",
+        categories: [{ id: "cat-legal", name: "Legal Fees" }],
+        expected: "cat-legal",
+      },
+      {
+        payee: "Laptop Store",
+        memo: "computer equipment",
+        categories: [{ id: "cat-equipment", name: "Equipment" }],
+        expected: "cat-equipment",
+      },
+      {
+        payee: "Wholesale Materials",
+        memo: "inventory purchase",
+        categories: [{ id: "cat-inventory", name: "Inventory" }],
+        expected: "cat-inventory",
+      },
     ];
 
     for (const c of cases) {

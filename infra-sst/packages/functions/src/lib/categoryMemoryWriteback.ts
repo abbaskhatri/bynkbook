@@ -1,4 +1,5 @@
 import { normalizeMerchant } from "./categoryMerchantNormalize";
+import { bumpCategoryLearningVersion } from "./categoryLearningVersion";
 
 type WritebackConfidenceArgs = {
   merchantNormalized: string;
@@ -310,4 +311,6 @@ export async function writeCategoryMemoryFeedback(args: WriteCategoryMemoryFeedb
       overrideIncrement: 1,
     });
   }
+
+  bumpCategoryLearningVersion(businessId);
 }

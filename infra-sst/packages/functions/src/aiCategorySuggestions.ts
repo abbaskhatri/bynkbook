@@ -15,6 +15,7 @@ import {
   type HeuristicSuggestion,
 } from "./lib/categorySuggestionScoring";
 import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
+import { getCategoryLearningVersion } from "./lib/categoryLearningVersion";
 
 function getClaims(event: any) {
   const auth = event?.requestContext?.authorizer ?? {};
@@ -355,7 +356,8 @@ async function loadVendors(prisma: any, businessId: string) {
 }
 
 async function loadBusinessMemory(prisma: any, businessId: string) {
-  const cacheKey = `biz:${businessId}:category-memory:v1`;
+  const learningVersion = getCategoryLearningVersion(businessId);
+  const cacheKey = `biz:${businessId}:category-memory:v1:${learningVersion}`;
   const cached = getCached(memoryCache, cacheKey);
   if (cached) return cached;
 
@@ -412,7 +414,8 @@ async function loadEntrySnapshots(prisma: any, businessId: string, itemIds: stri
 }
 
 async function loadAccountHistory(prisma: any, businessId: string, accountId: string) {
-  const cacheKey = `biz:${businessId}:acct:${accountId}:hist:v2`;
+  const learningVersion = getCategoryLearningVersion(businessId);
+  const cacheKey = `biz:${businessId}:acct:${accountId}:hist:v2:${learningVersion}`;
   const cached = getCached(historyCache, cacheKey);
   if (cached) return cached;
 
@@ -622,6 +625,7 @@ async function runAiFallback(args: {
 
   const cacheKey = JSON.stringify({
     businessId: args.businessId,
+    learningVersion: getCategoryLearningVersion(args.businessId),
     limitPerItem: args.limitPerItem,
     categories: args.categories.map((c) => [c.id, c.name]),
     items: args.items.map((x) => ({

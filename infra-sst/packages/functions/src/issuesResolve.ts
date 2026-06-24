@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
 
 function json(statusCode: number, body: any) {
   return {
@@ -128,7 +129,7 @@ export async function handler(event: any) {
       // so it remains allowed even when the entry's period is closed.
       const entryForCheck = await prisma.entry.findFirst({
         where: { id: row.entry_id, business_id: biz, account_id: acct, deleted_at: null },
-        select: { id: true },
+        select: { id: true, payee: true, memo: true, amount_cents: true, type: true },
       });
       if (!entryForCheck) return json(404, { ok: false, error: "Entry not found" });
 
@@ -142,6 +143,19 @@ export async function handler(event: any) {
           where: { id: issue, business_id: biz, account_id: acct },
           data: { status: "RESOLVED", resolved_at: new Date(), updated_at: new Date() },
         });
+      });
+
+      await writeCategoryMemoryFeedback({
+        prisma,
+        business_id: biz,
+        entry: {
+          id: entryForCheck.id,
+          payee: entryForCheck.payee,
+          memo: entryForCheck.memo,
+          amount_cents: entryForCheck.amount_cents,
+          type: entryForCheck.type,
+        },
+        selected_category_id: categoryId,
       });
 
       return json(200, { ok: true, issue_id: issue, resolved: true, action });
