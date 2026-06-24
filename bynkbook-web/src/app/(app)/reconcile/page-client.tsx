@@ -4699,13 +4699,13 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               ) : bankPanelShowRows ? (
                 <>
-                  <table className="w-full min-w-[684px] table-fixed border-collapse">
+                  <table className="w-full min-w-[640px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 30 }} />
                     <col style={{ width: 84 }} />
                     <col />
-                    <col style={{ width: 96 }} />
-                    <col style={{ width: 176 }} />
+                    <col style={{ width: 116 }} />
+                    <col style={{ width: 112 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
@@ -4965,16 +4965,15 @@ const displayBankActiveList = useMemo(() => {
                                     return (
                                       <button
                                         type="button"
-                                        className={`h-7 max-w-[92px] min-w-0 shrink inline-flex items-center gap-1 px-2 text-[11px] rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
+                                        className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
                                         title="Auto-match this bank transaction with the only entry that exactly matches (amount, direction, within 3 days)"
-                                        aria-label="Auto-match"
+                                        aria-label="Auto-match bank transaction"
                                         onClick={(ev) => {
                                           ev.stopPropagation();
                                           void quickMatchAt(txnId, autoCandidateEntryId);
                                         }}
                                       >
-                                        <Sparkles className="h-3 w-3" />
-                                        <span className="truncate">Auto-match</span>
+                                        <Sparkles className="h-4 w-4" />
                                       </button>
                                     );
                                   })()}
