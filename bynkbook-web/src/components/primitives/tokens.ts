@@ -1,16 +1,16 @@
 // Canonical UI tokens (Phase 3).
 // Use these instead of redefining per-page styles.
 export const surfaceCard =
-  "rounded-xl border border-bb-border bg-bb-surface-card shadow-sm";
+  "rounded-lg border border-bb-border bg-bb-surface-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]";
 
 
 export const textMuted = "text-bb-text-muted";
 
 export const surfaceCardSoft =
-  "rounded-xl border border-bb-border bg-bb-surface-card shadow-sm";
+  "rounded-lg border border-bb-border bg-bb-surface-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]";
 
 export const ringFocus =
-  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0";
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-0";
 
   // Motion: premium, non-bouncy micro-interactions (200ms ease-out)
 export const motionFast =
@@ -41,7 +41,7 @@ export const tabButtonBase =
   "h-7 px-3 rounded-md border text-xs font-medium transition";
 
 export const tabButtonActive =
-  "border-bb-border bg-bb-surface-elevated text-bb-text shadow-sm";
+  "border-primary/25 bg-primary/10 text-primary shadow-sm";
 
 export const tabButtonInactive =
   "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover hover:text-bb-text";

@@ -10,15 +10,17 @@ export function FilterBar({ left, right, className }: FilterBarProps) {
   return (
     <div
       className={[
-        "w-full flex items-center justify-between gap-2",
-        "py-2",
+        "w-full rounded-lg border border-bb-border bg-bb-surface-soft/70 px-2 py-2",
+        "flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="min-w-0 flex items-center gap-2 flex-wrap">{left}</div>
-      <div className="shrink-0 flex items-center gap-2">{right}</div>
+      <div className="min-w-0 flex flex-wrap items-center gap-2">{left}</div>
+      <div className="min-w-0 flex flex-wrap items-center justify-start gap-2 lg:justify-end lg:shrink-0">
+        {right}
+      </div>
     </div>
   );
 }

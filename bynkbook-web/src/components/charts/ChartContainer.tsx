@@ -152,7 +152,7 @@ export function ChartContainer({
     }, [empty, loading, noResponsive]);
 
     return (
-        <Card className={`rounded-[10px] border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm ${motionFast}`}>
+        <Card className={`rounded-lg border border-bb-border bg-bb-surface-card text-card-foreground shadow-[0_1px_2px_rgba(15,23,42,0.04)] ${motionFast}`}>
             <CardHeader className="py-1">
                 <div className="flex items-start justify-between gap-3">
                     <div>

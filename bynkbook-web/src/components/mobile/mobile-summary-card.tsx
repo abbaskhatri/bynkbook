@@ -25,7 +25,7 @@ export function MobileSummaryCard({
   tone = "neutral",
 }: MobileSummaryCardProps) {
   return (
-    <section className={cn("rounded-md border p-3.5 shadow-sm", toneClasses[tone])}>
+    <section className={cn("rounded-md border p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]", toneClasses[tone])}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">

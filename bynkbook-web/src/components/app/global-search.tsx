@@ -166,7 +166,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-bb-text-subtle" />
         <Input
           ref={inputRef}
-          className="h-9 w-full sm:w-[320px] rounded-xl border-bb-input-border bg-bb-input-bg pl-9 pr-16 text-sm shadow-sm"
+          className="h-8 w-full sm:w-[320px] rounded-md border-bb-input-border bg-bb-input-bg pl-9 pr-16 text-sm shadow-sm"
           placeholder="Search entries, bank txns, payees…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -221,8 +221,8 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
       </div>
 
       {open ? (
-        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.14)]">
-          <div className="flex items-center justify-between border-b border-bb-border-muted px-4 py-3">
+        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.14)]">
+          <div className="flex items-center justify-between border-b border-bb-border-muted bg-bb-surface-soft px-3 py-2.5">
             <div>
               <div className="text-xs font-semibold tracking-wide text-foreground/80">Global search</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -235,19 +235,19 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
           {errMsg ? <div className="px-4 py-3 text-sm text-bb-status-danger-fg">{errMsg}</div> : null}
 
           {!canSearch ? (
-            <div className="px-4 py-4">
-              <div className="rounded-xl border border-bb-border bg-bb-surface-soft px-4 py-3 text-sm text-foreground/70">
+            <div className="px-3 py-3">
+              <div className="rounded-lg border border-bb-border bg-bb-surface-soft px-3 py-2.5 text-sm text-foreground/70">
                 Search by payee, memo, amount phrasing, or transaction context. Try:
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-full border border-bb-border bg-bb-surface-card px-2.5 py-1">Uber</span>
-                  <span className="rounded-full border border-bb-border bg-bb-surface-card px-2.5 py-1">Office supplies</span>
-                  <span className="rounded-full border border-bb-border bg-bb-surface-card px-2.5 py-1">Expenses over 500</span>
+                  <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Uber</span>
+                  <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Office supplies</span>
+                  <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Expenses over 500</span>
                 </div>
               </div>
             </div>
           ) : (
             <>
-              <div className="px-4 py-3">
+              <div className="px-3 py-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Entries</div>
                 {entries.length ? (
                   <div className="flex flex-col gap-1">
@@ -259,9 +259,8 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                         <button
                           key={String(e.id)}
                           type="button"
-                          aria-selected={isActive}
                           className={[
-                            "rounded-xl border px-3 py-2.5 text-left transition",
+                            "rounded-md border px-3 py-2 text-left transition",
                             isActive ? "border-bb-border bg-bb-surface-soft" : "border-transparent hover:border-bb-border hover:bg-bb-table-row-hover",
                           ].join(" ")}
                           onMouseEnter={() => setActiveIndex(rowIndex)}
@@ -285,7 +284,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-muted-foreground">
+                  <div className="rounded-lg border border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-muted-foreground">
                     No entry matches.
                   </div>
                 )}
@@ -293,7 +292,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
 
               <div className="h-px bg-bb-border-muted" />
 
-              <div className="px-4 py-3">
+              <div className="px-3 py-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Bank transactions</div>
                 {bankTxns.length ? (
                   <div className="flex flex-col gap-1">
@@ -305,9 +304,8 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                         <button
                           key={String(t.id)}
                           type="button"
-                          aria-selected={isActive}
                           className={[
-                            "rounded-xl border px-3 py-2.5 text-left transition",
+                            "rounded-md border px-3 py-2 text-left transition",
                             isActive ? "border-bb-border bg-bb-surface-soft" : "border-transparent hover:border-bb-border hover:bg-bb-table-row-hover",
                           ].join(" ")}
                           onMouseEnter={() => setActiveIndex(rowIndex)}
@@ -331,7 +329,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-muted-foreground">
+                  <div className="rounded-lg border border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-muted-foreground">
                     No bank transaction matches.
                   </div>
                 )}

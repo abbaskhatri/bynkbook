@@ -104,6 +104,9 @@
 
   --bb-amber-500: #f59e0b;
   --bb-blue-500:  #3b82f6;
+  --bb-cyan-500:  #06b6d4;
+  --bb-violet-500:#8b5cf6;
+  --bb-rose-500:  #f43f5e;
 
   --bb-slate-50:  #f8fafc;
   --bb-slate-100: #f1f5f9;
@@ -115,7 +118,7 @@
   --bb-white: #ffffff;
 
   /* shadcn-style semantic mapping (LIGHT) */
-  --background: var(--bb-slate-50);
+  --background: #f6faf8;
   --foreground: var(--bb-slate-900);
 
   --card: var(--bb-white);
@@ -148,7 +151,7 @@
   --bb-app-fg: var(--foreground);
 
   --bb-surface-card: var(--card);
-  --bb-surface-soft: var(--bb-slate-50);
+  --bb-surface-soft: #f3faf7;
   --bb-surface-elevated: var(--bb-white);
 
   --bb-border: var(--border);
@@ -164,8 +167,8 @@
   --bb-input-border: var(--bb-slate-200);
   --bb-input-placeholder: var(--bb-slate-400);
 
-  --bb-table-header: var(--bb-slate-50);
-  --bb-table-row-hover: var(--bb-slate-50);
+  --bb-table-header: #f2f8f5;
+  --bb-table-row-hover: #eef7f2;
   --bb-table-row-selected: var(--bb-slate-100);
   --bb-table-sticky: var(--bb-white);
 
@@ -173,9 +176,9 @@
   --bb-scrollbar-thumb: var(--bb-slate-300);
   --bb-scrollbar-thumb-hover: var(--bb-slate-400);
 
-  --bb-sidebar-bg: var(--bb-white);
+  --bb-sidebar-bg: #fbfefd;
   --bb-sidebar-fg: var(--bb-slate-900);
-  --bb-nav-active-bg: var(--primary);
+  --bb-nav-active-bg: #047857;
   --bb-nav-active-fg: var(--primary-foreground);
   --bb-mobile-nav-bg: rgba(255, 255, 255, 0.95);
 
@@ -206,8 +209,8 @@
   --chart-1: var(--bb-emerald-600); /* net / primary */
   --chart-2: var(--bb-green-600);   /* income */
   --chart-3: var(--bb-red-600);     /* expense */
-  --chart-4: var(--bb-blue-500);    /* info */
-  --chart-5: var(--bb-amber-500);   /* warning */
+  --chart-4: var(--bb-cyan-500);    /* info */
+  --chart-5: var(--bb-violet-500);  /* accent */
 
   /* Standardized chart component vars (used by ChartContainer) */
   --bb-chart-income: var(--bb-green-600);
@@ -261,12 +264,12 @@
   --ring: var(--bb-emerald-600);
 
   /* Bynkbook semantic tokens (DARK) */
-  --bb-app-bg: #0b1120;
+  --bb-app-bg: #08111f;
   --bb-app-fg: #f8fafc;
 
-  --bb-surface-card: #111827;
-  --bb-surface-soft: #0f172a;
-  --bb-surface-elevated: #172033;
+  --bb-surface-card: #101927;
+  --bb-surface-soft: #0d1725;
+  --bb-surface-elevated: #162235;
 
   --bb-border: rgba(255, 255, 255, 0.10);
   --bb-border-muted: rgba(255, 255, 255, 0.07);
@@ -281,8 +284,8 @@
   --bb-input-border: rgba(255, 255, 255, 0.14);
   --bb-input-placeholder: #64748b;
 
-  --bb-table-header: #0f172a;
-  --bb-table-row-hover: rgba(255, 255, 255, 0.04);
+  --bb-table-header: #0c1624;
+  --bb-table-row-hover: rgba(20, 184, 166, 0.08);
   --bb-table-row-selected: rgba(5, 150, 105, 0.16);
   --bb-table-sticky: #111827;
 
@@ -290,7 +293,7 @@
   --bb-scrollbar-thumb: rgba(148, 163, 184, 0.46);
   --bb-scrollbar-thumb-hover: rgba(203, 213, 225, 0.62);
 
-  --bb-sidebar-bg: #0f172a;
+  --bb-sidebar-bg: #0b1523;
   --bb-sidebar-fg: #f8fafc;
   --bb-nav-active-bg: var(--bb-emerald-600);
   --bb-nav-active-fg: #ffffff;
@@ -349,6 +352,12 @@
   }
   body {
     @apply bg-background text-foreground;
+    background:
+      linear-gradient(180deg, rgba(6, 182, 212, 0.08) 0%, rgba(5, 150, 105, 0.06) 18rem, transparent 34rem),
+      var(--bb-app-bg);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
 
   *::-webkit-scrollbar {
@@ -408,6 +417,76 @@
 .mobile-token-card-control {
   background: var(--bb-surface-soft);
   border-color: var(--bb-border);
+}
+
+.bb-app-canvas {
+  background:
+    linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68) 0%, rgba(246, 250, 248, 0.92) 16rem, var(--bb-app-bg) 100%);
+  background-size: 24px 24px, 24px 24px, auto;
+}
+
+.dark .bb-app-canvas {
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(20, 184, 166, 0.06) 0%, rgba(8, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
+  background-size: 24px 24px, 24px 24px, auto;
+}
+
+.bb-focus-lift {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background-color 160ms ease;
+}
+
+.bb-focus-lift:hover {
+  transform: translateY(-1px);
+}
+
+.bb-checkbox {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--bb-input-border);
+  border-radius: 0.25rem;
+  background: var(--bb-surface-card);
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.bb-checkbox::before {
+  content: "";
+  width: 0.56rem;
+  height: 0.56rem;
+  clip-path: polygon(14% 44%, 0 65%, 44% 100%, 100% 16%, 80% 0, 39% 62%);
+  background: white;
+  transform: scale(0);
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+
+.bb-checkbox:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.bb-checkbox:checked::before {
+  transform: scale(1);
+}
+
+.bb-checkbox:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 34%, transparent);
+}
+
+/* Keep the whole product on a tighter, more professional radius scale. */
+.rounded-xl,
+.rounded-2xl,
+.rounded-\[10px\],
+.rounded-\[28px\],
+.rounded-\[32px\] {
+  border-radius: 0.5rem !important;
 }
 
 /* BynkBook: use full width workspace */

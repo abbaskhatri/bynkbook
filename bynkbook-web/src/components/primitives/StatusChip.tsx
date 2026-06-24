@@ -22,7 +22,7 @@ export function StatusChip({ label, tone = "default", className }: StatusChipPro
   return (
     <span
       className={[
-        "inline-flex items-center gap-1 px-2 h-6 rounded-full text-[11px] font-medium border",
+        "inline-flex items-center gap-1 px-2 h-5 rounded-md text-[11px] font-semibold border",
         toneClasses[tone],
         className,
       ]

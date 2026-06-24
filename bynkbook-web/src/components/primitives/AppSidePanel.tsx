@@ -79,7 +79,7 @@ export function AppSidePanel({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-bb-border bg-bb-dialog-bg shadow-2xl",
+            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)]",
             "transition-transform duration-200 ease-out animate-in slide-in-from-right",
             widthClass,
             "flex min-h-0 flex-col overflow-hidden",
@@ -94,7 +94,7 @@ export function AppSidePanel({
               <button
                 type="button"
                 className={[
-                  "h-8 w-8 inline-flex items-center justify-center rounded-lg border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
+                  "h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
                   "hover:bg-bb-table-row-hover hover:text-bb-text",
                   ringFocus,
                 ].join(" ")}

@@ -32,9 +32,9 @@ export function MobileTaskCard({
   const content = (
     <div
       className={cn(
-        "flex min-h-[84px] items-center gap-3 rounded-md border p-3.5 text-card-foreground shadow-sm",
+        "flex min-h-[78px] items-center gap-3 rounded-md border p-3 text-card-foreground shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
         toneClasses[tone],
-        disabled ? "opacity-60" : "transition-colors hover:bg-muted/50"
+        disabled ? "opacity-60" : "transition-[background-color,border-color,transform] hover:-translate-y-px hover:bg-muted/50"
       )}
     >
       {icon ? (

@@ -10,8 +10,10 @@ import {
 } from "@/components/ui/select";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { StatusChip } from "@/components/primitives/StatusChip";
 import { resolveIssue, type EntryIssueRow } from "@/lib/api/issues";
 import { deleteEntry, mergeEntry, unmatchAndDeleteEntry } from "@/lib/api/entries";
+import { statusTone } from "@/lib/ledger/helpers";
 import { Loader2, Trash2 } from "lucide-react";
 
 type Kind = "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK";
@@ -171,8 +173,16 @@ export function FixIssueDialog(props: {
 
   const entryStatusLabel = (id: string) => {
     const r = rowsById?.[id] as any;
+    const raw = String(r?.rawStatus ?? r?.status ?? "").trim().toUpperCase();
     const label = String(r?.status ?? "").trim();
-    return label || "Expected";
+    if (label) return label;
+    if (raw) {
+      return raw
+        .replace(/_/g, " ")
+        .toLowerCase()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+    return "Expected";
   };
 
   const isMatchedEntry = (id: string) => {
@@ -552,7 +562,7 @@ export function FixIssueDialog(props: {
                     <div className="shrink-0 text-right font-semibold tabular-nums">{r.amountStr}</div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                    <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{entryStatusLabel(r.id)}</span>
+                    <StatusChip label={entryStatusLabel(r.id)} tone={statusTone(String((r as any).rawStatus ?? (r as any).status ?? ""))} />
                     <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.methodDisplay || "Other"}</span>
                     <span className="rounded-md border border-bb-border bg-bb-surface-soft px-2 py-1">{r.category || "No category"}</span>
                   </div>
@@ -637,7 +647,9 @@ export function FixIssueDialog(props: {
                       {String((r as any).ref ?? "").trim() || "—"}
                     </td>
                     <td className="px-2 py-1.5 whitespace-normal break-normal">{r.payee}</td>
-                    <td className="px-2 py-1.5">{entryStatusLabel(r.id)}</td>
+                    <td className="px-2 py-1.5">
+                      <StatusChip label={entryStatusLabel(r.id)} tone={statusTone(String((r as any).rawStatus ?? (r as any).status ?? ""))} />
+                    </td>
                     <td className="px-2 py-1.5">{r.methodDisplay}</td>
                     <td className="px-2 py-1.5">{r.category || "—"}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{r.amountStr}</td>
@@ -681,15 +693,15 @@ export function FixIssueDialog(props: {
 
         {kind === "DUPLICATE" ? (
           <div className="space-y-2">
-            <div className="text-xs text-bb-text-muted">
+            <div className="rounded-lg border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs text-bb-text-muted">
               {duplicateMentionsMatch
-                ? "One entry is bank-matched. Use the row Delete action for the exact entry to remove, or use the selectors below to merge two rows."
-                : "Use the row Delete action for the exact entry to remove, or select Survivor and Duplicate to merge. If both are legitimate, click \"Not a duplicate\" instead."}
+                ? "One entry may already be bank-matched. Keep the correct row as Survivor, remove only the duplicate, or mark both as legitimate."
+                : "Choose the row to keep and the row to remove. Use row Delete only when you are sure which exact entry should go away."}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div className="text-xs">
-                <div className="text-[11px] text-bb-text-muted mb-1">Survivor</div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+              <div className="rounded-lg border border-primary/25 bg-primary/5 p-2 text-xs">
+                <div className="text-[11px] font-semibold uppercase text-primary">Keep this entry</div>
                 <Select
                   value={mergeSurvivorId}
                   onValueChange={(value) => {
@@ -699,7 +711,7 @@ export function FixIssueDialog(props: {
                     setForceUnmatchDeleteEntryId("");
                   }}
                 >
-                  <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-primary/30 bg-primary/5">
+                  <SelectTrigger className="mt-1 h-8 min-w-0 border-primary/30 bg-bb-surface-card px-2 text-xs">
                     <span className="truncate" title={mergeSurvivorId ? entryLabel(mergeSurvivorId) : ""}>
                       {mergeSurvivorId ? entryLabel(mergeSurvivorId) : "Pick survivor"}
                     </span>
@@ -714,8 +726,12 @@ export function FixIssueDialog(props: {
                 </Select>
               </div>
 
-              <div className="text-xs">
-                <div className="text-[11px] text-bb-text-muted mb-1">Duplicate to remove</div>
+              <div className="hidden pb-3 text-center text-[11px] font-semibold uppercase text-bb-text-muted sm:block">
+                then
+              </div>
+
+              <div className="rounded-lg border border-bb-status-danger-border bg-bb-status-danger-bg p-2 text-xs">
+                <div className="text-[11px] font-semibold uppercase text-bb-status-danger-fg">Remove this duplicate</div>
                 <Select
                   value={mergeDuplicateId}
                   onValueChange={(value) => {
@@ -725,7 +741,7 @@ export function FixIssueDialog(props: {
                     setForceUnmatchDeleteEntryId("");
                   }}
                 >
-                  <SelectTrigger className="h-7 px-2 text-xs min-w-0 border-bb-status-danger-border bg-bb-status-danger-bg">
+                  <SelectTrigger className="mt-1 h-8 min-w-0 border-bb-status-danger-border bg-bb-surface-card px-2 text-xs">
                     <span className="truncate" title={mergeDuplicateId ? entryLabel(mergeDuplicateId) : ""}>
                       {mergeDuplicateId ? entryLabel(mergeDuplicateId) : "Pick duplicate"}
                     </span>

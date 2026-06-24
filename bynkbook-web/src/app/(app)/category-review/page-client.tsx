@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterBar } from "@/components/primitives/FilterBar";
+import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
@@ -35,7 +36,7 @@ import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox, type CategoryComboboxOption } from "@/components/categories/category-combobox";
 
-import { Tags, Loader2, ChevronRight } from "lucide-react";
+import { Tags, Loader2, ChevronRight, RefreshCw, Sparkles, ListFilter } from "lucide-react";
 
 function formatUsdAccountingFromCents(raw: unknown) {
   const n = Number(raw);
@@ -1238,6 +1239,13 @@ export default function CategoryReviewPageClient() {
     return out.slice(0, 200);
   }, [selectedIds, manualCategoryByEntryId, visibleRows, categoryNameById]);
 
+  const combinedAutoFixApplyItems = useMemo(() => {
+    const byEntryId = new Map<string, { entryId: string; category_id: string; suggested_category_id?: string }>();
+    for (const item of selectedApplyItems) byEntryId.set(item.entryId, item);
+    for (const item of manuallySelectedApplyItems) byEntryId.set(item.entryId, item);
+    return Array.from(byEntryId.values()).slice(0, 200);
+  }, [selectedApplyItems, manuallySelectedApplyItems]);
+
   const autoFixRows = useMemo(() => {
     return visibleRows
       .filter((e: any) => selectedIds.has(String(e.id)))
@@ -1530,8 +1538,11 @@ export default function CategoryReviewPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFixPendingIds, suggestionsQ.isFetching, suggestionsQ.error, suggestionsQ.data, sugByEntryId]);
 
-  async function applyManuallySelectedCategories() {
-    if (!selectedBusinessId || !selectedAccountId || manuallySelectedApplyItems.length === 0) return;
+  async function applyCategoryItems(
+    items: Array<{ entryId: string; category_id: string; suggested_category_id?: string }>,
+    errorTitle: string
+  ) {
+    if (!selectedBusinessId || !selectedAccountId || items.length === 0) return;
 
     setApplyBusy(true);
     clearMutErr();
@@ -1540,7 +1551,7 @@ export default function CategoryReviewPageClient() {
       const res: any = await applyCategoryBatch({
         businessId: selectedBusinessId,
         accountId: selectedAccountId,
-        items: manuallySelectedApplyItems,
+        items,
       });
 
       const summary = summarizeApplyResult(res);
@@ -1555,8 +1566,8 @@ export default function CategoryReviewPageClient() {
         if (r?.ok === true) successIds.add(id);
       }
 
-      if (successIds.size === 0 && applied === manuallySelectedApplyItems.length && blocked === 0) {
-        for (const item of manuallySelectedApplyItems) successIds.add(item.entryId);
+      if (successIds.size === 0 && applied === items.length && blocked === 0) {
+        for (const item of items) successIds.add(item.entryId);
       }
 
       setApplySummary({
@@ -1565,14 +1576,17 @@ export default function CategoryReviewPageClient() {
       });
 
       if (successIds.size > 0) {
+        const categoryByEntryId = new Map(items.map((item) => [item.entryId, item.category_id]));
+
         updateCategoryReviewEntriesCache((row: any) => {
           const id = String(row.id);
           if (!successIds.has(id)) return row;
-          const nextCategoryId = String(manualCategoryByEntryId[id] ?? "").trim();
+          const nextCategoryId = String(categoryByEntryId.get(id) ?? "").trim();
           return {
             ...row,
             category_id: nextCategoryId || row.category_id,
             category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
+            suggested_category_id: nextCategoryId || (row.suggested_category_id ?? null),
           };
         });
 
@@ -1611,10 +1625,14 @@ export default function CategoryReviewPageClient() {
 
       if (blocked === 0) setApplyOpen(false);
     } catch (e: any) {
-      applyMutationError(e, "Can’t apply selected categories");
+      applyMutationError(e, errorTitle);
     } finally {
       setApplyBusy(false);
     }
+  }
+
+  async function applyAutoFixSelectedCategories() {
+    await applyCategoryItems(combinedAutoFixApplyItems, "Can’t apply selected categories");
   }
 
   const loadedCount = visibleRows.length;
@@ -1791,67 +1809,33 @@ export default function CategoryReviewPageClient() {
               {sugUpdating ? <span className="text-[11px] text-muted-foreground">Updating…</span> : null}
             </CardTitle>
 
-            <div className="flex items-center gap-2">
-              <Button
-                variant={groupedByCategory ? "default" : "outline"}
-                className="h-7 px-3 text-xs"
-                onClick={() => {
-                  setGroupedByCategory((v) => !v);
-                  setCollapsedGroups(new Set());
-                }}
-                title={groupedByCategory ? "Switch to flat list" : "Group entries by suggested category"}
-              >
-                Group by category
-              </Button>
-
-              <Button
-                variant="outline"
-                className="h-7 px-3 text-xs"
-                disabled={
-                  applyBusy ||
-                  sugLoading ||
-                  sugUpdating ||
-                  entriesQ.isLoading ||
-                  suggestionTargets.length === 0 ||
-                  !selectedBusinessId ||
-                  !selectedAccountId
-                }
-                onClick={loadSuggestionsForCurrentFilters}
-              >
-                {sugLoading ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Loading suggestions
-                  </span>
-                ) : suggestionsLoadedForCurrentFilters ? (
-                  suggestionsButtonLabel
-                ) : (
-                  suggestionsButtonLabel
-                )}
-              </Button>
-
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="inline-flex" title={autoFixButtonTitle}>
                 <Button
                   variant={autoFixButtonReadyCount === 0 ? "outline" : "default"}
-                  className="h-7 px-3 text-xs"
+                  size="sm"
                   disabled={autoFixButtonDisabled}
                   onClick={handleReviewAutoFix}
                 >
                   {autoFixPreparing ? (
                     <span className="inline-flex items-center gap-1.5">
                       <Loader2 className="h-3 w-3 animate-spin" />
-                      Finding safe category matches…
+                      Preparing…
                     </span>
                   ) : (
-                    "Review Auto Fix"
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Review Auto Fix
+                    </>
                   )}
                 </Button>
               </span>
 
               {selectedCount > 0 ? (
-                <>
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 rounded-lg border border-bb-border bg-bb-surface-soft px-2 py-1.5">
+                  <span className="text-[11px] font-semibold text-bb-text-muted">{selectedCount} selected</span>
                   <select
-                    className="h-7 rounded-md border border-border bg-card px-2 text-xs"
+                    className="h-7 w-[180px] rounded-md border border-border bg-card px-2 text-xs"
                     value={bulkCategoryId}
                     onChange={(e) => setBulkCategoryId(e.target.value)}
                   >
@@ -1865,8 +1849,8 @@ export default function CategoryReviewPageClient() {
                   </select>
 
                   <Button
-                    className="h-7 px-3 text-xs"
-                    disabled={bulkCategoryId === "__NONE__" || selectedCount === 0}
+                    size="sm"
+                    disabled={bulkCategoryId === "__NONE__" || selectedCount === 0 || applyBusy}
                     onClick={async () => {
                       clearMutErr();
                       setApplyBusy(true);
@@ -1877,33 +1861,47 @@ export default function CategoryReviewPageClient() {
                       }
                     }}
                   >
-                    Apply bulk category to selected loaded rows
+                    Apply category
                   </Button>
-
-                  {manuallySelectedApplyItems.length > 0 ? (
-                    <BusyButton
-                      variant="primary"
-                      size="sm"
-                      className="h-7 px-3 text-xs"
-                      busy={applyBusy}
-                      busyLabel="Applying..."
-                      disabled={applyBusy || manuallySelectedApplyItems.length === 0}
-                      onClick={applyManuallySelectedCategories}
-                    >
-                      {`Apply selected categories to loaded rows (${manuallySelectedApplyItems.length})`}
-                    </BusyButton>
-                  ) : null}
-
-                  <Button
-                    variant="outline"
-                    className="h-7 px-3 text-xs"
-                    onClick={clearSelection}
-                    disabled={selectedCount === 0}
-                  >
-                    Clear
-                  </Button>
-                </>
+                </div>
               ) : null}
+
+              <AppActionMenu
+                label="More"
+                title="Category review actions"
+                items={[
+                  {
+                    label: groupedByCategory ? "Show flat list" : "Group by category",
+                    description: groupedByCategory ? "Return to a simple row list." : "Cluster rows by suggested category.",
+                    icon: ListFilter,
+                    onSelect: () => {
+                      setGroupedByCategory((v) => !v);
+                      setCollapsedGroups(new Set());
+                    },
+                  },
+                  {
+                    label: suggestionsButtonLabel,
+                    description: "Refresh AI suggestions for the currently loaded rows.",
+                    icon: RefreshCw,
+                    disabled:
+                      applyBusy ||
+                      sugLoading ||
+                      sugUpdating ||
+                      entriesQ.isLoading ||
+                      suggestionTargets.length === 0 ||
+                      !selectedBusinessId ||
+                      !selectedAccountId,
+                    onSelect: loadSuggestionsForCurrentFilters,
+                  },
+                  {
+                    label: "Clear selection",
+                    description: "Deselect rows and reset bulk actions.",
+                    icon: ChevronRight,
+                    disabled: selectedCount === 0,
+                    onSelect: clearSelection,
+                  },
+                ]}
+              />
             </div>
           </div>
         </CHeader>
@@ -2362,10 +2360,10 @@ export default function CategoryReviewPageClient() {
             footer={
               <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-muted-foreground">
-                  {selectedApplyItems.length > 0
-                    ? `${selectedApplyItems.length} safe ${selectedApplyItems.length === 1 ? "fix" : "fixes"} ready`
-                    : manuallySelectedApplyItems.length > 0
-                      ? `${manuallySelectedApplyItems.length} reviewed ${manuallySelectedApplyItems.length === 1 ? "selection" : "selections"} ready`
+                  {combinedAutoFixApplyItems.length > 0
+                    ? `${combinedAutoFixApplyItems.length} selected ${combinedAutoFixApplyItems.length === 1 ? "category" : "categories"} ready`
+                    : autoFixReviewRows.length > 0
+                      ? "Choose categories for rows that need review."
                       : "Review suggestions before applying."}
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -2374,116 +2372,14 @@ export default function CategoryReviewPageClient() {
                 </Button>
 
                 <BusyButton
-                  variant="secondary"
-                  size="md"
-                  busy={applyBusy}
-                  busyLabel="Applying..."
-                  disabled={applyBusy || manuallySelectedApplyItems.length === 0}
-                  onClick={applyManuallySelectedCategories}
-                >
-                  {`Apply reviewed (${manuallySelectedApplyItems.length})`}
-                </BusyButton>
-
-                <BusyButton
                   variant="primary"
                   size="md"
                   busy={applyBusy}
                   busyLabel="Applying..."
-                  disabled={applyBusy || selectedApplyItems.length === 0}
-                  onClick={async () => {
-                    if (!selectedBusinessId || !selectedAccountId) return;
-
-                    setApplyBusy(true);
-                    clearMutErr();
-
-                    try {
-                      const res: any = await applyCategoryBatch({
-                        businessId: selectedBusinessId,
-                        accountId: selectedAccountId,
-                        items: selectedApplyItems,
-                      });
-
-                      const summary = summarizeApplyResult(res);
-                      const applied = summary.applied;
-                      const blocked = summary.blocked;
-
-                      setApplySummary({
-                        ...summary,
-                        stillNeedReview: Math.max(0, autoFixRows.length - summary.applied),
-                      });
-
-                      const results = Array.isArray(res?.results) ? res.results : [];
-                      const successIds = new Set<string>();
-
-                      for (const r of results) {
-                        const id = String(r?.entryId ?? "");
-                        if (!id) continue;
-                        if (r?.ok === true) successIds.add(id);
-                      }
-
-                      if (successIds.size === 0 && applied === selectedApplyItems.length && blocked === 0) {
-                        for (const item of selectedApplyItems) successIds.add(item.entryId);
-                      }
-
-                      if (successIds.size > 0) {
-                        const categoryByEntryId = new Map(
-                          selectedApplyItems.map((item) => [item.entryId, item.category_id])
-                        );
-
-                        updateCategoryReviewEntriesCache((row: any) => {
-                          const id = String(row.id);
-                          if (!successIds.has(id)) return row;
-                          const nextCategoryId = String(categoryByEntryId.get(id) ?? "").trim();
-                          return {
-                            ...row,
-                            category_id: nextCategoryId || row.category_id,
-                            category_name: categoryNameById[nextCategoryId] ?? row.category_name ?? null,
-                            suggested_category_id: nextCategoryId || (row.suggested_category_id ?? null),
-                          };
-                        });
-                      }
-
-                      setSelectedSuggestionByEntryId((prev) => {
-                        const next = { ...prev };
-                        for (const id of Array.from(successIds)) {
-                          delete next[id];
-                        }
-                        return next;
-                      });
-
-                      setCategoryDraftByEntryId((prev) => {
-                        const next = { ...prev };
-                        for (const id of Array.from(successIds)) {
-                          delete next[id];
-                        }
-                        return next;
-                      });
-
-                      setSelectedIds((prev) => {
-                        const next = new Set(Array.from(prev));
-                        for (const id of Array.from(successIds)) {
-                          next.delete(id);
-                        }
-                        return next;
-                      });
-
-                      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-                      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
-                      void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
-
-                      if (typeof window !== "undefined") {
-                        window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
-                      }
-
-                      setApplyOpen(false);
-                    } catch (e: any) {
-                      applyMutationError(e, "Can’t apply suggestions");
-                    } finally {
-                      setApplyBusy(false);
-                    }
-                  }}
+                  disabled={applyBusy || combinedAutoFixApplyItems.length === 0}
+                  onClick={applyAutoFixSelectedCategories}
                 >
-                  {`Apply safe fixes (${selectedApplyItems.length})`}
+                  {`Apply selected (${combinedAutoFixApplyItems.length})`}
                 </BusyButton>
                 </div>
               </div>
@@ -2516,7 +2412,7 @@ export default function CategoryReviewPageClient() {
 
               {autoFixSafeSelectedCount === 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
-                  No safe bulk fixes yet. Choose categories in Needs review, then apply reviewed selections.
+                  No safe bulk groups yet. Choose categories in Needs review, then apply selected.
                 </div>
               ) : autoFixReviewNeededCount > 0 ? (
                 <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-[11px] text-bb-status-warning-fg">
@@ -2537,8 +2433,8 @@ export default function CategoryReviewPageClient() {
                 ) : (
                   <div className="min-w-[420px] divide-y divide-border">
                     {autoFixGroups.length === 0 ? (
-                      <div className="bg-card px-4 py-4 text-sm text-muted-foreground">
-                        Safe category groups will appear here when loaded rows meet the bulk-fix threshold.
+                      <div className="bg-card px-3 py-3 text-xs text-muted-foreground">
+                        Safe groups appear here when loaded rows meet the bulk-fix threshold.
                       </div>
                     ) : null}
 
@@ -2557,7 +2453,7 @@ export default function CategoryReviewPageClient() {
                             <div className="flex min-w-0 items-start gap-2">
                               <input
                                 type="checkbox"
-                                className="mt-0.5 h-4 w-4"
+                                className="bb-checkbox mt-0.5"
                                 checked={isGroupSelected}
                                 onChange={(ev) => setAutoFixGroupSelected(group, ev.target.checked)}
                                 aria-label={`Select all ${group.categoryName} safe fixes`}
@@ -2616,7 +2512,7 @@ export default function CategoryReviewPageClient() {
                                     <div className="pt-0.5">
                                       <input
                                         type="checkbox"
-                                        className="h-4 w-4"
+                                        className="bb-checkbox"
                                         checked={String(selectedSuggestionByEntryId[id] ?? "") === topCategoryId}
                                         onChange={(ev) => setAutoFixRowSelected(row, ev.target.checked)}
                                         aria-label={`Select ${String(e.payee ?? "row")} safe fix`}

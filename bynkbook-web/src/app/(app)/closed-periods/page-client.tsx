@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
+import { AppDialog } from "@/components/primitives/AppDialog";
+import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Lock } from "lucide-react";
@@ -14,7 +16,7 @@ import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
-import { closeThroughDate, listClosedPeriods, reopenPeriod } from "@/lib/api/closedPeriods";
+import { listClosedPeriods, reopenPeriod } from "@/lib/api/closedPeriods";
 import { getActivity } from "@/lib/api/activity";
 
 import { CloseThroughControl } from "./close-through-control";
@@ -51,10 +53,6 @@ export default function ClosedPeriodsPageClient() {
 
   const [rows, setRows] = useState<any[]>([]);
   const [closedThroughDate, setClosedThroughDate] = useState<string | null>(null);
-
-  // Close-through UX
-  const [closeMonth, setCloseMonth] = useState<string>(""); // YYYY-MM
-  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
 
   // Recent close/reopen actions (real only; otherwise hidden)
   const [recentActions, setRecentActions] = useState<any[] | null>(null);
@@ -127,35 +125,7 @@ export default function ClosedPeriodsPageClient() {
     return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
-  function monthEndYmd(month: string) {
-    // month: YYYY-MM
-    const y = Number(month.slice(0, 4));
-    const m = Number(month.slice(5, 7));
-    const leap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
-    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    const d = days[Math.max(1, Math.min(12, m)) - 1] ?? 30;
-    return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-  }
-
   const todayYmd = useMemo(() => todayYmdLocal(), []);
-  const closeThroughYmd = useMemo(() => (closeMonth ? monthEndYmd(closeMonth) : ""), [closeMonth]);
-  const isCloseBeyondToday = !!closeThroughYmd && closeThroughYmd > todayYmd;
-
-  async function onConfirmClose() {
-    if (!businessId || !closeMonth) return;
-    setLoading(true);
-    setErr(null);
-    try {
-      const through_date = monthEndYmd(closeMonth);
-      await closeThroughDate(businessId, through_date);
-      setConfirmCloseOpen(false);
-      await refresh();
-    } catch (e: any) {
-      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
 
   // Auto-load once businessId is known (deterministic; avoids useState side-effects)
   useEffect(() => {
@@ -240,63 +210,22 @@ export default function ClosedPeriodsPageClient() {
             />
           </div>
 
-          {/* Confirm modal (no placeholders) */}
-          {confirmCloseOpen ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-3">
-              <div className="w-full max-w-md rounded-xl border border-bb-border bg-bb-surface-card shadow-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-bb-border">
-                  <div className="text-sm font-semibold">Confirm close period</div>
-                  <div className="mt-1 text-xs text-bb-text-muted">
-                    You are about to close through{" "}
-                    <span className="font-medium tabular-nums">{closeMonth ? monthEndYmd(closeMonth) : "—"}</span>.
-                  </div>
-                </div>
-
-                <div className="px-4 py-3">
-                  <div className="text-xs text-bb-text-muted">
-                    This will block edits to any entries dated on or before that date. Reopening is restricted by role.
-                  </div>
-                </div>
-
-                <div className="px-4 py-3 border-t border-bb-border flex items-center justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    className="h-9 px-3"
-                    disabled={loading}
-                    onClick={() => setConfirmCloseOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button className="h-9 px-3" disabled={loading || !closeMonth || isCloseBeyondToday} onClick={onConfirmClose}>
-                    Confirm close
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           {/* Confirm reopen (OWNER only; deterministic month) */}
-          {confirmReopenOpen ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-3">
-              <div className="w-full max-w-md rounded-xl border border-bb-border bg-bb-surface-card shadow-lg overflow-hidden">
-                <div className="px-4 py-3 border-b border-bb-border">
-                  <div className="text-sm font-semibold">Confirm reopen month</div>
-                  <div className="mt-1 text-xs text-bb-text-muted">
-                    You are about to reopen{" "}
-                    <span className="font-medium tabular-nums">{reopenMonth || "—"}</span>.
-                  </div>
-                </div>
-
-                <div className="px-4 py-3">
-                  <div className="text-xs text-bb-text-muted">
-                    Reopening restores the ability to modify entries in that month. This action is restricted to OWNER.
-                  </div>
-                </div>
-
-                <div className="px-4 py-3 border-t border-bb-border flex items-center justify-end gap-2">
+          <AppDialog
+            open={confirmReopenOpen}
+            onClose={() => {
+              setConfirmReopenOpen(false);
+              setReopenMonth("");
+            }}
+            title="Reopen month"
+            size="sm"
+            footer={
+              <DialogFooter
+                right={
+                  <>
                   <Button
                     variant="outline"
-                    className="h-9 px-3"
+                    size="sm"
                     disabled={loading}
                     onClick={() => {
                       setConfirmReopenOpen(false);
@@ -306,17 +235,26 @@ export default function ClosedPeriodsPageClient() {
                     Cancel
                   </Button>
                   <Button
-                    className="h-9 px-3"
+                    size="sm"
                     disabled={loading || !canReopen || !reopenMonth}
                     title={!canReopen ? "Only OWNER can reopen" : "Confirm reopen"}
                     onClick={() => onReopen(reopenMonth)}
                   >
                     Confirm reopen
                   </Button>
-                </div>
-              </div>
+                  </>
+                }
+              />
+            }
+          >
+            <div className="space-y-2 text-xs text-bb-text-muted">
+              <p>
+                You are about to reopen{" "}
+                <span className="font-medium tabular-nums text-bb-text">{reopenMonth || "—"}</span>.
+              </p>
+              <p>Reopening restores the ability to modify entries in that month. This action is restricted to OWNER.</p>
             </div>
-          ) : null}
+          </AppDialog>
 
           {/* Closed months table */}
           <div

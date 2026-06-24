@@ -73,21 +73,22 @@ export function MatchSideCard({
 }) {
   const amount = toBigIntSafe(amountCents);
   return (
-    <div className="min-w-0 rounded-md border border-bb-border bg-bb-surface-card p-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-bb-text" title={title}>
-        {compactText(title)}
+    <div className="min-w-0 rounded-md border border-bb-border bg-bb-surface-card px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-bb-text-muted">{label}</div>
+          <div className="truncate text-sm font-semibold text-bb-text" title={title}>
+            {compactText(title)}
+          </div>
+        </div>
+        <div className={`shrink-0 text-right text-sm font-semibold tabular-nums ${amount < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
+          {formatUsdFromCents(amount)}
+        </div>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+      <div className="mt-1 grid grid-cols-3 gap-x-3 gap-y-1 text-[11px]">
         <div className="min-w-0">
           <div className="text-bb-text-muted">Date</div>
           <div className="truncate text-bb-text">{compactText(date)}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-bb-text-muted">Amount</div>
-          <div className={`tabular-nums font-semibold ${amount < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
-            {formatUsdFromCents(amount)}
-          </div>
         </div>
         <div className="min-w-0">
           <div className="text-bb-text-muted">Account</div>
@@ -101,7 +102,7 @@ export function MatchSideCard({
             {compactText(refText)}
           </div>
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 col-span-3">
           <div className="text-bb-text-muted">Category/status</div>
           <div className="truncate text-bb-text" title={categoryOrStatus}>
             {compactText(categoryOrStatus)}
@@ -140,11 +141,11 @@ export function MatchPairPreview({
   const bankTotal = banks.reduce((sum, t) => sum + absBig(toBigIntSafe(t?.amount_cents)), 0n);
 
   return (
-    <div className="mb-3 rounded-md border border-bb-border bg-bb-surface-soft p-2.5">
+    <div className="rounded-md border border-bb-border bg-bb-surface-soft p-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-xs font-semibold text-bb-text">Review the match pair</div>
-          <div className="text-[11px] text-bb-text-muted">Confirm exactly which ledger and bank records will be linked.</div>
+          <div className="text-[11px] text-bb-text-muted">Confirm the ledger and bank records to link.</div>
         </div>
         <div className="flex flex-wrap justify-end gap-1.5">
           {chips.map((chip) => (

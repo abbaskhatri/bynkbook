@@ -1499,8 +1499,7 @@ export default function LedgerPageClient() {
   })();
 
   // Selection
-  const checkboxClass =
-    "h-4 w-4 rounded border border-bb-input-border bg-bb-surface-card checked:bg-primary checked:border-primary";
+  const checkboxClass = "bb-checkbox";
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
 
   // Only rows that actually have checkboxes (matches your row render condition)

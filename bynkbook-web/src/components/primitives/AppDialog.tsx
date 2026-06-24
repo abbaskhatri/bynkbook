@@ -15,6 +15,7 @@ type AppDialogProps = {
   footer?: React.ReactNode;
   size?: AppDialogSize;
   disableOverlayClose?: boolean;
+  bodyClassName?: string;
 };
 
 const dialogWidthBySize: Record<AppDialogSize, string> = {
@@ -33,6 +34,7 @@ export function AppDialog({
   footer,
   size = "md",
   disableOverlayClose = false,
+  bodyClassName,
 }: AppDialogProps) {
   const titleId = useId();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -82,7 +84,7 @@ export function AppDialog({
           aria-labelledby={title ? titleId : undefined}
           className={[
             surfaceCardSoft,
-            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-2xl sm:rounded-2xl border border-bb-border bg-bb-dialog-bg shadow-2xl",
+            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-lg sm:rounded-lg border border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)]",
             "max-h-[calc(100dvh-0.75rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
             "transition-all duration-200 ease-out",
             "animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 sm:slide-in-from-bottom-0",
@@ -98,7 +100,7 @@ export function AppDialog({
               <button
                 type="button"
                 className={[
-                  "h-8 w-8 inline-flex items-center justify-center rounded-lg border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
+                  "h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
                   "hover:bg-bb-table-row-hover hover:text-bb-text",
                   ringFocus,
                 ].join(" ")}
@@ -110,10 +112,19 @@ export function AppDialog({
             ) : null}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3 sm:overflow-x-auto sm:px-3.5 sm:py-2.5">{children}</div>
+          <div
+            className={[
+              "min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3 sm:overflow-x-auto sm:px-3.5 sm:py-2.5",
+              bodyClassName,
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            {children}
+          </div>
 
           {footer ? (
-            <div className="min-w-0 shrink-0 px-4 py-3 border-t border-bb-border-muted bg-bb-surface-soft [&>div]:flex-wrap [&>div]:gap-2 [&_button]:min-h-10 [&_button]:shrink-0 sm:px-3.5 sm:py-2.5">
+            <div className="min-w-0 shrink-0 px-4 py-3 border-t border-bb-border-muted bg-bb-surface-soft [&>div]:flex-wrap [&>div]:gap-2 [&_button]:min-h-8 [&_button]:shrink-0 sm:px-3.5 sm:py-2.5">
               {footer}
             </div>
           ) : null}

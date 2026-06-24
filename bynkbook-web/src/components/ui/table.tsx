@@ -21,7 +21,7 @@ function Table({
   return (
     <div
       data-slot="table-container"
-      className={cn("relative w-full overflow-x-auto", containerClassName)}
+      className={cn("relative w-full overflow-x-auto rounded-lg border border-bb-border bg-bb-surface-card", containerClassName)}
     >
       <table
         data-slot="table"
@@ -37,7 +37,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("bg-bb-table-header [&_tr]:border-b", className)}
+      className={cn("bg-bb-table-header [&_tr]:border-b [&_tr]:border-bb-border", className)}
       {...props}
     />
   )
@@ -71,7 +71,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "hover:bg-bb-table-row-hover data-[state=selected]:bg-bb-table-row-selected border-b transition-colors",
+        "hover:bg-bb-table-row-hover data-[state=selected]:bg-bb-table-row-selected border-b border-bb-border-muted transition-colors",
         className
       )}
       {...props}
@@ -84,7 +84,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "text-bb-text-muted h-8 px-2 text-left align-middle text-[11px] font-semibold uppercase whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}
@@ -97,7 +97,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "px-2 py-1.5 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}

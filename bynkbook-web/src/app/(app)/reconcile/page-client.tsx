@@ -20,6 +20,7 @@ import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { StatusChip } from "@/components/primitives/StatusChip";
+import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { inputH7 } from "@/components/primitives/tokens";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -648,11 +649,7 @@ export default function ReconcilePageClient() {
   // Auto-reconcile v1 (suggestion-only)
   const [openAutoReconcile, setOpenAutoReconcile] = useState(false);
 
-  // History Hub (keeps headers clean)
-  const [openHistoryHub, setOpenHistoryHub] = useState(false);
-
   // Phase 5C: Issues (read-only)
-  const [openIssuesHub, setOpenIssuesHub] = useState(false);
   const [openIssuesList, setOpenIssuesList] = useState(false);
   const [issuesKind, setIssuesKind] = useState<"notInView" | "voidHeavy">("notInView");
   const [issuesSearch, setIssuesSearch] = useState("");
@@ -1501,10 +1498,10 @@ export default function ReconcilePageClient() {
   }, [bankTab, selectedBusinessId, selectedAccountId, bankStatusLoaded.matched, bankLoadingByStatus.matched]);
 
   useEffect(() => {
-    const needsAllMatchGroups = openReconciliationHistory || openIssuesHub || openIssuesList || openExportHub;
+    const needsAllMatchGroups = openReconciliationHistory || openIssuesList || openExportHub;
     if (!needsAllMatchGroups) return;
     void loadAllMatchGroups();
-  }, [openReconciliationHistory, openIssuesHub, openIssuesList, openExportHub, loadAllMatchGroups]);
+  }, [openReconciliationHistory, openIssuesList, openExportHub, loadAllMatchGroups]);
 
   useEffect(() => {
     if (!openExportHub) return;
@@ -3100,11 +3097,6 @@ const displayBankActiveList = useMemo(() => {
     : allMatchGroupsLoading
       ? "Loading"
       : "Deferred";
-  const issuesTotalLabel = allMatchGroupsHydrated
-    ? String(issuesCounts.total)
-    : allMatchGroupsLoading
-      ? "loading"
-      : `${issuesCounts.notInView} loaded`;
   const issuesVoidHeavyLabel = allMatchGroupsHydrated
     ? String(issuesCounts.voidHeavy)
     : allMatchGroupsLoading
@@ -3132,39 +3124,15 @@ const displayBankActiveList = useMemo(() => {
     "h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card opacity-50 cursor-not-allowed inline-flex items-center gap-1";
 
   const headerRight = (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-        onClick={() => setOpenSnapshots(true)}
-        title="Snapshots"
-      >
-        Snapshots
-      </button>
-
-      <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
-        <button
-          type="button"
-          className={`h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
-            }`}
-          onClick={() => {
-            if (!canWriteReconcileEffective) return;
-            setOpenExportHub(true);
-          }}
-          disabled={!canWriteReconcileEffective}
-          title={canWriteReconcileEffective ? "Export (CSV)" : (reconcileWriteReason ?? noPermTitle)}
-        >
-          <Download className="h-3.5 w-3.5" /> Export
-        </button>
-      </HintWrap>
+    <div className="flex flex-wrap items-center justify-end gap-2">
       <HintWrap
         disabled={!canWriteReconcileEffective}
         reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
       >
-        <button
+        <Button
           type="button"
-          className={`h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
-            }`}
+          variant="outline"
+          size="sm"
           disabled={!canWriteReconcileEffective || !bankTruthReady || !entriesTruthReady || displayBankUnmatchedList.length === 0 || displayEntriesExpectedList.length === 0}
           title={
             !canWriteReconcileEffective
@@ -3183,29 +3151,60 @@ const displayBankActiveList = useMemo(() => {
           }}
         >
           <Sparkles className="h-3.5 w-3.5" /> Match suggestions
-        </button>
+        </Button>
       </HintWrap>
 
-      <button
-        type="button"
-        className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-        onClick={() => setOpenHistoryHub(true)}
-        title="History"
-      >
-        <Download className="h-3.5 w-3.5" /> History
-      </button>
-
-      <button
-        type="button"
-        className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-        onClick={() => {
-          setIssuesSearch("");
-          setOpenIssuesHub(true);
-        }}
-        title="Issues (read-only diagnostics)"
-      >
-        <AlertCircle className="h-3.5 w-3.5" /> <span className="font-semibold">{issuesTotalLabel}</span> issues
-      </button>
+      <AppActionMenu
+        label="Actions"
+        title="Snapshots, exports, history, and diagnostics"
+        items={[
+          {
+            label: "Snapshots",
+            description: "Save or restore this reconciliation view.",
+            icon: FileText,
+            onSelect: () => setOpenSnapshots(true),
+          },
+          {
+            label: "Export CSV",
+            description: canWriteReconcileEffective ? "Bank transactions and audit events." : (reconcileWriteReason ?? noPermTitle),
+            icon: Download,
+            disabled: !canWriteReconcileEffective,
+            onSelect: () => setOpenExportHub(true),
+          },
+          {
+            label: "Statement history",
+            description: "Imported bank statements for this account.",
+            icon: FileText,
+            onSelect: () => setOpenStatementHistory(true),
+          },
+          {
+            label: "Reconciliation history",
+            description: "Matches, reverts, and audit details.",
+            icon: ClipboardList,
+            onSelect: () => setOpenReconciliationHistory(true),
+          },
+          {
+            label: `Not in view (${issuesCounts.notInView})`,
+            description: "Active matches hidden by current filters.",
+            icon: AlertCircle,
+            onSelect: () => {
+              setIssuesKind("notInView");
+              setIssuesSearch("");
+              setOpenIssuesList(true);
+            },
+          },
+          {
+            label: `Reverts (${issuesVoidHeavyLabel})`,
+            description: `${VOID_HEAVY_THRESHOLD}+ reverts on a bank transaction.`,
+            icon: RotateCcw,
+            onSelect: () => {
+              setIssuesKind("voidHeavy");
+              setIssuesSearch("");
+              setOpenIssuesList(true);
+            },
+          },
+        ]}
+      />
     </div>
   );
 
@@ -3412,6 +3411,7 @@ const displayBankActiveList = useMemo(() => {
           }}
           title={createEntryDuplicateCandidates.length ? "Possible duplicate ledger entry" : "Create entry"}
           size="lg"
+          bodyClassName="overflow-hidden sm:overflow-hidden"
           footer={openCreateEntry ? (
             <DialogFooter
               left={
@@ -3483,7 +3483,7 @@ const displayBankActiveList = useMemo(() => {
                     reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
                   >
                     <BusyButton
-                      variant={createEntryDuplicateCandidates.length ? "danger" : "primary"}
+                      variant={createEntryDuplicateCandidates.length ? "secondary" : "primary"}
                       size="md"
                       busy={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
                       busyLabel="Creating…"
@@ -3610,7 +3610,7 @@ const displayBankActiveList = useMemo(() => {
                         }
                       }}
                     >
-                      {createEntryDuplicateCandidates.length ? "Create separate entry anyway" : "Create entry"}
+                      {createEntryDuplicateCandidates.length ? "Create separate entry" : "Create entry"}
                     </BusyButton>
                   </HintWrap>
                 </>
@@ -3648,8 +3648,8 @@ const displayBankActiveList = useMemo(() => {
             const createEntryBlockReason = bankId ? getCreateEntryActionBlockReason(bankId) : null;
 
             return (
-              <div className="flex flex-col max-h-[55vh]">
-                <div className="flex-1 overflow-y-auto overflow-x-hidden">
+              <div className="flex h-[min(68vh,680px)] min-h-0 flex-col">
+                <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
                   <div className="text-xs text-bb-text-muted">
                     {createEntryDuplicateCandidates.length
                       ? "A likely existing ledger entry was found. Match the existing entry first unless this bank transaction is truly a separate event."
@@ -3843,7 +3843,7 @@ const displayBankActiveList = useMemo(() => {
                         <input
                           id="reconcile-create-entry-allow-duplicate"
                           type="checkbox"
-                          className={`mt-0.5 h-4 w-4 ${ringFocus}`}
+                          className="bb-checkbox mt-0.5"
                           checked={createEntryDuplicateConfirm === "Create a separate ledger entry"}
                           onChange={(e) =>
                             setCreateEntryDuplicateConfirm(
@@ -3854,7 +3854,7 @@ const displayBankActiveList = useMemo(() => {
                         <label htmlFor="reconcile-create-entry-allow-duplicate" className="text-[11px] leading-4 text-bb-text">
                           I&apos;m sure this is a separate transaction. Common case: recurring charges
                           (bank fees, NTTA tolls, subscriptions) that look similar to a prior entry but
-                          are a new real-world event. Check this box, then click <b>Create separate entry anyway</b>.
+                          are a new real-world event. Check this box, then click <b>Create separate entry</b>.
                         </label>
                       </div>
                     </div>
@@ -5501,6 +5501,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Match bank transaction"
         size="lg"
+        bodyClassName="overflow-hidden sm:overflow-hidden"
         footer={openMatch ? (
           <DialogFooter
             left={null}
@@ -5652,13 +5653,15 @@ const displayBankActiveList = useMemo(() => {
         ) : null}
       >
         {openMatch ? (
-        <div className="flex flex-col max-h-[70vh]">
-          <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-bb-text-muted mb-2">Select ledger entries that sum exactly to the bank transaction amount. The bar below turns green when you&apos;re ready.</div>
+        <div className="flex h-[min(72vh,720px)] min-h-0 flex-col gap-2">
+          <div className="shrink-0 space-y-2">
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-bb-text-muted">
+              Pick matching ledger entries. The ready bar turns green when the selected amount equals the bank transaction.
+            </div>
 
-            <div className="mb-2">
+            <div>
               <input
-                className="h-7 w-full px-2 text-xs border border-bb-border rounded-md"
+                className="h-8 w-full rounded-md border border-bb-border bg-bb-surface-card px-2 text-xs"
                 placeholder="Search entries…"
                 aria-label="Search ledger entries"
                 value={matchSearch}
@@ -5735,7 +5738,7 @@ const displayBankActiveList = useMemo(() => {
               );
             })()}
 
-            {matchError ? <div className="text-xs text-bb-status-danger-fg mb-2">{matchError}</div> : null}
+            {matchError ? <div className="text-xs text-bb-status-danger-fg">{matchError}</div> : null}
 
             {/* Match suggestions (AI rerank when available; deterministic fallback otherwise) */}
             {(() => {
@@ -5862,8 +5865,10 @@ const displayBankActiveList = useMemo(() => {
               );
             })()}
 
-            <div className="rounded-md border border-bb-border overflow-hidden">
-              <div className="max-h-[44vh] overflow-y-auto overflow-x-auto">
+          </div>
+
+          <div className="min-h-0 flex-1 rounded-md border border-bb-border overflow-hidden">
+            <div className="h-full overflow-y-auto overflow-x-auto">
                 <table className="w-full min-w-[520px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 110 }} />
@@ -5930,7 +5935,6 @@ const displayBankActiveList = useMemo(() => {
               </div>
             </div>
           </div>
-        </div>
         ) : null}
       </AppDialog>
 
@@ -6062,6 +6066,7 @@ const displayBankActiveList = useMemo(() => {
         }}
         title="Match entry"
         size="lg"
+        bodyClassName="overflow-hidden sm:overflow-hidden"
         footer={openEntryMatch ? (
           <DialogFooter
             left={null}
@@ -6208,15 +6213,15 @@ const displayBankActiveList = useMemo(() => {
         ) : null}
       >
         {openEntryMatch ? (
-        <div className="flex flex-col max-h-[70vh]">
-          <div className="flex-1 overflow-y-auto pr-1">
-            <div className="text-xs text-bb-text-muted mb-2">
-              Select bank transactions that sum exactly to the ledger entry amount. The bar below turns green when you&apos;re ready.
+        <div className="flex h-[min(72vh,720px)] min-h-0 flex-col gap-2">
+          <div className="shrink-0 space-y-2">
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-bb-text-muted">
+              Pick matching bank transactions. The ready bar turns green when selected transactions equal the ledger entry.
             </div>
 
-            <div className="mb-2">
+            <div>
               <input
-                className="h-7 w-full px-2 text-xs border border-bb-border rounded-md"
+                className="h-8 w-full rounded-md border border-bb-border bg-bb-surface-card px-2 text-xs"
                 placeholder="Search bank transactions…"
                 aria-label="Search bank transactions"
                 value={entryMatchSearch}
@@ -6261,7 +6266,7 @@ const displayBankActiveList = useMemo(() => {
               );
             })()}
 
-            {entryMatchError ? <div className="text-xs text-bb-status-danger-fg mb-2">{entryMatchError}</div> : null}
+            {entryMatchError ? <div className="text-xs text-bb-status-danger-fg">{entryMatchError}</div> : null}
 
             {/* Match suggestions (AI rerank when available; deterministic fallback otherwise) */}
             {(() => {
@@ -6431,8 +6436,10 @@ const displayBankActiveList = useMemo(() => {
 
             {/* (removed stray pasted code) */}
 
-            <div className="rounded-md border border-bb-border overflow-hidden">
-              <div className="max-h-[44vh] overflow-y-auto overflow-x-auto">
+          </div>
+
+          <div className="min-h-0 flex-1 rounded-md border border-bb-border overflow-hidden">
+            <div className="h-full overflow-y-auto overflow-x-auto">
                 <table className="w-full min-w-[520px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 110 }} />
@@ -6507,10 +6514,8 @@ const displayBankActiveList = useMemo(() => {
                     })()}
                   </tbody>
                 </table>
-              </div>
             </div>
           </div>
-
           {null}
         </div>
         ) : null}
@@ -7091,63 +7096,6 @@ const displayBankActiveList = useMemo(() => {
         </div>
       </AppDialog>
 
-      {/* Issues Hub (Phase 5C, read-only) */}
-      <AppDialog
-        open={openIssuesHub}
-        onClose={() => setOpenIssuesHub(false)}
-        title="Issues"
-        size="sm"
-      >
-        <div className="p-3">
-          <div className="grid grid-cols-2 gap-3">
-            {null /* Full-match only: no partial issues */}
-
-            <button
-              type="button"
-              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
-              onClick={() => {
-                setOpenIssuesHub(false);
-                setIssuesKind("notInView");
-                setIssuesSearch("");
-                setOpenIssuesList(true);
-              }}
-              title="Active matches referencing items not loaded by current filters"
-            >
-              <AlertCircle className="h-6 w-6 text-bb-text" />
-              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Not in view</span>
-              <span className="text-[11px] text-bb-text-muted">{issuesCounts.notInView}</span>
-            </button>
-
-            <button
-              type="button"
-              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-1", ringFocus].join(" ")}
-              onClick={() => {
-                setOpenIssuesHub(false);
-                setIssuesKind("voidHeavy");
-                setIssuesSearch("");
-                setOpenIssuesList(true);
-              }}
-              title={`Bank transactions with ${VOID_HEAVY_THRESHOLD}+ reverts`}
-            >
-              <RotateCcw className="h-6 w-6 text-bb-text" />
-              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Reverts</span>
-              <span className="text-[11px] text-bb-text-muted">{VOID_HEAVY_THRESHOLD}+</span>
-              <span className="text-[11px] text-bb-text-muted">{issuesVoidHeavyLabel}</span>
-            </button>
-
-            {null /* Full-match MatchGroups: conflicts are not expected (one-active-group-per-item). */}
-          </div>
-
-          <div className="mt-2 text-[11px] text-bb-text-muted">
-            {allMatchGroupsHydrated
-              ? "Read-only diagnostics for the loaded history."
-              : allMatchGroupsLoading
-                ? "Loading full issue diagnostics."
-                : "Current-view diagnostics shown; full diagnostics load when opened."}
-          </div>
-        </div>
-      </AppDialog>
-
       {/* Issues List (Phase 5C, read-only) */}
       <AppDialog
         open={openIssuesList}
@@ -7369,42 +7317,6 @@ const displayBankActiveList = useMemo(() => {
 
           <div className="mt-2 text-[11px] text-bb-text-muted">
             CSV exports reflect current scope and loaded filters; audit history loads when Export opens.
-          </div>
-        </div>
-      </AppDialog>
-
-      {/* History Hub (keeps Bank header clean) */}
-      <AppDialog
-        open={openHistoryHub}
-        onClose={() => setOpenHistoryHub(false)}
-        title="History"
-        size="sm"
-      >
-        <div className="p-3">
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
-              onClick={() => {
-                setOpenHistoryHub(false);
-                setOpenStatementHistory(true);
-              }}
-            >
-              <FileText className="h-6 w-6 text-bb-text" />
-              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Statement history</span>
-            </button>
-
-            <button
-              type="button"
-              className={["h-24 rounded-xl border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover flex flex-col items-center justify-center gap-2", ringFocus].join(" ")}
-              onClick={() => {
-                setOpenHistoryHub(false);
-                setOpenReconciliationHistory(true);
-              }}
-            >
-              <ClipboardList className="h-6 w-6 text-bb-text" />
-              <span className="text-xs font-semibold text-bb-text whitespace-nowrap">Reconciliation</span>
-            </button>
           </div>
         </div>
       </AppDialog>

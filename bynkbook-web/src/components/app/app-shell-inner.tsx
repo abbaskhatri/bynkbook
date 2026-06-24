@@ -490,20 +490,20 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   };
 
   const renderNavGroups = (isCollapsed: boolean, onNavigate?: () => void) => (
-    <div className="p-3 space-y-3 flex-1 overflow-y-auto">
+    <div className="p-2.5 space-y-3 flex-1 overflow-y-auto">
       {NAV_GROUPS.map((group, groupIndex) => {
         if (!group.items.length) return null;
 
         return (
-          <div key={group.group} className="space-y-2">
+          <div key={group.group} className="space-y-1.5">
             {/* Group label (hidden when collapsed to keep width stable) */}
             {!isCollapsed ? (
-              <div className="px-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-200">
+              <div className="px-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-200">
                 {group.group}
               </div>
             ) : null}
 
-            <div className="space-y-2">
+            <div className="space-y-1">
               {group.items.map((item) => {
                 const active = pathname.startsWith(item.path);
                 const link = href(item.path, item.needsAccountId);
@@ -522,10 +522,10 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                       asChild
                       variant={navVariant(active)}
                       className={[
-                        "w-full justify-center border transition-colors duration-200",
+                        "w-full justify-center border transition-[color,background-color,border-color,box-shadow,transform] duration-200",
                         active
-                          ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg hover:bg-bb-nav-active-bg/90"
-                          : "border-transparent bg-transparent text-bb-sidebar-fg/80 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg",
+                          ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg shadow-[0_8px_18px_rgba(5,150,105,0.18)] hover:bg-bb-nav-active-bg/90"
+                          : "border-transparent bg-transparent text-bb-sidebar-fg/72 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg hover:translate-x-0.5",
                       ].join(" ")}
                       size="sm"
                       title={
@@ -569,10 +569,10 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     asChild
                     variant={navVariant(active)}
                     className={[
-                      "w-full justify-start border transition-colors duration-200",
+                      "w-full justify-start border transition-[color,background-color,border-color,box-shadow,transform] duration-200",
                       active
-                        ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg hover:bg-bb-nav-active-bg/90"
-                        : "border-transparent bg-transparent text-bb-sidebar-fg/80 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg",
+                        ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg shadow-[0_8px_18px_rgba(5,150,105,0.18)] hover:bg-bb-nav-active-bg/90"
+                        : "border-transparent bg-transparent text-bb-sidebar-fg/72 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg hover:translate-x-0.5",
                     ].join(" ")}
                     size="sm"
                   >
@@ -667,16 +667,16 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   if (isMobileRoute) return <>{children}</>;
 
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="min-h-screen flex bg-background bb-app-canvas">
       {/* Sidebar (sticky) */}
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "border-r border-bb-border bg-bb-sidebar-bg/95 backdrop-blur hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
+          "border-r border-bb-border bg-bb-sidebar-bg/90 backdrop-blur-xl hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg shadow-[1px_0_0_rgba(255,255,255,0.7)_inset]",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
-        <div className="h-14 px-3 border-b border-bb-border flex items-center bg-bb-sidebar-bg/95">
+        <div className="h-14 px-3 border-b border-bb-border flex items-center bg-bb-sidebar-bg/92">
           <div
             className={
               collapsed
@@ -696,7 +696,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         {renderNavGroups(collapsed)}
 
-        <div className="p-3 border-t border-bb-border bg-bb-sidebar-bg/95">
+        <div className="p-3 border-t border-bb-border bg-bb-sidebar-bg/92">
           <Button
             variant="outline"
             size="sm"
@@ -722,12 +722,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card">
+        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/88 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
             <button
               type="button"
-              className="md:hidden h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
+              className="md:hidden h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
               title="Open navigation"
               aria-label="Open navigation"
               onClick={openMobileNav}
@@ -773,7 +773,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             <div className="relative" ref={activityRef}>
               <button
                 type="button"
-                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Activity"
                 aria-label="Activity"
                 onClick={() => {
@@ -789,7 +789,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {activityOpen ? (
-                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-md border border-bb-border bg-bb-surface-elevated shadow-md overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] overflow-hidden z-50">
                   <div className="px-3 h-10 flex items-center justify-between border-b border-bb-border bg-bb-surface-soft">
                     <div className="text-xs font-semibold text-foreground/80">Activity</div>
 
@@ -885,7 +885,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             <div className="relative" ref={userMenuRef}>
               <button
                 type="button"
-                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
                 title="Account"
                 aria-label="Account menu"
                 onClick={() => setUserMenuOpen((v) => !v)}
@@ -894,7 +894,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {userMenuOpen ? (
-                <div className="absolute right-0 mt-2 w-56 rounded-md border border-bb-border bg-bb-surface-elevated shadow-md overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-56 rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] overflow-hidden z-50">
                   {currentUserEmail ? (
                     <div className="px-3 py-2 border-b border-bb-border-muted bg-bb-surface-soft">
                       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -951,7 +951,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         {/* Content: ledger must not page-scroll. Extra bottom padding on
             mobile reserves space for the fixed bottom tab bar. */}
-        <main className={(noPageScroll ? "p-3 pb-[5.25rem] md:p-6 md:pb-6 overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-6 md:pb-6 overflow-y-auto flex-1 min-h-0")}>
+        <main className={(noPageScroll ? "p-3 pb-[5.25rem] md:p-4 md:pb-4 overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-4 md:pb-4 overflow-y-auto flex-1 min-h-0")}>
           {children}
         </main>
       </div>
@@ -959,7 +959,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Mobile bottom tab bar — primary navigation, thumb-friendly. Hidden on
           md+ where the sidebar is shown. */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/95 backdrop-blur flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/92 backdrop-blur-xl flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)]"
         aria-label="Primary"
       >
         {[
