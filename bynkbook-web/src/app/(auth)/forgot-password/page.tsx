@@ -107,21 +107,21 @@ function ForgotPasswordInner() {
           </div>
 
           <div className="flex items-center justify-center">
-            <Card className="w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur">
+            <Card className="w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur dark:border-bb-border dark:bg-bb-surface-card/96 dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
               <CardContent className="p-0">
-                <div className="border-b border-slate-200/80 px-6 pb-5 pt-6 sm:px-7">
+                <div className="border-b border-slate-200/80 px-6 pb-5 pt-6 dark:border-bb-border-muted sm:px-7">
                   <div className="flex justify-center lg:justify-start">
                     <BrandLogo size="md" priority />
                   </div>
 
                   <div className="mt-5">
-                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-700">
+                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-700 dark:border-bb-status-success-border dark:bg-bb-status-success-bg dark:text-bb-status-success-fg">
                       Password reset
                     </div>
-                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-bb-text">
                       Reset your password
                     </h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-bb-text-muted">
                       Enter the email for your account and we’ll start the secure reset flow.
                     </p>
                   </div>
@@ -142,13 +142,13 @@ function ForgotPasswordInner() {
                     </div>
 
                     {err ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                         {err}
                       </div>
                     ) : null}
 
                     {msg ? (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-bb-border dark:bg-bb-surface-soft dark:text-bb-text-muted">
                         {msg}
                       </div>
                     ) : null}
@@ -177,14 +177,14 @@ function ForgotPasswordInner() {
                       {!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
                     </Button>
 
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-bb-border dark:bg-bb-surface-soft dark:text-bb-text-muted">
                       After this step, you’ll continue to the reset page to enter your code and new password.
                     </div>
 
-                    <div className="text-xs text-slate-600">
+                    <div className="text-xs text-slate-600 dark:text-bb-text-subtle">
                       Remembered your password?{" "}
                       <button
-                        className="font-medium text-slate-900 hover:underline"
+                        className="font-medium text-slate-900 hover:underline dark:text-bb-text"
                         onClick={() => router.replace(`/login?next=${encodeURIComponent(nextUrl)}`)}
                         type="button"
                       >
@@ -208,7 +208,7 @@ export default function ForgotPasswordPage() {
       fallback={
         <div className="min-h-screen bg-slate-950 px-4 py-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-md">
-            <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+            <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] dark:border-bb-border dark:bg-bb-surface-card dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
               <CardContent className="space-y-4 p-6">
                 <Skeleton className="h-8 w-36" />
                 <Skeleton className="h-6 w-48" />

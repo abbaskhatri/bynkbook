@@ -54,16 +54,16 @@ function pluralize(count: number, singular: string, plural?: string) {
 function sectionCard(title: string, count: number, body: React.ReactNode, tone: "default" | "success" | "warning" = "default") {
   const toneCls =
     tone === "success"
-      ? "border-emerald-200 bg-emerald-50/60"
+      ? "border-bb-status-success-border bg-bb-status-success-bg"
       : tone === "warning"
-        ? "border-amber-200 bg-amber-50/70"
-        : "border-bb-border bg-white";
+        ? "border-bb-status-warning-border bg-bb-status-warning-bg"
+        : "border-bb-border bg-bb-surface-card";
 
   return (
     <section className={`rounded-2xl border ${toneCls}`}>
       <div className="flex items-center justify-between gap-3 border-b border-inherit/60 px-4 py-3">
         <div className="text-sm font-semibold text-bb-text">{title}</div>
-        <div className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+        <div className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-bb-border bg-bb-surface-soft px-2 text-[11px] font-medium text-bb-text-muted">
           {count}
         </div>
       </div>
@@ -96,7 +96,7 @@ function confidenceLabel(value: string | null | undefined) {
 function ItemRow({ item, showAction = true }: { item: BulkIssuePreviewItem; showAction?: boolean }) {
   const amount = formatUsdAccountingFromCents(item.amount_cents);
   return (
-    <div className="rounded-xl border border-bb-border bg-white px-3 py-2.5">
+    <div className="rounded-xl border border-bb-border bg-bb-surface-card px-3 py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -329,22 +329,22 @@ export function AutoFixIssuesDialog(props: {
             <section className="rounded-2xl border border-bb-border bg-bb-surface-soft/70 px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="text-sm font-semibold text-bb-text">Preview summary</div>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                   Requested {preview.requested_count}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                   Open {preview.valid_open_selected_count}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                   Safe {safeCount}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                   Likely duplicate {likelyDuplicateCount}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                   Needs review {needsReviewCount}
                 </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                   Unsupported {unsupportedCount}
                 </span>
               </div>
@@ -359,16 +359,16 @@ export function AutoFixIssuesDialog(props: {
             </section>
 
             {applyResult ? (
-              <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
+              <section className="rounded-2xl border border-bb-status-success-border bg-bb-status-success-bg px-4 py-3">
                 <div className="text-sm font-semibold text-bb-text">Apply result</div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="inline-flex h-6 items-center rounded-md border border-emerald-200 bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-status-success-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                     Applied {applyResult.applied_count}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                     Skipped {applyResult.skipped_count}
                   </span>
-                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-white px-2 text-[11px] font-medium text-bb-text-muted">
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                     Blocked {applyResult.blocked_count}
                   </span>
                 </div>

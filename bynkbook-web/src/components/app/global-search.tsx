@@ -221,7 +221,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
       </div>
 
       {open ? (
-        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.14)]">
+        <div className="absolute right-0 z-50 mt-2 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.14)] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)]">
           <div className="flex items-center justify-between border-b border-bb-border-muted bg-bb-surface-soft px-3 py-2.5">
             <div>
               <div className="text-xs font-semibold tracking-wide text-foreground/80">Global search</div>

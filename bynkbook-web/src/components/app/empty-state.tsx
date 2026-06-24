@@ -16,7 +16,7 @@ export function EmptyStateCard({
   secondary?: { label: string; onClick: () => void } | null;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-bb-border bg-bb-surface-card/90 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+    <div className="rounded-lg border border-dashed border-bb-border bg-bb-surface-card/90 p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary/10 text-primary">
           <Sparkles className="h-4 w-4" />

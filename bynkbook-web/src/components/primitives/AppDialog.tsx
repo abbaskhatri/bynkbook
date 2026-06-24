@@ -84,7 +84,7 @@ export function AppDialog({
           aria-labelledby={title ? titleId : undefined}
           className={[
             surfaceCardSoft,
-            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-lg sm:rounded-lg border border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)]",
+            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-lg sm:rounded-lg border border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.48)]",
             "max-h-[calc(100dvh-0.75rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
             "transition-all duration-200 ease-out",
             "animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 sm:slide-in-from-bottom-0",

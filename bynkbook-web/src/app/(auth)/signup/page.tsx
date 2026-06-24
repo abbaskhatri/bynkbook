@@ -107,21 +107,21 @@ function SignupInner() {
           </div>
 
           <div className="flex items-center justify-center">
-            <Card className="w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur">
+            <Card className="w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur dark:border-bb-border dark:bg-bb-surface-card/96 dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
               <CardContent className="p-0">
-                <div className="border-b border-slate-200/80 px-6 pb-5 pt-6 sm:px-7">
+                <div className="border-b border-slate-200/80 px-6 pb-5 pt-6 dark:border-bb-border-muted sm:px-7">
                   <div className="flex justify-center lg:justify-start">
                     <BrandLogo size="md" priority />
                   </div>
 
                   <div className="mt-5">
-                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-700">
+                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-700 dark:border-bb-status-success-border dark:bg-bb-status-success-bg dark:text-bb-status-success-fg">
                       New account
                     </div>
-                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-bb-text">
                       Create your BynkBook account
                     </h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-bb-text-muted">
                       Start with secure access, then create your business workspace and continue into the app.
                     </p>
                   </div>
@@ -132,7 +132,7 @@ function SignupInner() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-11 w-full rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
+                      className="h-11 w-full rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50 dark:border-bb-border dark:bg-bb-surface-elevated dark:text-bb-text dark:hover:bg-bb-table-row-hover"
                       onClick={async () => {
                         if (typeof window !== "undefined") window.sessionStorage.setItem("bb_auth_next", nextUrl);
                         await signInWithRedirect({ provider: "Google" });
@@ -142,9 +142,9 @@ function SignupInner() {
                     </Button>
 
                     <div className="flex items-center gap-3">
-                      <div className="h-px flex-1 bg-slate-200" />
-                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">or</div>
-                      <div className="h-px flex-1 bg-slate-200" />
+                      <div className="h-px flex-1 bg-slate-200 dark:bg-bb-border" />
+                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400 dark:text-bb-text-subtle">or</div>
+                      <div className="h-px flex-1 bg-slate-200 dark:bg-bb-border" />
                     </div>
 
                     <div className="space-y-4">
@@ -174,7 +174,7 @@ function SignupInner() {
                       </div>
 
                       {err ? (
-                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                           {err}
                         </div>
                       ) : null}
@@ -212,24 +212,24 @@ function SignupInner() {
                       </Button>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-bb-border dark:bg-bb-surface-soft">
                       <div className="flex items-start gap-3">
-                        <div className="mt-0.5 rounded-xl bg-slate-900 p-2 text-white">
+                        <div className="mt-0.5 rounded-xl bg-slate-900 p-2 text-white dark:bg-primary dark:text-primary-foreground">
                           <LockKeyhole className="h-4 w-4" />
                         </div>
                         <div>
-                          <div className="text-sm font-semibold text-slate-900">Secure onboarding</div>
-                          <div className="mt-1 text-sm text-slate-600">
+                          <div className="text-sm font-semibold text-slate-900 dark:text-bb-text">Secure onboarding</div>
+                          <div className="mt-1 text-sm text-slate-600 dark:text-bb-text-muted">
                             Your account is confirmed by email before you move into business creation and app setup.
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="text-xs text-slate-600">
+                    <div className="text-xs text-slate-600 dark:text-bb-text-subtle">
                       Already have an account?{" "}
                       <button
-                        className="font-medium text-slate-900 hover:underline"
+                        className="font-medium text-slate-900 hover:underline dark:text-bb-text"
                         onClick={() => router.replace(`/login?next=${encodeURIComponent(nextUrl)}`)}
                         type="button"
                       >
@@ -253,7 +253,7 @@ export default function SignupPage() {
       fallback={
         <div className="min-h-screen bg-slate-950 px-4 py-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-md">
-            <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+            <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] dark:border-bb-border dark:bg-bb-surface-card dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
               <CardContent className="space-y-4 p-6">
                 <Skeleton className="h-8 w-36" />
                 <Skeleton className="h-6 w-48" />

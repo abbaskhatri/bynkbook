@@ -219,21 +219,21 @@ function LoginInner() {
           </div>
 
           <div className="flex items-center justify-center">
-            <Card className="w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur">
+            <Card className="w-full max-w-md overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/96 shadow-[0_24px_80px_rgba(15,23,42,0.28)] backdrop-blur dark:border-bb-border dark:bg-bb-surface-card/96 dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
               <CardContent className="p-0">
-                <div className="border-b border-slate-200/80 px-6 pb-5 pt-6 sm:px-7">
+                <div className="border-b border-slate-200/80 px-6 pb-5 pt-6 dark:border-bb-border-muted sm:px-7">
                   <div className="flex justify-center lg:justify-start">
                     <BrandLogo size="md" priority />
                   </div>
 
                   <div className="mt-5">
-                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-700">
+                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-emerald-700 dark:border-bb-status-success-border dark:bg-bb-status-success-bg dark:text-bb-status-success-fg">
                       Secure workspace access
                     </div>
-                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-bb-text">
                       {needsNewPassword ? "Set your new password" : "Sign in to BynkBook"}
                     </h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                    <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-bb-text-muted">
                       {needsNewPassword
                         ? "This account requires a new password before you can continue."
                         : "Access your businesses, reconciliation workflows, and reports from one secure place."}
@@ -272,7 +272,7 @@ function LoginInner() {
                       }}
                       className="space-y-4"
                     >
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-bb-border dark:bg-bb-surface-soft dark:text-bb-text-muted">
                         Choose a strong password to activate this account.
                       </div>
 
@@ -289,7 +289,7 @@ function LoginInner() {
                       </div>
 
                       {error ? (
-                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                           {error}
                         </div>
                       ) : null}
@@ -298,10 +298,10 @@ function LoginInner() {
                         {submitting ? "Saving…" : "Set new password"}
                       </Button>
 
-                      <div className="flex items-center justify-between text-xs text-slate-500">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-bb-text-subtle">
                         <button
                           type="button"
-                          className="hover:text-slate-700"
+                          className="hover:text-slate-700 dark:hover:text-bb-text"
                           onClick={() => {
                             setNeedsNewPassword(false);
                             setNewPassword("");
@@ -313,7 +313,7 @@ function LoginInner() {
 
                         <button
                           type="button"
-                          className="hover:text-slate-700"
+                          className="hover:text-slate-700 dark:hover:text-bb-text"
                           onClick={() => router.replace(`/forgot-password?next=${encodeURIComponent(nextUrl)}`)}
                         >
                           Forgot password
@@ -325,7 +325,7 @@ function LoginInner() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-11 w-full rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
+                        className="h-11 w-full rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50 dark:border-bb-border dark:bg-bb-surface-elevated dark:text-bb-text dark:hover:bg-bb-table-row-hover"
                         onClick={async () => {
                           if (typeof window !== "undefined") {
                             window.sessionStorage.setItem(NEXT_KEY, nextUrl);
@@ -346,9 +346,9 @@ function LoginInner() {
                       </Button>
 
                       <div className="flex items-center gap-3">
-                        <div className="h-px flex-1 bg-slate-200" />
-                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">or</div>
-                        <div className="h-px flex-1 bg-slate-200" />
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-bb-border" />
+                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400 dark:text-bb-text-subtle">or</div>
+                        <div className="h-px flex-1 bg-slate-200 dark:bg-bb-border" />
                       </div>
 
                       <form onSubmit={onSubmit} className="space-y-4">
@@ -369,7 +369,7 @@ function LoginInner() {
                             <Label htmlFor="password">Password</Label>
                             <button
                               type="button"
-                              className="text-xs font-medium text-slate-500 hover:text-slate-700"
+                              className="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-bb-text-subtle dark:hover:text-bb-text"
                               onClick={() => router.replace(`/forgot-password?next=${encodeURIComponent(nextUrl)}`)}
                             >
                               Forgot password?
@@ -387,7 +387,7 @@ function LoginInner() {
                         </div>
 
                         {error ? (
-                          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                             {error}
                           </div>
                         ) : null}
@@ -398,35 +398,35 @@ function LoginInner() {
                         </Button>
                       </form>
 
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-bb-border dark:bg-bb-surface-soft">
                         <div className="flex items-start gap-3">
-                          <div className="mt-0.5 rounded-xl bg-slate-900 p-2 text-white">
+                          <div className="mt-0.5 rounded-xl bg-slate-900 p-2 text-white dark:bg-primary dark:text-primary-foreground">
                             <LockKeyhole className="h-4 w-4" />
                           </div>
                           <div>
-                            <div className="text-sm font-semibold text-slate-900">Protected workspace</div>
-                            <div className="mt-1 text-sm text-slate-600">
+                            <div className="text-sm font-semibold text-slate-900 dark:text-bb-text">Protected workspace</div>
+                            <div className="mt-1 text-sm text-slate-600 dark:text-bb-text-muted">
                               Access is scoped by business with audit-friendly workflows and secure session handling.
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-xs text-slate-500">
+                      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-bb-text-subtle">
                         <button
                           type="button"
-                          className="hover:text-slate-700"
+                          className="hover:text-slate-700 dark:hover:text-bb-text"
                           onClick={() => router.replace(`/signup?next=${encodeURIComponent(nextUrl)}`)}
                         >
                           Create account
                         </button>
 
                         <div className="flex items-center gap-3">
-                          <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/privacy")}>
+                          <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/privacy")}>
                             Privacy
                           </button>
-                          <span className="text-slate-300">•</span>
-                          <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/terms")}>
+                          <span className="text-slate-300 dark:text-bb-border-strong">•</span>
+                          <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/terms")}>
                             Terms
                           </button>
                         </div>
@@ -449,7 +449,7 @@ export default function LoginPage() {
       fallback={
         <div className="min-h-screen bg-slate-950 px-4 py-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-md">
-            <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+            <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] dark:border-bb-border dark:bg-bb-surface-card dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
               <CardContent className="space-y-4 p-6">
                 <Skeleton className="h-8 w-36" />
                 <Skeleton className="h-6 w-48" />

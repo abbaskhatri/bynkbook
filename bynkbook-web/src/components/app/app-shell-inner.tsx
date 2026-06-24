@@ -672,7 +672,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "border-r border-bb-border bg-bb-sidebar-bg/90 backdrop-blur-xl hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg shadow-[1px_0_0_rgba(255,255,255,0.7)_inset]",
+          "border-r border-bb-border bg-bb-sidebar-bg/90 backdrop-blur-xl hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg shadow-[1px_0_0_rgba(255,255,255,0.7)_inset] dark:shadow-[1px_0_0_rgba(255,255,255,0.06)_inset]",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
@@ -722,7 +722,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/88 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.75)_inset]">
+        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/88 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
             <button
@@ -789,7 +789,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {activityOpen ? (
-                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)] overflow-hidden z-50">
                   <div className="px-3 h-10 flex items-center justify-between border-b border-bb-border bg-bb-surface-soft">
                     <div className="text-xs font-semibold text-foreground/80">Activity</div>
 
@@ -894,7 +894,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               </button>
 
               {userMenuOpen ? (
-                <div className="absolute right-0 mt-2 w-56 rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] overflow-hidden z-50">
+                <div className="absolute right-0 mt-2 w-56 rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)] overflow-hidden z-50">
                   {currentUserEmail ? (
                     <div className="px-3 py-2 border-b border-bb-border-muted bg-bb-surface-soft">
                       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -959,7 +959,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Mobile bottom tab bar — primary navigation, thumb-friendly. Hidden on
           md+ where the sidebar is shown. */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/92 backdrop-blur-xl flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/92 backdrop-blur-xl flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_-16px_36px_rgba(0,0,0,0.28)]"
         aria-label="Primary"
       >
         {[

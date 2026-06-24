@@ -228,7 +228,7 @@ export default function CategoryMigrationPageClient() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="rounded-xl border border-bb-border bg-white shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm dark:shadow-[0_1px_0_rgba(255,255,255,0.04)_inset] overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader icon={<Tags className="h-4 w-4" />} title="Category Migration" afterTitle={accountCapsule} />
         </div>
@@ -336,7 +336,7 @@ export default function CategoryMigrationPageClient() {
 
                     <div className="px-3 py-2">
                       <select
-                        className="h-7 w-full rounded-md border border-bb-border bg-white px-2 text-xs"
+                        className="h-7 w-full rounded-md border border-bb-border bg-bb-input-bg px-2 text-xs text-bb-text"
                         value={choice.mode === "CREATE_SAME" ? "__CREATE_SAME__" : choice.categoryId}
                         onChange={(e) => {
                           const v = e.target.value;

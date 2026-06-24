@@ -126,7 +126,7 @@ export default function CreateBusinessClient() {
     return (
       <div className="min-h-screen bg-slate-950 px-4 py-8 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-5xl">
-          <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+          <Card className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)] dark:border-bb-border dark:bg-bb-surface-card dark:shadow-[0_28px_90px_rgba(0,0,0,0.42)]">
             <CardContent className="grid gap-6 p-6 lg:grid-cols-[0.95fr_1.05fr] lg:p-8">
               <div className="space-y-4">
                 <Skeleton className="h-8 w-40" />
@@ -232,21 +232,21 @@ export default function CreateBusinessClient() {
               </div>
             </div>
 
-            <div className="bg-white/96 p-6 text-slate-900 sm:p-8">
+            <div className="bg-white/96 p-6 text-slate-900 dark:bg-bb-surface-card/96 dark:text-bb-text sm:p-8">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-slate-700">
+                  <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-slate-700 dark:border-bb-status-success-border dark:bg-bb-status-success-bg dark:text-bb-status-success-fg">
                     Create business
                   </div>
-                  <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                  <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-bb-text">
                     Set up your business profile
                   </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                  <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-bb-text-muted">
                     You need one business workspace before you can continue into the app.
                   </p>
                 </div>
 
-                <Button variant="outline" className="h-10 rounded-xl border-slate-200 px-4" onClick={onSignOut}>
+                <Button variant="outline" className="h-10 rounded-xl border-slate-200 px-4 dark:border-bb-border" onClick={onSignOut}>
                   Sign out
                 </Button>
               </div>
@@ -304,7 +304,7 @@ export default function CreateBusinessClient() {
                     <Label htmlFor="logoUrl">Logo</Label>
                     <label
                       htmlFor="logoFile"
-                      className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                      className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-bb-border dark:bg-bb-surface-elevated dark:text-bb-text dark:hover:bg-bb-table-row-hover"
                     >
                       Upload logo
                     </label>
@@ -336,7 +336,7 @@ export default function CreateBusinessClient() {
                     }}
                   />
 
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-slate-500 dark:text-bb-text-subtle">
                     Upload a logo image or paste a public logo URL.
                   </div>
                 </div>
@@ -345,7 +345,7 @@ export default function CreateBusinessClient() {
                   <div className="space-y-2">
                     <Label htmlFor="currency">Currency</Label>
                     <div className="relative">
-                      <Landmark className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Landmark className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-bb-text-subtle" />
                       <Input
                         id="currency"
                         value={currency}
@@ -359,12 +359,12 @@ export default function CreateBusinessClient() {
                   <div className="space-y-2">
                     <Label htmlFor="fiscalStartMonth">Fiscal year start month</Label>
                     <div className="relative">
-                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-bb-text-subtle" />
                       <select
                         id="fiscalStartMonth"
                         value={fiscalStartMonth}
                         onChange={(e) => setFiscalStartMonth(e.target.value)}
-                        className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 shadow-sm outline-none ring-0 focus:border-emerald-500"
+                        className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 shadow-sm outline-none ring-0 focus:border-emerald-500 dark:border-bb-input-border dark:bg-bb-input-bg dark:text-bb-text dark:focus:border-primary"
                       >
                         <option value="1">January</option>
                         <option value="2">February</option>
@@ -395,12 +395,12 @@ export default function CreateBusinessClient() {
                 </div>
 
                 {error ? (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                     {error}
                   </div>
                 ) : null}
 
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-bb-border dark:bg-bb-surface-soft dark:text-bb-text-muted">
                   These settings help BynkBook initialize the business with the right financial context.
                 </div>
 
@@ -410,17 +410,17 @@ export default function CreateBusinessClient() {
                 </Button>
               </form>
 
-              <div className="mt-6 flex items-center justify-between text-xs text-slate-500">
-                <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/login")}>
+              <div className="mt-6 flex items-center justify-between text-xs text-slate-500 dark:text-bb-text-subtle">
+                <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/login")}>
                   Back to sign in
                 </button>
 
                 <div className="flex items-center gap-3">
-                  <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/privacy")}>
+                  <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/privacy")}>
                     Privacy
                   </button>
-                  <span className="text-slate-300">•</span>
-                  <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/terms")}>
+                  <span className="text-slate-300 dark:text-bb-border-strong">•</span>
+                  <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/terms")}>
                     Terms
                   </button>
                 </div>

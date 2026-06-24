@@ -234,105 +234,107 @@
 }
 
 .dark {
-  /* Dark mode — keep the same emerald brand identity, but use slate surfaces */
-  --background: #0f172a;
-  --foreground: #f8fafc;
+  color-scheme: dark;
 
-  --card: #111827;
-  --card-foreground: #f8fafc;
+  /* Dark mode: compact financial workspace with richer surface contrast */
+  --background: #07111f;
+  --foreground: #f4f8fc;
 
-  --popover: #111827;
-  --popover-foreground: #f8fafc;
+  --card: #111d2e;
+  --card-foreground: #f4f8fc;
 
-  --primary: var(--bb-emerald-600);
-  --primary-foreground: #ffffff;
+  --popover: #18263a;
+  --popover-foreground: #f4f8fc;
 
-  --secondary: #111827;
-  --secondary-foreground: #f8fafc;
+  --primary: #34d399;
+  --primary-foreground: #052e22;
 
-  --muted: #111827;
-  --muted-foreground: #94a3b8;
+  --secondary: #142033;
+  --secondary-foreground: #f4f8fc;
 
-  --accent: #111827;
-  --accent-foreground: #f8fafc;
+  --muted: #101b2c;
+  --muted-foreground: #a7b4c5;
+
+  --accent: #142033;
+  --accent-foreground: #f4f8fc;
 
   --destructive: var(--bb-red-600);
 
-  --border: rgba(255, 255, 255, 0.10);
-  --input: rgba(255, 255, 255, 0.15);
+  --border: rgba(167, 180, 197, 0.18);
+  --input: rgba(167, 180, 197, 0.22);
 
-  --ring: var(--bb-emerald-600);
+  --ring: #34d399;
 
   /* Bynkbook semantic tokens (DARK) */
-  --bb-app-bg: #08111f;
-  --bb-app-fg: #f8fafc;
+  --bb-app-bg: #07111f;
+  --bb-app-fg: #f4f8fc;
 
-  --bb-surface-card: #101927;
-  --bb-surface-soft: #0d1725;
-  --bb-surface-elevated: #162235;
+  --bb-surface-card: #111d2e;
+  --bb-surface-soft: #0b1626;
+  --bb-surface-elevated: #18263a;
 
-  --bb-border: rgba(255, 255, 255, 0.10);
-  --bb-border-muted: rgba(255, 255, 255, 0.07);
-  --bb-border-strong: rgba(255, 255, 255, 0.16);
+  --bb-border: rgba(167, 180, 197, 0.18);
+  --bb-border-muted: rgba(167, 180, 197, 0.11);
+  --bb-border-strong: rgba(167, 180, 197, 0.28);
 
-  --bb-text: #f8fafc;
-  --bb-text-muted: #94a3b8;
-  --bb-text-subtle: #64748b;
-  --bb-text-inverse: #0f172a;
+  --bb-text: #f4f8fc;
+  --bb-text-muted: #a7b4c5;
+  --bb-text-subtle: #77869a;
+  --bb-text-inverse: #07111f;
 
-  --bb-input-bg: rgba(255, 255, 255, 0.04);
-  --bb-input-border: rgba(255, 255, 255, 0.14);
-  --bb-input-placeholder: #64748b;
+  --bb-input-bg: #0a1422;
+  --bb-input-border: rgba(167, 180, 197, 0.24);
+  --bb-input-placeholder: #77869a;
 
-  --bb-table-header: #0c1624;
-  --bb-table-row-hover: rgba(20, 184, 166, 0.08);
-  --bb-table-row-selected: rgba(5, 150, 105, 0.16);
-  --bb-table-sticky: #111827;
+  --bb-table-header: #0e1a2b;
+  --bb-table-row-hover: rgba(52, 211, 153, 0.10);
+  --bb-table-row-selected: rgba(52, 211, 153, 0.18);
+  --bb-table-sticky: #111d2e;
 
-  --bb-scrollbar-track: #0b1120;
-  --bb-scrollbar-thumb: rgba(148, 163, 184, 0.46);
-  --bb-scrollbar-thumb-hover: rgba(203, 213, 225, 0.62);
+  --bb-scrollbar-track: #0a1422;
+  --bb-scrollbar-thumb: rgba(167, 180, 197, 0.46);
+  --bb-scrollbar-thumb-hover: rgba(219, 230, 241, 0.62);
 
-  --bb-sidebar-bg: #0b1523;
-  --bb-sidebar-fg: #f8fafc;
-  --bb-nav-active-bg: var(--bb-emerald-600);
-  --bb-nav-active-fg: #ffffff;
-  --bb-mobile-nav-bg: rgba(15, 23, 42, 0.95);
+  --bb-sidebar-bg: #0b1626;
+  --bb-sidebar-fg: #f4f8fc;
+  --bb-nav-active-bg: #34d399;
+  --bb-nav-active-fg: #052e22;
+  --bb-mobile-nav-bg: rgba(7, 17, 31, 0.94);
 
-  --bb-overlay: rgba(2, 6, 23, 0.72);
-  --bb-dialog-bg: #111827;
+  --bb-overlay: rgba(2, 6, 23, 0.76);
+  --bb-dialog-bg: #18263a;
 
-  --bb-status-default-bg: rgba(148, 163, 184, 0.12);
-  --bb-status-default-fg: #cbd5e1;
-  --bb-status-default-border: rgba(148, 163, 184, 0.22);
-  --bb-status-success-bg: #12372d;
-  --bb-status-success-fg: #6ee7b7;
-  --bb-status-success-border: rgba(16, 185, 129, 0.32);
-  --bb-status-warning-bg: #3a2a12;
+  --bb-status-default-bg: rgba(167, 180, 197, 0.13);
+  --bb-status-default-fg: #dbe6f1;
+  --bb-status-default-border: rgba(167, 180, 197, 0.24);
+  --bb-status-success-bg: #12372f;
+  --bb-status-success-fg: #86efac;
+  --bb-status-success-border: rgba(52, 211, 153, 0.34);
+  --bb-status-warning-bg: #332819;
   --bb-status-warning-fg: #fbbf24;
-  --bb-status-warning-border: rgba(245, 158, 11, 0.34);
-  --bb-status-danger-bg: #3a1824;
-  --bb-status-danger-fg: #fb7185;
-  --bb-status-danger-border: rgba(244, 63, 94, 0.34);
-  --bb-status-info-bg: #0f2f3f;
+  --bb-status-warning-border: rgba(251, 191, 36, 0.36);
+  --bb-status-danger-bg: #3a1d28;
+  --bb-status-danger-fg: #f87171;
+  --bb-status-danger-border: rgba(248, 113, 113, 0.36);
+  --bb-status-info-bg: #102f45;
   --bb-status-info-fg: #7dd3fc;
-  --bb-status-info-border: rgba(56, 189, 248, 0.32);
+  --bb-status-info-border: rgba(125, 211, 252, 0.34);
 
-  --bb-amount-positive: #6ee7b7;
+  --bb-amount-positive: #86efac;
   --bb-amount-negative: #f87171;
-  --bb-amount-neutral: #f8fafc;
+  --bb-amount-neutral: #f4f8fc;
 
-  --chart-1: var(--bb-emerald-600);
-  --chart-2: var(--bb-green-600);
-  --chart-3: var(--bb-red-600);
-  --chart-4: var(--bb-blue-500);
-  --chart-5: var(--bb-amber-500);
+  --chart-1: #34d399;
+  --chart-2: #86efac;
+  --chart-3: #f87171;
+  --chart-4: #38bdf8;
+  --chart-5: #a78bfa;
 
-  --bb-chart-grid: rgba(255, 255, 255, 0.10);
-  --bb-chart-axis: #94a3b8;
-  --bb-chart-tooltip-bg: #111827;
-  --bb-chart-tooltip-border: rgba(255, 255, 255, 0.12);
-  --bb-chart-tooltip-text: #f8fafc;
+  --bb-chart-grid: rgba(167, 180, 197, 0.14);
+  --bb-chart-axis: #a7b4c5;
+  --bb-chart-tooltip-bg: #18263a;
+  --bb-chart-tooltip-border: rgba(167, 180, 197, 0.22);
+  --bb-chart-tooltip-text: #f4f8fc;
 
   --sidebar: var(--bb-sidebar-bg);
   --sidebar-foreground: var(--bb-sidebar-fg);
@@ -429,9 +431,9 @@
 
 .dark .bb-app-canvas {
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(20, 184, 166, 0.06) 0%, rgba(8, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
+    linear-gradient(90deg, rgba(167, 180, 197, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(167, 180, 197, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(52, 211, 153, 0.075) 0%, rgba(7, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
   background-size: 24px 24px, 24px 24px, auto;
 }
 

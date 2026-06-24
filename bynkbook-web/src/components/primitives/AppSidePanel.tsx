@@ -79,7 +79,7 @@ export function AppSidePanel({
           aria-modal="true"
           className={[
             surfaceCardSoft,
-            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)]",
+            "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.48)]",
             "transition-transform duration-200 ease-out animate-in slide-in-from-right",
             widthClass,
             "flex min-h-0 flex-col overflow-hidden",

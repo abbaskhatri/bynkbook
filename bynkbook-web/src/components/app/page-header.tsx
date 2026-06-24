@@ -21,7 +21,7 @@ export function PageHeader(props: PageHeaderProps) {
       <div className="min-w-0">
         <div className="flex items-center gap-3 min-w-0">
           {icon ? (
-            <div className="h-8 w-8 rounded-md border border-primary/20 bg-primary/10 text-primary inline-flex items-center justify-center shrink-0 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset]">
+            <div className="h-8 w-8 rounded-md border border-primary/20 bg-primary/10 text-primary inline-flex items-center justify-center shrink-0 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset] dark:shadow-[0_1px_0_rgba(255,255,255,0.10)_inset]">
               {icon}
             </div>
           ) : null}
