@@ -2867,10 +2867,10 @@ export default function LedgerPageClient() {
     ];
 
     const tail = [
-      <col key="c9" style={{ width: "64px" }} />,  // status
-      <col key="c10" style={{ width: "16px" }} />,  // dup icon
-      <col key="c11" style={{ width: "16px" }} />,  // cat icon
-      <col key="c12" style={{ width: "64px" }} />,  // actions
+      <col key="c9" style={{ width: "78px" }} />,  // status
+      <col key="c10" style={{ width: "30px" }} />,  // dup icon
+      <col key="c11" style={{ width: "30px" }} />,  // cat icon
+      <col key="c12" style={{ width: "74px" }} />,  // actions
     ];
 
     if (isNeedsReconcileView) return [...base, ...tail];
@@ -4424,14 +4424,14 @@ export default function LedgerPageClient() {
           </td>
 
           {/* DUP column (tight padding) */}
-          <td className={td + " " + center + " px-0.5"}>
+          <td className={td + " " + center + " px-0.5 overflow-hidden"}>
             {!deletedRow && (r.hasDup || r.hasStale) ? (
               <HoverTooltip
                 text={[r.hasDup ? r.dupTooltip : "", r.hasStale ? r.staleTooltip : ""].filter(Boolean).join("\n")}
               >
                 <button
                   type="button"
-                  className="mx-auto flex h-6 w-6 items-center justify-center"
+                  className="mx-auto flex h-6 w-6 items-center justify-center rounded-md hover:bg-bb-table-row-hover"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
                     setFixDialog({
@@ -4448,7 +4448,7 @@ export default function LedgerPageClient() {
           </td>
 
           {/* CAT column (tight padding) */}
-          <td className={td + " " + center + " px-0.5"}>
+          <td className={td + " " + center + " px-0.5 overflow-hidden"}>
             {!deletedRow &&
               !r.isOpeningBalanceEntry &&
               r.hasMissing &&
@@ -4459,7 +4459,7 @@ export default function LedgerPageClient() {
               <HoverTooltip text={r.missingTooltip}>
                 <button
                   type="button"
-                  className="mx-auto flex h-6 w-6 items-center justify-center"
+                  className="mx-auto flex h-6 w-6 items-center justify-center rounded-md hover:bg-bb-table-row-hover"
                   onClick={() => {
                     if (r.id.startsWith("temp_")) return setErr("Still syncing—try again in a moment.");
 
@@ -4477,8 +4477,8 @@ export default function LedgerPageClient() {
           </td>
 
           {/* Actions */}
-          <td className={td + " text-center px-0.5"}>
-            <div className="relative mx-auto flex h-full min-h-7 w-[60px] items-center justify-center gap-1" data-rowmenu={r.id}>
+          <td className={td + " text-center px-0.5 overflow-visible"}>
+            <div className="relative mx-auto flex h-full min-h-7 w-[66px] items-center justify-center gap-1" data-rowmenu={r.id}>
               {deletedRow ? (
                 <>
                   <Button

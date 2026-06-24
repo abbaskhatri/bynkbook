@@ -4242,13 +4242,13 @@ const displayBankActiveList = useMemo(() => {
                 <EmptyState label={entriesEmptyStateLabel} />
               ) : (
                 <>
-                  <table className="w-full min-w-[620px] table-fixed border-collapse">
+                  <table className="w-full min-w-[656px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 84 }} />
                     <col />
                     <col style={{ width: 96 }} />
-                    <col style={{ width: 96 }} />
-                    <col style={{ width: 92 }} />
+                    <col style={{ width: 108 }} />
+                    <col style={{ width: 104 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
@@ -4320,8 +4320,8 @@ const displayBankActiveList = useMemo(() => {
                             <span className={reconcileTextClampClass}>{payee}</span>
                           </td>
                           <td className={`${tdClass} text-right pr-2 tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
-                          <td className={`${tdClass} text-right pr-2${deEmphasis}`}>
-                            <div className="inline-flex items-center justify-end gap-1.5">
+                          <td className={`${tdClass} text-right pr-2 overflow-hidden${deEmphasis}`}>
+                            <div className="inline-flex max-w-full items-center justify-end gap-1.5">
                               <StatusChip
                                 label={isOptimisticPending ? "Saving" : isMatched ? "Matched" : "Expected"}
                                 tone={isOptimisticPending ? "warning" : isMatched ? "success" : "default"}
@@ -4329,8 +4329,8 @@ const displayBankActiveList = useMemo(() => {
                               {hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
                             </div>
                           </td>
-                          <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2`}>
-                            <div className="flex items-center justify-end gap-1">
+                          <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2 overflow-hidden`}>
+                            <div className="flex min-w-0 items-center justify-end gap-1">
                               {pendingById[String(e.id)] || isOptimisticPending ? <TinySpinner /> : null}
 
                               {isOptimisticPending ? null : expectedTab === "matched" ? (
@@ -4699,13 +4699,13 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               ) : bankPanelShowRows ? (
                 <>
-                  <table className="w-full min-w-[640px] table-fixed border-collapse">
+                  <table className="w-full min-w-[684px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 30 }} />
                     <col style={{ width: 84 }} />
                     <col />
                     <col style={{ width: 96 }} />
-                    <col style={{ width: 132 }} />
+                    <col style={{ width: 176 }} />
                   </colgroup>
 
                   <thead className="sticky top-0 z-10 bg-bb-table-header border-b border-bb-border">
@@ -4869,8 +4869,8 @@ const displayBankActiveList = useMemo(() => {
                             {formatUsdFromCents(amt)}
                           </td>
 
-                          <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2`}>
-                            <div className="flex items-center justify-end gap-1">
+                          <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2 overflow-hidden`}>
+                            <div className="flex min-w-0 items-center justify-end gap-1">
                               {pendingById[String(t.id)] ? <TinySpinner /> : null}
 
                               {bulkCreateResultByBankTxnId[String(t.id)] ? (() => {
@@ -4882,7 +4882,7 @@ const displayBankActiveList = useMemo(() => {
                                 return (
                                   <>
                                     <span
-                                      className="text-[11px] px-2 py-0.5 rounded-full border border-bb-border text-bb-text"
+                                      className="max-w-[96px] truncate text-[11px] px-2 py-0.5 rounded-full border border-bb-border text-bb-text"
                                       title={String(
                                         bulkRes?.error ??
                                           (isPossibleDup
@@ -4895,7 +4895,7 @@ const displayBankActiveList = useMemo(() => {
                                     {isPossibleDup ? (
                                       <button
                                         type="button"
-                                        className={`text-[11px] px-2 py-0.5 rounded-md border border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed ${ringFocus}`}
+                                        className={`max-w-[92px] truncate text-[11px] px-2 py-0.5 rounded-md border border-bb-border bg-bb-surface-card text-bb-text hover:bg-bb-table-row-hover disabled:opacity-50 disabled:cursor-not-allowed ${ringFocus}`}
                                         disabled={pendingById[String(t.id)] === true}
                                         title="Create separate entry anyway (use for recurring charges)"
                                         onClick={async (ev) => {
@@ -4965,7 +4965,7 @@ const displayBankActiveList = useMemo(() => {
                                     return (
                                       <button
                                         type="button"
-                                        className={`h-7 inline-flex items-center gap-1 px-2 text-[11px] rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
+                                        className={`h-7 max-w-[92px] min-w-0 shrink inline-flex items-center gap-1 px-2 text-[11px] rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
                                         title="Auto-match this bank transaction with the only entry that exactly matches (amount, direction, within 3 days)"
                                         aria-label="Auto-match"
                                         onClick={(ev) => {
@@ -4974,7 +4974,7 @@ const displayBankActiveList = useMemo(() => {
                                         }}
                                       >
                                         <Sparkles className="h-3 w-3" />
-                                        Auto-match
+                                        <span className="truncate">Auto-match</span>
                                       </button>
                                     );
                                   })()}
