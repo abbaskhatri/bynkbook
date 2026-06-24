@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
+import { AppTooltip } from "@/components/ui/tooltip";
 import { UploadCloud, X, CheckCircle2, AlertTriangle, Trash2, Download } from "lucide-react";
 import { useUploadController } from "./useUploadController";
 import { apiFetch } from "@/lib/api/client";
@@ -229,14 +230,15 @@ function VendorPicker(props: {
           placeholder="Search vendor…"
         />
         {value ? (
-          <button
-            type="button"
-            className="h-8 px-2 text-xs border border-bb-border bg-bb-surface-card text-bb-text rounded-md"
-            onClick={() => onChange(null)}
-            title="Clear vendor"
-          >
-            Clear
-          </button>
+          <AppTooltip content="Clear the selected vendor" side="bottom">
+            <button
+              type="button"
+              className="h-8 px-2 text-xs border border-bb-border bg-bb-surface-card text-bb-text rounded-md hover:bg-bb-table-row-hover"
+              onClick={() => onChange(null)}
+            >
+              Clear
+            </button>
+          </AppTooltip>
         ) : null}
       </div>
 
@@ -869,7 +871,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 type="button"
                                 variant="outline"
                                 className="h-7 w-8 p-0"
-                                title="Download"
+                                title="Open or download this uploaded file"
                                 onClick={async () => {
                                   const businessId = ctx?.businessId?.trim();
                                   if (!businessId) return;
@@ -885,7 +887,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                                 type="button"
                                 variant="outline"
                                 className="h-7 w-8 p-0"
-                                title="Remove from list"
+                                title="Remove this upload from the current list"
                                 onClick={() => {
                                   // Remove from list
                                   controller.remove(it.id);
@@ -1079,7 +1081,7 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
                             Retry
                           </Button>
                         ) : (
-                          <Button type="button" variant="outline" className="h-7 w-8 p-0" onClick={() => controller.remove(it.id)} title="Remove">
+                          <Button type="button" variant="outline" className="h-7 w-8 p-0" onClick={() => controller.remove(it.id)} title="Remove this file from the upload list">
                             <Trash2 className="h-4 w-4 mx-auto text-bb-text-muted" />
                           </Button>
                         )}

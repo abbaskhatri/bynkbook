@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { AppTooltip } from "@/components/ui/tooltip";
 
 type HintWrapProps = {
   disabled: boolean;
@@ -18,9 +19,5 @@ export function HintWrap({ disabled, reason, children, className }: HintWrapProp
     return React.createElement(React.Fragment, null, children);
   }
 
-  return React.createElement(
-    "span",
-    { title: reason, className: className ?? "inline-flex" },
-    children
-  );
+  return React.createElement(AppTooltip, { content: reason, className: className ?? "inline-flex" }, children);
 }

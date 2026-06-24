@@ -23,6 +23,7 @@ import { CapsuleSelect } from "@/components/app/capsule-select";
 import { Card, CardContent, CardHeader as CHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { AppTooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppActionMenu } from "@/components/primitives/AppActionMenu";
@@ -1821,7 +1822,7 @@ export default function CategoryReviewPageClient() {
             </CardTitle>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <span className="inline-flex" title={autoFixButtonTitle}>
+              <AppTooltip content={autoFixButtonTitle} side="bottom">
                 <Button
                   variant={autoFixButtonReadyCount === 0 ? "outline" : "default"}
                   size="sm"
@@ -1840,7 +1841,7 @@ export default function CategoryReviewPageClient() {
                     </>
                   )}
                 </Button>
-              </span>
+              </AppTooltip>
 
               {selectedCount > 0 ? (
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 rounded-lg border border-bb-border bg-bb-surface-soft px-2 py-1.5">

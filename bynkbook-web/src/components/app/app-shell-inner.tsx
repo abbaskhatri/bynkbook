@@ -40,6 +40,7 @@ import {
   writeLastSelectedAccountId,
 } from "@/lib/accountSelection";
 import { Button } from "@/components/ui/button";
+import { AppTooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
 import GlobalSearch from "@/components/app/global-search";
@@ -725,15 +726,16 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/88 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
-            <button
-              type="button"
-              className="md:hidden h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
-              title="Open navigation"
-              aria-label="Open navigation"
-              onClick={openMobileNav}
-            >
-              <Menu className={NAV_ICON_CLASS} />
-            </button>
+            <AppTooltip content="Open navigation" side="bottom">
+              <button
+                type="button"
+                className="md:hidden h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
+                aria-label="Open navigation"
+                onClick={openMobileNav}
+              >
+                <Menu className={NAV_ICON_CLASS} />
+              </button>
+            </AppTooltip>
 
             <div className="min-w-0 max-w-full overflow-hidden">
               <Pill title="Business">
@@ -762,31 +764,31 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             ) : null}
 
             {appEnv.label !== "PROD" ? (
-              <span
-                title={`Environment: ${appEnv.label} (${appEnv.source}${appEnv.explicit ? "" : " fallback"})`}
-                className="hidden sm:inline-flex h-7 items-center rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 text-[11px] font-semibold text-bb-status-warning-fg"
-              >
-                {appEnv.label}
-              </span>
+              <AppTooltip content={`Environment: ${appEnv.label} (${appEnv.source}${appEnv.explicit ? "" : " fallback"})`} side="bottom">
+                <span className="hidden sm:inline-flex h-7 items-center rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 text-[11px] font-semibold text-bb-status-warning-fg">
+                  {appEnv.label}
+                </span>
+              </AppTooltip>
             ) : null}
 
             <div className="relative" ref={activityRef}>
-              <button
-                type="button"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
-                title="Activity"
-                aria-label="Activity"
-                onClick={() => {
-                  // Close other menu; toggle activity
-                  setUserMenuOpen(false);
+              <AppTooltip content="Recent activity" side="bottom">
+                <button
+                  type="button"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
+                  aria-label="Recent activity"
+                  onClick={() => {
+                    // Close other menu; toggle activity
+                    setUserMenuOpen(false);
 
-                  // Just toggle — the activity useQuery is enabled when
-                  // activityOpen flips to true and uses staleTime as the TTL.
-                  setActivityOpen((v) => !v);
-                }}
-              >
-                <Bell className={NAV_ICON_CLASS} />
-              </button>
+                    // Just toggle — the activity useQuery is enabled when
+                    // activityOpen flips to true and uses staleTime as the TTL.
+                    setActivityOpen((v) => !v);
+                  }}
+                >
+                  <Bell className={NAV_ICON_CLASS} />
+                </button>
+              </AppTooltip>
 
               {activityOpen ? (
                 <div className="absolute right-0 mt-2 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[420px] rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)] overflow-hidden z-50">
@@ -883,15 +885,16 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             </div>
 
             <div className="relative" ref={userMenuRef}>
-              <button
-                type="button"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
-                title="Account"
-                aria-label="Account menu"
-                onClick={() => setUserMenuOpen((v) => !v)}
-              >
-                <UserCircle className={NAV_ICON_CLASS} />
-              </button>
+              <AppTooltip content="Account menu" side="bottom">
+                <button
+                  type="button"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
+                  aria-label="Account menu"
+                  onClick={() => setUserMenuOpen((v) => !v)}
+                >
+                  <UserCircle className={NAV_ICON_CLASS} />
+                </button>
+              </AppTooltip>
 
               {userMenuOpen ? (
                 <div className="absolute right-0 mt-2 w-56 rounded-lg border border-bb-border bg-bb-surface-elevated shadow-[0_18px_60px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_60px_rgba(0,0,0,0.36)] overflow-hidden z-50">

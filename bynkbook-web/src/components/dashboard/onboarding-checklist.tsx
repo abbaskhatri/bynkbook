@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
+import { AppTooltip } from "@/components/ui/tooltip";
 import { Check, Circle, Sparkles, X } from "lucide-react";
 
 export type OnboardingChecklistProps = {
@@ -115,16 +116,17 @@ export function OnboardingChecklist({
             </div>
           </div>
 
-          <button
-            type="button"
-            className="h-7 inline-flex items-center gap-1 px-2 text-[11px] rounded-md border border-bb-border text-foreground/70 hover:bg-bb-table-row-hover"
-            onClick={handleDismiss}
-            title="Hide this checklist for this business (it can't be brought back)"
-            aria-label="Skip setup"
-          >
-            <X className="h-3 w-3" />
-            Skip setup
-          </button>
+          <AppTooltip content="Hide this checklist for this business. You can still complete setup from each page." side="left">
+            <button
+              type="button"
+              className="h-7 inline-flex items-center gap-1 px-2 text-[11px] rounded-md border border-bb-border text-foreground/70 hover:bg-bb-table-row-hover"
+              onClick={handleDismiss}
+              aria-label="Skip setup"
+            >
+              <X className="h-3 w-3" />
+              Skip setup
+            </button>
+          </AppTooltip>
         </div>
 
         <ul className="mt-3 space-y-1.5">

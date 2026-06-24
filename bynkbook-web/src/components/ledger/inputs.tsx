@@ -6,8 +6,7 @@
 
 "use client";
 
-import { createPortal } from "react-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Info, RefreshCw, X } from "lucide-react";
 
 import { apiFetch } from "@/lib/api/client";
@@ -18,6 +17,7 @@ import {
   normalizeCategoryName,
   toBigIntSafe,
 } from "@/lib/ledger/helpers";
+import { AppTooltip } from "@/components/ui/tooltip";
 
 export function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   return (
@@ -194,48 +194,11 @@ export function AutoInput(props: {
 
 export function HoverTooltip(props: { text: string; children: any }) {
   const { text, children } = props;
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    setPos({ x: r.right, y: r.bottom });
-  }, [open, text]);
-
-  const body = typeof document !== "undefined" ? document.body : null;
 
   return (
-    <span
-      ref={ref}
-      className="inline-flex h-5 w-5 items-center justify-center"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      aria-label={text}
-    >
+    <AppTooltip content={text} side="bottom" className="h-5 w-5 items-center justify-center">
       {children}
-      {open && text && body && pos
-        ? createPortal(
-          <div
-            style={{
-              position: "fixed",
-              left: pos.x,
-              top: pos.y + 6,
-              transform: "translateX(-100%)",
-              zIndex: 9999,
-              pointerEvents: "none",
-              maxWidth: 420,
-            }}
-            className="rounded-md bg-bb-text px-2 py-1 text-[11px] text-bb-text-inverse shadow-lg whitespace-pre-line break-words w-max"
-          >
-            {text}
-          </div>,
-          body
-        )
-        : null}
-    </span>
+    </AppTooltip>
   );
 }
 

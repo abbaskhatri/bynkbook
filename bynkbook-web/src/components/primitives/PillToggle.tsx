@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check } from "lucide-react";
 import { ringFocus } from "./tokens";
+import { AppTooltip } from "@/components/ui/tooltip";
 
 export type PillToggleProps = {
   checked: boolean;
@@ -13,7 +14,7 @@ export type PillToggleProps = {
 };
 
 export function PillToggle({ checked, onCheckedChange, disabled = false, id, title }: PillToggleProps) {
-  return (
+  const toggle = (
     <button
       id={id}
       type="button"
@@ -30,7 +31,6 @@ export function PillToggle({ checked, onCheckedChange, disabled = false, id, tit
         disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
         ringFocus,
       ].join(" ")}
-      title={title}
     >
       <span
         aria-hidden="true"
@@ -43,4 +43,6 @@ export function PillToggle({ checked, onCheckedChange, disabled = false, id, tit
       </span>
     </button>
   );
+
+  return title ? <AppTooltip content={title}>{toggle}</AppTooltip> : toggle;
 }

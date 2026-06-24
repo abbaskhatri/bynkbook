@@ -28,6 +28,7 @@ import { BusyButton } from "@/components/primitives/BusyButton";
 import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { PillToggle } from "@/components/primitives/PillToggle";
 import { Button } from "@/components/ui/button";
+import { AppTooltip } from "@/components/ui/tooltip";
 import { ringFocus } from "@/components/primitives/tokens";
 
 import { InlineBanner } from "@/components/app/inline-banner";
@@ -4983,18 +4984,19 @@ const displayBankActiveList = useMemo(() => {
                                     if (!canWriteReconcileEffective) return null;
                                     if (isPendingBankTxn || isRowPending) return null;
                                     return (
-                                      <button
-                                        type="button"
-                                        className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
-                                        title="Auto-match this bank transaction with the only entry that exactly matches (amount, direction, within 3 days)"
-                                        aria-label="Auto-match bank transaction"
-                                        onClick={(ev) => {
-                                          ev.stopPropagation();
-                                          void quickMatchAt(txnId, autoCandidateEntryId);
-                                        }}
-                                      >
-                                        <Sparkles className="h-4 w-4" />
-                                      </button>
+                                      <AppTooltip content="Auto-match with the only ledger entry that exactly matches amount, direction, and date window" side="left">
+                                        <button
+                                          type="button"
+                                          className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
+                                          aria-label="Auto-match bank transaction"
+                                          onClick={(ev) => {
+                                            ev.stopPropagation();
+                                            void quickMatchAt(txnId, autoCandidateEntryId);
+                                          }}
+                                        >
+                                          <Sparkles className="h-4 w-4" />
+                                        </button>
+                                      </AppTooltip>
                                     );
                                   })()}
 

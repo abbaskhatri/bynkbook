@@ -4,6 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { inputH7, ringFocus } from "./tokens";
+import { AppTooltip } from "@/components/ui/tooltip";
 
 export type AppDatePickerProps = {
     value: string; // YYYY-MM-DD or ""
@@ -216,6 +217,7 @@ export function AppDatePicker({
             </button>
 
             {allowClear && value ? (
+              <AppTooltip content="Clear date" side="left">
                 <button
                     type="button"
                     className={[
@@ -228,10 +230,10 @@ export function AppDatePicker({
                     onClick={() => onChange("")}
                     aria-label="Clear date"
                     disabled={disabled}
-                    title="Clear"
                 >
                     <X className="h-4 w-4" />
                 </button>
+              </AppTooltip>
             ) : null}
 
             {open && typeof document !== "undefined"
@@ -267,35 +269,37 @@ export function AppDatePicker({
                         >
                             {/* Header */}
                             <div className="grid grid-cols-[40px_1fr_40px] items-center mb-2">
-                                <button
-                                    type="button"
-                                    className={[
-                                        "h-9 w-9 rounded-xl border border-bb-border bg-bb-surface-elevated hover:bg-bb-table-row-hover",
-                                        "inline-flex items-center justify-center",
-                                        ringFocus,
-                                    ].join(" ")}
-                                    onClick={() => setViewMonth((m) => addMonths(m, -1))}
-                                    aria-label="Previous month"
-                                    title="Previous month"
-                                >
-                                    <ChevronLeft className="h-5 w-5 text-bb-text-muted" />
-                                </button>
+                                <AppTooltip content="Previous month" side="bottom">
+                                    <button
+                                        type="button"
+                                        className={[
+                                            "h-9 w-9 rounded-xl border border-bb-border bg-bb-surface-elevated hover:bg-bb-table-row-hover",
+                                            "inline-flex items-center justify-center",
+                                            ringFocus,
+                                        ].join(" ")}
+                                        onClick={() => setViewMonth((m) => addMonths(m, -1))}
+                                        aria-label="Previous month"
+                                    >
+                                        <ChevronLeft className="h-5 w-5 text-bb-text-muted" />
+                                    </button>
+                                </AppTooltip>
 
                                 <div className="text-base font-semibold text-bb-text text-center">{monthLabel}</div>
 
-                                <button
-                                    type="button"
-                                    className={[
-                                        "h-9 w-9 rounded-xl border border-bb-border bg-bb-surface-elevated hover:bg-bb-table-row-hover",
-                                        "inline-flex items-center justify-center",
-                                        ringFocus,
-                                    ].join(" ")}
-                                    onClick={() => setViewMonth((m) => addMonths(m, 1))}
-                                    aria-label="Next month"
-                                    title="Next month"
-                                >
-                                    <ChevronRight className="h-5 w-5 text-bb-text-muted" />
-                                </button>
+                                <AppTooltip content="Next month" side="bottom">
+                                    <button
+                                        type="button"
+                                        className={[
+                                            "h-9 w-9 rounded-xl border border-bb-border bg-bb-surface-elevated hover:bg-bb-table-row-hover",
+                                            "inline-flex items-center justify-center",
+                                            ringFocus,
+                                        ].join(" ")}
+                                        onClick={() => setViewMonth((m) => addMonths(m, 1))}
+                                        aria-label="Next month"
+                                    >
+                                        <ChevronRight className="h-5 w-5 text-bb-text-muted" />
+                                    </button>
+                                </AppTooltip>
                             </div>
 
                             {/* Weekdays */}

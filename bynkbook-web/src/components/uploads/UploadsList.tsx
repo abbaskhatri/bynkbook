@@ -144,7 +144,7 @@ export function UploadsList(props: {
                       variant="outline"
                       className="h-7 px-2 text-xs"
                       disabled={!canImport || importingId === u.id}
-                      title={!canImport ? "Not ready to import" : undefined}
+                      title={!canImport ? "This upload is not ready to import yet" : undefined}
                       onClick={() => runImport(u.id)}
                     >
                       {importingId === u.id ? "Importing…" : importStatus === "IMPORTED" ? "Re-import" : "Import"}
@@ -156,7 +156,7 @@ export function UploadsList(props: {
                     variant="outline"
                     className="h-7 px-2 text-xs"
                     disabled={!downloadable || downloadingId === u.id}
-                    title={!downloadable ? "Not available yet" : undefined}
+                    title={!downloadable ? "The file is still being processed" : undefined}
                     onClick={() => download(u.id)}
                   >
                     {downloadingId === u.id ? "Loading…" : "View / Download"}
