@@ -13,6 +13,7 @@ import { useEntries } from "@/lib/queries/useEntries";
 import { usePreferredAccountId } from "@/lib/accountSelection";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { apiFetch } from "@/lib/api/client";
+import { listEntriesPage } from "@/lib/api/entries";
 import { listCategories } from "@/lib/api/categories";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -483,13 +484,10 @@ export default function ReconcilePageClient() {
   // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
   const PAGE_CHUNK = 200;
   const ENTRIES_API_LIMIT = 200;
-  const ENTRIES_INITIAL_PAGE_COUNT = 1;
   const ENTRIES_BACKGROUND_MAX_PAGE_COUNT = 500;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
   const BANK_COUNT_PROBE_MAX_PAGES = 20;
 
-  const [entriesPageCount, setEntriesPageCount] = useState(ENTRIES_INITIAL_PAGE_COUNT);
-  const [entriesPageScopeKey, setEntriesPageScopeKey] = useState("");
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
   const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
 
@@ -499,10 +497,6 @@ export default function ReconcilePageClient() {
     selectedBusinessId && selectedAccountId
       ? `${selectedBusinessId}:${selectedAccountId}:${from || ""}:${to || ""}`
       : "";
-  const effectiveEntriesPageCount =
-    bankScopeKey && entriesPageScopeKey === bankScopeKey
-      ? entriesPageCount
-      : ENTRIES_INITIAL_PAGE_COUNT;
   const [bankLoadedScopeByStatus, setBankLoadedScopeByStatus] = useState<Record<BankTab, string>>({
     unmatched: "",
     matched: "",
@@ -552,39 +546,145 @@ export default function ReconcilePageClient() {
     businessId: selectedBusinessId,
     accountId: selectedAccountId,
     limit: ENTRIES_API_LIMIT,
-    pageCount: effectiveEntriesPageCount,
+    pageCount: 1,
     date_from: from || undefined,
     date_to: to || undefined,
   });
 
+  const [entriesHydratedScopeKey, setEntriesHydratedScopeKey] = useState("");
+  const [entriesExtraRows, setEntriesExtraRows] = useState<any[]>([]);
+  const [entriesNextCursor, setEntriesNextCursor] = useState<string | null>(null);
+  const [entriesHasMore, setEntriesHasMore] = useState(false);
+  const [entriesBackgroundPageCount, setEntriesBackgroundPageCount] = useState(0);
+  const [entriesBackgroundLoading, setEntriesBackgroundLoading] = useState(false);
+
   useEffect(() => {
-    setEntriesPageCount(ENTRIES_INITIAL_PAGE_COUNT);
-    setEntriesPageScopeKey(bankScopeKey);
+    setEntriesHydratedScopeKey("");
+    setEntriesExtraRows([]);
+    setEntriesNextCursor(null);
+    setEntriesHasMore(false);
+    setEntriesBackgroundPageCount(0);
+    setExpectedVisibleN(PAGE_CHUNK);
+    setMatchedVisibleN(PAGE_CHUNK);
   }, [bankScopeKey]);
 
   useEffect(() => {
+    if (!bankScopeKey) return;
+    if (entriesQ.isLoading || (entriesQ as any).isPlaceholderData) return;
+
+    const meta = (entriesQ.data as any)?.meta ?? {};
+    const nextCursor = typeof meta.nextCursor === "string" ? meta.nextCursor : null;
+    setEntriesHydratedScopeKey(bankScopeKey);
+    setEntriesExtraRows([]);
+    setEntriesNextCursor(nextCursor);
+    setEntriesHasMore(!!meta.hasMore && !!nextCursor);
+    setEntriesBackgroundPageCount(0);
+  }, [bankScopeKey, entriesQ.data, entriesQ.isLoading]);
+
+  useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
-    if (entriesQ.isLoading || entriesQ.isFetching) return;
-    if (!((entriesQ.data as any)?.meta?.hasMore)) return;
-    if (effectiveEntriesPageCount >= ENTRIES_BACKGROUND_MAX_PAGE_COUNT) return;
+    if (!bankScopeKey || entriesHydratedScopeKey !== bankScopeKey) return;
+    if (entriesBackgroundLoading || !entriesHasMore || !entriesNextCursor) return;
+    if (entriesBackgroundPageCount >= ENTRIES_BACKGROUND_MAX_PAGE_COUNT - 1) return;
 
+    let cancelled = false;
+    const cursor = entriesNextCursor;
     const timer = window.setTimeout(() => {
-      setEntriesPageCount((current) =>
-        Math.min(ENTRIES_BACKGROUND_MAX_PAGE_COUNT, Math.max(current + 1, current * 2))
-      );
-      setEntriesPageScopeKey(bankScopeKey);
-    }, 250);
+      (async () => {
+        setEntriesBackgroundLoading(true);
+        try {
+          const res = await listEntriesPage({
+            businessId: selectedBusinessId,
+            accountId: selectedAccountId,
+            limit: ENTRIES_API_LIMIT,
+            cursor,
+            date_from: from || undefined,
+            date_to: to || undefined,
+          });
 
-    return () => window.clearTimeout(timer);
+          if (cancelled) return;
+
+          setEntriesExtraRows((prev) => {
+            const seen = new Set<string>();
+            for (const row of entriesQ.data ?? []) {
+              const id = String((row as any)?.id ?? "").trim();
+              if (id) seen.add(id);
+            }
+            for (const row of prev) {
+              const id = String(row?.id ?? "").trim();
+              if (id) seen.add(id);
+            }
+
+            const additions = res.items.filter((row: any) => {
+              const id = String(row?.id ?? "").trim();
+              if (!id || seen.has(id)) return false;
+              seen.add(id);
+              return true;
+            });
+
+            return additions.length ? [...prev, ...additions] : prev;
+          });
+
+          const nextCursor = typeof res.meta.nextCursor === "string" ? res.meta.nextCursor : null;
+          setEntriesNextCursor(nextCursor);
+          setEntriesHasMore(!!res.meta.hasMore && !!nextCursor);
+          setEntriesBackgroundPageCount((count) => count + 1);
+        } finally {
+          if (!cancelled) setEntriesBackgroundLoading(false);
+        }
+      })();
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [
     selectedBusinessId,
     selectedAccountId,
-    entriesQ.isLoading,
-    entriesQ.isFetching,
-    entriesQ.data,
-    effectiveEntriesPageCount,
     bankScopeKey,
+    entriesHydratedScopeKey,
+    entriesBackgroundLoading,
+    entriesHasMore,
+    entriesNextCursor,
+    entriesBackgroundPageCount,
+    entriesQ.data,
+    from,
+    to,
   ]);
+
+  const entriesData = useMemo(() => {
+    if (!bankScopeKey || entriesHydratedScopeKey !== bankScopeKey) return [] as any[];
+
+    const combined: any[] = [];
+    const seen = new Set<string>();
+    for (const row of entriesQ.data ?? []) {
+      const id = String((row as any)?.id ?? "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      combined.push(row);
+    }
+    for (const row of entriesExtraRows) {
+      const id = String(row?.id ?? "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      combined.push(row);
+    }
+
+    (combined as any).meta = {
+      ...((entriesQ.data as any)?.meta ?? {}),
+      hasMore: entriesHasMore,
+      nextCursor: entriesNextCursor,
+      limit: ENTRIES_API_LIMIT,
+    };
+
+    return combined;
+  }, [bankScopeKey, entriesHydratedScopeKey, entriesQ.data, entriesExtraRows, entriesHasMore, entriesNextCursor]);
+
+  const entriesInitialLoading =
+    !!selectedBusinessId &&
+    !!selectedAccountId &&
+    (entriesQ.isLoading || !bankScopeKey || entriesHydratedScopeKey !== bankScopeKey);
 
   const [bankTxLoading, setBankTxLoading] = useState(false);
   const [bankTx, setBankTx] = useState<any[]>([]);
@@ -1166,7 +1266,7 @@ export default function ReconcilePageClient() {
 
     const baselineBankSig = bankSignature(bankTx);
     const baselineGroupSig = matchGroupSignature(matchGroups);
-    const baselineEntriesSig = entriesSignature(entriesQ.data ?? []);
+    const baselineEntriesSig = entriesSignature(entriesData ?? []);
 
     const schedule = [0, 1200, 2500]; // bounded backoff (max 3 pulls including immediate)
     let stopped = false;
@@ -1185,7 +1285,7 @@ export default function ReconcilePageClient() {
         } as any);
 
         const entriesRes: any = await entriesQ.refetch?.();
-        const nextEntries = entriesRes?.data ?? entriesQ.data ?? [];
+        const nextEntries = entriesRes?.data ?? entriesData ?? [];
 
         const nextBankSig = bankSignature(Array.isArray(bank) ? bank : []);
         const nextGroupSig = matchGroupSignature(Array.isArray(nextGroups) ? nextGroups : []);
@@ -1326,6 +1426,7 @@ export default function ReconcilePageClient() {
   const entriesUpdating =
     plaidSyncing ||
     entriesQ.isFetching ||
+    entriesBackgroundLoading ||
     matchGroupsLoading;
 
   // Create-entry confirmation dialog
@@ -1614,9 +1715,9 @@ export default function ReconcilePageClient() {
   }, [isOpeningLikeEntry, selectedAccountForReconcile]);
 
   // Keep raw entries; tab-level filtering decides visibility (Expected hides Adjusted-unmatched)
-  const allEntries = useMemo(() => (entriesQ.data ?? []).filter((entry: any) => !isInactiveEntryRecord(entry)), [entriesQ.data]);
+  const allEntries = useMemo(() => (entriesData ?? []).filter((entry: any) => !isInactiveEntryRecord(entry)), [entriesData]);
   const entriesLoadedCount = allEntries.length;
-  const entriesHitApiLimit = !!((entriesQ.data as any)?.meta?.hasMore);
+  const entriesHitApiLimit = !!((entriesData as any)?.meta?.hasMore);
 
   const allEntriesSorted = useMemo(() => {
     const arr = [...allEntries];
@@ -1638,7 +1739,7 @@ export default function ReconcilePageClient() {
 
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
-    if (bankTxLoading || entriesQ.isLoading || entriesQ.isFetching) return;
+    if (bankTxLoading || entriesInitialLoading) return;
 
     const requestSeq = ++placementSummaryRequestSeqRef.current;
     const bankTransactionIds = bankTxSorted.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean);
@@ -1680,8 +1781,7 @@ export default function ReconcilePageClient() {
     selectedBusinessId,
     selectedAccountId,
     bankTxLoading,
-    entriesQ.isLoading,
-    entriesQ.isFetching,
+    entriesInitialLoading,
     bankTxSorted,
     allEntriesSorted,
     from,
@@ -2739,7 +2839,7 @@ export default function ReconcilePageClient() {
   }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, searchQ]);
 
   const entriesTruthReady =
-    !entriesQ.isLoading &&
+    !entriesInitialLoading &&
     matchGroupsTruthHydrated &&
     !matchGroupsLoading;
 
@@ -2996,7 +3096,7 @@ const displayBankActiveList = useMemo(() => {
     bankTab === "unmatched" && bankPendingUnmatchedCount > 0
       ? `${bankPendingUnmatchedCount} pending shown read-only until posted.`
       : null;
-  const entriesHistoryLoading = entriesQ.isFetching && effectiveEntriesPageCount > ENTRIES_INITIAL_PAGE_COUNT;
+  const entriesHistoryLoading = entriesBackgroundLoading || (entriesQ.isFetching && entriesLoadedCount > 0);
   const entriesScopeCopy = `Ledger ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded${entriesHistoryLoading ? " • Loading older history" : ""} • Showing ${expectedTab === "expected" ? displayEntriesExpectedList.length : displayEntriesMatchedList.length} of ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
@@ -3056,14 +3156,14 @@ const displayBankActiveList = useMemo(() => {
     ? `Expected (${displayExpectedCount})`
     : entriesTruthSnapshot
       ? `Expected (${displayExpectedCount})`
-      : entriesQ.isLoading
+      : entriesInitialLoading
         ? "Expected (loading)"
         : "Expected (Not loaded yet)";
   const matchedEntriesTabLabel = entriesTruthReady
     ? `Matched (${displayMatchedCount})`
     : entriesTruthSnapshot
       ? `Matched (${displayMatchedCount})`
-      : entriesQ.isLoading
+      : entriesInitialLoading
         ? "Matched (loading)"
         : "Matched (Not loaded yet)";
   const entriesEmptyStateLabel =

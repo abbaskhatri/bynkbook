@@ -111,7 +111,8 @@ export async function handler(event: any) {
   // -------------------------
   // Phase F2: bulk apply category suggestions
   // POST /v1/businesses/{businessId}/accounts/{accountId}/entries/apply-category-batch
-  // Returns per-item results (including CLOSED_PERIOD per row)
+  // Returns per-item results. Category-only cleanup is metadata, so closed
+  // periods do not block this endpoint.
   // -------------------------
   const isApplyCategoryBatch =
     method === "POST" &&
