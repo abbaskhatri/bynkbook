@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, Building2, Landmark } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
+import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileShell } from "@/components/mobile/mobile-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -99,35 +100,14 @@ export default function MobileIssuesPageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <section className="rounded-md border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                Mobile review
-              </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
-                Issues
-              </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
-                  <Building2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{business?.name ?? "Business"}</span>
-                </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
-                  <Landmark className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{account?.name ?? "No active account"}</span>
-                </span>
-              </div>
-            </div>
-            <Link
-              href={reviewHref}
-              prefetch={false}
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
-            >
-              Queue
-            </Link>
-          </div>
-        </section>
+        <MobilePageHeader
+          eyebrow="Mobile review"
+          title="Issues"
+          businessName={business?.name ?? "Business"}
+          accountName={account?.name ?? "No active account"}
+          actionHref={reviewHref}
+          actionLabel="Queue"
+        />
 
         {bannerMessage ? <InlineBanner title="Issues review is partially unavailable" message={bannerMessage} /> : null}
 

@@ -421,6 +421,20 @@
   border-color: var(--bb-border);
 }
 
+.mobile-app-canvas {
+  background:
+    radial-gradient(circle at 18% -4rem, color-mix(in srgb, var(--primary) 16%, transparent) 0, transparent 14rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--bb-surface-soft) 68%, transparent) 0%, transparent 18rem),
+    var(--bb-app-bg);
+}
+
+.dark .mobile-app-canvas {
+  background:
+    radial-gradient(circle at 16% -4rem, rgba(52, 211, 153, 0.16) 0, transparent 14rem),
+    linear-gradient(180deg, rgba(52, 211, 153, 0.06) 0%, transparent 18rem),
+    var(--bb-app-bg);
+}
+
 .bb-app-canvas {
   background:
     linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),

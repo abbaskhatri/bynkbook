@@ -70,23 +70,27 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
   ];
 
   return (
-    <div className="mx-auto min-h-[calc(100dvh-7rem)] w-full max-w-[480px] px-3 pb-28 pt-3 sm:px-4">
-      <main className="space-y-4">{children}</main>
+    <div className="mobile-app-canvas min-h-dvh">
+      <div className="mx-auto min-h-[calc(100dvh-7rem)] w-full max-w-[480px] px-3 pb-28 pt-3 sm:px-4">
+        <main className="space-y-3.5">{children}</main>
+      </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-        <div className="mx-auto grid max-w-[480px] grid-cols-5 gap-0.5">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-bb-border bg-bb-mobile-nav-bg px-2 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 shadow-[0_-14px_34px_rgba(15,23,42,0.10)] backdrop-blur-xl md:hidden">
+        <div className="mx-auto grid max-w-[480px] grid-cols-5 gap-1 rounded-lg border border-bb-border bg-bb-surface-card/82 p-1 shadow-[0_1px_0_rgba(255,255,255,0.65)_inset] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]">
           {items.map((item) => {
             const content = (
               <span
                 className={cn(
-                  "flex min-h-[3.35rem] flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-semibold leading-none",
+                  "flex min-h-[3.2rem] flex-col items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-semibold leading-none transition-[background-color,color,transform]",
                   item.active
                     ? "bg-bb-nav-active-bg text-bb-nav-active-fg shadow-sm"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                    : "text-muted-foreground hover:bg-bb-surface-soft hover:text-foreground",
                   item.disabled ? "opacity-45" : ""
                 )}
               >
-                {item.icon}
+                <span className={cn("grid h-6 w-6 place-items-center rounded-md", item.active ? "bg-white/12" : "bg-transparent")}>
+                  {item.icon}
+                </span>
                 <span className="truncate">{item.label}</span>
               </span>
             );
@@ -100,7 +104,7 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
             }
 
             return (
-              <Link key={item.label} href={item.href} prefetch={false}>
+              <Link key={item.label} href={item.href} prefetch={false} aria-current={item.active ? "page" : undefined}>
                 {content}
               </Link>
             );

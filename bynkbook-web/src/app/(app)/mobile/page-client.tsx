@@ -6,7 +6,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   AlertTriangle,
-  Building2,
   FileText,
   Landmark,
   ReceiptText,
@@ -19,6 +18,7 @@ import {
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { MobileShell } from "@/components/mobile/mobile-shell";
+import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileSummaryCard } from "@/components/mobile/mobile-summary-card";
 import { MobileTaskCard } from "@/components/mobile/mobile-task-card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -188,6 +188,7 @@ export default function MobilePageClient() {
   const invoiceHref = hrefWithMobileContext({ path: "/mobile/invoice", businessId, accountId });
   const vendorsHref = hrefWithMobileContext({ path: "/mobile/vendors", businessId, accountId });
   const activityHref = businessId ? `/settings?businessId=${businessId}&tab=activity` : "/settings?tab=activity";
+  const desktopDashboardHref = hrefWithMobileContext({ path: "/dashboard", businessId });
 
   const failedCards = [
     accountsSummaryQ.error ? "cash snapshot" : null,
@@ -235,35 +236,14 @@ export default function MobilePageClient() {
   return (
     <MobileShell businessId={businessId} accountId={accountId}>
       <div className="space-y-4">
-        <div className="rounded-md border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                Mobile companion
-              </div>
-              <h1 className="mt-2 truncate text-2xl font-semibold leading-tight text-foreground">
-                Home
-              </h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
-                  <Building2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{business?.name ?? "Business"}</span>
-                </span>
-                <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-1">
-                  <Landmark className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{account?.name ?? "No active account"}</span>
-                </span>
-              </div>
-            </div>
-            <Link
-              href={hrefWithMobileContext({ path: "/dashboard", businessId })}
-              prefetch={false}
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground hover:bg-muted/50"
-            >
-              Desktop
-            </Link>
-          </div>
-        </div>
+        <MobilePageHeader
+          eyebrow="Mobile companion"
+          title="Today"
+          businessName={business?.name ?? "Business"}
+          accountName={account?.name ?? "No active account"}
+          actionHref={desktopDashboardHref}
+          actionLabel="Desktop"
+        />
 
         {bannerMessage ? (
           <InlineBanner title="Mobile home is partially unavailable" message={bannerMessage} />

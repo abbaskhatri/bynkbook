@@ -32,13 +32,13 @@ export function MobileTaskCard({
   const content = (
     <div
       className={cn(
-        "flex min-h-[78px] items-center gap-3 rounded-md border p-3 text-card-foreground shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+        "flex min-h-[72px] items-center gap-2.5 rounded-md border p-2.5 text-card-foreground shadow-[0_8px_22px_rgba(15,23,42,0.045)]",
         toneClasses[tone],
-        disabled ? "opacity-60" : "transition-[background-color,border-color,transform] hover:-translate-y-px hover:bg-muted/50"
+        disabled ? "opacity-60" : "transition-[background-color,border-color,transform,box-shadow] hover:-translate-y-px hover:bg-muted/50 active:translate-y-0 active:scale-[0.99]"
       )}
     >
       {icon ? (
-        <div className="mobile-token-card-control inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border text-muted-foreground">
+        <div className="mobile-token-card-control inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-muted-foreground shadow-sm">
           {icon}
         </div>
       ) : null}
@@ -47,12 +47,12 @@ export function MobileTaskCard({
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1 text-[15px] font-semibold leading-5 text-card-foreground">{title}</div>
           {metric ? (
-            <span className="mobile-token-card-control shrink-0 rounded-md border px-2 py-1 text-xs font-semibold tabular-nums text-card-foreground">
+            <span className="mobile-token-card-control shrink-0 rounded-md border px-2 py-1 text-[11px] font-semibold tabular-nums text-card-foreground">
               {metric}
             </span>
           ) : null}
         </div>
-        <div className="mt-1 line-clamp-2 text-[13px] leading-5 text-muted-foreground">{description}</div>
+        <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-muted-foreground">{description}</div>
       </div>
 
       {disabled ? null : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
