@@ -645,7 +645,8 @@ async function runAiFallback(args: {
     "Return strict JSON only.",
     "Do not invent categories.",
     "Only use category_id values supplied in the categories array.",
-    "Prefer deterministic candidates when they fit.",
+    "Prefer deterministic candidates when they fit, but still suggest a better supplied category when deterministic candidates are missing or clearly weak.",
+    "Use common bookkeeping judgment from merchant/payee text, memo, direction, and amount.",
     "Do not treat possible transfers, credit card payments, loan payments, refunds, owner equity, Zelle, ACH, or wire activity as ordinary expenses without clear evidence.",
     "Tax and payroll patterns must remain review-first.",
     "This fallback is only for ambiguous rows, so confidence must stay between 60 and 84.",
@@ -694,7 +695,7 @@ async function runAiFallback(args: {
     apiKey,
     system,
     user,
-    maxTokens: 1200,
+    maxTokens: Math.min(2600, 900 + args.items.length * 70),
   });
 
   const parsed: any = parseJsonModelOutput(raw);
@@ -885,7 +886,7 @@ export async function computeCategorySuggestionsForItems(args: {
 
     if (
       args.includeAiFallback !== false &&
-      aiEligible.length < 25 &&
+      aiEligible.length < 40 &&
       shouldRunAiFallback({
         deterministic,
         memorySuggestions,
@@ -932,7 +933,7 @@ export async function computeCategorySuggestionsForItems(args: {
     meta: {
       version: "catSug_v2",
       source: "CATEGORY_INTELLIGENCE_ENGINE",
-      aiBatchCap: 25,
+      aiBatchCap: 40,
       aiRequestedRows: aiEligible.length,
     },
   };

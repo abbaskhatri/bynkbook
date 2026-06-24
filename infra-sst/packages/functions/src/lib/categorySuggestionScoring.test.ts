@@ -337,6 +337,92 @@ describe("category keyword suggestions", () => {
     expect(stateTaxSuggestions[0]?.category_id).toBe("cat-income-tax");
   });
 
+  test("suggests common operating expense families when matching categories exist", () => {
+    const cases = [
+      {
+        payee: "Starbucks",
+        memo: "business coffee",
+        categories: [{ id: "cat-meals", name: "Meals & Entertainment" }],
+        expected: "cat-meals",
+      },
+      {
+        payee: "United Airlines",
+        memo: "airline ticket",
+        categories: [{ id: "cat-travel", name: "Travel" }],
+        expected: "cat-travel",
+      },
+      {
+        payee: "Stripe",
+        memo: "processing fee",
+        categories: [{ id: "cat-merchant-fees", name: "Merchant Fees" }],
+        expected: "cat-merchant-fees",
+      },
+      {
+        payee: "Grimaldo Repairs",
+        memo: "repair service",
+        categories: [{ id: "cat-repairs", name: "Repairs & Maintenance" }],
+        expected: "cat-repairs",
+      },
+      {
+        payee: "Mailchimp",
+        memo: "marketing service",
+        categories: [{ id: "cat-advertising", name: "Advertising" }],
+        expected: "cat-advertising",
+      },
+      {
+        payee: "Chamber of Commerce",
+        memo: "annual dues",
+        categories: [{ id: "cat-dues", name: "Dues and Subscriptions" }],
+        expected: "cat-dues",
+      },
+    ];
+
+    for (const c of cases) {
+      const suggestions = buildKeywordCategorySuggestions({
+        item: keywordItem({ payee: c.payee, memo: c.memo }),
+        categories: c.categories,
+        limit: 3,
+      });
+
+      expect(suggestions[0]?.category_id).toBe(c.expected);
+    }
+  });
+
+  test("suggests payroll and interest income with direction-aware signals", () => {
+    const payrollSuggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({ payee: "Gusto Payroll", memo: "payroll processor debit" }),
+      categories: [{ id: "cat-payroll", name: "Payroll Expense" }],
+      limit: 3,
+    });
+
+    expect(payrollSuggestions[0]).toMatchObject({
+      category_id: "cat-payroll",
+      category_name: "Payroll Expense",
+      confidence: 84,
+    });
+
+    const interestSuggestions = buildKeywordCategorySuggestions({
+      item: keywordItem({
+        payee: "Bank Interest Credit",
+        memo: "interest income",
+        direction: "INCOME",
+        amount_cents: 233n,
+      }),
+      categories: [{ id: "cat-interest", name: "Interest Income" }],
+      limit: 3,
+    });
+
+    expect(interestSuggestions[0]?.category_id).toBe("cat-interest");
+
+    const wrongDirectionInterest = buildKeywordCategorySuggestions({
+      item: keywordItem({ payee: "Loan interest payment", direction: "EXPENSE" }),
+      categories: [{ id: "cat-interest", name: "Interest Income" }],
+      limit: 3,
+    });
+
+    expect(wrongDirectionInterest).toEqual([]);
+  });
+
   test("does not suggest tax category for income direction tax refunds", () => {
     const suggestions = buildKeywordCategorySuggestions({
       item: keywordItem({

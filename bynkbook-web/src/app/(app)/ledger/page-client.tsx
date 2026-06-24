@@ -1372,7 +1372,7 @@ export default function LedgerPageClient() {
         accountId: selectedAccountId,
         items,
         limitPerItem: 1,
-        includeAiFallback: false,
+        includeAiFallback: true,
       });
 
       const next: Record<string, any> = {};

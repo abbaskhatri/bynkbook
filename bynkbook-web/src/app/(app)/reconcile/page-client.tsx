@@ -1527,7 +1527,7 @@ export default function ReconcilePageClient() {
             },
           ],
           limitPerItem: 3,
-          includeAiFallback: false,
+          includeAiFallback: true,
         });
 
         const s = res?.suggestionsById?.[bankId] ?? [];
