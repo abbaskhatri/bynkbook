@@ -1093,14 +1093,12 @@ export default function IssuesPageClient() {
         businessId={selectedBusinessId ?? ""}
         accountId={selectedAccountId ?? ""}
         issueIds={selectedIssueBackendIds}
-        onDidApply={async () => {
+        onDidApply={() => {
           clearSelection();
           if (selectedBusinessId && selectedAccountId) {
-            await Promise.all([
-              qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
-              qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
-              qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false }),
-            ]);
+            void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
+            void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
+            void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
           }
         }}
       />

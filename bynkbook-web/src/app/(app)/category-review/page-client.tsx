@@ -991,7 +991,18 @@ export default function CategoryReviewPageClient() {
     const idx = prev.findIndex((x: any) => String(x.id) === entryId);
     const prevEntry = idx >= 0 ? prev[idx] : null;
 
-    // Patch only after the API succeeds so single-row applies feel immediate without rollback risk.
+    if (idx >= 0 && prevEntry) {
+      updateCategoryReviewEntriesCache((row: any) =>
+        String(row.id) === entryId
+          ? {
+              ...row,
+              category_id: categoryId,
+              category_name: categoryId ? (categoryNameById[String(categoryId)] ?? row.category_name ?? null) : null,
+              suggested_category_id: suggestedCategoryId ?? null,
+            }
+          : row
+      );
+    }
 
     try {
       const updatedEntry = await updateEntry({

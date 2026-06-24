@@ -1278,7 +1278,26 @@ export default function ReconcilePageClient() {
       void refreshTablesFully({ preserveOnEmpty: true, skipLegacyMatches: true });
     }, 150);
   }
-    useEffect(() => {
+
+  function settleReconcileInBackground(
+    reason: string,
+    afterRefresh?: () => void | Promise<void>
+  ) {
+    void (async () => {
+      try {
+        await refreshTablesFully({
+          preserveOnEmpty: true,
+          skipLegacyMatches: true,
+          silent: true,
+        });
+        await afterRefresh?.();
+      } catch (e: any) {
+        applyMutationError(e, `Can't refresh ${reason}`);
+      }
+    })();
+  }
+
+  useEffect(() => {
     const onLedgerRefresh = () => {
       void refreshTablesFully({ preserveOnEmpty: true, skipLegacyMatches: true });
     };
@@ -1837,12 +1856,8 @@ export default function ReconcilePageClient() {
         }
       }
 
-      await refreshTablesFully({
-        preserveOnEmpty: true,
-        skipLegacyMatches: true,
-        silent: true,
-      });
       clearMutErr();
+      settleReconcileInBackground("auto-match");
     } catch (e: any) {
       const r = applyMutationError(e, "Can't auto-match");
       if (r.isClosed) {
@@ -3554,28 +3569,23 @@ const displayBankActiveList = useMemo(() => {
                             allowPossibleDuplicate: createEntryDuplicateCandidates.length > 0,
                           });
 
-                          await refreshTablesFully({
-                            preserveOnEmpty: true,
-                            skipLegacyMatches: true,
-                            silent: true,
-                          });
-                          await refreshIssuesAfterBankEntryCreate();
-
-                          setOptimisticPendingEntryDrafts((prev) =>
-                            prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
-                          );
-                          setOptimisticHiddenBankTxnIds((prev) => {
-                            const next = new Set(prev);
-                            next.delete(bankId);
-                            return next;
-                          });
-
                           clearMutErr();
                           setOpenCreateEntry(false);
                           setCreateEntryBankTxnId(null);
                           setCreateEntryDuplicateCandidates([]);
                           setCreateEntryDuplicateConfirm("");
                           setCreateEntryCategoryTouched(false);
+                          settleReconcileInBackground("created entry", async () => {
+                            await refreshIssuesAfterBankEntryCreate();
+                            setOptimisticPendingEntryDrafts((prev) =>
+                              prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
+                            );
+                            setOptimisticHiddenBankTxnIds((prev) => {
+                              const next = new Set(prev);
+                              next.delete(bankId);
+                              return next;
+                            });
+                          });
                         } catch (e: any) {
                           setOptimisticPendingEntryDrafts((prev) =>
                             prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
@@ -4194,25 +4204,33 @@ const displayBankActiveList = useMemo(() => {
                           return next;
                         });
 
-                        await refreshTablesFully({
-                          preserveOnEmpty: true,
-                          skipLegacyMatches: true,
-                          silent: true,
-                        });
-                        if (list.some((r: any) => String(r?.status ?? "") === "CREATED")) {
-                          await refreshIssuesAfterBankEntryCreate();
-                        }
-
                         // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
+                        const createdIds: string[] = [];
                         setSelectedBankTxnIds((prev) => {
                           const next = new Set(prev);
                           for (const r of list) {
                             const bid = String(r?.bank_transaction_id ?? "");
                             const st = String(r?.status ?? "");
                             if (!bid) continue;
+                            if (st === "CREATED") createdIds.push(bid);
                             if (st === "CREATED" || st === "SKIPPED") next.delete(bid);
                           }
                           return next;
+                        });
+                        if (createdIds.length > 0) {
+                          setOptimisticHiddenBankTxnIds((prev) => {
+                            const next = new Set(prev);
+                            for (const id of createdIds) next.add(id);
+                            return next;
+                          });
+                        }
+                        settleReconcileInBackground("bulk-created entries", async () => {
+                          if (createdIds.length > 0) await refreshIssuesAfterBankEntryCreate();
+                          setOptimisticHiddenBankTxnIds((prev) => {
+                            const next = new Set(prev);
+                            for (const id of createdIds) next.delete(id);
+                            return next;
+                          });
                         });
                       } catch (e: any) {
                         applyMutationError(e, "Can’t create entries");
@@ -4535,12 +4553,9 @@ const displayBankActiveList = useMemo(() => {
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
 
-                          await refreshTablesFully({
-                            preserveOnEmpty: true,
-                            skipLegacyMatches: true,
-                            silent: true,
+                          settleReconcileInBackground("bank sync", () => {
+                            setBankCountRefreshSeq((n) => n + 1);
                           });
-                          setBankCountRefreshSeq((n) => n + 1);
                         } catch (e: any) {
                           setSyncMsg(`Sync failed: ${e?.message ?? "Unable to refresh transactions"}`);
                           setPendingMsg("Keeping the current transaction list until sync succeeds.");
@@ -4614,11 +4629,9 @@ const displayBankActiveList = useMemo(() => {
                       const res = await plaidStatus(selectedBusinessId, selectedAccountId);
                       setPlaid(res);
 
-                      await refreshTablesFully({
-                        preserveOnEmpty: true,
-                        skipLegacyMatches: true,
+                      settleReconcileInBackground("bank connection", () => {
+                        setBankCountRefreshSeq((n) => n + 1);
                       });
-                      setBankCountRefreshSeq((n) => n + 1);
                     } finally {
                       setPlaidLoading(false);
                     }
@@ -4920,12 +4933,19 @@ const displayBankActiveList = useMemo(() => {
                                               next[bid] = { ...next[bid], status: "CREATED", code: "" };
                                               return next;
                                             });
-                                            await refreshTablesFully({
-                                              preserveOnEmpty: true,
-                                              skipLegacyMatches: true,
-                                              silent: true,
+                                            setOptimisticHiddenBankTxnIds((prev) => {
+                                              const next = new Set(prev);
+                                              next.add(bid);
+                                              return next;
                                             });
-                                            await refreshIssuesAfterBankEntryCreate();
+                                            settleReconcileInBackground("created entry", async () => {
+                                              await refreshIssuesAfterBankEntryCreate();
+                                              setOptimisticHiddenBankTxnIds((prev) => {
+                                                const next = new Set(prev);
+                                                next.delete(bid);
+                                                return next;
+                                              });
+                                            });
                                           } catch (err: any) {
                                             applyMutationError(err, "Can’t create entry");
                                           } finally {
@@ -5613,12 +5633,6 @@ const displayBankActiveList = useMemo(() => {
                           }
                         }
 
-                        await refreshTablesFully({
-                          preserveOnEmpty: true,
-                          skipLegacyMatches: true,
-                          silent: true,
-                        });
-
                         clearMutErr();
                         setOpenMatch(false);
                         setMatchBankTxnId(null);
@@ -5626,6 +5640,7 @@ const displayBankActiveList = useMemo(() => {
                         setMatchSelectedEntryIds(new Set());
                         setMatchAiSuggestions([]);
                         setMatchSuggestError(null);
+                        settleReconcileInBackground("matched transactions");
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t match transactions");
                         if (!r.isClosed) setMatchError(r.msg);
@@ -6175,12 +6190,6 @@ const displayBankActiveList = useMemo(() => {
                           }
                         }
 
-                        await refreshTablesFully({
-                          preserveOnEmpty: true,
-                          skipLegacyMatches: true,
-                          silent: true,
-                        });
-
                         clearMutErr();
                         setOpenEntryMatch(false);
                         setEntryMatchEntryId(null);
@@ -6188,6 +6197,7 @@ const displayBankActiveList = useMemo(() => {
                         setEntryMatchSelectedBankTxnIds(new Set());
                         setEntryAiSuggestions([]);
                         setEntrySuggestError(null);
+                        settleReconcileInBackground("matched entry");
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t create match");
                         if (!r.isClosed) setEntryMatchError(r.msg);
@@ -6976,14 +6986,21 @@ const displayBankActiveList = useMemo(() => {
                     confirmSoftDelete: willSoftDelete,
                   });
 
-                  await refreshTablesFully({ preserveOnEmpty: true });
-                  await loadAllMatchGroups({ force: true });
+                  const voidedAt = new Date().toISOString();
+                  const voidedGroupPatch = (g: any) =>
+                    String(g?.id ?? "") === groupId ? { ...g, status: "VOIDED", voided_at: voidedAt } : g;
+
+                  setMatchGroups((prev) => (prev ?? []).map(voidedGroupPatch));
+                  setAllMatchGroups((prev) => (prev ?? []).map(voidedGroupPatch));
 
                   clearMutErr();
                   setRevertConfirmOpen(false);
                   setRevertPreview(null);
                   setOpenReconAuditDetail(false);
                   setSelectedReconAudit(null);
+                  settleReconcileInBackground("reverted match", async () => {
+                    await loadAllMatchGroups({ force: true });
+                  });
                 } catch (e: any) {
                   const r = applyMutationError(e, "Can’t revert match");
                   if (!r.isClosed) setRevertError(r.msg);
@@ -7335,15 +7352,12 @@ const displayBankActiveList = useMemo(() => {
             type="BANK_STATEMENT"
             limit={25}
             showStatementPeriod
-            onImported={async () => {
+            onImported={() => {
               setSyncMsg("Bank statement import finished; transaction list refreshed.");
               setPendingMsg(null);
-              await refreshTablesFully({
-                preserveOnEmpty: true,
-                skipLegacyMatches: true,
-                silent: true,
+              settleReconcileInBackground("statement import", () => {
+                setBankCountRefreshSeq((n) => n + 1);
               });
-              setBankCountRefreshSeq((n) => n + 1);
             }}
           />
         </AppDialog>
