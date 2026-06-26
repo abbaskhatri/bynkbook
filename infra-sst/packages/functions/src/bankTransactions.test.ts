@@ -335,6 +335,28 @@ describe("bank transactions list status and pagination", () => {
     expect(body.items.map((row: any) => row.id)).toEqual(["matched-group", "matched-legacy"]);
   });
 
+  test("list exposes sanitized check_number without raw bank payload", async () => {
+    const rows = [
+      tx("check-row", "2026-04-28", "2026-04-28T12:00:00.000Z", {
+        name: "CHECK PAID",
+        raw: { check_number: "001234", original_description: "CHECK PAID TRACE 999999999" },
+      }),
+    ];
+    const { handler } = await loadHandler({ rows });
+
+    const res = await handler(event({ status: "all", limit: "10" }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.items[0]).toEqual(
+      expect.objectContaining({
+        id: "check-row",
+        check_number: "001234",
+      })
+    );
+    expect(body.items[0].raw).toBeUndefined();
+  });
+
   test("status filter is applied before limit", async () => {
     const rows = [
       tx("matched-newest", "2026-04-30", "2026-04-30T12:00:00.000Z"),
@@ -476,6 +498,36 @@ describe("bank transaction create-entry duplicate preflight", () => {
     expect(body.code).toBe("POSSIBLE_DUPLICATE_ENTRY");
     expect(body.possible_duplicate_candidates).toEqual([
       expect.objectContaining({ entry_id: "entry-dup", payee: "Coffee House" }),
+    ]);
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("blocks check-number duplicate even when bank description is generic", async () => {
+    const rows = [
+      tx("bank-check-dup", "2026-04-26", "2026-04-26T12:00:00.000Z", {
+        name: "CHECK PAID",
+        amount_cents: -5000n,
+        raw: { check_number: "001234" },
+      }),
+    ];
+    const manual = entry("entry-check-dup", "2026-04-25", -5000n, {
+      payee: "Rent",
+      memo: "Ref: 1234",
+    });
+    const { handler, prisma } = await loadHandler({ rows, entries: [manual] });
+
+    const res = await handler(postCreateEntryEvent("bank-check-dup", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("POSSIBLE_DUPLICATE_ENTRY");
+    expect(body.possible_duplicate_candidates).toEqual([
+      expect.objectContaining({
+        entry_id: "entry-check-dup",
+        duplicate_reason: "matching_check_number",
+        duplicate_confidence: "high",
+      }),
     ]);
     expect(prisma.entry.create).not.toHaveBeenCalled();
     expect(prisma.matchGroup.create).not.toHaveBeenCalled();

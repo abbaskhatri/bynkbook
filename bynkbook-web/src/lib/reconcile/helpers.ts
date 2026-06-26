@@ -83,10 +83,12 @@ export function scoreEntryCandidate(bank: any, entry: any) {
 
   const overlapRaw = tokenOverlap(String(bank?.name ?? ""), String(entry?.payee ?? ""));
   const overlap = Math.min(overlapRaw, 3);
+  const refMatch = checkRefsMatch(bank, entry);
 
   const diffN = Number(diff);
   const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+  const refBonus = refMatch && diff === 0n && dtDays <= 7 ? 1_000_000 : 0;
+  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus - refBonus;
 
   return {
     score,
@@ -94,6 +96,7 @@ export function scoreEntryCandidate(bank: any, entry: any) {
     dtDays,
     overlap,
     exactAmount: diff === 0n,
+    refMatch,
   };
 }
 
@@ -111,10 +114,12 @@ export function scoreBankCandidate(entry: any, bank: any) {
 
   const overlapRaw = tokenOverlap(String(entry?.payee ?? ""), String(bank?.name ?? ""));
   const overlap = Math.min(overlapRaw, 3);
+  const refMatch = checkRefsMatch(bank, entry);
 
   const diffN = Number(diff);
   const tokenBonus = diff === 0n && dtDays <= 3 ? overlap * 50_000 : 0;
-  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus;
+  const refBonus = refMatch && diff === 0n && dtDays <= 7 ? 1_000_000 : 0;
+  const score = diffN * 1_000_000 + dtDays * 10_000 - tokenBonus - refBonus;
 
   return {
     score,
@@ -122,6 +127,7 @@ export function scoreBankCandidate(entry: any, bank: any) {
     dtDays,
     overlap,
     exactAmount: diff === 0n,
+    refMatch,
   };
 }
 
@@ -245,6 +251,21 @@ export function extractEntryRefFromEntry(entry: any) {
   return compactText(match?.[1] ?? "", "");
 }
 
+export function normalizeCheckRefForMatch(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  if (!/^\d{2,8}$/.test(digits)) return "";
+  const normalized = digits.replace(/^0+/, "");
+  return normalized || digits;
+}
+
+export function checkRefsMatch(bank: any, entry: any) {
+  const bankRef = normalizeCheckRefForMatch(extractCheckRefFromBankTransaction(bank));
+  const entryRef = normalizeCheckRefForMatch(extractEntryRefFromEntry(entry));
+  return !!bankRef && !!entryRef && bankRef === entryRef;
+}
+
 export function inferMethodFromBankTransaction(bank: any) {
   if (extractCheckRefFromBankTransaction(bank)) return "CHECK";
 
@@ -306,6 +327,10 @@ export function duplicateReasonChips(bank: any, candidate: any, matchStatus: str
 
   if (sameAmountAbs(bank?.amount_cents, candidate?.amount_cents)) {
     chips.push({ label: "same amount", tone: "success" });
+  }
+
+  if (checkRefsMatch(bank, candidate)) {
+    chips.push({ label: "check # match", tone: "success" });
   }
 
   if (Number(meta.dtDays ?? 9999) <= 3) {
@@ -380,6 +405,8 @@ export function matchSignalChips(meta: any, similarCandidateCount: number, aiCon
   if (overlap >= 2) chips.push({ label: "Similar payee", tone: "success" });
   else if (overlap === 1) chips.push({ label: "Some payee overlap", tone: "default" });
   else chips.push({ label: "Payee differs", tone: "warning" });
+
+  if (meta?.refMatch) chips.push({ label: "Check # match", tone: "success" });
 
   if (similarCandidateCount > 1) {
     chips.push({

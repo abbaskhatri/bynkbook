@@ -79,6 +79,7 @@ import {
   compareBankDateDesc,
   compareEntryDateAsc,
   compareEntryDateDesc,
+  checkRefsMatch,
   directionLabel,
   duplicateReasonChips,
   entriesSignature,
@@ -2952,6 +2953,8 @@ const displayBankActiveList = useMemo(() => {
 
       let onlyMatchId: string | null = null;
       let count = 0;
+      let onlyRefMatchId: string | null = null;
+      let refMatchCount = 0;
 
       for (const e of entriesExpectedAllList) {
         const entryId = String(e?.id ?? "");
@@ -2972,15 +2975,22 @@ const displayBankActiveList = useMemo(() => {
         if (Number(meta.dtDays ?? 9999) > 3) continue;
 
         count++;
+        if (checkRefsMatch(t, e)) {
+          refMatchCount++;
+          if (refMatchCount === 1) onlyRefMatchId = entryId;
+          else onlyRefMatchId = null;
+        }
         if (count > 1) {
-          // Ambiguous — bail; auto-match only when exactly one candidate.
+          // Ambiguous by amount/date; a unique check-number match below can
+          // still safely disambiguate.
           onlyMatchId = null;
-          break;
+          continue;
         }
         onlyMatchId = entryId;
       }
 
-      if (count === 1 && onlyMatchId) out.set(txnId, onlyMatchId);
+      if (refMatchCount === 1 && onlyRefMatchId) out.set(txnId, onlyRefMatchId);
+      else if (count === 1 && onlyMatchId) out.set(txnId, onlyMatchId);
     }
     return out;
   }, [bankTab, displayBankActiveList, entriesExpectedAllList, isBankTxnFullyMatched]);

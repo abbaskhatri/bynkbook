@@ -99,6 +99,12 @@ function normalizeCheckNumberCandidate(value: any) {
   return s;
 }
 
+function normalizeCheckNumberForCompare(value: any) {
+  const candidate = normalizeCheckNumberCandidate(String(value ?? "").replace(/\D/g, ""));
+  if (!candidate) return "";
+  return candidate.replace(/^0+/, "") || candidate;
+}
+
 // Extract a labeled reference/trace number from a text string.
 // Mirrors the same logic in issuesScan.ts — only matches explicit labels to
 // avoid false matches on store IDs, amounts, or masked account fragments.
@@ -210,6 +216,32 @@ function memoWithCheckRef(memo: string, checkRef: string) {
   return `Ref: ${ref}\n${base}`.slice(0, 400);
 }
 
+function extractCheckNumberFromEntry(entry: any) {
+  const explicit = normalizeCheckNumberCandidate(
+    String(
+      entry?.ref ??
+        entry?.reference ??
+        entry?.reference_number ??
+        entry?.referenceNumber ??
+        ""
+    ).replace(/\D/g, "")
+  );
+  if (explicit) return explicit;
+
+  const memoRef = String(entry?.memo ?? "").match(/\bref\s*:\s*([0-9]{2,8})\b/i)?.[1];
+  const normalizedMemoRef = normalizeCheckNumberCandidate(String(memoRef ?? ""));
+  if (normalizedMemoRef) return normalizedMemoRef;
+
+  const ref = extractRefFromText(`${entry?.memo ?? ""} ${entry?.payee ?? ""}`);
+  return normalizeCheckNumberCandidate(String(ref ?? "").replace(/\D/g, ""));
+}
+
+function sameCheckNumber(bankCheckRef: string, entry: any) {
+  const bankComparable = normalizeCheckNumberForCompare(bankCheckRef);
+  const entryComparable = normalizeCheckNumberForCompare(extractCheckNumberFromEntry(entry));
+  return !!bankComparable && !!entryComparable && bankComparable === entryComparable;
+}
+
 function dateOnlyUtc(ymd: string) {
   return new Date(`${ymd}T00:00:00Z`);
 }
@@ -315,6 +347,7 @@ function hasGenericBankDescriptor(value: any) {
     /\bdeposit\b/i,
     /\bbankcard\b/i,
     /\bmerchant\s+services?\b/i,
+    /\b(?:check|chk)\b/i,
     /\bcheck\s*#?\s*\d+\b/i,
   ].some((pattern) => pattern.test(text));
 }
@@ -427,7 +460,8 @@ async function findPossibleCreateEntryDuplicates(args: {
   // original_description, not in the short name, so using the full text is essential
   // for both payee similarity and reference-number extraction.
   const bankFullText = bankTransactionSearchText(bankTxn);
-  const bankRef = extractRefFromText(bankFullText);
+  const bankCheckRef = extractCheckNumberFromBankTransaction(bankTxn);
+  const bankRef = bankCheckRef || extractRefFromText(bankFullText);
 
   return rows
     // An entry already linked to any bank transaction is a different real-world
@@ -436,6 +470,7 @@ async function findPossibleCreateEntryDuplicates(args: {
     .filter(isDuplicatePreflightEligibleEntry)
     .map((entry: any) => {
       const dateDistance = dateDistanceDays(entry?.date, entryDateYmd);
+      const checkNumberMatch = sameCheckNumber(bankCheckRef || bankRef || "", entry);
       const similarPayee = dateDistance <= CREATE_ENTRY_DUPLICATE_WINDOW_DAYS && hasSimilarPayee(bankFullText, entry);
       const genericBankManual = isGenericBankManualDuplicateCandidate({
         bankFullText,
@@ -448,9 +483,9 @@ async function findPossibleCreateEntryDuplicates(args: {
       return {
         entry,
         dateDistance,
-        duplicateReason: genericBankManual ? "generic_bank_manual_same_amount" : "similar_payee",
-        duplicateConfidence: genericBankManual ? "high" : "medium",
-        isDuplicateCandidate: similarPayee || genericBankManual,
+        duplicateReason: checkNumberMatch ? "matching_check_number" : genericBankManual ? "generic_bank_manual_same_amount" : "similar_payee",
+        duplicateConfidence: checkNumberMatch || genericBankManual ? "high" : "medium",
+        isDuplicateCandidate: similarPayee || genericBankManual || checkNumberMatch,
       };
     })
     .filter((candidate: any) => candidate.isDuplicateCandidate)
@@ -459,8 +494,11 @@ async function findPossibleCreateEntryDuplicates(args: {
     .filter((candidate: any) => {
       if (!bankRef) return true;
       const entry = candidate.entry;
-      const entryRef = extractRefFromText(`${entry?.memo ?? ""} ${entry?.payee ?? ""}`);
+      const entryRef = extractCheckNumberFromEntry(entry) || extractRefFromText(`${entry?.memo ?? ""} ${entry?.payee ?? ""}`);
       if (!entryRef) return true;
+      const bankComparable = normalizeCheckNumberForCompare(bankRef);
+      const entryComparable = normalizeCheckNumberForCompare(entryRef);
+      if (bankComparable && entryComparable) return bankComparable === entryComparable;
       return bankRef === entryRef;
     })
     .slice(0, 5)
@@ -1568,14 +1606,22 @@ export async function handler(event: any) {
         source_upload_id: true,
         import_hash: true,
         created_at: true,
+        raw: true,
       },
     }),
     prisma.bankTransaction.count({ where: whereBase }),
   ]);
 
   const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : null;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const items = pageRows.map((row: any) => {
+    const { raw, ...rest } = row;
+    return {
+      ...rest,
+      check_number: extractCheckNumberFromBankTransaction(row) || null,
+    };
+  });
+  const nextCursor = hasMore ? encodeCursor(pageRows[pageRows.length - 1]) : null;
 
   return json(200, { ok: true, items, nextCursor, totalCount });
 }

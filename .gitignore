@@ -63,6 +63,8 @@ docs/**/debug*
 # Local Playwright auth/session files
 bynkbook-web/auth/
 .qa/
+.claude/
+.codex-tmp/
 .codex-tmp/final-smoke-fixture-validate.mjs
 .codex-tmp/final-smoke-fixture-seed.mjs
 .codex-tmp/final-smoke-check-suggestion-primer.mjs
