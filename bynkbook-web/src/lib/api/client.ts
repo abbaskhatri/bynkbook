@@ -43,7 +43,10 @@ async function fetchSessionToken(forceRefresh: boolean): Promise<string | null> 
   );
   const accessToken = session.tokens?.accessToken?.toString();
   const idToken = session.tokens?.idToken?.toString();
-  return accessToken ?? idToken ?? null;
+  // API Gateway's Cognito JWT authorizer is configured with the app client
+  // as audience. Cognito ID tokens carry that audience; access tokens carry
+  // client_id instead and can be rejected with 401 before Lambda runs.
+  return idToken ?? accessToken ?? null;
 }
 
 async function getAuthToken(): Promise<string | null> {
@@ -87,6 +90,17 @@ if (!API_BASE && process.env.NODE_ENV !== "production") {
   throw new Error("Missing NEXT_PUBLIC_API_URL. Set it in .env.local (see .env.example).");
 }
 
+async function refreshAuthToken(): Promise<string | null> {
+  cachedToken = null;
+  tokenExpiresAt = 0;
+  tokenPromise = null;
+
+  const token = await fetchSessionToken(true).catch(() => null);
+  cachedToken = token;
+  tokenExpiresAt = token ? Date.now() + 60_000 : 0;
+  return token;
+}
+
 function joinSignals(signals: Array<AbortSignal | null | undefined>) {
   const activeSignals = signals.filter((signal): signal is AbortSignal => !!signal);
   if (activeSignals.length === 0) return null;
@@ -122,19 +136,32 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const timeoutMs = Math.max(Number(init?.timeoutMs ?? DEFAULT_TIMEOUT_MS), 1);
-  const timeoutController = new AbortController();
-  const timeout = globalThis.setTimeout(() => timeoutController.abort(), timeoutMs);
+  const runFetch = async (requestHeaders: Headers) => {
+    const timeoutController = new AbortController();
+    const timeout = globalThis.setTimeout(() => timeoutController.abort(), timeoutMs);
 
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE ?? ""}${path}`, {
-      ...init,
-      headers,
-      signal: joinSignals([init?.signal, timeoutController.signal]) ?? undefined,
-      cache: "no-store",
-    });
-  } finally {
-    globalThis.clearTimeout(timeout);
+    try {
+      return await fetch(`${API_BASE ?? ""}${path}`, {
+        ...init,
+        headers: requestHeaders,
+        signal: joinSignals([init?.signal, timeoutController.signal]) ?? undefined,
+        cache: "no-store",
+      });
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  };
+
+  let res = await runFetch(headers);
+
+  if (res.status === 401) {
+    const refreshedToken = await refreshAuthToken();
+    if (refreshedToken) {
+      const retryHeaders = new Headers(init?.headers);
+      retryHeaders.set("Content-Type", "application/json");
+      retryHeaders.set("Authorization", `Bearer ${refreshedToken}`);
+      res = await runFetch(retryHeaders);
+    }
   }
 
   const ms = performance.now() - t0;

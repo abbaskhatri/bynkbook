@@ -31,7 +31,7 @@ export default function OAuthCallbackClient() {
     (async () => {
       try {
         await sleep(150);
-        await withTimeout(fetchAuthSession(), 8000);
+        await withTimeout(fetchAuthSession({ forceRefresh: true }), 12000);
         await withTimeout(getCurrentUser(), 8000);
 
         const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
@@ -43,7 +43,7 @@ export default function OAuthCallbackClient() {
         try {
           setMsg("Finishing sign-in… (retrying)");
           await sleep(600);
-          await withTimeout(fetchAuthSession(), 8000);
+          await withTimeout(fetchAuthSession({ forceRefresh: true }), 12000);
           await withTimeout(getCurrentUser(), 8000);
 
           const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
