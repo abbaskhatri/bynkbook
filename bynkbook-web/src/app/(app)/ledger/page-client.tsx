@@ -17,7 +17,7 @@
  * ================================
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -227,19 +227,19 @@ export default function LedgerPageClient() {
     }
   }, []);
 
-  const perfLog = (...args: any[]) => {
+  const perfLog = useCallback((...args: any[]) => {
     if (!perfOn) return;
     if (process.env.NODE_ENV === "production") return;
      
     if (process.env.NODE_ENV === "development") {
       console.log(...args);
     }
-  };
+  }, [perfOn]);
 
   // Coalesced background refresh for entries (no storms)
   const entriesRefreshTimerRef = useRef<number | null>(null);
 
-  const scheduleEntriesRefresh = (businessId: string | null, accountId: string | null, reason: string) => {
+  const scheduleEntriesRefresh = useCallback((businessId: string | null, accountId: string | null, reason: string) => {
     if (!businessId || !accountId) return;
 
     // coalesce
@@ -260,7 +260,7 @@ export default function LedgerPageClient() {
 
       perfLog(`[PERF][entriesRefresh] fired (${reason})`);
     }, 15000); // 15s idle
-  };
+  }, [perfLog, qc]);
 
   const cancelEntriesRefresh = () => {
     if (entriesRefreshTimerRef.current) {
@@ -328,7 +328,7 @@ export default function LedgerPageClient() {
 
     window.addEventListener("bynk:ledger-refresh-now", fn as any);
     return () => window.removeEventListener("bynk:ledger-refresh-now", fn as any);
-  }, [qc]);
+  }, [perfLog, qc]);
 
   // Open Apply Payment dialog from vendor suggestion pill (no redirect)
   useEffect(() => {
@@ -547,7 +547,7 @@ export default function LedgerPageClient() {
   const [loadedPageCount, setLoadedPageCount] = useState(1);
 
   const maxFetch = ENTRIES_API_MAX_LIMIT;
-  const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage), [rowsPerPage]);
+  const fetchLimit = useMemo(() => Math.min(maxFetch, rowsPerPage), [maxFetch, rowsPerPage]);
 
   // Server-side find: payee/memo search and date range are pushed to the
   // backend so finding an old entry is one request instead of clicking
@@ -703,7 +703,7 @@ export default function LedgerPageClient() {
     },
   });
 
-  const openIssues = issuesListQ.data?.issues ?? [];
+  const openIssues = useMemo(() => issuesListQ.data?.issues ?? [], [issuesListQ.data?.issues]);
   const issueLookupWarning = issuesListQ.isError
     ? "Some issue markers couldn’t load. Ledger rows are still available."
     : null;
@@ -816,7 +816,7 @@ export default function LedgerPageClient() {
     if (!selectedBusinessId) return;
     // One refresh on navigation / business scope change (prevents stale category list)
     void qc.invalidateQueries({ queryKey: ["categories", selectedBusinessId], exact: false });
-  }, [selectedBusinessId]);
+  }, [qc, selectedBusinessId]);
 
   const categoriesQ = useQuery({
     queryKey: ["categories", selectedBusinessId],
@@ -829,7 +829,7 @@ export default function LedgerPageClient() {
     },
   });
 
-  const categoryRows = categoriesQ.data?.rows ?? [];
+  const categoryRows = useMemo(() => categoriesQ.data?.rows ?? [], [categoriesQ.data?.rows]);
 
   const categoryNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -999,7 +999,15 @@ export default function LedgerPageClient() {
         isOpeningBalanceEntry,
       };
     });
-  }, [entriesWithOpening, openingBalanceCents, closedThroughDate, matchedEntryIdSet, hasAdjustmentByEntryId, isServerFiltered]);
+  }, [
+    categoryNameById,
+    entriesWithOpening,
+    openingBalanceCents,
+    closedThroughDate,
+    matchedEntryIdSet,
+    hasAdjustmentByEntryId,
+    isServerFiltered,
+  ]);
 
   const rowModelById = useMemo(() => {
     const map = new Map<string, (typeof rowModels)[number]>();
@@ -1473,12 +1481,12 @@ export default function LedgerPageClient() {
     setSelectedIds((m) => ({ ...m, [id]: !m[id] }));
   }
 
-  function toggleAllPage() {
+  const toggleAllPage = useCallback(() => {
     const next = { ...selectedIds };
     const shouldSelect = !allPageSelected;
     for (const id of selectablePageIds) next[id] = shouldSelect;
     setSelectedIds(next);
-  }
+  }, [allPageSelected, selectablePageIds, selectedIds]);
 
   // Bulk actions (Ledger): bulk soft delete only
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
@@ -1620,15 +1628,15 @@ export default function LedgerPageClient() {
   >({});
   const undoTimerByEntryIdRef = useRef<Record<string, number>>({});
 
-  const clearUndoTimer = (entryId: string) => {
+  const clearUndoTimer = useCallback((entryId: string) => {
     const t = undoTimerByEntryIdRef.current[entryId];
     if (t) {
       window.clearTimeout(t);
       delete undoTimerByEntryIdRef.current[entryId];
     }
-  };
+  }, []);
 
-  const setUndoWindow = (entryId: string, prevCategoryId: string | null, nextCategoryId: string | null) => {
+  const setUndoWindow = useCallback((entryId: string, prevCategoryId: string | null, nextCategoryId: string | null) => {
     clearUndoTimer(entryId);
     const expiresAt = Date.now() + 10_000;
 
@@ -1646,7 +1654,7 @@ export default function LedgerPageClient() {
       });
       clearUndoTimer(entryId);
     }, 10_000);
-  };
+  }, [clearUndoTimer]);
 
   // Clean up timers on unmount
   useEffect(() => {
@@ -1859,7 +1867,7 @@ export default function LedgerPageClient() {
     scanEpochRef.current += 1;
     setScanBusy(false);
   }, [selectedBusinessId, selectedAccountId]);
-  async function scanIssues() {
+  const scanIssues = useCallback(async () => {
     if (scanBusy) return;
     if (!selectedBusinessId || !selectedAccountId) return;
 
@@ -1906,7 +1914,7 @@ export default function LedgerPageClient() {
     } finally {
       if (myEpoch === scanEpochRef.current) setScanBusy(false);
     }
-  }
+  }, [qc, scanBusy, scanKey, selectedAccountId, selectedBusinessId]);
 
   const payeeInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -2610,7 +2618,7 @@ export default function LedgerPageClient() {
     },
   });
 
-  function triggerSaveEdit(entryId: string) {
+  const triggerSaveEdit = useCallback((entryId: string) => {
     if (!editDraft) return;
 
     // Guard: optimistic temp rows are not yet server-backed (avoid PUT /entries/temp_... 500)
@@ -2719,7 +2727,16 @@ export default function LedgerPageClient() {
 
     setEditingId(null);
     setEditDraft(null);
-  }
+  }, [
+    categoryIdByNormName,
+    editDraft,
+    entriesWithOpening,
+    rowModels,
+    scheduleEntriesRefresh,
+    selectedAccountId,
+    selectedBusinessId,
+    updateMut,
+  ]);
 
   function cancelEdit() {
     setEditingId(null);
@@ -2842,7 +2859,7 @@ export default function LedgerPageClient() {
       <th className={th + " " + center + " px-0.5"} aria-label="Missing category issues"></th>
       <th className={th + " " + center}>Actions</th>
     </tr>
-  ), [allPageSelected, isNeedsReconcileView]);
+  ), [allPageSelected, isNeedsReconcileView, toggleAllPage]);
 
   const addRow = (
     <tr>
@@ -3418,6 +3435,12 @@ export default function LedgerPageClient() {
       ) : null}
     </div>
   ), [
+    bulkDeleteMut,
+    categoryNameById,
+    categoryRows,
+    debouncedPayee,
+    entriesKey,
+    err,
     searchPayee,
     filterType,
     filterMethod,
@@ -3430,8 +3453,13 @@ export default function LedgerPageClient() {
     filterAmountExact,
     ledgerViewMode,
     selectedCount,
-    allPageSelected,
     scanBusy,
+    scanIssues,
+    isServerFiltered,
+    qc,
+    rowsUi,
+    selectablePageIds,
+    selectedIds,
     showDeleted,
     lastScanAt,
     bulkMsg,
@@ -3525,7 +3553,10 @@ export default function LedgerPageClient() {
     },
   });
 
-  const fixIssueFallbackIssues = fixIssueContextQ.data?.issues ?? [];
+  const fixIssueFallbackIssues = useMemo(
+    () => fixIssueContextQ.data?.issues ?? [],
+    [fixIssueContextQ.data?.issues]
+  );
 
   const fixIssueDialogIssues = useMemo(() => {
     const byId = new Map<string, EntryIssueRow>();
@@ -3564,14 +3595,14 @@ export default function LedgerPageClient() {
   const [quickCatBusy, setQuickCatBusy] = useState(false);
   const [quickCatErr, setQuickCatErr] = useState<string | null>(null);
 
-  const cancelQuickCat = () => {
+  const cancelQuickCat = useCallback(() => {
     setQuickCatEntryId(null);
     setQuickCatValue("");
     setQuickCatBusy(false);
     setQuickCatErr(null);
-  };
+  }, []);
 
-  const saveQuickCat = async () => {
+  const saveQuickCat = useCallback(async () => {
     if (!selectedBusinessId || !selectedAccountId) return;
     if (!quickCatEntryId) return;
     const targetEntryId = quickCatEntryId;
@@ -3614,7 +3645,16 @@ export default function LedgerPageClient() {
     } finally {
       setQuickCatBusy(false);
     }
-  };
+  }, [
+    cancelQuickCat,
+    categoryIdByNormName,
+    qc,
+    quickCatEntryId,
+    quickCatValue,
+    selectedAccountId,
+    selectedBusinessId,
+    updateMut,
+  ]);
 
   // Quick-fix: Missing Category inline (no dialog)
 
@@ -4647,7 +4687,8 @@ export default function LedgerPageClient() {
     editedIds,
     editTypeOpen,
     editMethodOpen,
-    showDeleted,
+    cancelQuickCat,
+    clearUndoTimer,
     rowModels,
     selectedBusinessId,
     selectedAccountId,
@@ -4667,8 +4708,21 @@ export default function LedgerPageClient() {
     apTotalsByEntryId,
     deletingId,
     deleteMut.isPending,
+    categoryIdByNormName,
+    categoryNameById,
     categoryComboboxOptions,
+    createMut,
+    hardDeleteMut.isPending,
     isNeedsReconcileView,
+    qc,
+    restoreMut,
+    saveQuickCat,
+    savedById,
+    scheduleEntriesRefresh,
+    selectedAccount?.type,
+    setUndoWindow,
+    triggerSaveEdit,
+    updateMut,
     router,
   ]);
 

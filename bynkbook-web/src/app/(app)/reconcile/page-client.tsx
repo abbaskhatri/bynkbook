@@ -114,6 +114,8 @@ import {
   safeTopCategorySuggestion,
 } from "@/lib/categorySuggestions";
 
+const WRITE_ALLOWLIST = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
+
 type RefreshBankAndMatchesOptions = {
   preserveOnEmpty?: boolean;
   skipLegacyMatches?: boolean;
@@ -296,7 +298,6 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Phase 6A: Permission guardrails (deny-by-default)
   // -------------------------
-  const WRITE_ALLOWLIST = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
   const noPermTitle = "Insufficient permissions";
   const businessRole = useMemo(() => {
     const list = businessesQ.data ?? [];
@@ -530,6 +531,7 @@ export default function ReconcilePageClient() {
     date_from: from || undefined,
     date_to: to || undefined,
   });
+  const entriesIsPlaceholderData = !!(entriesQ as any).isPlaceholderData;
 
   const [entriesHydratedScopeKey, setEntriesHydratedScopeKey] = useState("");
   const [entriesExtraRows, setEntriesExtraRows] = useState<any[]>([]);
@@ -550,7 +552,7 @@ export default function ReconcilePageClient() {
 
   useEffect(() => {
     if (!bankScopeKey) return;
-    if (entriesQ.isLoading || (entriesQ as any).isPlaceholderData) return;
+    if (entriesQ.isLoading || entriesIsPlaceholderData) return;
 
     const meta = (entriesQ.data as any)?.meta ?? {};
     const nextCursor = typeof meta.nextCursor === "string" ? meta.nextCursor : null;
@@ -559,7 +561,7 @@ export default function ReconcilePageClient() {
     setEntriesNextCursor(nextCursor);
     setEntriesHasMore(!!meta.hasMore && !!nextCursor);
     setEntriesBackgroundPageCount(0);
-  }, [bankScopeKey, entriesQ.data, entriesQ.isLoading]);
+  }, [bankScopeKey, entriesIsPlaceholderData, entriesQ.data, entriesQ.isLoading]);
 
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
@@ -1317,6 +1319,10 @@ export default function ReconcilePageClient() {
       if (!opts?.silent) setRefreshBusy(false);
     }
   }
+  const refreshBankAndMatchesRef = useRef(refreshBankAndMatches);
+  refreshBankAndMatchesRef.current = refreshBankAndMatches;
+  const refreshTablesFullyRef = useRef(refreshTablesFully);
+  refreshTablesFullyRef.current = refreshTablesFully;
 
   function issueScanStorageKey(businessId: string, accountId: string) {
     return `bynkbook:lastScanAt:${businessId}:${accountId}`;
@@ -1371,7 +1377,7 @@ export default function ReconcilePageClient() {
 
   useEffect(() => {
     const onLedgerRefresh = () => {
-      void refreshTablesFully({ preserveOnEmpty: true, skipLegacyMatches: true });
+      void refreshTablesFullyRef.current({ preserveOnEmpty: true, skipLegacyMatches: true });
     };
 
     window.addEventListener("bynk:ledger-refresh", onLedgerRefresh as any);
@@ -1574,14 +1580,14 @@ export default function ReconcilePageClient() {
         q.queryKey[2] === selectedAccountId,
     });
 
-    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["unmatched"] });
-  }, [selectedBusinessId, selectedAccountId, from, to]);
+    void refreshBankAndMatchesRef.current({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["unmatched"] });
+  }, [qc, selectedBusinessId, selectedAccountId, from, to]);
 
   useEffect(() => {
     if (bankTab !== "matched") return;
     if (!selectedBusinessId || !selectedAccountId) return;
     if (bankStatusLoaded.matched || bankLoadingByStatus.matched) return;
-    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
+    void refreshBankAndMatchesRef.current({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
   }, [bankTab, selectedBusinessId, selectedAccountId, bankStatusLoaded.matched, bankLoadingByStatus.matched]);
 
   useEffect(() => {
@@ -1594,7 +1600,7 @@ export default function ReconcilePageClient() {
     if (!openExportHub) return;
     if (bankTab !== "matched") return;
     if (bankStatusLoaded.matched || bankLoadingByStatus.matched) return;
-    void refreshBankAndMatches({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
+    void refreshBankAndMatchesRef.current({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["matched"] });
   }, [openExportHub, bankTab, bankStatusLoaded.matched, bankLoadingByStatus.matched]);
 
   // Phase 6B: Load snapshot list when dialog opens
@@ -2575,10 +2581,10 @@ export default function ReconcilePageClient() {
     setBankMatchedVisibleN(PAGE_CHUNK);
   }, [bankTab, searchQ]);
 
-  const matchesRowSearch = (hay: string) => {
+  const matchesRowSearch = useCallback((hay: string) => {
     if (!searchQ) return true;
     return (hay ?? "").toLowerCase().includes(searchQ);
-  };
+  }, [searchQ]);
 
   // Tabs: Expected Entries. Keep the full filtered lists available for matching,
   // counts, and reconciliation truth. Slice only the rendered rows.
@@ -2597,7 +2603,7 @@ export default function ReconcilePageClient() {
       out.push(e);
     }
     return out;
-  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, searchQ, isAdjustedEntry, isReconcileExemptEntry]);
+  }, [optimisticPendingEntryDrafts, allEntriesSorted, matchedEntryIdSet, matchesRowSearch, isAdjustedEntry, isReconcileExemptEntry]);
 
   const entriesMatchedAllList = useMemo(() => {
     const out: any[] = [];
@@ -2611,7 +2617,7 @@ export default function ReconcilePageClient() {
       out.push(e);
     }
     return out;
-  }, [allEntriesNewestFirst, matchedEntryIdSet, searchQ, isReconcileExemptEntry]);
+  }, [allEntriesNewestFirst, matchedEntryIdSet, matchesRowSearch, isReconcileExemptEntry]);
 
   const entriesExpectedList = useMemo(
     () => entriesExpectedAllList.slice(0, expectedVisibleN),
@@ -2642,7 +2648,7 @@ export default function ReconcilePageClient() {
       if (out.length >= bankUnmatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, searchQ, bankUnmatchedVisibleN]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, matchesRowSearch, bankUnmatchedVisibleN]);
 
   useEffect(() => {
     setSelectedBankTxnIds(new Set());
@@ -2662,7 +2668,7 @@ export default function ReconcilePageClient() {
       if (out.length >= bankMatchedVisibleN) break;
     }
     return out;
-  }, [bankTxNewestFirst, isBankTxnFullyMatched, searchQ, bankMatchedVisibleN]);
+  }, [bankTxNewestFirst, isBankTxnFullyMatched, matchesRowSearch, bankMatchedVisibleN]);
 
   const bankPendingUnmatchedIds = useMemo(() => {
     const ids = new Set<string>();
@@ -2752,7 +2758,7 @@ export default function ReconcilePageClient() {
       }
     }
     return { bankUnmatchedCount: u, bankMatchedCount: m, bankPendingUnmatchedCount: pending };
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, searchQ]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, matchesRowSearch]);
 
   const entriesTruthReady =
     !entriesInitialLoading &&
@@ -2795,12 +2801,14 @@ export default function ReconcilePageClient() {
   const entriesTruthBlocking = !entriesTruthReady && !entriesTruthSnapshot;
   const bankTruthBlocking = !bankTruthReady && !bankTruthSnapshot;
 
-  const displayEntriesExpectedList = entriesTruthReady
-    ? entriesExpectedList
-    : (entriesTruthSnapshot?.expectedList ?? []);
-  const displayEntriesMatchedList = entriesTruthReady
-    ? entriesMatchedList
-    : (entriesTruthSnapshot?.matchedList ?? []);
+  const displayEntriesExpectedList = useMemo(
+    () => entriesTruthReady ? entriesExpectedList : (entriesTruthSnapshot?.expectedList ?? []),
+    [entriesTruthReady, entriesExpectedList, entriesTruthSnapshot?.expectedList]
+  );
+  const displayEntriesMatchedList = useMemo(
+    () => entriesTruthReady ? entriesMatchedList : (entriesTruthSnapshot?.matchedList ?? []),
+    [entriesTruthReady, entriesMatchedList, entriesTruthSnapshot?.matchedList]
+  );
   const displayExpectedCount = entriesTruthReady
     ? expectedCount
     : (entriesTruthSnapshot?.expectedCount ?? 0);
@@ -2808,16 +2816,22 @@ export default function ReconcilePageClient() {
     ? matchedCount
     : (entriesTruthSnapshot?.matchedCount ?? 0);
 
-  const displayBankUnmatchedList = bankStatusLoaded.unmatched && bankTruthReady
-    ? bankUnmatchedList
-    : bankStatusLoaded.unmatched
-      ? (bankTruthSnapshot?.unmatchedList ?? [])
-      : [];
-  const displayBankMatchedList = bankStatusLoaded.matched && bankTruthReady
-    ? bankMatchedList
-    : bankStatusLoaded.matched
-      ? (bankTruthSnapshot?.matchedList ?? [])
-      : [];
+  const displayBankUnmatchedList = useMemo(
+    () => bankStatusLoaded.unmatched && bankTruthReady
+      ? bankUnmatchedList
+      : bankStatusLoaded.unmatched
+        ? (bankTruthSnapshot?.unmatchedList ?? [])
+        : [],
+    [bankStatusLoaded.unmatched, bankTruthReady, bankUnmatchedList, bankTruthSnapshot?.unmatchedList]
+  );
+  const displayBankMatchedList = useMemo(
+    () => bankStatusLoaded.matched && bankTruthReady
+      ? bankMatchedList
+      : bankStatusLoaded.matched
+        ? (bankTruthSnapshot?.matchedList ?? [])
+        : [],
+    [bankStatusLoaded.matched, bankTruthReady, bankMatchedList, bankTruthSnapshot?.matchedList]
+  );
   const displayBankUnmatchedCount = bankStatusLoaded.unmatched && bankTruthReady
     ? bankUnmatchedCount
     : bankStatusLoaded.unmatched
@@ -2908,7 +2922,7 @@ const displayBankActiveList = useMemo(() => {
       else if (count === 1 && onlyMatchId) out.set(txnId, onlyMatchId);
     }
     return out;
-  }, [bankTab, displayBankActiveList, entriesExpectedAllList, isBankTxnFullyMatched]);
+  }, [bankTab, displayBankActiveList, entriesExpectedAllList, entriesExpectedList, isBankTxnFullyMatched]);
 
   // Row virtualization for the two reconcile tables. Both can grow large
   // (no pagination), so windowing the rendered <tr> set keeps scroll smooth
