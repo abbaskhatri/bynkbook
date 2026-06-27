@@ -124,6 +124,34 @@ function NoWorkspaceRedirectScreen() {
   );
 }
 
+function WorkspaceLoadErrorScreen({
+  onRetry,
+  onSignOut,
+}: {
+  onRetry: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center px-6">
+      <div className="w-full max-w-sm rounded-md border border-bb-border bg-bb-surface-card p-6 shadow-sm">
+        <BrandLogo variant="full" size="md" priority className="mb-6" />
+        <div className="text-sm font-semibold text-foreground">Workspace did not load</div>
+        <p className="mt-2 text-sm leading-6 text-foreground/70">
+          Your session is active, but Bynkbook could not load your business workspace.
+        </p>
+        <div className="mt-5 flex gap-2">
+          <Button className="flex-1" onClick={onRetry}>
+            Retry
+          </Button>
+          <Button className="flex-1" variant="outline" onClick={onSignOut}>
+            Sign out
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -648,6 +676,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             </div>
           </div>
         </div>
+      );
+    }
+
+    if (businessesQ.error) {
+      return (
+        <WorkspaceLoadErrorScreen
+          onRetry={() => void businessesQ.refetch()}
+          onSignOut={() => void onSignOut()}
+        />
       );
     }
 

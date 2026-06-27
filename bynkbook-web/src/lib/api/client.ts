@@ -3,6 +3,7 @@ import { metrics } from "@/lib/perf/metrics";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const AUTH_TOKEN_TIMEOUT_MS = 8_000;
 
 export type ApiFetchInit = RequestInit & {
   timeoutMs?: number;
@@ -12,6 +13,27 @@ export type ApiFetchInit = RequestInit & {
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 let tokenPromise: Promise<string | null> | null = null;
+
+function timeoutError(label: string, ms: number) {
+  const err: any = new Error(`${label} timed out after ${ms}ms`);
+  err.code = "TIMEOUT";
+  return err;
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = globalThis.setTimeout(() => reject(timeoutError(label, ms)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) globalThis.clearTimeout(timeout);
+  }
+}
 
 async function getAuthToken(): Promise<string | null> {
   const now = Date.now();
@@ -26,7 +48,7 @@ async function getAuthToken(): Promise<string | null> {
 
   tokenPromise = (async () => {
     try {
-      const session = await fetchAuthSession();
+      const session = await withTimeout(fetchAuthSession(), AUTH_TOKEN_TIMEOUT_MS, "Auth session");
       const accessToken = session.tokens?.accessToken?.toString();
       const idToken = session.tokens?.idToken?.toString();
       const token = accessToken ?? idToken ?? null;
@@ -70,6 +92,12 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
   const t0 = performance.now();
 
   const token = await getAuthToken();
+  if (!token) {
+    const err: any = new Error("Auth session unavailable. Please sign in again.");
+    err.status = 401;
+    err.code = "AUTH_SESSION_UNAVAILABLE";
+    throw err;
+  }
 
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
