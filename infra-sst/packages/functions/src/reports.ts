@@ -62,6 +62,35 @@ function normalizeYmd(input: any) {
   return v;
 }
 
+function clampActivityLimit(input: any) {
+  const n = Number(input ?? 200);
+  if (!Number.isFinite(n)) return 200;
+  return Math.min(Math.max(Math.trunc(n), 1), 500);
+}
+
+function encodeActivityCursor(row: any) {
+  const payload = {
+    date: String(row?.date ?? "").slice(0, 10),
+    id: String(row?.id ?? ""),
+  };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function parseActivityCursor(input: any) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    const date = normalizeYmd(parsed?.date);
+    const id = String(parsed?.id ?? "").trim();
+    if (!date || !id) return null;
+    return { date: toUtcStart(date), id };
+  } catch {
+    return null;
+  }
+}
+
 export async function handler(event: any) {
   const method = event?.requestContext?.http?.method ?? "GET";
   const path = getPath(event);
@@ -201,6 +230,11 @@ export async function handler(event: any) {
 
   // GET /v1/businesses/{businessId}/reports/activity (Bundle 1)
   if (path === `/v1/businesses/${biz}/reports/activity`) {
+    const limit = clampActivityLimit(q.limit);
+    const rawCursor = String(q.cursor ?? "").trim();
+    const cursor = rawCursor ? parseActivityCursor(rawCursor) : null;
+    if (rawCursor && !cursor) return json(400, { ok: false, error: "Invalid cursor" });
+
     const incomeAgg = await prisma.entry.aggregate({
       where: { ...baseWhere, type: "INCOME" },
       _sum: { amount_cents: true },
@@ -222,8 +256,18 @@ export async function handler(event: any) {
     });
     const accountNameById = new Map<string, string>(accounts.map((a: any) => [String(a.id), String(a.name)]));
 
-    const rows = await prisma.entry.findMany({
-      where: baseWhere,
+    const where = cursor
+      ? {
+          ...baseWhere,
+          OR: [
+            { date: { lt: cursor.date } },
+            { date: cursor.date, id: { lt: cursor.id } },
+          ],
+        }
+      : baseWhere;
+
+    const rowsPlusOne = await prisma.entry.findMany({
+      where,
       orderBy: [{ date: "desc" }, { id: "desc" }], // no created_at assumption
       select: {
         id: true,
@@ -234,7 +278,11 @@ export async function handler(event: any) {
         memo: true,
         amount_cents: true,
       },
+      take: limit + 1,
     });
+    const hasMore = rowsPlusOne.length > limit;
+    const rows = hasMore ? rowsPlusOne.slice(0, limit) : rowsPlusOne;
+    const nextCursor = hasMore && rows.length ? encodeActivityCursor(rows[rows.length - 1]) : null;
 
     return json(200, {
       ok: true,
@@ -247,6 +295,11 @@ export async function handler(event: any) {
         expense_cents: expense.toString(),
         net_cents: (income + expense).toString(),
         count: Number((incomeAgg?._count?._all ?? 0) + (expenseAgg?._count?._all ?? 0)),
+      },
+      meta: {
+        limit,
+        hasMore,
+        next_cursor: nextCursor,
       },
       rows: rows.map((r: any) => ({
         date: String(r.date).slice(0, 10),

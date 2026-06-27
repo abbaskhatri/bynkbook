@@ -277,6 +277,17 @@ export function AutoReconcileDialog(props: {
       });
     }
 
+    const banks = bankTxns
+      .slice(0, 600)
+      .sort((a, b) => {
+        const da = String(a.posted_date ?? "");
+        const db = String(b.posted_date ?? "");
+        if (da !== db) return da.localeCompare(db);
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+    let bankAlreadySuggested = new Set<string>();
+
     function tryCombine(e: any) {
       // COMBINE: multiple bank txns sum to one entry (≤5 txns), all within ±3d
       const entryAbs = absBig(toBigIntSafe(e.amount_cents));
@@ -337,18 +348,9 @@ export function AutoReconcileDialog(props: {
       (out[out.length - 1] as any).bankTxnIds = foundBanks.map((t) => String(t.id));
     }
 
-    const banks = bankTxns
-      .slice(0, 600)
-      .sort((a, b) => {
-        const da = String(a.posted_date ?? "");
-        const db = String(b.posted_date ?? "");
-        if (da !== db) return da.localeCompare(db);
-        return String(a.id).localeCompare(String(b.id));
-      });
-
     for (const t of banks) tryOneToOne(t);
 
-    const bankAlreadySuggested = new Set(out.map((s) => s.bankTxnId));
+    bankAlreadySuggested = new Set(out.map((s) => s.bankTxnId));
     for (const t of banks) {
       if (bankAlreadySuggested.has(t.id)) continue;
       trySplit(t);
@@ -366,7 +368,6 @@ export function AutoReconcileDialog(props: {
       });
 
     for (const e of eligibleEntries) {
-      // @ts-ignore - helper defined above
       tryCombine(e);
     }
 

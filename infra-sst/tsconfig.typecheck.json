@@ -13,12 +13,7 @@
     "**/*.bak.*",
     "**/*.bak_*/**",
 
-    // Exclude SST template/example code that imports SST v2-only modules
-    "packages/core/src/event.ts",
-    "packages/core/src/todo.ts",
-    "packages/functions/src/events/**",
-    "packages/functions/src/lambda.ts",
-    "packages/functions/src/todo.ts",
-    "stacks/MyStack.ts"
+    // Exclude archived SST starter handler kept only for historical local templates.
+    "packages/functions/src/lambda.ts"
   ]
 }

@@ -2,6 +2,12 @@ import { fetchAuthSession } from "aws-amplify/auth";
 import { metrics } from "@/lib/perf/metrics";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+export type ApiFetchInit = RequestInit & {
+  timeoutMs?: number;
+};
+
 // Phase 2 Performance: in-memory token cache + coalescing
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
@@ -41,20 +47,49 @@ if (!API_BASE && process.env.NODE_ENV !== "production") {
   throw new Error("Missing NEXT_PUBLIC_API_URL. Set it in .env.local (see .env.example).");
 }
 
-export async function apiFetch(path: string, init?: RequestInit) {
+function joinSignals(signals: Array<AbortSignal | null | undefined>) {
+  const activeSignals = signals.filter((signal): signal is AbortSignal => !!signal);
+  if (activeSignals.length === 0) return null;
+  if (activeSignals.length === 1) return activeSignals[0];
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      controller.abort();
+      break;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  }
+
+  return controller.signal;
+}
+
+export async function apiFetch(path: string, init?: ApiFetchInit) {
   const t0 = performance.now();
 
-const token = await getAuthToken();
+  const token = await getAuthToken();
 
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-    const res = await fetch(`${API_BASE ?? ""}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
+  const timeoutMs = Math.max(Number(init?.timeoutMs ?? DEFAULT_TIMEOUT_MS), 1);
+  const timeoutController = new AbortController();
+  const timeout = globalThis.setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE ?? ""}${path}`, {
+      ...init,
+      headers,
+      signal: joinSignals([init?.signal, timeoutController.signal]) ?? undefined,
+      cache: "no-store",
+    });
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 
   const ms = performance.now() - t0;
   const method = (init?.method ?? "GET").toUpperCase();

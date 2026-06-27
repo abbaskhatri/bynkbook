@@ -19,5 +19,14 @@ export function useLedgerSummary(params: {
         to,
       }),
     enabled: !!businessId && !!accountId,
+
+    // Match entries query behavior so summary cards do not flicker or
+    // refetch aggressively while row-level changes settle in the background.
+    staleTime: 30_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    placeholderData: (prev) => prev,
   });
 }

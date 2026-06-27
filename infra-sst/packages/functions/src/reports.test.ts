@@ -35,6 +35,11 @@ async function loadHandler() {
     business: {
       findUnique: vi.fn(async () => ({ fiscal_year_start_month: 1 })),
     },
+    account: {
+      findMany: vi.fn(async () => [
+        { id: "account-1", name: "Checking" },
+      ]),
+    },
     category: {
       findMany: vi.fn(async () => [
         { id: SALE_CATEGORY_ID, name: "Sale", archived_at: null },
@@ -198,5 +203,24 @@ describe("reports category composition", () => {
       income_count: 1,
       expense_count: 1,
     });
+  });
+
+  test("/reports/activity caps rows and returns a cursor", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(reportsEvent("/reports/activity", { limit: "1" }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(prisma.entry.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 2,
+      orderBy: [{ date: "desc" }, { id: "desc" }],
+    }));
+    expect(body.rows).toHaveLength(1);
+    expect(body.meta).toMatchObject({
+      limit: 1,
+      hasMore: true,
+    });
+    expect(typeof body.meta.next_cursor).toBe("string");
   });
 });
