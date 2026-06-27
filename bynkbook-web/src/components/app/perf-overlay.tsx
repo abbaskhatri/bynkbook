@@ -37,17 +37,13 @@ function PerfOverlayInner() {
   const pathname = usePathname();
   const qc = useQueryClient();
 
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(readEnabled);
   const [snap, setSnap] = useState<PerfSnapshot>({ api: [], ui: [], counters: {} });
   const [navMs, setNavMs] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
   const prevPathRef = useRef<string>(pathname);
   const navStartRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    setEnabled(readEnabled());
-  }, []);
 
   // Alt+P to toggle (does not conflict with browser shortcuts).
   useEffect(() => {

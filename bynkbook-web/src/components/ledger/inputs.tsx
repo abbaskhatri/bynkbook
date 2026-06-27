@@ -214,10 +214,15 @@ export function VendorSuggestPill(props: {
   const [best, setBest] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const q = (payee || "").trim();
     if (!businessId || q.length < 2) {
-      setBest(null);
-      return;
+      queueMicrotask(() => {
+        if (!cancelled) setBest(null);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
     const timer = setTimeout(async () => {
@@ -240,7 +245,10 @@ export function VendorSuggestPill(props: {
       }
     }, 250);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [businessId, payee]);
 
   if (!best) return null;

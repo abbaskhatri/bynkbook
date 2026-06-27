@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -116,7 +115,7 @@ export default function MobileReviewPageClient() {
   const uncategorizedCount = uncategorizedQueue.rows.length;
   const openIssues = issuesQueue.rows.length;
   const bankUnmatchedCount = Number(attentionSummaryQ.data?.bank_unmatched_count ?? 0) || 0;
-  const apVendors = apSummaryQ.data?.vendors ?? [];
+  const apVendors = useMemo(() => apSummaryQ.data?.vendors ?? [], [apSummaryQ.data]);
   const apOpenVendorCount = apVendors.filter((vendor) => {
     try {
       return BigInt(String(vendor.total_open_cents ?? "0")) > 0n;

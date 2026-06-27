@@ -50,7 +50,7 @@ function formatUsdAccountingFromCents(centsStr: string) {
   return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
-function formatBucketLabel(raw: string, rangeMode: RangeMode) {
+function formatBucketLabel(raw: string) {
   const s = String(raw ?? "").trim();
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -191,7 +191,6 @@ function ReportsResponsiveChartFrame({
 }
 
 export function ComboBarLineChart({
-  title,
   months,
   barA,
   barB,
@@ -199,7 +198,6 @@ export function ComboBarLineChart({
   aLabel,
   bLabel,
   lineLabel,
-  rangeMode,
   rangeTo,
 }: {
   title: string;
@@ -234,7 +232,7 @@ export function ComboBarLineChart({
         <XAxis
           dataKey="month"
           tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
-          tickFormatter={(v: any) => formatBucketLabel(String(v), rangeMode)}
+          tickFormatter={(v: any) => formatBucketLabel(String(v))}
         />
         <YAxis
           tick={{ fontSize: 11, fill: "var(--bb-chart-axis)" }}
@@ -244,7 +242,7 @@ export function ComboBarLineChart({
 
         <Tooltip
           formatter={(value: any, name: any) => [tooltipFmt(value), String(name)]}
-          labelFormatter={(label: any) => formatBucketLabel(String(label), rangeMode)}
+          labelFormatter={(label: any) => formatBucketLabel(String(label))}
           contentStyle={{
             fontSize: 12,
             background: "var(--bb-chart-tooltip-bg)",

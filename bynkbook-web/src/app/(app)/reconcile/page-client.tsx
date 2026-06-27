@@ -205,8 +205,6 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Mutation banner (single region; CLOSED_PERIOD consistency)
   // -------------------------
-  const CLOSED_PERIOD_MSG = "This period is closed. Reopen period to modify.";
-
   const [mutErr, setMutErr] = useState<string | null>(null);
   const [mutErrIsClosed, setMutErrIsClosed] = useState(false);
 
@@ -227,21 +225,6 @@ export default function ReconcilePageClient() {
     });
   }
 
-  function isClosedPeriodError(e: any, msg: string | null): boolean {
-    if (msg === CLOSED_PERIOD_MSG) return true;
-
-    const code =
-      String(e?.code ?? e?.payload?.code ?? e?.data?.code ?? e?.response?.data?.code ?? "").toUpperCase();
-
-    if (code === "CLOSED_PERIOD") return true;
-
-    const status =
-      Number(e?.status ?? e?.statusCode ?? e?.response?.status ?? e?.payload?.status ?? NaN);
-
-    if (status === 409 && msg === CLOSED_PERIOD_MSG) return true;
-
-    return false;
-  }
   const [mutErrTitle, setMutErrTitle] = useState<string>("");
 
   function clearMutErr() {
@@ -348,7 +331,6 @@ export default function ReconcilePageClient() {
   // Phase 7.2B: role policy hints (frontend-only)
   const policyDeniedTitle = "Not allowed by role policy";
   const [rolePolicyRows, setRolePolicyRows] = useState<RolePolicyRow[]>([]);
-  const [rolePolicyLoaded, setRolePolicyLoaded] = useState(false);
 
   // Prevent duplicate support-metadata fetches for the same scope,
   // especially during development strict-mode remounts.
@@ -368,13 +350,11 @@ export default function ReconcilePageClient() {
         const res: any = await getRolePolicies(selectedBusinessId);
         if (!cancelled) {
           setRolePolicyRows(res?.items ?? []);
-          setRolePolicyLoaded(true);
         }
       } catch {
         // If we cannot load policies, do not block UI (fallback to allowlist only)
         if (!cancelled) {
           setRolePolicyRows([]);
-          setRolePolicyLoaded(false);
         }
       }
     })();
@@ -487,7 +467,6 @@ export default function ReconcilePageClient() {
   const ENTRIES_API_LIMIT = 200;
   const ENTRIES_BACKGROUND_MAX_PAGE_COUNT = 500;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
-  const BANK_COUNT_PROBE_MAX_PAGES = 20;
 
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
   const [matchedVisibleN, setMatchedVisibleN] = useState(PAGE_CHUNK);
@@ -921,15 +900,6 @@ export default function ReconcilePageClient() {
   const refreshEpochRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<any> | null>(null);
   const refreshQueuedOptsRef = useRef<RefreshBankAndMatchesOptions | null>(null);
-
-  function newestPostedDate(items: any[]): string {
-    let max = "";
-    for (const t of items ?? []) {
-      const d = String(t?.posted_date ?? "");
-      if (d && d > max) max = d;
-    }
-    return max;
-  }
 
   async function refreshBankAndMatches(opts?: RefreshBankAndMatchesOptions) {
     if (!selectedBusinessId || !selectedAccountId) {
@@ -1414,11 +1384,6 @@ export default function ReconcilePageClient() {
   const [optimisticHiddenBankTxnIds, setOptimisticHiddenBankTxnIds] = useState<Set<string>>(() => new Set());
   const [optimisticPendingEntryDrafts, setOptimisticPendingEntryDrafts] = useState<any[]>([]);
 
-  const createEntryBusy = useMemo(
-    () => Object.values(createEntryBusyByBankId).some(Boolean),
-    [createEntryBusyByBankId]
-  );
-
   const bankUpdating =
     plaidSyncing ||
     bankTxLoading ||
@@ -1862,15 +1827,6 @@ export default function ReconcilePageClient() {
     if (x.isVoided) return false;
     return true;
   }, []);
-
-  // Legacy helper (v1 BankMatch). Keep for CSV export + "Not in view" diagnostics only.
-  function stableLegacyMatchId(x: any) {
-    if (x?.id) return String(x.id);
-    const bt = x?.bank_transaction_id ? String(x.bank_transaction_id) : "bt?";
-    const en = x?.entry_id ? String(x.entry_id) : "e?";
-    const ca = x?.created_at ? String(x.created_at) : "ca?";
-    return `${bt}:${en}:${ca}`;
-  }
 
   // Legacy v1 active matches (export-only; Reconcile UI uses MatchGroups)
   const activeMatches = useMemo(() => {
@@ -2561,47 +2517,6 @@ export default function ReconcilePageClient() {
     ];
 
     downloadCsv("reconcile_bank_transactions.csv", toCsv(headers, rows));
-  };
-
-  const exportActiveMatchesCsv = () => {
-    if (!selectedBusinessId || !selectedAccountId) return;
-
-    // Stable ordering: created_at ASC, then bankTxnId, then entryId
-    const ordered = [...activeMatches].sort((a: any, b: any) => {
-      const ta = a?.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b?.created_at ? new Date(b.created_at).getTime() : 0;
-      if (ta !== tb) return ta - tb;
-      const abt = String(a?.bank_transaction_id ?? "");
-      const bbt = String(b?.bank_transaction_id ?? "");
-      if (abt !== bbt) return abt.localeCompare(bbt);
-      return String(a?.entry_id ?? "").localeCompare(String(b?.entry_id ?? ""));
-    });
-
-    const rows = ordered.map((x: any) => ({
-      business_id: selectedBusinessId,
-      account_id: selectedAccountId,
-      match_id: stableLegacyMatchId(x),
-      bank_transaction_id: String(x.bank_transaction_id ?? ""),
-      entry_id: String(x.entry_id ?? ""),
-      matched_amount_cents: String(x.matched_amount_cents ?? ""),
-      match_type: String(x.match_type ?? ""),
-      created_at: String(x.created_at ?? ""),
-      created_by_user_id: String(x.created_by_user_id ?? ""),
-    }));
-
-    const headers = [
-      "business_id",
-      "account_id",
-      "match_id",
-      "bank_transaction_id",
-      "entry_id",
-      "matched_amount_cents",
-      "match_type",
-      "created_at",
-      "created_by_user_id",
-    ];
-
-    downloadCsv("reconcile_active_matches.csv", toCsv(headers, rows));
   };
 
   const exportAuditEventsCsv = () => {
@@ -3765,7 +3680,6 @@ const displayBankActiveList = useMemo(() => {
               ref: extractedRef,
             };
 
-            const busy = bankId ? !!createEntryBusyByBankId[bankId] : false;
             const createEntryBlockReason = bankId ? getCreateEntryActionBlockReason(bankId) : null;
 
             return (
@@ -6580,7 +6494,6 @@ const displayBankActiveList = useMemo(() => {
                       if (!entry) return null;
 
                       const entryAmt = toBigIntSafe(entry.amount_cents);
-                      const entryAbs = absBig(entryAmt);
                       const entrySign = entryAmt < 0n ? -1n : 1n;
 
                       return bankTxSorted

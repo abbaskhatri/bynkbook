@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -274,14 +274,14 @@ export default function VendorDetailPageClient() {
   // 1) Loading token prevents overlapping async flows from clearing each other’s busy state.
   // 2) Refresh epoch + coalescing prevents stale refresh commits and overlapping refreshes.
   const loadingTokenRef = useRef(0);
-  function beginLoading() {
+  const beginLoading = useCallback(() => {
     const token = ++loadingTokenRef.current;
     setLoading(true);
     return token;
-  }
-  function endLoading(token: number) {
+  }, []);
+  const endLoading = useCallback((token: number) => {
     if (token === loadingTokenRef.current) setLoading(false);
-  }
+  }, []);
 
   const refreshEpochRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
@@ -305,7 +305,6 @@ export default function VendorDetailPageClient() {
   const [apTab, setApTab] = useState<"bills" | "payments">("bills");
   const [vendorPayments, setVendorPayments] = useState<any[]>([]);
   const [paymentsErr, setPaymentsErr] = useState<string | null>(null);
-  const [paymentsErrIsClosed, setPaymentsErrIsClosed] = useState(false);
 
   // Row-level pending state (never feels stuck)
   const [pendingBillById, setPendingBillById] = useState<Record<string, boolean>>({});
@@ -356,8 +355,6 @@ export default function VendorDetailPageClient() {
   const [creditApplyCandidateEntryId, setCreditApplyCandidateEntryId] = useState<string | null>(null);
   const [creditApplyRequested, setCreditApplyRequested] = useState(false);
 
-  const [billsLoading, setBillsLoading] = useState(false);
-
   const summaryUpdating = loading && !!vendor;
   const apUpdating = loading && (!!apSummary || bills.length > 0 || vendorPayments.length > 0);
 
@@ -404,7 +401,6 @@ export default function VendorDetailPageClient() {
   const [openUpload, setOpenUpload] = useState(false);
 
   const [invoiceUploads, setInvoiceUploads] = useState<any[]>([]);
-  const [uploadsLoading, setUploadsLoading] = useState(false);
   const uploadsUpdating = loading && invoiceUploads.length > 0;
 
   // Statement dialog
@@ -416,7 +412,7 @@ export default function VendorDetailPageClient() {
   const [statementTo, setStatementTo] = useState("");
 
 
-  async function refresh() {
+  const refresh = useCallback(async function refreshVendorDetail() {
     if (!businessId || !vendorId) return;
 
     // Coalesce refreshes: 1 in-flight, 1 queued
@@ -503,10 +499,10 @@ export default function VendorDetailPageClient() {
       // Run one queued refresh (latest scope wins automatically due to epoch)
       if (refreshQueuedRef.current) {
         refreshQueuedRef.current = false;
-        void refresh();
+        void refreshVendorDetail();
       }
     }
-  }
+  }, [beginLoading, businessId, endLoading, vendorId]);
 
   function computeAutoAllocationMap(totalCents: bigint) {
     const openBills = bills.filter((b: any) => String(b.status) === "OPEN" || String(b.status) === "PARTIAL");
@@ -650,7 +646,7 @@ export default function VendorDetailPageClient() {
       window.removeEventListener("bynk:vendors-refresh", onRefreshAny as any);
       window.removeEventListener("bynk:vendor-detail-refresh", onRefreshDetail as any);
     };
-  }, [vendorId, businessId]); // refresh() already checks businessId/vendorId
+  }, [refresh, vendorId]);
 
   useEffect(() => {
     if (!applyOpen) return;
@@ -718,7 +714,17 @@ export default function VendorDetailPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [applyOpen, businessId, applyAccountId, vendorId]);
+  }, [
+    accountIdParam,
+    accountsQ.data,
+    applyAccountId,
+    applyOpen,
+    businessId,
+    creditApplyCandidateEntryId,
+    creditApplyRequested,
+    vendor?.name,
+    vendorId,
+  ]);
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
@@ -1198,18 +1204,6 @@ export default function VendorDetailPageClient() {
                         <td className="px-3 py-4 text-sm text-bb-status-danger-fg" colSpan={7}>
                           <div>{paymentsErr}</div>
 
-                          {paymentsErrIsClosed ? (
-                            <a
-                              className="mt-1 inline-flex text-[11px] underline text-bb-text hover:text-bb-text"
-                              href={
-                                businessId
-                                  ? `/closed-periods?businessId=${encodeURIComponent(businessId)}&focus=reopen`
-                                  : "/closed-periods?focus=reopen"
-                              }
-                            >
-                              Go to Close Periods
-                            </a>
-                          ) : null}
                         </td>
                       </tr>
                     ) : vendorPayments.length === 0 ? (

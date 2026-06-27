@@ -34,7 +34,6 @@ import {
   deleteEntry,
   hardDeleteEntry,
   listAllEntries,
-  listEntries,
   restoreEntry,
   unmatchAndDeleteEntry,
   updateEntry,
@@ -51,7 +50,7 @@ import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { getChunkedMatchGroupPlacementSummary } from "@/lib/api/match-groups";
 
-import { aiExplainEntry, aiAnomalies } from "@/lib/api/ai";
+import { aiExplainEntry } from "@/lib/api/ai";
 
 import {
   ENTRIES_API_MAX_LIMIT,
@@ -187,21 +186,6 @@ function ClosePeriodDialog(props: any) {
   return <DynamicClosePeriodDialog {...props} />;
 }
 
-type CreateVars = {
-  tempId: string;
-  date: string;
-  ref: string;
-  payee: string;
-  type: UiType;
-  method: UiMethod;
-  categoryName: string;
-  categoryId: string | null;
-  note?: string;
-  toAccountId?: string;
-  amountStr: string;
-  afterCreateEdit?: boolean;
-};
-
 type EditDraft = {
   date: string;
   ref: string;
@@ -226,11 +210,9 @@ export default function LedgerPageClient() {
   // Vendor suggestion is shown post-save on the created row only.
   const [uploadType, setUploadType] = useState<"RECEIPT" | "BANK_STATEMENT">("RECEIPT");
   const [openUpload, setOpenUpload] = useState(false);
-  const [lastCreatedEntryId, setLastCreatedEntryId] = useState<string | null>(null);
 
   // Optimistic vendor badge map (so linked indicator persists immediately, even before refetch)
   const [linkedVendorByEntryId, setLinkedVendorByEntryId] = useState<Record<string, string>>({});
-  const [lastCreatedLinkedVendor, setLastCreatedLinkedVendor] = useState<{ id: string; name: string } | null>(null);
 
   // PERF logging toggle (default OFF)
   // Enable via localStorage: bynkbook.debug.perf = "1"
@@ -469,12 +451,6 @@ export default function LedgerPageClient() {
     return list.find((b: any) => b?.id === selectedBusinessId)?.name ?? "Business";
   }, [businessesQ.data, selectedBusinessId]);
 
-  const accountNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const a of accountsQ.data ?? []) m.set(a.id, a.name);
-    return m;
-  }, [accountsQ.data]);
-
   // Transfer display is derived from backend fields on each entry (stable across refetch).
 
 
@@ -650,31 +626,6 @@ export default function LedgerPageClient() {
   useEffect(() => {
     setPage(1);
   }, [ledgerViewMode]);
-
-  // ---------- Bundle F: Ledger anomalies (read-only) ----------
-  const anomaliesQ = useQuery({
-    queryKey: ["ledgerAnomalies", selectedBusinessId, selectedAccountId, filterFrom || allTimeStartYmd(), filterTo || todayYmd()],
-    enabled: false,
-    placeholderData: (prev) => prev ?? null,
-    staleTime: 30_000,
-    gcTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      return aiAnomalies({
-        businessId: selectedBusinessId as string,
-        accountId: selectedAccountId as string,
-        from: (filterFrom || allTimeStartYmd()) as string,
-        to: (filterTo || todayYmd()) as string,
-      });
-    },
-  });
-
-  const anomalySet = useMemo(() => {
-    const ids = new Set<string>();
-    const list = (anomaliesQ.data as any)?.anomalies ?? [];
-    for (const a of list) if (a?.entryId) ids.add(String(a.entryId));
-    return ids;
-  }, [anomaliesQ.data]);
 
   // MatchGroups (ACTIVE) drive the canonical Ledger status pill for bank-match state.
   // Match state MUST come from the same source the Reconcile page uses,
@@ -2026,7 +1977,6 @@ export default function LedgerPageClient() {
   // remains available in lib/api/ai.ts for future use.
 
   const [aiExplainOpen, setAiExplainOpen] = useState(false);
-  const [aiExplainEntryId, setAiExplainEntryId] = useState<string | null>(null);
   const [aiExplainLast, setAiExplainLast] = useState<string | null>(null);
   const [aiExplainBusy, setAiExplainBusy] = useState(false);
   const [aiExplainErr, setAiExplainErr] = useState<string | null>(null);
@@ -2212,17 +2162,6 @@ export default function LedgerPageClient() {
     onSuccess: async (_data: any, vars: any, ctx: any) => {
       setMutErr(null);
       setMutErrIsClosed(false);
-      // Track last created entry so we can show a post-save suggestion pill
-      const createdId =
-        (_data?.entry?.id as string | undefined) ||
-        (_data?.id as string | undefined) ||
-        (_data?.entry_id as string | undefined) ||
-        null;
-
-      if (createdId) {
-        setLastCreatedEntryId(createdId);
-        setLastCreatedLinkedVendor(null);
-      }
       const mark = ctx?.__perf?.mark || `[PERF][create][${vars?.tempId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
       const tOk = performance.now();
@@ -2596,9 +2535,6 @@ export default function LedgerPageClient() {
           delete next[entryId];
           return next;
         });
-
-        // Re-suggest vendor payment workflow after restore
-        setLastCreatedEntryId(entryId);
       }
       const mark = ctx?.__perf?.mark || `[PERF][restore][${entryId || "noid"}]`;
       const t0 = ctx?.__perf?.t0 ?? performance.now();
@@ -3108,22 +3044,6 @@ export default function LedgerPageClient() {
         </Button>
       </td>
     </tr>
-  );
-
-  // Header capsule + filter bar
-  const accountCapsule = (
-    <CapsuleSelect
-      loading={accountsQ.isLoading}
-      value={selectedAccountId || ""}
-      onValueChange={(v) => {
-        setPage(1);
-        router.replace(`/ledger?businessId=${selectedBusinessId}&accountId=${v}`);
-      }}
-      options={(accountsQ.data ?? [])
-        .filter((a) => !a.archived_at)
-        .map((a) => ({ value: a.id, label: a.name }))}
-      placeholder="Select account"
-    />
   );
 
   // Filters wrapped as compact "area" + Reset thin/icon like old app
@@ -3643,18 +3563,6 @@ export default function LedgerPageClient() {
   const [quickCatValue, setQuickCatValue] = useState<string>("");
   const [quickCatBusy, setQuickCatBusy] = useState(false);
   const [quickCatErr, setQuickCatErr] = useState<string | null>(null);
-
-  const ledgerUpdating =
-    (entriesQ.isFetching && !!(entriesQ.data ?? []).length) ||
-    createMut.isPending ||
-    updateMut.isPending ||
-    deleteMut.isPending ||
-    matchedDeleteMut.isPending ||
-    restoreMut.isPending ||
-    hardDeleteMut.isPending ||
-    bulkDeleteMut.isPending ||
-    quickCatBusy ||
-    scanBusy;
 
   const cancelQuickCat = () => {
     setQuickCatEntryId(null);
@@ -4576,7 +4484,6 @@ export default function LedgerPageClient() {
                               if (!selectedBusinessId) return;
 
                               setAiExplainOpen(true);
-                              setAiExplainEntryId(String(r.id));
                               setAiExplainBusy(true);
                               setAiExplainErr(null);
 

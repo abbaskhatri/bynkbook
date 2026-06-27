@@ -22,11 +22,8 @@ import { AlertTriangle, CheckCircle2, FileText, Info, TrendingUp, TrendingDown, 
 import {
   getPnlSummary,
   getCashflowSeries,
-  getAccountsSummary,
   getApAging,
-  getApAgingVendor,
   getCategories,
-  getCategoriesDetail,
 } from "@/lib/api/reports";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -204,7 +201,7 @@ function formatUsdAccountingFromCents(centsStr: string) {
   return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
-function formatBucketLabel(raw: string, rangeMode: RangeMode) {
+function formatBucketLabel(raw: string) {
   const s = String(raw ?? "").trim();
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -645,39 +642,18 @@ export default function ReportsPageClient() {
   const autoRunStartedRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const bannerMsg =
-    err ||
-    appErrorMessageOrNull(businessesQ.error) ||
-    appErrorMessageOrNull(accountsQ.error) ||
-    null;
-
   const [pnl, setPnl] = useState<any>(null);
   const [pnlPrev, setPnlPrev] = useState<any>(null);
 
   const [cashflow, setCashflow] = useState<any>(null);
   const [cashflowPrev, setCashflowPrev] = useState<any>(null);
 
-  const [cashEndingCents, setCashEndingCents] = useState<string | null>(null);
-  const [cashEndingPrevCents, setCashEndingPrevCents] = useState<string | null>(null);
-
   const [topCats, setTopCats] = useState<Array<{ label: string; cents: string }> | null>(null);
   const [topVendorsAp, setTopVendorsAp] = useState<Array<{ label: string; cents: string }> | null>(null);
 
-  const [accountsSummary, setAccountsSummary] = useState<any>(null);
-  const [includeArchivedAccounts, setIncludeArchivedAccounts] = useState(false); // Accounts Summary default: exclude archived
   const [apAging, setApAging] = useState<any>(null);
-  const [apVendorId, setApVendorId] = useState<string | null>(null);
-  const [apVendorDetail, setApVendorDetail] = useState<any>(null);
 
   const [categories, setCategories] = useState<any>(null);
-  const [catDetail, setCatDetail] = useState<any>(null);
-  const [catDetailCategoryId, setCatDetailCategoryId] = useState<string | null>(null);
-  const [catPage, setCatPage] = useState(1);
-
-  const asOf = useMemo(() => {
-    // As-of uses end of selected month (or today if month is current and you want later).
-    return to;
-  }, [to]);
 
   async function run() {
     if (!businessId || !selectedScope) return;
@@ -706,8 +682,6 @@ export default function ReportsPageClient() {
           resCashPrev,
           cats,
           ap,
-          endAcct,
-          endPrevAcct,
         ] = await Promise.all([
           getPnlSummary(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId, ytd: runYtd }),
           getPnlSummary(runBusinessId, { from: prev.from, to: prev.to, accountId: runAccountId, ytd: prev.ytd }),
@@ -715,8 +689,6 @@ export default function ReportsPageClient() {
           getCashflowSeries(runBusinessId, { from: prev.from, to: prev.to, accountId: runAccountId, ytd: prev.ytd }),
           getCategories(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId }),
           getApAging(runBusinessId, { asOf: runTo }),
-          getAccountsSummary(runBusinessId, { asOf: runTo, accountId: runAccountId, includeArchived: false }),
-          getAccountsSummary(runBusinessId, { asOf: prev.to, accountId: runAccountId, includeArchived: false }),
         ]);
 
         if (myEpoch !== runEpochRef.current) return;
@@ -738,33 +710,17 @@ export default function ReportsPageClient() {
         const vendorRows = (ap?.rows ?? []).map((r: any) => ({ label: String(r.vendor ?? "Vendor"), cents: String(r.total_cents ?? "0") }));
         setTopVendorsAp(topNByAbs(vendorRows, 6));
 
-        // Ending cash (Overview / Cashflow Statement)
-        const sumBalances = (rows: any[]) => {
-          let s = 0n;
-          for (const r of rows ?? []) {
-            try { s += BigInt(String(r.balance_cents ?? "0")); } catch { }
-          }
-          return String(s);
-        };
-        setCashEndingCents(sumBalances(endAcct?.rows ?? []));
-        setCashEndingPrevCents(sumBalances(endPrevAcct?.rows ?? []));
-
-        // Accounts summary list for Overview
-        setAccountsSummary(endAcct);
-
         return;
       }
 
       if (runTab === "cashflow") {
         const prev = priorRangeForCurrent(rangeMode, runFrom, runTo, ym, year, weekFrom, customFrom, customTo, runYtd);
 
-        const [res, resPrev, cats, ap, endAcct, endPrevAcct] = await Promise.all([
+        const [res, resPrev, cats, ap] = await Promise.all([
           getCashflowSeries(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId, ytd: runYtd }),
           getCashflowSeries(runBusinessId, { from: prev.from, to: prev.to, accountId: runAccountId, ytd: prev.ytd }),
           getCategories(runBusinessId, { from: runFrom, to: runTo, accountId: runAccountId }),
           getApAging(runBusinessId, { asOf: runTo }),
-          getAccountsSummary(runBusinessId, { asOf: runTo, accountId: runAccountId, includeArchived: false }),
-          getAccountsSummary(runBusinessId, { asOf: prev.to, accountId: runAccountId, includeArchived: false }),
         ]);
 
         if (myEpoch !== runEpochRef.current) return;
@@ -772,17 +728,6 @@ export default function ReportsPageClient() {
         setLastRunScope(runScope);
         setCashflow(res);
         setCashflowPrev(resPrev);
-
-        const sumBalances = (rows: any[]) => {
-          let s = 0n;
-          for (const r of rows ?? []) {
-            try { s += BigInt(String(r.balance_cents ?? "0")); } catch { }
-          }
-          return String(s);
-        };
-
-        setCashEndingCents(sumBalances(endAcct?.rows ?? []));
-        setCashEndingPrevCents(sumBalances(endPrevAcct?.rows ?? []));
 
         setCategories(cats);
         setApAging(ap);
@@ -804,54 +749,6 @@ export default function ReportsPageClient() {
     }
   }
 
-  async function openApVendor(vendorId: string) {
-    if (!businessId) return;
-
-    const myEpoch = ++runEpochRef.current;
-    const loadingToken = beginLoading();
-    setErr(null);
-
-    try {
-      const res = await getApAgingVendor(businessId, { asOf, vendorId });
-      if (myEpoch !== runEpochRef.current) return;
-      setApVendorId(vendorId);
-      setApVendorDetail(res);
-    } catch (e: any) {
-      if (myEpoch !== runEpochRef.current) return;
-      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
-    } finally {
-      endLoading(loadingToken);
-    }
-  }
-
-  async function openCategoryDetail(categoryId: string | null, page: number) {
-    if (!businessId) return;
-
-    const myEpoch = ++runEpochRef.current;
-    const loadingToken = beginLoading();
-    setErr(null);
-
-    try {
-      const res = await getCategoriesDetail(businessId, {
-        from,
-        to,
-        accountId,
-        categoryId,
-        page,
-        take: 50,
-      });
-      if (myEpoch !== runEpochRef.current) return;
-      setCatDetail(res);
-      setCatDetailCategoryId(categoryId);
-      setCatPage(page);
-    } catch (e: any) {
-      if (myEpoch !== runEpochRef.current) return;
-      setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
-    } finally {
-      endLoading(loadingToken);
-    }
-  }
-
   // Switching tabs should never empty-clear existing results.
   // We keep the last known results for each tab until the user runs a new report (deterministic, no blank flicker).
   useEffect(() => {
@@ -859,8 +756,6 @@ export default function ReportsPageClient() {
     runEpochRef.current += 1;
     setLoading(false);
 
-    // Reset only tab-local paging state (safe; does not blank existing results).
-    setCatPage(1);
   }, [tab]);
 
   // Do NOT empty-clear results while the user adjusts range controls.
@@ -870,9 +765,7 @@ export default function ReportsPageClient() {
     runEpochRef.current += 1;
     setLoading(false);
 
-    // Safe reset: paging-only.
-    setCatPage(1);
-  }, [rangeMode, ym, year, weekFrom, customFrom, customTo, ytd, accountId, includeArchivedAccounts]);
+  }, [rangeMode, ym, year, weekFrom, customFrom, customTo, ytd, accountId]);
 
   // YTD only makes sense for monthly/yearly; force off for weekly/custom
   useEffect(() => {
@@ -1514,8 +1407,8 @@ export default function ReportsPageClient() {
 
                         {(pnl.monthly ?? []).map((r: any, idx: number) => (
                           <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-sm">
-                            <div className="truncate tabular-nums text-bb-text" title={formatBucketLabel(String(r.month), rangeMode)}>
-                              {formatBucketLabel(String(r.month), rangeMode)}
+                            <div className="truncate tabular-nums text-bb-text" title={formatBucketLabel(String(r.month))}>
+                              {formatBucketLabel(String(r.month))}
                             </div>
                             <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.income_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                               {formatUsdAccountingFromCents(r.income_cents).text}
@@ -1691,8 +1584,8 @@ export default function ReportsPageClient() {
 
                           {(cashflow.monthly ?? []).map((r: any, idx: number) => (
                             <div key={`${r.month}-${idx}`} className="h-9 px-3 grid grid-cols-[110px_160px_160px_160px] items-center gap-3 text-sm">
-                              <div className="truncate tabular-nums text-bb-text" title={formatBucketLabel(String(r.month), rangeMode)}>
-                                {formatBucketLabel(String(r.month), rangeMode)}
+                              <div className="truncate tabular-nums text-bb-text" title={formatBucketLabel(String(r.month))}>
+                                {formatBucketLabel(String(r.month))}
                               </div>
                               <div className={`text-right tabular-nums ${formatUsdAccountingFromCents(r.cash_in_cents).isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
                                 {formatUsdAccountingFromCents(r.cash_in_cents).text}

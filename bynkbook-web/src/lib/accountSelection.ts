@@ -108,16 +108,27 @@ export function usePreferredAccountId<T extends AccountSelectionRow>({
   }>({ businessId: null, accountId: null, ready: false });
 
   useEffect(() => {
+    let cancelled = false;
     if (!businessId) {
-      setStoredAccount({ businessId: null, accountId: null, ready: true });
-      return;
+      queueMicrotask(() => {
+        if (!cancelled) setStoredAccount({ businessId: null, accountId: null, ready: true });
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
-    setStoredAccount({
-      businessId,
-      accountId: readLastSelectedAccountId(businessId),
-      ready: true,
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setStoredAccount({
+        businessId,
+        accountId: readLastSelectedAccountId(businessId),
+        ready: true,
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   const selectedAccountId = useMemo(() => {

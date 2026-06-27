@@ -51,7 +51,7 @@ export function useUploadController(args: {
   meta?: Record<string, any>;
   completeOptions?: CompleteUploadOptions;
 }) {
-  const { type, ctx } = args;
+  const { type, ctx, meta, completeOptions } = args;
 
   const [items, setItems] = useState<UploadItem[]>([]);
   const xhrs = useRef<Record<string, XMLHttpRequest>>({});
@@ -60,11 +60,11 @@ export function useUploadController(args: {
     return items.some((i) => i.status === "QUEUED" || i.status === "UPLOADING");
   }, [items]);
 
-  const requireBusinessId = () => {
+  const requireBusinessId = useCallback(() => {
     const businessId = ctx?.businessId?.trim();
     if (!businessId) throw new Error("Missing businessId for upload");
     return businessId;
-  };
+  }, [ctx?.businessId]);
 
   const initOne = useCallback(
     async (file: File) => {
@@ -77,7 +77,7 @@ export function useUploadController(args: {
         filename: file.name,
         contentType: file.type || "application/octet-stream",
         sizeBytes: file.size,
-        meta: args?.meta ?? {},
+        meta: meta ?? {},
       };
 
       try {
@@ -105,18 +105,18 @@ export function useUploadController(args: {
         throw e;
       }
     },
-    [ctx?.accountId, ctx?.businessId, type],
+    [ctx?.accountId, meta, requireBusinessId, type],
   );
 
   const completeOne = useCallback(
     async (uploadId: string) => {
       const businessId = requireBusinessId();
 
-      const res = await completeUpload(businessId, uploadId, args.completeOptions);
+      const res = await completeUpload(businessId, uploadId, completeOptions);
 
       return res;
     },
-    [args.completeOptions, ctx?.businessId],
+    [completeOptions, requireBusinessId],
   );
 
   const uploadPutWithProgress = useCallback(
@@ -278,7 +278,7 @@ const completeRes: any = await completeOne(init.id);
         delete xhrs.current[localId];
       }
     },
-    [completeOne, initOne, uploadPutWithProgress],
+    [completeOne, ctx?.accountId, initOne, requireBusinessId, type, uploadPutWithProgress],
   );
 
   const enqueueAndStart = useCallback(

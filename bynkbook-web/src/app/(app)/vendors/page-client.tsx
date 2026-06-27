@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
@@ -95,7 +95,7 @@ export default function VendorsPageClient() {
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [categoryRows, setCategoryRows] = useState<CategoryRow[]>([]);
 
-  async function hydrateApSummary(list: any[], sourceRefreshEpoch: number, sourceBusinessId: string) {
+  const hydrateApSummary = useCallback(async (list: any[], sourceRefreshEpoch: number, sourceBusinessId: string) => {
     const myApEpoch = ++apSummaryEpochRef.current;
     const ids = list.map((v: any) => String(v.id));
     if (ids.length === 0) {
@@ -127,7 +127,7 @@ export default function VendorsPageClient() {
         setApSummaryLoading(false);
       }
     }
-  }
+  }, []);
 
   async function ensureCategoriesLoaded() {
     if (!businessId) return;
@@ -163,7 +163,7 @@ export default function VendorsPageClient() {
     void ensureCategoriesLoaded();
   }
 
-  async function refresh() {
+  const refresh = useCallback(async function refreshVendors() {
     if (!businessId) return;
 
     // Coalesce refresh calls: 1 in-flight, 1 queued
@@ -205,10 +205,10 @@ export default function VendorsPageClient() {
       // Run one queued refresh (latest scope wins due to epoch)
       if (refreshQueuedRef.current) {
         refreshQueuedRef.current = false;
-        void refresh();
+        void refreshVendors();
       }
     }
-  }
+  }, [businessId, hydrateApSummary, q, sort]);
 
   async function onCreate() {
     if (!businessId) return;
@@ -248,7 +248,7 @@ export default function VendorsPageClient() {
     }
     window.addEventListener("bynk:vendors-refresh", onRefresh as any);
     return () => window.removeEventListener("bynk:vendors-refresh", onRefresh as any);
-  }, [businessId, q, sort]);
+  }, [refresh]);
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">

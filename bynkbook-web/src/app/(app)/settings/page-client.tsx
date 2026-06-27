@@ -237,11 +237,9 @@ export default function SettingsPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
   const spKey = sp.toString(); // stable dependency key (prevents dynamic deps array issues)
+  const activeTab = new URLSearchParams(spKey).get("tab") || "business";
   const qc = useQueryClient();
   const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
-
-  // Phase 1: per-surface reload triggers (no router.refresh storms)
-  const [reloadNonce, setReloadNonce] = useState(0);
 
   const businessesQ = useBusinesses();
   const bizIdFromUrl = sp.get("businessId") ?? sp.get("businessesId");
@@ -255,16 +253,12 @@ export default function SettingsPageClient() {
   // Keep Settings URL consistent with the selected business (one-shot sync; no loops)
   const didSyncBizRef = useRef(false);
 
-  // Phase 1: per-surface retry hooks (reloadNonce retriggers tab-scoped loaders safely)
-  function retryCategories() {
-    setReloadNonce((n) => n + 1);
-  }
   // Phase 1 Stabilization: epoch guard for tab-scoped async loaders
   const tabEpochRef = useRef(0);
   useEffect(() => {
     // bump epoch whenever tab/business changes (stale async completions must not commit)
     tabEpochRef.current += 1;
-  }, [spKey, selectedBusinessId, reloadNonce]);
+  }, [activeTab, selectedBusinessId]);
   useEffect(() => {
     if (didSyncBizRef.current) return;
     if (businessesQ.isLoading) return;
@@ -278,12 +272,12 @@ export default function SettingsPageClient() {
       return;
     }
 
-    const params = new URLSearchParams(String(sp));
+    const params = new URLSearchParams(spKey);
     params.set("businessId", firstId);
     params.delete("businessesId");
     router.replace(`?${params.toString()}`);
     didSyncBizRef.current = true;
-  }, [bizIdFromUrl, businessesQ.isLoading, businessesQ.data, router, sp]);
+  }, [bizIdFromUrl, businessesQ.isLoading, businessesQ.data, router, spKey]);
 
   const selectedBusinessRole = useMemo(() => {
     const list = businessesQ.data ?? [];
@@ -373,8 +367,7 @@ export default function SettingsPageClient() {
 
   // Load bookkeeping preferences when Bookkeeping tab is active
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "bookkeeping") return;
+    if (activeTab !== "bookkeeping") return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -415,7 +408,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, selectedBusinessId]);
+  }, [activeTab, selectedBusinessId]);
 
   // Account create/edit dialogs
   const [open, setOpen] = useState(false);
@@ -467,7 +460,6 @@ export default function SettingsPageClient() {
   const [editErr, setEditErr] = useState<string | null>(null);
 
   // Business profile form
-  const [bpName, setBpName] = useState("");
   const [bpIndustry, setBpIndustry] = useState("");
   const [bpIndustryOther, setBpIndustryOther] = useState("");
   const [bpAddress, setBpAddress] = useState("");
@@ -623,14 +615,6 @@ export default function SettingsPageClient() {
   const [actFromDate, setActFromDate] = useState<string>("");
   const [actToDate, setActToDate] = useState<string>("");
   const [actDetailsId, setActDetailsId] = useState<string | null>(null);
-
-  const noPermTitle = "Insufficient permissions";
-  const policyDeniedTitle = "Not allowed by role policy";
-
-  const canWriteTeamAllowlist = useMemo(
-    () => ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(selectedBusinessRole),
-    [selectedBusinessRole]
-  );
 
   const canManageMemberRolesAllowlist = useMemo(
     () => ["OWNER", "ADMIN"].includes(selectedBusinessRole),
@@ -819,8 +803,7 @@ export default function SettingsPageClient() {
 
   // Load activity when Activity tab is active
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "activity") return;
+    if (activeTab !== "activity") return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -847,7 +830,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, selectedBusinessId, actEventType, reloadNonce]);
+  }, [activeTab, selectedBusinessId, actEventType]);
 
   const actUserOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -888,8 +871,7 @@ export default function SettingsPageClient() {
 
   // Load team data when Team tab is active
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "team" && tab !== "activity") return;
+    if (activeTab !== "team" && activeTab !== "activity") return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -913,12 +895,11 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, selectedBusinessId, reloadNonce]);
+  }, [activeTab, selectedBusinessId]);
 
   // Load role policies when Team tab is active
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "team") return;
+    if (activeTab !== "team") return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -930,23 +911,22 @@ export default function SettingsPageClient() {
       try {
         const res: any = await getRolePolicies(selectedBusinessId);
         const items: RolePolicyRow[] = res?.items ?? [];
-        if (!cancelled) setPolRows(items);
+        if (!cancelled && myEpoch === tabEpochRef.current) setPolRows(items);
       } catch (e: any) {
-        if (!cancelled) setPolError(uiErrorMessage(e, "Failed to load role policies."));
+        if (!cancelled && myEpoch === tabEpochRef.current) setPolError(uiErrorMessage(e, "Failed to load role policies."));
       } finally {
-        if (!cancelled) setPolLoading(false);
+        if (!cancelled && myEpoch === tabEpochRef.current) setPolLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [sp, teamSubTab, selectedBusinessId]);
+  }, [activeTab, teamSubTab, selectedBusinessId]);
 
   // Load plaid status when Accounts tab is active (cached)
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "accounts") return;
+    if (activeTab !== "accounts") return;
     if (!selectedBusinessId) return;
     // Do not block on isLoading; we fetch once accounts data is present.
 
@@ -1034,12 +1014,11 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, selectedBusinessId, accountsQ.data]);
+  }, [activeTab, selectedBusinessId, accountsQ.data, plaidByAccount, plaidLoading, plaidChecked]);
 
   // Load categories when Bookkeeping tab is active
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "bookkeeping") return;
+    if (activeTab !== "bookkeeping") return;
     if (!selectedBusinessId) return;
 
     const myEpoch = tabEpochRef.current;
@@ -1060,12 +1039,11 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [sp, selectedBusinessId, catShowArchived, reloadNonce]);
+  }, [activeTab, selectedBusinessId, catShowArchived]);
 
   // Load delete eligibility when Accounts tab is active (cached)
   useEffect(() => {
-    const tab = sp.get("tab") || "business";
-    if (tab !== "accounts") return;
+    if (activeTab !== "accounts") return;
     if (!selectedBusinessId) return;
     if (accountsQ.isLoading) return;
 
@@ -1109,7 +1087,7 @@ export default function SettingsPageClient() {
 
         await Promise.all(Array.from({ length: Math.min(MAX_IN_FLIGHT, toFetch.length) }, () => worker()));
 
-        if (cancelled) return;
+        if (cancelled || myEpoch !== tabEpochRef.current) return;
 
         setDeleteEligByAccount((cur) => {
           const next = { ...cur };
@@ -1118,7 +1096,7 @@ export default function SettingsPageClient() {
         });
       } finally {
         // Always clear loading flags for the batch if this effect instance is still active
-        if (!cancelled) {
+        if (!cancelled && myEpoch === tabEpochRef.current) {
           setDeleteEligLoading((cur) => {
             const next = { ...cur };
             for (const a of toFetch) delete next[a.id];
@@ -1131,7 +1109,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [spKey, selectedBusinessId, accountsQ.isLoading, accountsQ.data]);
+  }, [activeTab, selectedBusinessId, accountsQ.isLoading, accountsQ.data]);
 
   useEffect(() => {
     if (!exportClosedOpen || !selectedBusinessId) return;
@@ -1166,7 +1144,7 @@ export default function SettingsPageClient() {
 
   // current tab (only allowed)
   const tab = (() => {
-    const raw = sp.get("tab") || "business";
+    const raw = activeTab;
     if (raw === "team" || raw === "activity" || raw === "accounts" || raw === "bookkeeping" || raw === "business") return raw;
     return "business";
   })();

@@ -164,213 +164,6 @@ function moneyClassFromCents(centsStr?: string) {
   }
 }
 
-type AreaLayout = {
-  w: number;
-  h: number;
-  padL: number;
-  padR: number;
-  padT: number;
-  padB: number;
-  domainMin: number;
-  domainMax: number;
-  zeroY: number | null;
-  grid: Array<{ y: number; label: string; isZero: boolean }>;
-  x: number[];
-  lineD: string;
-  areaD: string;
-};
-
-function computeNiceTicks(minV: number, maxV: number) {
-  // 5 ticks max. Deterministic, no scoring.
-  const span = maxV - minV || 1;
-  const rawStep = span / 4;
-  const pow10 = Math.pow(10, Math.floor(Math.log10(Math.abs(rawStep))));
-  const step = Math.max(pow10, Math.round(rawStep / pow10) * pow10);
-
-  const start = Math.floor(minV / step) * step;
-  const end = Math.ceil(maxV / step) * step;
-
-  const ticks: number[] = [];
-  for (let v = start; v <= end + step * 0.5; v += step) ticks.push(v);
-  return ticks;
-}
-
-function fmtAxisUsd(n: number) {
-  const abs = Math.abs(n);
-  const sign = n < 0 ? -1 : 1;
-
-  const to = (v: number) => {
-    // v is dollars (number)
-    // Compact format: $0, $10K, $1.2M
-    if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}M`;
-    if (v >= 1_000) return `$${(v / 1_000).toFixed(v % 1_000 === 0 ? 0 : 1)}K`;
-    return `$${Math.round(v).toString()}`;
-  };
-
-  const s = to(abs);
-  return sign < 0 ? `(${s})` : s;
-}
-
-function computeAreaLayout(args: {
-  labels: string[];
-  valuesDollars: number[];
-  // Chart rule: add 5–10% padding so movement is visible in tight ranges.
-  padPct: number;
-}): AreaLayout {
-  const w = 980;
-  const h = 300;
-
-  const padL = 64;
-  const padR = 16;
-  const padT = 16;
-  const padB = 34;
-
-  const n = Math.min(args.labels.length, args.valuesDollars.length);
-  const vals = args.valuesDollars.slice(0, n);
-
-  // Guard: if we don't have at least 2 points, return a safe empty layout.
-  // This prevents runtime crashes during initial loads / empty datasets.
-  if (vals.length < 2) {
-    return {
-      w,
-      h,
-      padL,
-      padR,
-      padT,
-      padB,
-      domainMin: 0,
-      domainMax: 1,
-      zeroY: null,
-      grid: [],
-      x: [],
-      lineD: "",
-      areaD: "",
-    };
-  }
-
-  let minV = Math.min(...vals);
-  let maxV = Math.max(...vals);
-
-  // padding rule (5–10% of range); if range is 0, use a small fixed pad.
-  const span = maxV - minV;
-  const pad = span === 0 ? Math.max(Math.abs(maxV) * 0.08, 250) : Math.max(span * args.padPct, span * 0.05);
-  minV = minV - pad;
-  maxV = maxV + pad;
-
-  const yOf = (v: number) => {
-    const usable = h - padT - padB;
-    const s = (maxV - v) / (maxV - minV || 1);
-    return Math.round(padT + s * usable);
-  };
-
-  const xStep = (w - padL - padR) / (n - 1);
-  const x = Array.from({ length: n }).map((_, i) => Math.round(padL + i * xStep));
-
-  const ticks = computeNiceTicks(minV, maxV);
-
-  // Zero baseline: only if 0 is within visible range.
-  const zeroY = 0 >= minV && 0 <= maxV ? yOf(0) : null;
-
-  const grid = ticks
-    .map((t) => ({
-      y: yOf(t),
-      label: fmtAxisUsd(t),
-      isZero: Math.abs(t) < 1e-9,
-    }))
-    .filter((g, idx, arr) => idx === 0 || g.y !== arr[idx - 1].y); // avoid duplicates after rounding
-
-  const pts = vals.map((v, i) => ({ x: x[i], y: yOf(v) }));
-
-  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-
-  // Area closes to bottom plot baseline (not zero). This is Cash Position chart (ending cash), not net chart.
-  const bottomY = h - padB;
-  const areaD =
-    `${lineD} ` +
-    `L ${pts[pts.length - 1].x} ${bottomY} ` +
-    `L ${pts[0].x} ${bottomY} Z`;
-
-  return {
-    w,
-    h,
-    padL,
-    padR,
-    padT,
-    padB,
-    domainMin: minV,
-    domainMax: maxV,
-    zeroY,
-    grid,
-    x,
-    lineD,
-    areaD,
-  };
-}
-
-type CashBarsLayout = {
-  w: number;
-  h: number;
-  padL: number;
-  padR: number;
-  padT: number;
-  padB: number;
-  x: number[];
-  grid: Array<{ y: number; label: string; isZero: boolean }>;
-  yOf: (v: number) => number;
-};
-
-function computeCashBarsLayout(args: {
-  labels: string[];
-  inCents: string[];
-  outCents: string[];
-  padPct: number; // 5–10% domain padding
-}): CashBarsLayout {
-  const w = 980;
-  const h = 300;
-
-  const padL = 64;
-  const padR = 16;
-  const padT = 16;
-  const padB = 34;
-
-  const n = Math.min(args.labels.length, args.inCents.length, args.outCents.length);
-  if (n < 2) {
-    return { w, h, padL, padR, padT, padB, x: [], grid: [], yOf: () => h - padB };
-  }
-
-  const centsToAbsDollars = (s: string) => {
-    try {
-      return Math.abs(Number(BigInt(String(s ?? "0")))) / 100;
-    } catch {
-      return 0;
-    }
-  };
-
-  let maxV = 0;
-  for (let i = 0; i < n; i++) {
-    maxV = Math.max(maxV, centsToAbsDollars(args.inCents[i]), centsToAbsDollars(args.outCents[i]));
-  }
-
-  const pad = Math.max(maxV * args.padPct, maxV * 0.05, 100);
-  const domainMax = maxV + pad;
-
-  const yOf = (v: number) => {
-    const usable = h - padT - padB;
-    const s = (domainMax - v) / (domainMax || 1);
-    return Math.round(padT + s * usable);
-  };
-
-  const xStep = (w - padL - padR) / (n - 1);
-  const x = Array.from({ length: n }).map((_, i) => Math.round(padL + i * xStep));
-
-  const ticks = computeNiceTicks(0, domainMax);
-  const grid = ticks
-    .map((t) => ({ y: yOf(t), label: fmtAxisUsd(t), isZero: Math.abs(t) < 1e-9 }))
-    .filter((g, idx, arr) => idx === 0 || g.y !== arr[idx - 1].y);
-
-  return { w, h, padL, padR, padT, padB, x, grid, yOf };
-}
-
 export default function DashboardPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -391,7 +184,8 @@ export default function DashboardPageClient() {
   useEffect(() => {
     if (businessesQ.isLoading) return;
     if (!selectedBusinessId) return;
-    if (!sp.get("businessId")) router.replace(`/dashboard?businessId=${selectedBusinessId}`);
+    const params = new URLSearchParams(spKey);
+    if (!params.get("businessId")) router.replace(`/dashboard?businessId=${selectedBusinessId}`);
   }, [businessesQ.isLoading, selectedBusinessId, router, spKey]);
 
   // Period selector (top-right; controls ALL widgets)
@@ -772,7 +566,7 @@ export default function DashboardPageClient() {
         netCents: String(r.net_cents ?? "0"),
       };
     });
-  }, [cashflowQ.data, cashBalanceCents]);
+  }, [cashflowQ.data, cashBalanceCents, range.to]);
 
   // ---------- Bundle F: Ask Your Business (aggregates-only chat) ----------
   type ChatMsg = { role: "user" | "assistant"; text: string; ts: number };
@@ -804,7 +598,6 @@ export default function DashboardPageClient() {
     } catch {
       /* corrupt or unavailable storage; start empty */
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatStorageKey]);
 
   // Persist whenever messages change.
@@ -1298,104 +1091,6 @@ export default function DashboardPageClient() {
 
     return out.slice(0, 3);
   }, [monthlySummary, topExpenseCats]);
-
-  // Area chart layout + zero baseline emphasis rule
-  const areaLayout = useMemo(() => {
-    const labels = animCashMonthly.map((r) => r.label);
-    const values = animCashMonthly.map((r) => centsToNumber(r.endingCashCents)); // dollars
-    return computeAreaLayout({ labels, valuesDollars: values, padPct: 0.08 });
-  }, [animCashMonthly]);
-
-  // Donut rendering (simple deterministic SVG)
-  const donut = useMemo(() => {
-    const rows = topExpenseCats.rows;
-    const total = topExpenseCats.totalAbs;
-
-    if (!rows || rows.length === 0 || total <= 0n) {
-      return { arcs: [] as Array<{ a0: number; a1: number; label: string; cents: string }>, totalAbs: total };
-    }
-
-    let angle = -Math.PI / 2;
-    const arcs: Array<{ a0: number; a1: number; label: string; cents: string }> = [];
-
-    for (const r of rows) {
-      const v = Number(r.absCents);
-      const t = Number(total);
-      const frac = t > 0 ? v / t : 0;
-      const a0 = angle;
-      const a1 = angle + frac * Math.PI * 2;
-      arcs.push({ a0, a1, label: r.label, cents: r.cents });
-      angle = a1;
-    }
-
-    return { arcs, totalAbs: total };
-  }, [topExpenseCats]);
-
-  // Donut animation (200ms): tween arc angles when data changes.
-  const [animDonutArcs, setAnimDonutArcs] = useState(donut.arcs);
-  const prevDonutRef = useRef(donut.arcs);
-
-  useEffect(() => {
-    const prev = prevDonutRef.current;
-    const next = donut.arcs;
-
-    if (!prev || !next || prev.length !== next.length || next.length === 0) {
-      prevDonutRef.current = next;
-      setAnimDonutArcs(next);
-      return;
-    }
-
-    const start = performance.now();
-    const dur = 200;
-
-    let raf = 0;
-    const tick = (t: number) => {
-      const k = Math.min(1, (t - start) / dur);
-      const ease = 1 - Math.pow(1 - k, 3);
-
-      const blended = next.map((n: any, i: number) => {
-        const p: any = prev[i];
-        return {
-          ...n,
-          a0: (p.a0 ?? n.a0) + ((n.a0 ?? 0) - (p.a0 ?? n.a0)) * ease,
-          a1: (p.a1 ?? n.a1) + ((n.a1 ?? 0) - (p.a1 ?? n.a1)) * ease,
-        };
-      });
-
-      setAnimDonutArcs(blended);
-
-      if (k < 1) raf = requestAnimationFrame(tick);
-      else {
-        prevDonutRef.current = next;
-        setAnimDonutArcs(next);
-      }
-    };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [donut.arcs]);
-
-  function arcPath(cx: number, cy: number, rOuter: number, rInner: number, a0: number, a1: number) {
-    const large = a1 - a0 > Math.PI ? 1 : 0;
-
-    const x0 = cx + rOuter * Math.cos(a0);
-    const y0 = cy + rOuter * Math.sin(a0);
-    const x1 = cx + rOuter * Math.cos(a1);
-    const y1 = cy + rOuter * Math.sin(a1);
-
-    const xi1 = cx + rInner * Math.cos(a1);
-    const yi1 = cy + rInner * Math.sin(a1);
-    const xi0 = cx + rInner * Math.cos(a0);
-    const yi0 = cy + rInner * Math.sin(a0);
-
-    return [
-      `M ${x0} ${y0}`,
-      `A ${rOuter} ${rOuter} 0 ${large} 1 ${x1} ${y1}`,
-      `L ${xi1} ${yi1}`,
-      `A ${rInner} ${rInner} 0 ${large} 0 ${xi0} ${yi0}`,
-      "Z",
-    ].join(" ");
-  }
 
   const periodCapsule = (
     <div className="h-6 px-1.5 rounded-lg border border-bb-border bg-bb-surface-card flex items-center">

@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
-import { AppTooltip } from "@/components/ui/tooltip";
 import { UploadCloud, X, CheckCircle2, AlertTriangle, Trash2, Download } from "lucide-react";
 import { useUploadController } from "./useUploadController";
 import { apiFetch } from "@/lib/api/client";
@@ -30,10 +29,6 @@ type UploadPanelProps = {
 };
 
 type VendorLite = { id: string; name: string };
-
-function norm(s: string) {
-  return String(s || "").trim().toLowerCase();
-}
 
 // Convert various date strings into YYYY-MM-DD for date pickers (YYYY-MM-DD)
 function toIsoDate(v: string): string {
@@ -144,141 +139,6 @@ function uploadFileLifecycleText(type: UploadType, it: any) {
   return uploadLifecycleStatus(type, it, parsedStatus, String(duplicateCode));
 }
 
-function VendorPicker(props: {
-  businessId: string;
-  value: VendorLite | null;
-  query: string;
-  onQueryChange: (v: string) => void;
-  onChange: (v: VendorLite | null) => void;
-}) {
-  const { businessId, value, query, onQueryChange, onChange } = props;
-
-  const [results, setResults] = useState<VendorLite[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  // debounce vendor search (no storms)
-  useEffect(() => {
-    if (!businessId) return;
-
-    const q = query.trim();
-    if (!q) {
-      setResults([]);
-      return;
-    }
-
-    setLoading(true);
-    setErr(null);
-
-    const t = setTimeout(async () => {
-      try {
-        const res: any = await apiFetch(`/v1/businesses/${businessId}/vendors?q=${encodeURIComponent(q)}`, {
-          method: "GET",
-        });
-
-        setResults(Array.isArray(res?.vendors) ? res.vendors.map((v: any) => ({ id: v.id, name: v.name })) : []);
-      } catch (e: any) {
-        setErr(e?.message || "Vendor search failed");
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-
-    return () => clearTimeout(t);
-  }, [businessId, query]);
-
-  const canCreate =
-    businessId &&
-    query.trim().length > 0 &&
-    !results.some((r) => norm(r.name) === norm(query));
-
-  async function createVendor() {
-    if (!businessId) return;
-    const name = query.trim();
-    if (!name) return;
-
-    setLoading(true);
-    setErr(null);
-
-    try {
-      const res: any = await apiFetch(`/v1/businesses/${businessId}/vendors`, {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
-
-      if (!res?.ok || !res?.vendor) throw new Error(res?.error || "Create vendor failed");
-
-      const v: VendorLite = { id: res.vendor.id, name: res.vendor.name };
-      onChange(v);
-      onQueryChange(v.name);
-      setResults([]);
-    } catch (e: any) {
-      setErr(e?.message || "Create vendor failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <input
-          className="h-8 flex-1 px-2 text-xs border border-bb-input-border bg-bb-input-bg text-bb-text placeholder:text-bb-input-placeholder rounded-md"
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search vendor…"
-        />
-        {value ? (
-          <AppTooltip content="Clear the selected vendor" side="bottom">
-            <button
-              type="button"
-              className="h-8 px-2 text-xs border border-bb-border bg-bb-surface-card text-bb-text rounded-md hover:bg-bb-table-row-hover"
-              onClick={() => onChange(null)}
-            >
-              Clear
-            </button>
-          </AppTooltip>
-        ) : null}
-      </div>
-
-      {value ? (
-        <div className="text-xs text-bb-text">
-          Selected: <span className="font-medium">{value.name}</span>
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="space-y-1 py-1">
-          <div className="h-3 w-32 rounded bg-bb-surface-elevated animate-pulse" />
-        </div>
-      ) : null}
-      {err ? <div className="text-[11px] text-bb-status-danger-fg">{err}</div> : null}
-
-      {!value && results.length > 0 ? (
-        <div className="border border-bb-border rounded-md overflow-hidden">
-          {results.slice(0, 6).map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              className="w-full text-left px-2 py-1.5 text-xs hover:bg-bb-surface-soft"
-              onClick={() => onChange(r)}
-            >
-              {r.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {!value && canCreate ? (
-        <button type="button" className="text-xs text-primary hover:underline" onClick={createVendor}>
-          Create vendor “{query.trim()}”
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadPanelProps) {
   const effectiveAllowMultiple = allowMultiple ?? uploadAllowMultiple[type];
   const accept = uploadAccept[type];
@@ -298,41 +158,52 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
   // Metadata
   const [notes, setNotes] = useState("");
-  const [vendorQuery, setVendorQuery] = useState("");
   const [selectedVendor, setSelectedVendor] = useState<VendorLite | null>(null);
   const [statementFrom, setStatementFrom] = useState("");
   const [statementTo, setStatementTo] = useState("");
+
+  const forcedVendorId = useMemo(
+    () => ((ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : ""),
+    [ctx]
+  );
 
   const uploadMeta = useMemo(() => {
     if (type !== "INVOICE") return {};
 
     // If this upload panel is opened from a vendor detail page, we force vendor_id.
-    const forcedVendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
-
     if (forcedVendorId) return { vendor_id: forcedVendorId };
 
     // Otherwise, keep existing behavior (vendor can be created by parsing)
     return selectedVendor ? { vendor_id: selectedVendor.id, vendor_name: selectedVendor.name } : {};
-  }, [type, selectedVendor, ctx]);
+  }, [type, selectedVendor, forcedVendorId]);
 
   const controller = useUploadController({ type, ctx, meta: uploadMeta });
+  const clearUploads = controller.clearAll;
 
   // Reset UI state whenever the panel opens (prevents stale summary/files persisting across sessions)
   useEffect(() => {
     if (!open) return;
-    setShowSummary(false);
-    setNotes("");
-    setVendorQuery("");
-    setSelectedVendor(null);
-    setStatementFrom("");
-    setStatementTo("");
+    let cancelled = false;
 
-    // IMPORTANT: reset selection state too
-    setSelectedForEntry({});
-    setEntryDateByUploadId({});
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setShowSummary(false);
+      setNotes("");
+      setSelectedVendor(null);
+      setStatementFrom("");
+      setStatementTo("");
 
-    controller.clearAll();
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+      // IMPORTANT: reset selection state too
+      setSelectedForEntry({});
+      setEntryDateByUploadId({});
+
+      clearUploads();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, clearUploads]);
 
   // Auto-switch to summary once all uploads are completed (no need to press Done)
   useEffect(() => {
@@ -342,50 +213,48 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
 
     const allDone = controller.items.every((it) => it.status === "COMPLETED" || it.status === "UPLOADED");
     if (allDone) {
-      setShowSummary(true);
+      const completedItems = controller.items;
+      queueMicrotask(() => {
+        setShowSummary(true);
+
+        // Default selection: all items that have a parsed amount (deterministic, no stubs)
+        setSelectedForEntry((prev) => {
+          const next = { ...prev };
+          for (const it of completedItems) {
+            if (!it.uploadId) continue;
+
+            const cents =
+              (it.parsed as any)?.amount_cents ??
+              (it.completedMeta as any)?.parsed?.amount_cents ??
+              null;
+
+            if (typeof cents === "number" && Number.isFinite(cents) && cents !== 0) next[it.uploadId] = true;
+          }
+          return next;
+        });
+
+        // Default entry date: parsed doc_date when available (ISO-ish), else blank
+        setEntryDateByUploadId((prev) => {
+          const next = { ...prev };
+          for (const it of completedItems) {
+            if (!it.uploadId) continue;
+            const d = toIsoDate(String(it.parsed?.doc_date || "").trim());
+            if (d && !next[it.uploadId]) next[it.uploadId] = d;
+          }
+          return next;
+        });
+      });
 
       // Notify vendors pages to refresh (AP + vendor list) after invoice uploads complete
       if (type === "INVOICE") {
         window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
 
-        const forcedVendorId = (ctx as any)?.vendorId ? String((ctx as any).vendorId).trim() : "";
         if (forcedVendorId) {
           window.dispatchEvent(new CustomEvent("bynk:vendor-detail-refresh", { detail: { vendorId: forcedVendorId } }));
         }
       }
-
-      // Default selection: all items that have a parsed amount (deterministic, no stubs)
-      setSelectedForEntry((prev) => {
-        const next = { ...prev };
-        for (const it of controller.items) {
-          if (!it.uploadId) continue;
-
-          const cents =
-            (it.parsed as any)?.amount_cents ??
-            (it.completedMeta as any)?.parsed?.amount_cents ??
-            null;
-
-          if (typeof cents === "number" && Number.isFinite(cents) && cents !== 0) next[it.uploadId] = true;
-        }
-        return next;
-      });
-
-      // Default entry date: parsed doc_date when available (ISO-ish), else blank
-      setEntryDateByUploadId((prev) => {
-        const next = { ...prev };
-        for (const it of controller.items) {
-          if (!it.uploadId) continue;
-          const d = toIsoDate(String(it.parsed?.doc_date || "").trim());
-          if (d && !next[it.uploadId]) next[it.uploadId] = d;
-
-        }
-        return next;
-      });
     }
-  }, [open, controller.items, controller.hasActiveUploads]);
-
-  const canClose = !controller.hasActiveUploads;
-  const overlayCloseDisabled = controller.hasActiveUploads;
+  }, [open, controller.items, controller.hasActiveUploads, type, forcedVendorId]);
 
   const title = `Upload ${uploadTypeLabel[type]}`;
 
@@ -395,7 +264,6 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
   }, [type]);
 
   const showBankFields = type === "BANK_STATEMENT";
-  const showVendorField = false; // vendor is extracted during parsing
   const summaryTableMinWidth =
     type === "INVOICE" ? "min-w-[1260px]" : type === "RECEIPT" ? "min-w-[980px]" : "min-w-[560px]";
 
@@ -437,7 +305,6 @@ export function UploadPanel({ open, onClose, type, ctx, allowMultiple }: UploadP
               onClick={() => {
                 controller.clearAll();
                 setNotes("");
-                setVendorQuery("");
                 setSelectedVendor(null);
                 setStatementFrom("");
                 setStatementTo("");

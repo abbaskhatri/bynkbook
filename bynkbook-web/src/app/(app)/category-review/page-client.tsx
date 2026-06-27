@@ -64,21 +64,6 @@ function UpdatingOverlay({ label = "Updating…" }: { label?: string }) {
   );
 }
 
-function todayYmd() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function firstOfThisMonth() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}-01`;
-}
-
 function categorySuggestionConfidence(raw: unknown) {
   return categorySuggestionConfidenceValue(raw) ?? 0;
 }
@@ -292,6 +277,8 @@ export default function CategoryReviewPageClient() {
     selectedBusinessId,
     selectedAccountId,
     router,
+    bizIdFromUrl,
+    accountIdFromUrl,
   ]);
   const opts = (accountsQ.data ?? [])
     .filter((a) => !a.archived_at)

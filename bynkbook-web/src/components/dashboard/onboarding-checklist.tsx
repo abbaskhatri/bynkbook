@@ -38,13 +38,20 @@ export function OnboardingChecklist({
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    if (!businessId) return;
-    try {
-      setDismissed(window.localStorage.getItem(dismissKey(businessId)) === "1");
-    } catch {
-      /* localStorage unavailable; treat as not dismissed */
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setMounted(true);
+      if (!businessId) return;
+      try {
+        setDismissed(window.localStorage.getItem(dismissKey(businessId)) === "1");
+      } catch {
+        /* localStorage unavailable; treat as not dismissed */
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   function handleDismiss() {

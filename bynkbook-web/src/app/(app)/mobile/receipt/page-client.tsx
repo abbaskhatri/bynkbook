@@ -112,11 +112,12 @@ export default function MobileReceiptPageClient() {
   });
 
   useEffect(() => {
+    const previewUrls = previewUrlsRef.current;
     return () => {
-      for (const previewUrl of previewUrlsRef.current) {
+      for (const previewUrl of previewUrls) {
         URL.revokeObjectURL(previewUrl);
       }
-      previewUrlsRef.current.clear();
+      previewUrls.clear();
     };
   }, []);
 
