@@ -125,9 +125,11 @@ function NoWorkspaceRedirectScreen() {
 }
 
 function WorkspaceLoadErrorScreen({
+  message,
   onRetry,
   onSignOut,
 }: {
+  message?: string | null;
   onRetry: () => void;
   onSignOut: () => void;
 }) {
@@ -139,6 +141,11 @@ function WorkspaceLoadErrorScreen({
         <p className="mt-2 text-sm leading-6 text-foreground/70">
           Your session is active, but Bynkbook could not load your business workspace.
         </p>
+        {message ? (
+          <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs leading-5 text-bb-status-warning-fg">
+            {message}
+          </div>
+        ) : null}
         <div className="mt-5 flex gap-2">
           <Button className="flex-1" onClick={onRetry}>
             Retry
@@ -682,6 +689,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     if (businessesQ.error) {
       return (
         <WorkspaceLoadErrorScreen
+          message={(businessesQ.error as any)?.message ?? null}
           onRetry={() => void businessesQ.refetch()}
           onSignOut={() => void onSignOut()}
         />

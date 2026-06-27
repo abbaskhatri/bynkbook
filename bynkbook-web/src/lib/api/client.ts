@@ -3,7 +3,7 @@ import { metrics } from "@/lib/perf/metrics";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 const DEFAULT_TIMEOUT_MS = 30_000;
-const AUTH_TOKEN_TIMEOUT_MS = 8_000;
+const AUTH_TOKEN_TIMEOUT_MS = 15_000;
 
 export type ApiFetchInit = RequestInit & {
   timeoutMs?: number;
@@ -35,6 +35,17 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
+async function fetchSessionToken(forceRefresh: boolean): Promise<string | null> {
+  const session = await withTimeout(
+    fetchAuthSession(forceRefresh ? { forceRefresh: true } : undefined),
+    AUTH_TOKEN_TIMEOUT_MS,
+    forceRefresh ? "Auth session refresh" : "Auth session"
+  );
+  const accessToken = session.tokens?.accessToken?.toString();
+  const idToken = session.tokens?.idToken?.toString();
+  return accessToken ?? idToken ?? null;
+}
+
 async function getAuthToken(): Promise<string | null> {
   const now = Date.now();
 
@@ -47,14 +58,21 @@ async function getAuthToken(): Promise<string | null> {
   if (tokenPromise) return tokenPromise;
 
   tokenPromise = (async () => {
-    try {
-      const session = await withTimeout(fetchAuthSession(), AUTH_TOKEN_TIMEOUT_MS, "Auth session");
-      const accessToken = session.tokens?.accessToken?.toString();
-      const idToken = session.tokens?.idToken?.toString();
-      const token = accessToken ?? idToken ?? null;
+    let token: string | null = null;
 
+    try {
+      token = await fetchSessionToken(false);
+    } catch {
+      token = null;
+    }
+
+    if (!token) {
+      token = await fetchSessionToken(true).catch(() => null);
+    }
+
+    try {
       cachedToken = token;
-      tokenExpiresAt = Date.now() + 60_000; // 60s cache window
+      tokenExpiresAt = token ? Date.now() + 60_000 : 0; // 60s cache window
 
       return token;
     } finally {

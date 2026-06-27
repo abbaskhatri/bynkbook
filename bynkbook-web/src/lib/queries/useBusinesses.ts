@@ -6,5 +6,7 @@ export function useBusinesses(options?: { enabled?: boolean }) {
     queryKey: ["businesses"],
     queryFn: listBusinesses,
     enabled: options?.enabled ?? true,
+    retry: (failureCount) => failureCount < 2,
+    retryDelay: (failureCount) => 800 * (failureCount + 1),
   });
 }

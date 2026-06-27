@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser, signIn, confirmSignIn, signInWithRedirect } from "aws-amplify/auth";
+import { getCurrentUser, signIn, confirmSignIn, signInWithRedirect, fetchAuthSession } from "aws-amplify/auth";
 import { ArrowRight, BadgeCheck, Building2, LockKeyhole, ShieldCheck } from "lucide-react";
 
 import BrandLogo from "@/components/app/BrandLogo";
@@ -34,6 +34,21 @@ function getCanonicalCurrentUrl(origin: string) {
   return `${origin}${current.pathname}${current.search}${current.hash}`;
 }
 
+async function waitForAmplifySession(timeoutMs = 8000) {
+  let timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
+
+  try {
+    await Promise.race([
+      fetchAuthSession({ forceRefresh: true }),
+      new Promise((_, reject) => {
+        timeout = globalThis.setTimeout(() => reject(new Error("Timed out preparing session.")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) globalThis.clearTimeout(timeout);
+  }
+}
+
 function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -53,6 +68,7 @@ function LoginInner() {
     (async () => {
       try {
         await getCurrentUser();
+        await waitForAmplifySession().catch(() => {});
         router.replace(nextUrl);
       } catch {
         // not signed in
@@ -112,6 +128,7 @@ function LoginInner() {
       const result = await signIn({ username, password });
 
       if (result.isSignedIn) {
+        await waitForAmplifySession().catch(() => {});
         router.replace(nextUrl);
         return;
       }
