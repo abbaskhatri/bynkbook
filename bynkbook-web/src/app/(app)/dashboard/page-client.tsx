@@ -37,6 +37,9 @@ import {
   Tag,
   Sparkles,
   CalendarDays,
+  ArrowRight,
+  CheckCircle2,
+  type LucideIcon,
 } from "lucide-react";
 
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -162,6 +165,66 @@ function moneyClassFromCents(centsStr?: string) {
   } catch {
     return "text-bb-amount-neutral";
   }
+}
+
+type DashboardCommandTone = "danger" | "success" | "warning";
+
+const commandToneClasses: Record<DashboardCommandTone, { bg: string; fg: string; border: string }> = {
+  danger: {
+    bg: "bg-bb-status-danger-bg",
+    fg: "text-bb-status-danger-fg",
+    border: "hover:border-bb-status-danger-fg/25 hover:bg-bb-status-danger-bg/70",
+  },
+  success: {
+    bg: "bg-bb-status-success-bg",
+    fg: "text-bb-status-success-fg",
+    border: "hover:border-bb-status-success-fg/25 hover:bg-bb-status-success-bg/70",
+  },
+  warning: {
+    bg: "bg-bb-status-warning-bg",
+    fg: "text-bb-status-warning-fg",
+    border: "hover:border-bb-status-warning-fg/25 hover:bg-bb-status-warning-bg/70",
+  },
+};
+
+function DashboardCommandAction({
+  href,
+  icon: Icon,
+  label,
+  count,
+  meta,
+  tone,
+  loading,
+}: {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  count: number;
+  meta: string;
+  tone: DashboardCommandTone;
+  loading: boolean;
+}) {
+  const classes = commandToneClasses[tone];
+
+  return (
+    <Link
+      href={href}
+      className={`group flex min-h-[76px] items-center gap-3 rounded-lg border border-bb-border bg-bb-surface-card px-3 py-3 text-left shadow-sm transition-colors ${classes.border}`}
+    >
+      <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${classes.bg}`}>
+        <Icon className={`h-4 w-4 ${classes.fg}`} strokeWidth={2.2} />
+      </span>
+
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold leading-tight text-foreground">
+          {loading ? <Skeleton className="h-4 w-28" /> : `${count} ${label}`}
+        </span>
+        <span className="mt-1 block truncate text-xs text-muted-foreground">{meta}</span>
+      </span>
+
+      <ArrowRight className="h-4 w-4 shrink-0 text-bb-text-subtle opacity-60 transition-transform group-hover:translate-x-0.5 group-hover:opacity-100" />
+    </Link>
+  );
 }
 
 export default function DashboardPageClient() {
@@ -1206,6 +1269,21 @@ export default function DashboardPageClient() {
             !!(pnlQ.data?.period?.expense_cents && pnlQ.data.period.expense_cents !== "0") ||
             (Array.isArray(pnlQ.data?.monthly) && pnlQ.data.monthly.length > 0);
 
+          const selectedAccountLabel =
+            accountScopeId === "all"
+              ? "All accounts"
+              : String(
+                  ((accountsAllQ.data?.rows ?? []) as any[]).find(
+                    (row: any) => String(row.account_id ?? "") === accountScopeId
+                  )?.name ?? "Selected account"
+                );
+
+          const commandStatus = showAttentionLoading
+            ? null
+            : nextActionsN > 0
+              ? `${nextActionsN} open`
+              : "All clear";
+
           return (
         <>
       {/* Onboarding checklist — only renders for businesses with incomplete setup */}
@@ -1215,6 +1293,82 @@ export default function DashboardPageClient() {
         categoriesCount={onboardingCategoriesCount}
         hasEntries={onboardingHasEntries}
       />
+
+      {/* Command Center */}
+      <Card className="overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated shadow-sm !gap-0 !py-0">
+        <CardContent className="p-0">
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="min-w-0 p-4 md:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Today&apos;s bookkeeping
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <h2 className="text-lg font-semibold leading-tight text-foreground">Command center</h2>
+                    {!showAttentionLoading && nextActionsN === 0 ? (
+                      <CheckCircle2 className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="inline-flex h-7 w-fit items-center justify-center rounded-full border border-bb-border bg-bb-surface-card px-3 text-xs font-medium text-foreground/80">
+                  {commandStatus ? commandStatus : <Skeleton className="h-3 w-12" />}
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <DashboardCommandAction
+                  href={issuesHref}
+                  icon={AlertTriangle}
+                  label="Open issues"
+                  count={openIssuesN}
+                  meta="Resolve exceptions"
+                  tone="danger"
+                  loading={showAttentionLoading}
+                />
+                <DashboardCommandAction
+                  href={categoryReviewHref}
+                  icon={Tag}
+                  label="Uncategorized"
+                  count={uncategorizedN}
+                  meta="Assign categories"
+                  tone="success"
+                  loading={showAttentionLoading}
+                />
+                <DashboardCommandAction
+                  href={reconcileHref}
+                  icon={Landmark}
+                  label="Bank unmatched"
+                  count={bankUnmatchedN}
+                  meta="Review activity"
+                  tone="warning"
+                  loading={showAttentionLoading}
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-bb-border bg-bb-surface-soft/80 p-4 md:p-5 lg:border-l lg:border-t-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Period</div>
+              <div className="mt-1 text-sm font-semibold text-foreground">{range.from} to {range.to}</div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
+                  <div className="text-muted-foreground">Scope</div>
+                  <div className="mt-1 truncate font-medium text-foreground" title={selectedAccountLabel}>
+                    {selectedAccountLabel}
+                  </div>
+                </div>
+                <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
+                  <div className="text-muted-foreground">Net</div>
+                  <div className={`mt-1 truncate font-semibold tabular-nums ${netKpi.isNeg ? "text-bb-amount-negative" : "text-bb-amount-positive"}`}>
+                    {dashboardInitialLoading || pnlQ.isFetching ? <Skeleton className="h-4 w-20" /> : netKpi.text}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* KPI Strip */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -1379,82 +1533,6 @@ export default function DashboardPageClient() {
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Next Actions */}
-          <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
-            <CHeader className="p-0 px-4 py-2 border-b border-bb-border !gap-0">
-              <div className="flex items-center justify-between leading-none">
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
-                    <Tag className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
-                  </div>
-                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Next Actions</CardTitle>
-                </div>
-
-                <div className="text-xs font-medium rounded-full border border-bb-border px-2 py-0.5 text-foreground/80 bg-bb-surface-card">
-                  {showAttentionLoading ? <Skeleton className="h-3 w-10" /> : `${nextActionsN} open`}
-                </div>
-              </div>
-            </CHeader>
-
-            <CardContent className="p-0">
-              <div className="-mt-1 divide-y divide-bb-border-muted">
-                <button
-                  type="button"
-                  onClick={() => router.push(issuesHref)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-bb-status-danger-bg flex items-center justify-center">
-                      <AlertTriangle className="h-4 w-4 text-bb-status-danger-fg" strokeWidth={2} />
-                    </div>
-                    <div>
-                      <div className="font-medium text-sm text-foreground">
-                        {showAttentionLoading ? <Skeleton className="h-4 w-24" /> : `${openIssuesN} Open Issues`}
-                      </div>
-                      <div className="text-xs text-muted-foreground">Review and resolve</div>
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push(categoryReviewHref)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-bb-status-success-bg flex items-center justify-center">
-                      <Tag className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2} />
-                    </div>
-                    <div>
-                      <div className="font-medium text-sm text-foreground">
-                        {showAttentionLoading ? <Skeleton className="h-4 w-32" /> : `${uncategorizedN} Uncategorized`}
-                      </div>
-                      <div className="text-xs text-muted-foreground">Assign categories</div>
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push(reconcileHref)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bb-table-row-hover transition-colors text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-bb-status-warning-bg flex items-center justify-center">
-                      <Landmark className="h-4 w-4 text-bb-status-warning-fg" strokeWidth={2} />
-                    </div>
-                    <div>
-                      <div className="font-medium text-sm text-foreground">
-                        {showAttentionLoading ? <Skeleton className="h-4 w-32" /> : `${bankUnmatchedN} Bank Unmatched`}
-                      </div>
-                      <div className="text-xs text-muted-foreground">Review bank activity</div>
-                    </div>
-                  </div>
-                </button>
-              </div>
             </CardContent>
           </Card>
 
