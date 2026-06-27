@@ -1,6 +1,6 @@
 # Bynkbook Production Bridge Current State
 
-Last verified: 2026-05-04
+Last verified: 2026-06-27
 
 ## Executive Warning
 
@@ -73,6 +73,13 @@ Stale/risky prod-named Cognito reference:
 - Hosted UI domain: none verified
 
 Do not switch production auth to the stale prod-named Cognito pool as cleanup.
+
+2026-06-27 incident note:
+
+- Production login was using the live dev-named Cognito pool/client above.
+- The API Gateway JWT authorizer had drifted to the stale prod-named Cognito pool/client below, causing `/v1/businesses` to fail with API Gateway `401` before Lambda execution.
+- The live API Gateway authorizer was repaired to issuer `us-east-1_tmyPJwsJb` and audience `38gus49pnfilbc4u2f7b68ist7`.
+- `infra-sst/sst.config.ts` now refuses prod deploys that would restore the stale Cognito pool/client.
 
 ### KMS
 

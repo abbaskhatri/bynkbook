@@ -35,6 +35,16 @@ export default $config({
     if (!uploadsBucketName) throw new Error("Missing BYNKBOOK_PROD_UPLOADS_BUCKET_NAME for prod stage");
     if (!cognitoUserPoolId) throw new Error("Missing BYNKBOOK_PROD_COGNITO_USER_POOL_ID for prod stage");
     if (!cognitoAppClientId) throw new Error("Missing BYNKBOOK_PROD_COGNITO_APP_CLIENT_ID for prod stage");
+    if (isProd && cognitoUserPoolId === "us-east-1_CgE7Dozj4") {
+      throw new Error(
+        "Refusing prod deploy with stale Cognito pool us-east-1_CgE7Dozj4. Production auth uses us-east-1_tmyPJwsJb."
+      );
+    }
+    if (isProd && cognitoAppClientId === "2iqmddh5hu90ic1os90p59ls1d") {
+      throw new Error(
+        "Refusing prod deploy with stale Cognito app client 2iqmddh5hu90ic1os90p59ls1d. Production auth uses 38gus49pnfilbc4u2f7b68ist7."
+      );
+    }
 
     const databaseSecretId = `${resourcePrefix}/rds/database_url`;
     const databaseCaSecretId = isProd
