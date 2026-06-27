@@ -491,15 +491,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   };
 
   const renderNavGroups = (isCollapsed: boolean, onNavigate?: () => void) => (
-    <div className="p-2.5 space-y-3 flex-1 overflow-y-auto">
+    <div className="p-2.5 space-y-2 flex-1 overflow-y-auto">
       {NAV_GROUPS.map((group, groupIndex) => {
         if (!group.items.length) return null;
 
         return (
-          <div key={group.group} className="space-y-1.5">
+          <div key={group.group} className="space-y-1">
             {/* Group label (hidden when collapsed to keep width stable) */}
             {!isCollapsed ? (
-              <div className="px-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition-opacity duration-200">
+                <div className="px-2 pt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground transition-opacity duration-200">
                 {group.group}
               </div>
             ) : null}
@@ -525,8 +525,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                       className={[
                         "w-full justify-center border transition-[color,background-color,border-color,box-shadow,transform] duration-200",
                         active
-                          ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg shadow-[0_8px_18px_rgba(5,150,105,0.18)] hover:bg-bb-nav-active-bg/90"
-                          : "border-transparent bg-transparent text-bb-sidebar-fg/72 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg hover:translate-x-0.5",
+                          ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg shadow-sm hover:bg-bb-nav-active-bg/90"
+                          : "border-transparent bg-transparent text-bb-sidebar-fg/68 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg",
                       ].join(" ")}
                       size="sm"
                       title={
@@ -572,14 +572,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     className={[
                       "w-full justify-start border transition-[color,background-color,border-color,box-shadow,transform] duration-200",
                       active
-                        ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg shadow-[0_8px_18px_rgba(5,150,105,0.18)] hover:bg-bb-nav-active-bg/90"
-                        : "border-transparent bg-transparent text-bb-sidebar-fg/72 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg hover:translate-x-0.5",
+                        ? "border-transparent bg-bb-nav-active-bg text-bb-nav-active-fg shadow-sm hover:bg-bb-nav-active-bg/90"
+                        : "border-transparent bg-transparent text-bb-sidebar-fg/68 hover:bg-bb-surface-elevated hover:text-bb-sidebar-fg",
                     ].join(" ")}
                     size="sm"
                   >
                     <Link
                       href={link}
-                                            className="flex w-full items-center gap-2 transition-all duration-200"
+                      className="flex w-full items-center gap-2 transition-colors duration-200"
                       onClick={onNavigate}
                     >
                       <span className="shrink-0 text-current">{item.icon}</span>
@@ -604,7 +604,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             </div>
 
             {groupIndex < NAV_GROUPS.length - 1 ? (
-              <div className="border-t border-bb-border pt-2" />
+              <div className="pt-1" />
             ) : null}
           </div>
         );
@@ -673,11 +673,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "border-r border-bb-border bg-bb-sidebar-bg/90 backdrop-blur-xl hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg shadow-[1px_0_0_rgba(255,255,255,0.7)_inset] dark:shadow-[1px_0_0_rgba(255,255,255,0.06)_inset]",
+          "border-r border-bb-border bg-bb-sidebar-bg hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
-        <div className="h-14 px-3 border-b border-bb-border flex items-center bg-bb-sidebar-bg/92">
+        <div className="h-14 px-3 border-b border-bb-border flex items-center bg-bb-sidebar-bg">
           <div
             className={
               collapsed
@@ -697,7 +697,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         {renderNavGroups(collapsed)}
 
-        <div className="p-3 border-t border-bb-border bg-bb-sidebar-bg/92">
+        <div className="p-3 border-t border-bb-border bg-bb-sidebar-bg">
           <Button
             variant="outline"
             size="sm"
@@ -723,7 +723,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/88 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.75)_inset] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]">
+        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/95 backdrop-blur-md">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
             <AppTooltip content="Open navigation" side="bottom">
@@ -954,7 +954,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
         {/* Content: ledger must not page-scroll. Extra bottom padding on
             mobile reserves space for the fixed bottom tab bar. */}
-        <main className={(noPageScroll ? "p-3 pb-[5.25rem] md:p-4 md:pb-4 overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-4 md:pb-4 overflow-y-auto flex-1 min-h-0")}>
+        <main className={(noPageScroll ? "p-3 pb-[5.25rem] md:p-4 md:pb-4 overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-5 md:pb-5 overflow-y-auto flex-1 min-h-0")}>
           {children}
         </main>
       </div>

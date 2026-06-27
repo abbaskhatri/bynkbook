@@ -355,7 +355,7 @@
   body {
     @apply bg-background text-foreground;
     background:
-      linear-gradient(180deg, rgba(6, 182, 212, 0.08) 0%, rgba(5, 150, 105, 0.06) 18rem, transparent 34rem),
+      linear-gradient(180deg, rgba(5, 150, 105, 0.05) 0%, rgba(255, 255, 255, 0.38) 18rem, transparent 34rem),
       var(--bb-app-bg);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     text-rendering: optimizeLegibility;
@@ -437,18 +437,12 @@
 
 .bb-app-canvas {
   background:
-    linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.68) 0%, rgba(246, 250, 248, 0.92) 16rem, var(--bb-app-bg) 100%);
-  background-size: 24px 24px, 24px 24px, auto;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(246, 250, 248, 0.96) 17rem, var(--bb-app-bg) 100%);
 }
 
 .dark .bb-app-canvas {
   background:
-    linear-gradient(90deg, rgba(167, 180, 197, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(167, 180, 197, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(52, 211, 153, 0.075) 0%, rgba(7, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
-  background-size: 24px 24px, 24px 24px, auto;
+    linear-gradient(180deg, rgba(52, 211, 153, 0.045) 0%, rgba(7, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
 }
 
 .bb-focus-lift {
@@ -456,7 +450,7 @@
 }
 
 .bb-focus-lift:hover {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .bb-checkbox {

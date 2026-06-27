@@ -1416,14 +1416,13 @@ export default function DashboardPageClient() {
   );
 
   return (
-    <div className="space-y-5 max-w-7xl">
-      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
-        <div className="px-3 pt-2">
+    <div className="space-y-5 max-w-none">
+      <div className="px-1">
           <PageHeader
             icon={<LayoutDashboard className="h-4 w-4" />}
             title="Dashboard"
             afterTitle={
-              <div className="h-6 px-1.5 rounded-lg border border-primary/20 bg-primary/10 flex items-center">
+              <div className="h-7 px-1.5 rounded-md border border-bb-border bg-bb-surface-card flex items-center">
                 <CapsuleSelect
                   variant="flat"
                   value={accountScopeId}
@@ -1469,8 +1468,6 @@ export default function DashboardPageClient() {
               </div>
             }
           />
-        </div>
-        <div className="mt-2 h-px bg-bb-border" />
       </div>
 
       {!selectedBusinessId && !businessesQ.isLoading ? (
@@ -1525,7 +1522,7 @@ export default function DashboardPageClient() {
       />
 
       {/* KPI Strip */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {[
           {
             label: "Cash Balance",
@@ -1587,18 +1584,18 @@ export default function DashboardPageClient() {
           const loading = dashboardInitialLoading || pnlQ.isFetching || cashflowQ.isFetching || accountsSummaryQ.isFetching;
 
           return (
-            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-[10px] border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm overflow-hidden transition-[color,background-color,border-color,opacity,transform,box-shadow] duration-200 ease-out hover:shadow-md">
-              <CardContent className="px-3 py-3">
+            <Card key={k.label} className="flex flex-col gap-3 py-3 rounded-lg border border-bb-border bg-bb-surface-card text-card-foreground shadow-sm overflow-hidden">
+              <CardContent className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <div className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${k.iconBg}`}>
-                    <Icon className={`h-7 w-7 ${k.iconFg}`} strokeWidth={2} />
+                  <div className={`inline-flex h-8 w-8 items-center justify-center rounded-md ${k.iconBg}`}>
+                    <Icon className={`h-4 w-4 ${k.iconFg}`} strokeWidth={2.2} />
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">{k.label}</div>
 
                     <div
-                      className={`mt-0.5 text-[18px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}
+                      className={`mt-1 text-[20px] leading-tight font-semibold tabular-nums ${k.isNeg ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}
                       title={k.tooltip ?? undefined}
                     >
                       {loading ? (
@@ -1610,7 +1607,7 @@ export default function DashboardPageClient() {
                       )}
                     </div>
 
-                    <div className="mt-0.5 text-[10px] text-muted-foreground truncate">{k.sub}</div>
+                    <div className="mt-1 text-[11px] text-muted-foreground truncate">{k.sub}</div>
                   </div>
                 </div>
               </CardContent>
@@ -1638,12 +1635,12 @@ export default function DashboardPageClient() {
         {/* RIGHT: cards stack */}
         <div className="space-y-4">
           {/* Account Balances (Base44 structure) */}
-          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
+          <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+            <CHeader className="p-0 px-4 py-2 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
-                    <Landmark className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
+                    <Landmark className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                   </div>
                   <CardTitle className="text-sm font-semibold text-foreground leading-none">Account Balances</CardTitle>
                 </div>
@@ -1691,12 +1688,12 @@ export default function DashboardPageClient() {
           </Card>
 
           {/* Next Actions */}
-          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
+          <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+            <CHeader className="p-0 px-4 py-2 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
-                    <Tag className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
+                    <Tag className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                   </div>
                   <CardTitle className="text-sm font-semibold text-foreground leading-none">Next Actions</CardTitle>
                 </div>
@@ -1767,12 +1764,12 @@ export default function DashboardPageClient() {
           </Card>
 
           {/* AI Insights */}
-          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
+          <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+            <CHeader className="p-0 px-4 py-2 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
-                    <Sparkles className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
+                    <Sparkles className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                   </div>
                   <CardTitle className="text-sm font-semibold text-foreground leading-none">AI Insights</CardTitle>
                 </div>
@@ -1809,8 +1806,8 @@ export default function DashboardPageClient() {
 
           {/* Collapsible AI Assistant — bundles AI Summary, Anomalies, and Ask AI
               so the three sub-cards do not visually dominate the dashboard. */}
-          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
+          <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+            <CHeader className="p-0 px-4 py-2 border-b border-bb-border flex flex-row items-center justify-between">
               <button
                 type="button"
                 className="flex items-center gap-2 text-left"
@@ -1843,8 +1840,8 @@ export default function DashboardPageClient() {
           {aiPanelExpanded ? (
             <>
                 {/* AI Summary (read-only; aggregates only) */}
-      <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
+      <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+        <CHeader className="p-0 px-4 py-2 border-b border-bb-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
             <CardTitle className="text-sm">AI Summary</CardTitle>
@@ -1886,8 +1883,8 @@ export default function DashboardPageClient() {
       </Card>
 
       {/* AI Anomalies (deterministic; read-only) */}
-      <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
+      <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+        <CHeader className="p-0 px-4 py-2 border-b border-bb-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-bb-status-warning-fg" />
             <CardTitle className="text-sm">Anomalies</CardTitle>
@@ -1955,8 +1952,8 @@ export default function DashboardPageClient() {
       </Card>
 
             {/* Ask AI (aggregates-only; read-only) */}
-      <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-        <CHeader className="p-0 px-3 pt-2 pb-2 border-b border-bb-border flex flex-row items-center justify-between">
+      <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+        <CHeader className="p-0 px-4 py-2 border-b border-bb-border flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
             <CardTitle className="text-sm">Ask AI</CardTitle>
@@ -2016,12 +2013,12 @@ export default function DashboardPageClient() {
           ) : null}
 
           {/* Monthly Summary (Base44 card structure) */}
-          <Card className="rounded-xl border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-1">
-            <CHeader className="p-0 px-3 pt-1 pb-0.5 border-b border-bb-border !gap-0">
+          <Card className="rounded-lg border border-bb-border shadow-sm overflow-hidden bg-bb-surface-card flex flex-col !gap-0 !py-0">
+            <CHeader className="p-0 px-4 py-2 border-b border-bb-border !gap-0">
               <div className="flex items-center justify-between leading-none">
                 <div className="flex items-center gap-3">
-                  <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
-                    <CalendarDays className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
+                    <CalendarDays className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                   </div>
                   <CardTitle className="text-sm font-semibold text-foreground leading-none">Monthly Summary</CardTitle>
                 </div>
