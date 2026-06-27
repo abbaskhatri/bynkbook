@@ -72,6 +72,20 @@ function unapplyAndDeleteEvent(body: any = {}) {
   };
 }
 
+function applyPaymentEvent(body: any = {}) {
+  return {
+    body: JSON.stringify(body),
+    pathParameters: { businessId, accountId, entryId },
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "user-1" } } },
+      http: {
+        method: "POST",
+        path: `/v1/businesses/${businessId}/accounts/${accountId}/entries/${entryId}/ap/apply`,
+      },
+    },
+  };
+}
+
 function jsonBody(res: any) {
   return JSON.parse(res.body);
 }
@@ -105,6 +119,44 @@ function createApMutationPrisma(args: {
     bill: {
       findMany: vi.fn(async () => [{ id: billId, amount_cents: 1000n, voided_at: null }]),
       update: vi.fn(async () => ({})),
+    },
+    activityLog: {
+      create: vi.fn(async () => ({})),
+    },
+    $transaction: vi.fn(async (cb: any) => cb(prisma)),
+  };
+  return prisma;
+}
+
+function createApApplyPrisma(args: {
+  role?: string;
+  entryDate?: Date;
+  closedPeriod?: any;
+} = {}) {
+  const prisma: any = {
+    userBusinessRole: {
+      findFirst: vi.fn(async () => ({ role: args.role ?? "OWNER" })),
+    },
+    closedPeriod: {
+      findFirst: vi.fn(async () => args.closedPeriod ?? null),
+    },
+    entry: {
+      findFirst: vi.fn(async () => ({
+        id: entryId,
+        account_id: accountId,
+        amount_cents: -1000n,
+        vendor_id: vendorId,
+        date: args.entryDate ?? new Date("2026-04-15T00:00:00.000Z"),
+      })),
+    },
+    bill: {
+      findMany: vi.fn(async () => [{ id: billId, amount_cents: 1000n, voided_at: null }]),
+      update: vi.fn(async () => ({})),
+    },
+    billPaymentApplication: {
+      findMany: vi.fn(async () => []),
+      groupBy: vi.fn(async () => []),
+      upsert: vi.fn(async () => ({})),
     },
     activityLog: {
       create: vi.fn(async () => ({})),
@@ -218,5 +270,37 @@ describe("AP unapply-and-delete closed period safety", () => {
     expect(jsonBody(res)).toEqual({ ok: false, error: "Insufficient permissions" });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.closedPeriod.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("AP apply closed period safety", () => {
+  test("blocks before reading bills or creating applications when the payment date is closed", async () => {
+    const prisma = createApApplyPrisma({
+      entryDate: new Date("2026-04-15T00:00:00.000Z"),
+      closedPeriod: { id: "closed-1" },
+    });
+    const handler = await loadApHandlerWithPrisma(prisma);
+
+    const res = await handler(applyPaymentEvent({
+      applications: [{ bill_id: billId, applied_amount_cents: 1000 }],
+    }));
+
+    expect(res.statusCode).toBe(409);
+    expect(jsonBody(res)).toMatchObject({
+      ok: false,
+      code: "CLOSED_PERIOD",
+      error: "This period is closed. Reopen period to modify.",
+    });
+    expect(prisma.entry.findFirst).toHaveBeenCalledWith({
+      where: { id: entryId, business_id: businessId, account_id: accountId, deleted_at: null },
+      select: { id: true, account_id: true, amount_cents: true, vendor_id: true, date: true },
+    });
+    expect(prisma.closedPeriod.findFirst).toHaveBeenCalledWith({
+      where: { business_id: businessId, month: "2026-04" },
+      select: { id: true },
+    });
+    expect(prisma.bill.findMany).not.toHaveBeenCalled();
+    expect(prisma.billPaymentApplication.findMany).not.toHaveBeenCalled();
+    expect(prisma.billPaymentApplication.upsert).not.toHaveBeenCalled();
   });
 });

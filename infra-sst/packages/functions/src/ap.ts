@@ -655,6 +655,43 @@ export async function handler(event: any) {
 
     const billIds = bills.map((b: any) => String(b.id));
     const appliedByBill = await computeBillAppliedMap(prisma, biz, billIds);
+    const fromDate = new Date(from + "T00:00:00Z");
+    const toDate = new Date(to + "T23:59:59.999Z");
+    const payments: any[] = await prisma.$queryRaw`
+      WITH payments AS (
+        SELECT e.id, e.date, e.payee, e.memo, e.amount_cents
+        FROM entry e
+        WHERE e.business_id = ${biz}::uuid
+          AND e.vendor_id = ${vendorId}::uuid
+          AND e.deleted_at IS NULL
+          AND e.type = 'EXPENSE'
+          AND e.date >= ${fromDate}
+          AND e.date <= ${toDate}
+          AND (
+            COALESCE(e.entry_kind, 'GENERAL') = 'VENDOR_PAYMENT'
+            OR EXISTS (
+              SELECT 1
+              FROM category c
+              WHERE c.id = e.category_id
+                AND c.business_id = e.business_id
+                AND LOWER(c.name) = 'purchase'
+                AND c.archived_at IS NULL
+            )
+          )
+      ),
+      applied AS (
+        SELECT bpa.entry_id, COALESCE(SUM(bpa.applied_amount_cents), 0)::bigint AS applied_cents
+        FROM bill_payment_application bpa
+        JOIN payments p ON p.id = bpa.entry_id
+        WHERE bpa.business_id = ${biz}::uuid
+          AND bpa.reversed_at IS NULL
+        GROUP BY bpa.entry_id
+      )
+      SELECT p.id, p.date, p.payee, p.memo, p.amount_cents, COALESCE(a.applied_cents, 0)::bigint AS applied_cents
+      FROM payments p
+      LEFT JOIN applied a ON a.entry_id = p.id
+      ORDER BY p.date ASC, p.id ASC;
+    `;
 
     const lines: string[] = [];
     lines.push(`Vendor,${JSON.stringify(vendor.name)}`);
@@ -682,6 +719,26 @@ export async function handler(event: any) {
       ].join(","));
     }
 
+    lines.push("");
+    lines.push("Section,PaymentEntryId,PaymentDate,PaymentAmountCents,AppliedCents,UnappliedCents,Payee,Memo");
+
+    for (const p of payments ?? []) {
+      const rawAmount = toBigIntSafe(p.amount_cents);
+      const amount = rawAmount < 0n ? -rawAmount : rawAmount;
+      const applied = toBigIntSafe(p.applied_cents);
+      const unapplied = amount - applied;
+      lines.push([
+        "PAYMENT",
+        p.id,
+        String(p.date ?? "").slice(0, 10),
+        String(amount),
+        String(applied),
+        String(unapplied < 0n ? 0n : unapplied),
+        JSON.stringify(p.payee ?? ""),
+        JSON.stringify(p.memo ?? ""),
+      ].join(","));
+    }
+
     return {
       statusCode: 200,
       headers: {
@@ -701,12 +758,12 @@ export async function handler(event: any) {
 
     const acctId = String(body.account_id ?? "").trim();
     const date = String(body.date ?? "").trim(); // YYYY-MM-DD
-    const amountCentsIn = Number(body.amount_cents ?? 0);
+    const amountCentsIn = toBigIntSafe(body.amount_cents);
     const memo = body.memo !== undefined ? String(body.memo ?? "").trim() : "Vendor payment";
 
     if (!acctId) return json(400, { ok: false, error: "account_id is required" });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(400, { ok: false, error: "date must be YYYY-MM-DD" });
-    if (!Number.isFinite(amountCentsIn) || amountCentsIn <= 0) return json(400, { ok: false, error: "amount_cents must be positive cents" });
+    if (amountCentsIn <= 0n) return json(400, { ok: false, error: "amount_cents must be positive cents" });
 
     const vendor = await requireVendor(prisma, biz, String(vendorId));
     if (!vendor) return json(404, { ok: false, error: "Vendor not found" });
@@ -736,7 +793,7 @@ export async function handler(event: any) {
         date: new Date(date + "T00:00:00Z"),
         payee: vendor.name,
         memo: memo || "Vendor payment",
-        amount_cents: BigInt(-Math.abs(Math.round(amountCentsIn))), // expense
+        amount_cents: -amountCentsIn, // expense
         type: "EXPENSE",
         method: "OTHER",
         status: "EXPECTED",
@@ -898,12 +955,15 @@ AND (
     const result = await prisma.$transaction(async (tx: any) => {
       const entry = await tx.entry.findFirst({
         where: { id: entId, business_id: biz, account_id: acctId, deleted_at: null },
-        select: { id: true, account_id: true, amount_cents: true, vendor_id: true },
+        select: { id: true, account_id: true, amount_cents: true, vendor_id: true, date: true },
       });
       if (!entry) return { ok: false, status: 404, error: "Entry not found" };
 
       const entryVendorId = entry.vendor_id ? String(entry.vendor_id) : null;
       if (!entryVendorId) return { ok: false, status: 400, error: "Entry must be linked to a vendor" };
+
+      const cp = await assertNotClosedPeriod({ prisma: tx, businessId: biz, dateInput: entry.date });
+      if (!cp.ok) return { ok: false, status: cp.response.statusCode, response: cp.response };
 
       const paymentAbs = (() => {
         const a = toBigIntSafe(entry.amount_cents);
@@ -1006,6 +1066,7 @@ AND (
       return { ok: true };
     });
 
+    if (!result.ok && (result as any).response) return (result as any).response;
     if (!result.ok) return json(result.status ?? 400, { ok: false, error: result.error, bill_id: (result as any).bill_id });
 
     // Minimal response: affected bills (for UI patching without refetch storms)

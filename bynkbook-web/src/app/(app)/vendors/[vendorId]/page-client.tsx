@@ -99,6 +99,12 @@ function absBigint(v: bigint) {
   return v < 0n ? -v : v;
 }
 
+function notifyVendorAccountingChanged() {
+  window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+  window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
+  window.dispatchEvent(new CustomEvent("bynk:ledger-refresh"));
+}
+
 async function apiFetchWithRetry(path: string, init: any, retries: number = 1) {
   try {
     return await apiFetch(path, init);
@@ -1676,14 +1682,14 @@ export default function VendorDetailPageClient() {
 
                     setErr(null);
 
-                    const amt = Number(vendorPayAmount);
-                    if (!Number.isFinite(amt) || amt <= 0) {
+                    const amountCents = parseMoneyToCents(vendorPayAmount.trim());
+                    if (amountCents <= 0) {
                       setErr("Enter a valid amount.");
                       return;
                     }
 
                     const openBills = bills.filter((b: any) => String(b.status) === "OPEN" || String(b.status) === "PARTIAL");
-                    const totalCents = BigInt(Math.round(amt * 100));
+                    const totalCents = BigInt(amountCents);
 
                     // Build apps from applyAmounts map (works for both auto and manual)
                     const apps: Array<{ bill_id: string; applied_amount_cents: number }> = [];
@@ -1694,10 +1700,6 @@ export default function VendorDetailPageClient() {
                       const raw = (applyAmounts[key] || "").trim();
                       if (!raw) continue;
 
-                      const n = Number(raw);
-                      if (!Number.isFinite(n) || n <= 0) continue;
-
-                      // Parse via lib/money to avoid float precision issues at penny boundaries
                       const cents = BigInt(parseMoneyToCents(raw));
                       if (cents <= 0n) continue;
 
@@ -1723,7 +1725,7 @@ export default function VendorDetailPageClient() {
                         body: JSON.stringify({
                           account_id: vendorPayAccountId,
                           date: vendorPayDate,
-                          amount_cents: Number(totalCents),
+                          amount_cents: amountCents,
                           memo: vendorPayMemo,
                           method: vendorPayMethod,
                         }),
@@ -1766,7 +1768,7 @@ export default function VendorDetailPageClient() {
                         // keep existing list if transient
                       }
 
-                      window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+                      notifyVendorAccountingChanged();
 
                       // reset dialog state
                       setVendorPayAmount("");
@@ -1821,13 +1823,13 @@ export default function VendorDetailPageClient() {
 
                       if (!vendorPayAutoApply) return;
 
-                      const n = Number(v);
-                      if (!Number.isFinite(n) || n <= 0) {
+                      const amountCents = parseMoneyToCents(v.trim());
+                      if (amountCents <= 0) {
                         setApplyAmounts({});
                         return;
                       }
 
-                      const totalCents = BigInt(Math.round(n * 100));
+                      const totalCents = BigInt(amountCents);
                       const { map } = computeAutoAllocationMap(totalCents);
                       setApplyAmounts(map);
                     }}
@@ -1878,13 +1880,13 @@ export default function VendorDetailPageClient() {
 
                       if (!on) return;
 
-                      const n = Number(vendorPayAmount);
-                      if (!Number.isFinite(n) || n <= 0) {
+                      const amountCents = parseMoneyToCents(vendorPayAmount.trim());
+                      if (amountCents <= 0) {
                         setApplyAmounts({});
                         return;
                       }
 
-                      const totalCents = BigInt(Math.round(n * 100));
+                      const totalCents = BigInt(amountCents);
                       const { map } = computeAutoAllocationMap(totalCents);
                       setApplyAmounts(map);
                     }}
@@ -1941,8 +1943,8 @@ export default function VendorDetailPageClient() {
 
               <div className="px-3 py-2 border-t border-bb-border bg-bb-surface-card text-xs">
                 {(() => {
-                  const amt = Number(vendorPayAmount);
-                  const totalCents = Number.isFinite(amt) && amt > 0 ? BigInt(Math.round(amt * 100)) : 0n;
+                  const amountCents = parseMoneyToCents(vendorPayAmount.trim());
+                  const totalCents = amountCents > 0 ? BigInt(amountCents) : 0n;
 
                   const openBills = bills.filter((b: any) => String(b.status) === "OPEN" || String(b.status) === "PARTIAL");
 
@@ -1950,9 +1952,9 @@ export default function VendorDetailPageClient() {
                   for (const b of openBills) {
                     const raw = (applyAmounts[String(b.id)] || "").trim();
                     if (!raw) continue;
-                    const n = Number(raw);
-                    if (!Number.isFinite(n) || n <= 0) continue;
-                    applied += BigInt(Math.round(n * 100));
+                    const cents = parseMoneyToCents(raw);
+                    if (cents <= 0) continue;
+                    applied += BigInt(cents);
                   }
 
                   const remaining = totalCents - applied;
@@ -2016,6 +2018,7 @@ export default function VendorDetailPageClient() {
                         reason: "User unapply all",
                       });
                       await refresh();
+                      notifyVendorAccountingChanged();
                     } catch (e: any) {
                       const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply failed";
                       setErr(msg);
@@ -2049,7 +2052,7 @@ export default function VendorDetailPageClient() {
                         { method: "POST", body: JSON.stringify({ reason: "Unapply all and delete payment" }) }
                       );
                       await refresh();
-                      window.dispatchEvent(new CustomEvent("bynk:vendors-refresh"));
+                      notifyVendorAccountingChanged();
                       setApplyOpen(false);
                     } catch (e: any) {
                       const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Unapply+delete failed";
@@ -2082,10 +2085,10 @@ export default function VendorDetailPageClient() {
                       const raw = (applyAmounts[key] || "").trim();
                       if (!raw) continue;
 
-                      const n = Number(raw);
-                      if (!Number.isFinite(n) || n <= 0) return true;
+                      const parsedCents = parseMoneyToCents(raw);
+                      if (parsedCents <= 0) return true;
 
-                      const cents = BigInt(Math.round(n * 100));
+                      const cents = BigInt(parsedCents);
                       const outstanding = centsFromAny(b.outstanding_cents);
                       if (cents > outstanding) return true;
 
@@ -2113,10 +2116,7 @@ export default function VendorDetailPageClient() {
                       const raw = (applyAmounts[key] || "").trim();
                       if (!raw) continue;
 
-                      const n = Number(raw);
-                      if (!Number.isFinite(n) || n <= 0) continue;
-
-                      const cents = Math.round(n * 100);
+                      const cents = parseMoneyToCents(raw);
                       if (cents <= 0) continue;
 
                       apps.push({ bill_id: key, applied_amount_cents: cents });
@@ -2135,6 +2135,7 @@ export default function VendorDetailPageClient() {
 
                       // Deterministic UI update: refresh is coalesced + epoch-guarded and does not empty-clear.
                       await refresh();
+                      notifyVendorAccountingChanged();
                       setApplyOpen(false);
                     } catch (e: any) {
                       const msg = appErrorMessageOrNull(e) ?? e?.message ?? "Apply failed";
@@ -2311,10 +2312,10 @@ export default function VendorDetailPageClient() {
                     const key = String(b.id);
                     const raw = (applyAmounts[key] || "").trim();
                     if (!raw) continue;
-                    const n = Number(raw);
-                    if (!Number.isFinite(n) || n < 0) { invalid = true; continue; }
+                    const parsedCents = parseMoneyToCents(raw);
+                    if (parsedCents < 0) { invalid = true; continue; }
 
-                    const cents = BigInt(Math.round(n * 100));
+                    const cents = BigInt(parsedCents);
                     const outstanding = centsFromAny(b.outstanding_cents);
                     if (cents > outstanding) invalid = true;
                     total += cents;
