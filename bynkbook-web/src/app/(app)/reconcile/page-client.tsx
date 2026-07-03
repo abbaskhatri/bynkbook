@@ -2854,11 +2854,10 @@ const displayBankActiveList = useMemo(() => {
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
 
-  // Auto-match badge: for each unmatched bank txn, find an UNAMBIGUOUS
-  // candidate entry — exact same absolute amount, same direction, within
-  // 3 days, and exactly ONE such entry exists in the visible expected
-  // list. These are the "obvious" matches the user always confirms manually.
-  // The badge gives them a one-click match without opening the dialog.
+  // Auto-match badge: for each unmatched bank txn, find an unambiguous
+  // candidate entry — exact same amount, same direction, near date, and
+  // enough payee/reference/date signal to feel safe as a one-click action.
+  // More ambiguous suggestions stay in the review dialog.
   //
   // This is deterministic (no AI cost, no async). The dialog stays
   // available for ambiguous cases.
@@ -2884,6 +2883,7 @@ const displayBankActiveList = useMemo(() => {
       let count = 0;
       let onlyRefMatchId: string | null = null;
       let refMatchCount = 0;
+      let onlyStrongMatchId: string | null = null;
 
       for (const e of entriesExpectedAllList) {
         const entryId = String(e?.id ?? "");
@@ -2901,13 +2901,19 @@ const displayBankActiveList = useMemo(() => {
 
         // Within 3 days of bank posted date.
         const meta = scoreEntryCandidate(t, { ...e, date: String(e?.date ?? "").slice(0, 10) });
-        if (Number(meta.dtDays ?? 9999) > 3) continue;
+        const dtDays = Number(meta.dtDays ?? 9999);
+        if (dtDays > 3) continue;
 
         count++;
         if (checkRefsMatch(t, e)) {
           refMatchCount++;
           if (refMatchCount === 1) onlyRefMatchId = entryId;
           else onlyRefMatchId = null;
+        }
+        const hasStrongSignal = checkRefsMatch(t, e) || Number(meta.overlap ?? 0) > 0 || dtDays <= 1;
+        if (hasStrongSignal) {
+          if (onlyStrongMatchId === null) onlyStrongMatchId = entryId;
+          else onlyStrongMatchId = "";
         }
         if (count > 1) {
           // Ambiguous by amount/date; a unique check-number match below can
@@ -2919,7 +2925,7 @@ const displayBankActiveList = useMemo(() => {
       }
 
       if (refMatchCount === 1 && onlyRefMatchId) out.set(txnId, onlyRefMatchId);
-      else if (count === 1 && onlyMatchId) out.set(txnId, onlyMatchId);
+      else if (count === 1 && onlyMatchId && onlyStrongMatchId === onlyMatchId) out.set(txnId, onlyMatchId);
     }
     return out;
   }, [bankTab, displayBankActiveList, entriesExpectedAllList, entriesExpectedList, isBankTxnFullyMatched]);
@@ -5022,7 +5028,7 @@ const displayBankActiveList = useMemo(() => {
                                     if (!canWriteReconcileEffective) return null;
                                     if (isPendingBankTxn || isRowPending) return null;
                                     return (
-                                      <AppTooltip content="Auto-match with the only ledger entry that exactly matches amount, direction, and date window" side="left">
+                                      <AppTooltip content="Match with the only strong ledger entry candidate" side="left">
                                         <button
                                           type="button"
                                           className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}

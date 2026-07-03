@@ -13,7 +13,10 @@ type Suggestion = {
   bankTxnId: string;
   entryIds: string[]; // 1 for 1-to-1, many for split
   kind: "ONE_TO_ONE" | "SPLIT" | "COMBINE";
+  confidence: number;
+  quality: "READY" | "REVIEW";
   reasons: string[];
+  cautionReasons: string[];
   bank: any;
   entries: any[];
 };
@@ -81,6 +84,99 @@ function norm(s: any) {
   return String(s ?? "").trim().toLowerCase();
 }
 
+function sameDirectionAmount(a: any, b: any) {
+  const av = toBigIntSafe(a);
+  const bv = toBigIntSafe(b);
+  if (av === 0n || bv === 0n) return false;
+  return (av < 0n && bv < 0n) || (av > 0n && bv > 0n);
+}
+
+function tokenSet(s: any) {
+  return new Set(
+    norm(s)
+      .replace(/[0-9]/g, " ")
+      .replace(/[^a-z\s]/g, " ")
+      .split(/\s+/)
+      .filter((part) => part.length >= 3)
+  );
+}
+
+function textOverlap(a: any, b: any) {
+  const A = tokenSet(a);
+  const B = tokenSet(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let hits = 0;
+  for (const item of A) {
+    if (B.has(item)) hits += 1;
+  }
+  return hits;
+}
+
+function payeeMatchesBank(bank: any, entry: any) {
+  const bankDesc = norm(bank?.name ?? bank?.description ?? bank?.memo ?? "");
+  const payee = norm(entry?.payee ?? entry?.vendor_name ?? "");
+  if (!bankDesc || !payee) return false;
+  return bankDesc.includes(payee) || payee.includes(bankDesc) || textOverlap(bankDesc, payee) >= 2;
+}
+
+function suggestionKindLabel(kind: Suggestion["kind"]) {
+  if (kind === "COMBINE") return "Many bank transactions to one entry";
+  if (kind === "SPLIT") return "One bank transaction to several entries";
+  return "One bank transaction to one entry";
+}
+
+function qualityForOneToOne(args: {
+  bank: any;
+  entry: any;
+  dateDiffAbs: number;
+  similarCandidateCount: number;
+  payeeHit: boolean;
+}) {
+  const { bank, entry, dateDiffAbs, similarCandidateCount, payeeHit } = args;
+  const refHit = checkSimpleRefMatch(bank, entry);
+  const reasons = ["Exact amount", dateDiffAbs === 0 ? "Same date" : `Date within ${dateDiffAbs}d`];
+  const cautionReasons: string[] = [];
+
+  if (refHit) reasons.push("Reference match");
+  else if (payeeHit) reasons.push("Similar payee");
+  else cautionReasons.push("Payee is not clearly similar");
+
+  if (similarCandidateCount > 1 && !refHit) cautionReasons.push(`${similarCandidateCount} possible entries`);
+
+  const strong = similarCandidateCount === 1 && (refHit || payeeHit || dateDiffAbs <= 1);
+  return {
+    quality: strong ? "READY" as const : "REVIEW" as const,
+    confidence: strong ? (refHit ? 0.98 : payeeHit ? 0.93 : 0.88) : 0.72,
+    reasons,
+    cautionReasons,
+  };
+}
+
+function checkSimpleRefMatch(bank: any, entry: any) {
+  const bankText = [
+    bank?.check_number,
+    bank?.checkNumber,
+    bank?.name,
+    bank?.description,
+    bank?.memo,
+  ].map((v) => String(v ?? "")).join(" ");
+  const entryText = [
+    entry?.ref,
+    entry?.reference,
+    entry?.reference_number,
+    entry?.referenceNumber,
+    entry?.memo,
+  ].map((v) => String(v ?? "")).join(" ");
+
+  const bankNums = new Set((bankText.match(/\b\d{2,8}\b/g) ?? []).map((x) => x.replace(/^0+/, "") || x));
+  if (bankNums.size === 0) return false;
+  for (const raw of entryText.match(/\b\d{2,8}\b/g) ?? []) {
+    const normalized = raw.replace(/^0+/, "") || raw;
+    if (bankNums.has(normalized)) return true;
+  }
+  return false;
+}
+
 // Deterministic "Why" line for suggestions.
 // Prefer suggestion.reasons[] as the source of truth; only fall back if empty.
 function getSuggestionWhy(s: any): string | null {
@@ -132,6 +228,10 @@ function badge(text: string, tone: "default" | "success" | "danger" = "default",
   );
 }
 
+function qualityBadge(s: Suggestion) {
+  return badge(s.quality === "READY" ? `${Math.round(s.confidence * 100)}% ready` : "Review", s.quality === "READY" ? "success" : "default");
+}
+
 export function AutoReconcileDialog(props: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -165,49 +265,57 @@ export function AutoReconcileDialog(props: {
     if (!bankTxns?.length || !expectedEntries?.length) return [];
 
     const entries = expectedEntries.slice(0, 250); // safety cap
-    const entriesByAbs = new Map<string, any[]>();
+    const entriesByAmount = new Map<string, any[]>();
 
     for (const e of entries) {
-      const amt = absBig(toBigIntSafe(e.amount_cents)).toString();
-      const arr = entriesByAbs.get(amt) ?? [];
+      const amt = toBigIntSafe(e.amount_cents).toString();
+      if (amt === "0") continue;
+      const arr = entriesByAmount.get(amt) ?? [];
       arr.push(e);
-      entriesByAbs.set(amt, arr);
+      entriesByAmount.set(amt, arr);
     }
 
     const out: Suggestion[] = [];
     const usedEntryIds = new Set<string>();
 
     function tryOneToOne(t: any) {
-      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      const candidates = entriesByAbs.get(bankAbs.toString()) ?? [];
+      if (t?.is_pending) return;
+      const bankAmount = toBigIntSafe(t.amount_cents);
+      if (bankAmount === 0n) return;
+      const candidates = entriesByAmount.get(bankAmount.toString()) ?? [];
       if (!candidates.length) return;
 
       const bankDate = String(t.posted_date ?? "").slice(0, 10);
-      const bankDesc = norm(t.name ?? "");
 
       const scored = candidates
         .filter((e) => !usedEntryIds.has(e.id))
         .map((e) => {
           const entryDate = String(e.date ?? "").slice(0, 10);
           const inWin = withinWindow(entryDate, bankDate, DAY_WINDOW);
-          const payee = norm(e.payee ?? "");
-          const payeeHit = payee && bankDesc && (bankDesc.includes(payee) || payee.includes(bankDesc));
           const diff = daysBetween(entryDate, bankDate);
-          return { e, inWin, payeeHit, diffAbs: diff === null ? 9999 : Math.abs(diff) };
+          const diffAbs = diff === null ? 9999 : Math.abs(diff);
+          const payeeHit = payeeMatchesBank(t, e);
+          const refHit = checkSimpleRefMatch(t, e);
+          return { e, inWin, payeeHit, refHit, diffAbs };
         })
         .filter((x) => x.inWin)
         .sort((a, b) => {
+          if (a.refHit !== b.refHit) return a.refHit ? -1 : 1;
           if (a.payeeHit !== b.payeeHit) return a.payeeHit ? -1 : 1;
           if (a.diffAbs !== b.diffAbs) return a.diffAbs - b.diffAbs;
           return String(a.e.id).localeCompare(String(b.e.id));
         });
 
       if (!scored.length) return;
-      const best = scored[0].e;
-
-      const reasons = [`Exact amount match`, `Date within ±${DAY_WINDOW}d`];
-      const payee = norm(best.payee ?? "");
-      if (payee && bankDesc && (bankDesc.includes(payee) || payee.includes(bankDesc))) reasons.push(`Payee/description match`);
+      const bestMeta = scored[0];
+      const best = bestMeta.e;
+      const quality = qualityForOneToOne({
+        bank: t,
+        entry: best,
+        dateDiffAbs: bestMeta.diffAbs,
+        similarCandidateCount: scored.length,
+        payeeHit: bestMeta.payeeHit,
+      });
 
       usedEntryIds.add(best.id);
       out.push({
@@ -215,13 +323,15 @@ export function AutoReconcileDialog(props: {
         bankTxnId: t.id,
         entryIds: [best.id],
         kind: "ONE_TO_ONE",
-        reasons,
+        ...quality,
         bank: t,
         entries: [best],
       });
     }
 
     function trySplit(t: any) {
+      if (t?.is_pending) return;
+      const bankAmount = toBigIntSafe(t.amount_cents);
       const bankAbs = absBig(toBigIntSafe(t.amount_cents));
       if (bankAbs <= 0n) return;
 
@@ -229,6 +339,7 @@ export function AutoReconcileDialog(props: {
 
       const candidates = entries
         .filter((e) => !usedEntryIds.has(e.id))
+        .filter((e) => sameDirectionAmount(bankAmount, e.amount_cents))
         .filter((e) => withinWindow(String(e.date ?? "").slice(0, 10), bankDate, DAY_WINDOW))
         .map((e) => ({ e, abs: absBig(toBigIntSafe(e.amount_cents)) }))
         .filter((x) => x.abs > 0n)
@@ -265,13 +376,17 @@ export function AutoReconcileDialog(props: {
       const foundEntries = found as any[];
 
       for (const e of foundEntries) usedEntryIds.add(e.id);
+      bankAlreadySuggested.add(String(t.id));
 
       out.push({
         id: `s:${t.id}:${foundEntries.map((e) => e.id).join(",")}`,
         bankTxnId: t.id,
         entryIds: foundEntries.map((e) => e.id),
         kind: "SPLIT",
-        reasons: [`Entries sum exactly to bank amount`, `All entries within ±${DAY_WINDOW}d`, `≤${SPLIT_MAX} entries`],
+        confidence: 0.78,
+        quality: "REVIEW",
+        reasons: [`Exact total`, `Dates within ${DAY_WINDOW}d`, `${foundEntries.length} entries`],
+        cautionReasons: ["Multiple ledger entries"],
         bank: t,
         entries: foundEntries,
       });
@@ -297,6 +412,8 @@ export function AutoReconcileDialog(props: {
 
       const candidates = banks
         .filter((t: any) => !bankAlreadySuggested.has(t.id)) // don't use banks already used by 1-to-1/split suggestions
+        .filter((t: any) => !t?.is_pending)
+        .filter((t: any) => sameDirectionAmount(e.amount_cents, t.amount_cents))
         .filter((t: any) => withinWindow(entryDate, String(t.posted_date ?? "").slice(0, 10), DAY_WINDOW))
         .map((t: any) => ({ t, abs: absBig(toBigIntSafe(t.amount_cents)) }))
         .filter((x: any) => x.abs > 0n)
@@ -340,7 +457,10 @@ export function AutoReconcileDialog(props: {
         bankTxnId: String(foundBanks[0].id), // anchor (display only)
         entryIds: [String(e.id)],
         kind: "COMBINE",
-        reasons: [`Bank txns sum exactly to entry amount`, `All bank txns within ±${DAY_WINDOW}d`, `≤5 bank txns`],
+        confidence: 0.76,
+        quality: "REVIEW",
+        reasons: [`Exact total`, `Dates within ${DAY_WINDOW}d`, `${foundBanks.length} bank transactions`],
+        cautionReasons: ["Multiple bank transactions"],
         bank: foundBanks[0], // display anchor
         entries: [e],
         // We'll also attach banks list via a hidden field for apply below (we keep it in the object)
@@ -379,7 +499,9 @@ export function AutoReconcileDialog(props: {
     const one = suggestions.filter((s) => s.kind === "ONE_TO_ONE").length;
     const split = suggestions.filter((s) => s.kind === "SPLIT").length;
     const combine = suggestions.filter((s) => s.kind === "COMBINE").length;
-    return { total, one, split, combine };
+    const ready = suggestions.filter((s) => s.quality === "READY").length;
+    const review = total - ready;
+    return { total, one, split, combine, ready, review };
   }, [suggestions]);
 
   // ---------- Selection + confirmation ----------
@@ -403,7 +525,7 @@ export function AutoReconcileDialog(props: {
       return;
     }
 
-    setSelected(new Set(suggestions.map((s) => s.id)));
+    setSelected(new Set(suggestions.filter((s) => s.quality === "READY").map((s) => s.id)));
     setConfirmStep(false);
     setRowStatus({});
     setRowError({});
@@ -427,12 +549,13 @@ export function AutoReconcileDialog(props: {
     let failN = 0;
 
     try {
-      // Deterministic apply order: ONE_TO_ONE then SPLIT, and within each by posted_date asc then id
+      const kindRank: Record<Suggestion["kind"], number> = { ONE_TO_ONE: 0, SPLIT: 1, COMBINE: 2 };
+      // Deterministic apply order: simplest suggestions first, then by posted_date asc then id.
       const selectedSuggestions = suggestions
         .filter((s) => selected.has(s.id))
         .slice()
         .sort((a, b) => {
-          if (a.kind !== b.kind) return a.kind === "ONE_TO_ONE" ? -1 : 1;
+          if (a.kind !== b.kind) return kindRank[a.kind] - kindRank[b.kind];
           const da = String(a.bank.posted_date ?? "");
           const db = String(b.bank.posted_date ?? "");
           if (da !== db) return da.localeCompare(db);
@@ -499,12 +622,16 @@ export function AutoReconcileDialog(props: {
     <AppDialog
       open={open}
       onClose={() => onOpenChange(false)}
-      title="Auto-reconcile"
+      title="Match suggestions"
       size="lg"
       footer={
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs leading-5 text-bb-text-muted">
-            {applySummary ? applySummary : counts.total === 0 ? "No suggestions found." : `${counts.total} suggestions`}
+            {applySummary
+              ? applySummary
+              : counts.total === 0
+                ? "No suggestions found."
+                : `${selected.size} selected · ${counts.ready} ready · ${counts.review} review`}
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -521,19 +648,19 @@ export function AutoReconcileDialog(props: {
               <Button
                 className="w-full sm:w-auto"
                 disabled={!canWrite || selected.size === 0 || counts.total === 0}
-                title={!canWrite ? canWriteReason : "Review then confirm"}
+                title={!canWrite ? canWriteReason : "Review selected suggestions"}
                 onClick={() => setConfirmStep(true)}
               >
-                Continue ({selected.size})
+                Review selected ({selected.size})
               </Button>
             ) : (
               <Button
                 className="w-full sm:w-auto"
                 disabled={!canWrite || selected.size === 0 || counts.total === 0 || applyBusy}
-                title={!canWrite ? canWriteReason : "Confirm and apply selected suggestions"}
+                title={!canWrite ? canWriteReason : "Apply selected suggestions"}
                 onClick={applySelected}
               >
-                {applyBusy ? "Applying…" : `Confirm apply (${selected.size})`}
+                {applyBusy ? "Applying…" : `Apply ${selected.size}`}
               </Button>
             )}
           </div>
@@ -541,25 +668,46 @@ export function AutoReconcileDialog(props: {
       }
     >
       <div className="flex flex-col max-h-[70vh]">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-bb-border px-3 py-2 text-xs text-bb-text-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-bb-border px-3 py-2 text-xs text-bb-text-muted">
           <span>
-            1-to-1: <span className="font-medium text-bb-text">{counts.one}</span>
-          </span>
-          <span>
-            Split: <span className="font-medium text-bb-text">{counts.split}</span>
+            Ready: <span className="font-medium text-bb-text">{counts.ready}</span>
           </span>
           <span>
-            Combine: <span className="font-medium text-bb-text">{(counts as any).combine ?? 0}</span>
+            Needs review: <span className="font-medium text-bb-text">{counts.review}</span>
           </span>
-          <span className="basis-full text-[11px] text-bb-text-muted sm:ml-auto sm:basis-auto">
-            Deterministic suggestions (no AI). Review before applying.
+          <span>
+            Simple: <span className="font-medium text-bb-text">{counts.one}</span>
           </span>
+          <button
+            type="button"
+            className="h-6 rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] text-bb-text hover:bg-bb-table-row-hover disabled:opacity-50"
+            disabled={applyBusy || counts.ready === 0}
+            onClick={() => setSelected(new Set(suggestions.filter((s) => s.quality === "READY").map((s) => s.id)))}
+          >
+            Select ready
+          </button>
+          <button
+            type="button"
+            className="h-6 rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] text-bb-text hover:bg-bb-table-row-hover disabled:opacity-50"
+            disabled={applyBusy || counts.total === 0}
+            onClick={() => setSelected(new Set(suggestions.map((s) => s.id)))}
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            className="h-6 rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] text-bb-text hover:bg-bb-table-row-hover disabled:opacity-50"
+            disabled={applyBusy || selected.size === 0}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {suggestions.length === 0 ? (
             <div className="p-3 text-sm text-bb-text-muted">
-              No deterministic suggestions found for the current unmatched bank transactions and expected entries.
+              No clear matches found for the current unmatched bank transactions and expected entries.
             </div>
           ) : (
             <div className="divide-y divide-bb-border-muted">
@@ -601,6 +749,7 @@ export function AutoReconcileDialog(props: {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
                         <div className="min-w-0 flex-1 basis-full text-sm font-medium text-bb-text sm:basis-auto sm:truncate">{bankName || "Bank transaction"}</div>
+                        {qualityBadge(s)}
                         <div className="text-xs text-bb-text-muted tabular-nums">{bankDate}</div>
                         <div
                           className={`text-xs tabular-nums font-semibold sm:ml-auto ${
@@ -612,10 +761,10 @@ export function AutoReconcileDialog(props: {
                       </div>
 
                       <div className="mt-1 text-xs leading-5 text-bb-text-muted">
-                        Suggested:{" "}
+                        Match:{" "}
                         <span className="font-medium text-bb-text">
                           {s.kind === "COMBINE"
-                            ? `${(s as any).bankTxnIds?.length ?? 1} bank txns`
+                            ? `${(s as any).bankTxnIds?.length ?? 1} bank transactions`
                             : s.kind === "ONE_TO_ONE"
                               ? "1 entry"
                               : `${s.entryIds.length} entries`}
@@ -647,7 +796,11 @@ export function AutoReconcileDialog(props: {
                       ) : null}
 
                       <div className="mt-2 flex flex-wrap gap-2">
+                        <span>{badge(suggestionKindLabel(s.kind))}</span>
                         {s.reasons.map((r) => (
+                          <span key={r}>{badge(r)}</span>
+                        ))}
+                        {s.cautionReasons.map((r) => (
                           <span key={r}>{badge(r)}</span>
                         ))}
                         {stBadge}
@@ -662,7 +815,7 @@ export function AutoReconcileDialog(props: {
 
         {confirmStep ? (
           <div className="px-3 py-2 border-t border-bb-border text-xs text-bb-text-muted">
-            Confirm apply will create matches for the selected suggestions. Nothing is applied silently.
+            Applying creates matches for the selected rows only. Nothing is applied silently.
           </div>
         ) : null}
       </div>
