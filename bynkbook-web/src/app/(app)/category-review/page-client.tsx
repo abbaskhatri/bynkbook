@@ -7,6 +7,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { usePreferredAccountId } from "@/lib/accountSelection";
 import { listEntriesPage, updateEntry } from "@/lib/api/entries";
@@ -383,6 +384,28 @@ export default function CategoryReviewPageClient() {
     gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,
   });
+
+  async function refreshCategoryReviewAfterMutation() {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    setSelectedIds(new Set());
+    setBulkCategoryId("__NONE__");
+    setSelectedSuggestionByEntryId({});
+    setManualCategoryByEntryId({});
+    setCategoryDraftByEntryId({});
+    setSuggestionMapByEntryId({});
+    setSuggestionLoadedAtByEntryId({});
+    setSuggestionsRequestedKey(null);
+
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: entriesKey, exact: true }),
+      qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
+      qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
+      qc.invalidateQueries({ queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId), exact: false }),
+      qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false }),
+    ]);
+    await entriesQ.refetch();
+  }
 
   const bannerMsg =
     err ||
@@ -1032,10 +1055,9 @@ export default function CategoryReviewPageClient() {
         });
       }
 
-      // Keep the row fast locally; refresh dependent surfaces in the background.
-      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
-      void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+      // Keep the row fast locally, then replenish the active review queue from
+      // the server so filtered lists move on to the next newest entries.
+      void refreshCategoryReviewAfterMutation();
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));
@@ -1614,9 +1636,7 @@ export default function CategoryReviewPageClient() {
         });
       }
 
-      void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-      void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
-      void qc.invalidateQueries({ queryKey: ["ledgerSummary", selectedBusinessId, selectedAccountId], exact: false });
+      await refreshCategoryReviewAfterMutation();
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("bynk:ledger-refresh-now"));

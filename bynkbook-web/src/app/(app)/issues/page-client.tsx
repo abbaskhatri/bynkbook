@@ -6,6 +6,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { usePreferredAccountId } from "@/lib/accountSelection";
 
@@ -308,6 +309,19 @@ export default function IssuesPageClient() {
       lastPage.hasMore && lastPage.nextCursor ? lastPage.nextCursor : undefined
     ),
   });
+
+  async function refreshIssuesAfterMutation() {
+    if (!selectedBusinessId || !selectedAccountId) return;
+
+    clearSelection();
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
+      qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
+      qc.invalidateQueries({ queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId), exact: false }),
+      qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false }),
+    ]);
+    await issuesQ.refetch();
+  }
 
   const bannerMsg =
     appErrorMessageOrNull(businessesQ.error) ||
@@ -1093,14 +1107,7 @@ export default function IssuesPageClient() {
         businessId={selectedBusinessId ?? ""}
         accountId={selectedAccountId ?? ""}
         issueIds={selectedIssueBackendIds}
-        onDidApply={() => {
-          clearSelection();
-          if (selectedBusinessId && selectedAccountId) {
-            void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-            void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
-            void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
-          }
-        }}
+        onDidApply={refreshIssuesAfterMutation}
       />
 
       <FixIssueDialog
@@ -1134,14 +1141,7 @@ export default function IssuesPageClient() {
           })
         )}
         categories={categoryRows.map((c) => ({ id: c.id, name: c.name }))}
-        onDidMutate={() => {
-          clearSelection();
-          if (selectedBusinessId && selectedAccountId) {
-            void qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false });
-            void qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false });
-            void qc.invalidateQueries({ queryKey: ["entries", selectedBusinessId, selectedAccountId], exact: false });
-          }
-        }}
+        onDidMutate={refreshIssuesAfterMutation}
       />
     </div>
   );
