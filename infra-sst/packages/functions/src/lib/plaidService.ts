@@ -209,6 +209,11 @@ export async function createLinkTokenBusiness(params: {
     country_codes: [CountryCode.Us],
     language: "en",
     webhook: plaidWebhookUrl(),
+
+    // Keep new-account Plaid connects aligned with existing-account connects:
+    // the selected opening date is only useful if Link initializes enough
+    // historical transaction data for sync to drain.
+    transactions: { days_requested: 730 },
   });
 
   return json(200, { ok: true, link_token: res.data.link_token });

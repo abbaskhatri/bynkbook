@@ -1783,6 +1783,11 @@ export default function ReconcilePageClient() {
     return String(a?.name ?? "");
   }, [accountsQ.data, selectedAccountId]);
 
+  const selectedAccountOpeningDate = useMemo(() => {
+    const raw = String(selectedAccountForReconcile?.opening_balance_date ?? "").slice(0, 10);
+    return raw || new Date().toISOString().slice(0, 10);
+  }, [selectedAccountForReconcile]);
+
   const selectedBusinessName = useMemo(() => {
     const b = (businessesQ.data ?? []).find((row: any) => String(row.id) === String(selectedBusinessId));
     return String(b?.name ?? "Business");
@@ -4645,7 +4650,7 @@ const displayBankActiveList = useMemo(() => {
                   accountId={selectedAccountId ?? ""}
                   businessName={selectedBusinessName}
                   accountName={selectedAccountName}
-                  effectiveStartDate="2025-11-01"
+                  effectiveStartDate={selectedAccountOpeningDate}
                   disabled={plaidSyncing || !selectedBusinessId || !selectedAccountId}
                   disabledClassName={disabledBtn}
                   buttonClassName="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
