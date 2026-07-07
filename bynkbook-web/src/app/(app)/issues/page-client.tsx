@@ -649,7 +649,7 @@ export default function IssuesPageClient() {
   );
 
   const filterLeft = (
-    <div className="w-full max-w-full px-3 py-2">
+    <div className="w-full max-w-full">
       <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 py-1 pl-1">
         <div className="min-w-0 flex-1">
           <input
@@ -740,7 +740,7 @@ export default function IssuesPageClient() {
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
       {/* Unified header + filters container (match Ledger) */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<AlertTriangle className="h-4 w-4" />}
@@ -769,7 +769,9 @@ export default function IssuesPageClient() {
 
         <div className="mt-2 h-px bg-border" />
 
-        <FilterBar left={filterLeft} right={filterRight} />
+        <div className="px-3 py-2">
+          <FilterBar left={filterLeft} right={filterRight} />
+        </div>
 
         {(bannerMsg || mutErr) ? (
           <div className="px-3 py-2">
@@ -816,15 +818,15 @@ export default function IssuesPageClient() {
 
         <div className="h-px bg-border" />
 
-        <div className="px-3 py-2 flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="px-3 py-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
-            Loaded open: <span className="font-medium text-foreground">{kpi.openTotal}</span>
+            Open <span className="font-medium text-foreground">{kpi.openTotal}</span>
           </span>
           <span>
-            Loaded duplicates: <span className="font-medium text-foreground">{kpi.dup}</span>
+            Duplicates <span className="font-medium text-foreground">{kpi.dup}</span>
           </span>
           <span>
-            Loaded stale: <span className="font-medium text-foreground">{kpi.stale}</span>
+            Stale <span className="font-medium text-foreground">{kpi.stale}</span>
           </span>
 
           {scanErr ? <span className="text-bb-status-danger-fg ml-2">{scanErr}</span> : null}

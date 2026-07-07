@@ -718,7 +718,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "border-r border-bb-border bg-bb-sidebar-bg hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
+          "bb-modern-sidebar border-r border-bb-border bg-bb-sidebar-bg hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
@@ -768,7 +768,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar (sticky) */}
-        <header className="h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/95 backdrop-blur-md">
+        <header className="bb-modern-topbar h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/95 backdrop-blur-md">
           {/* Left: Business pill (display-only; we expect 1 business) */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
             <AppTooltip content="Open navigation" side="bottom">

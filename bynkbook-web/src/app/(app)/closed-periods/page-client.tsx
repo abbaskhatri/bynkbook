@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { PageHeader } from "@/components/app/page-header";
-import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -139,16 +138,12 @@ export default function ClosedPeriodsPageClient() {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
-      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
+      <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 pt-2">
-          <PageHeader icon={<Lock className="h-4 w-4" />} title="Closed periods" />
-        </div>
-
-        <div className="mt-2 h-px bg-bb-border" />
-
-        <div className="px-3 py-2">
-          <FilterBar
-            left={<div className="text-xs text-bb-text-muted">Close periods are enforced on all mutations across the app.</div>}
+          <PageHeader
+            icon={<Lock className="h-4 w-4" />}
+            title="Closed periods"
+            subtitle="Close periods are enforced on all mutations across the app."
             right={
               <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={loading || !businessId}>
                 Refresh
@@ -156,6 +151,8 @@ export default function ClosedPeriodsPageClient() {
             }
           />
         </div>
+
+        <div className="mt-2 h-px bg-bb-border" />
 
         {bannerMsg ? (
           <div className="px-3 pb-2">

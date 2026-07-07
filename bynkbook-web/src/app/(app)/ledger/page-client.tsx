@@ -110,6 +110,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { FilterBar } from "@/components/primitives/FilterBar";
+import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
@@ -2863,22 +2864,20 @@ export default function LedgerPageClient() {
 
   const addRow = (
     <tr>
-      <td className={td + " " + center + " relative"}>
-        {/* Borrow the empty checkbox column space so Date doesn't crush Ref */}
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[112px] z-10">
+      <td colSpan={2} className={td + " p-0"}>
+        <div className="grid grid-cols-[24px_1fr] items-center gap-0 px-1">
+          <div aria-hidden="true" />
           <AppDatePicker
             value={draftDate}
             onChange={setDraftDate}
             ariaLabel="Entry date"
             displayFormat="numeric"
             showIcon={false}
-            buttonClassName="justify-center pl-2 pr-7 text-center tabular-nums"
+            allowClear={false}
+            buttonClassName="w-full justify-center pl-2 pr-2 text-center tabular-nums"
           />
         </div>
       </td>
-
-      {/* Date (intentionally empty in add row; picker spans from checkbox area) */}
-      <td className={td}></td>
 
       {/* Ref */}
       <td className={td}>
@@ -3172,7 +3171,7 @@ export default function LedgerPageClient() {
               onClick={() => setShowAdvancedFilters((v) => !v)}
               title={showAdvancedFilters ? "Hide advanced filters" : "Show advanced filters"}
             >
-              Advanced
+              More filters
             </button>
 
             {/* Reset All */}
@@ -5008,7 +5007,7 @@ export default function LedgerPageClient() {
   return (
     <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
       {/* Unified header + filters container (old app style) */}
-      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
+      <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<BookOpen className="h-4 w-4" />}
@@ -5021,11 +5020,11 @@ export default function LedgerPageClient() {
               />
             }
             right={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
                 {uncategorizedCount > 0 ? (
                   <button
                     type="button"
-                    className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card text-bb-text-muted hover:bg-bb-table-row-hover inline-flex items-center gap-1"
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 text-xs font-medium text-bb-status-warning-fg hover:bg-bb-table-row-hover"
                     title="Review uncategorized entries"
                     onClick={() => {
                       if (!selectedBusinessId || !selectedAccountId) return;
@@ -5053,47 +5052,42 @@ export default function LedgerPageClient() {
                   Suggest categories
                 </button>
 
-                <button
-                  type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover inline-flex items-center gap-1.5"
-                  onClick={() => setExportDialogOpen(true)}
-                  disabled={!selectedBusinessId || !selectedAccountId}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Export
-                </button>
-
-                <button
-                  type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover inline-flex items-center gap-1.5"
-                  onClick={() => setPrintDialogOpen(true)}
-                  disabled={!selectedBusinessId || !selectedAccountId}
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  Print
-                </button>
-
-                <button
-                  type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
-                  onClick={() => {
-                    setOpenUpload(true);
-                  }}
-                >
-                  Upload Receipt
-                </button>
-
-                {/* Upload Invoice lives on Vendor page only */}
-
-                <button
-                  type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
-                  disabled={!canClosePeriod || !selectedBusinessId || !selectedAccountId}
-                  title={!canClosePeriod ? "Only OWNER/Admin can close periods" : "Close a period"}
-                  onClick={() => setClosePeriodOpen(true)}
-                >
-                  Close period
-                </button>
+                <AppActionMenu
+                  label="More"
+                  title="Ledger tools"
+                  items={[
+                    {
+                      label: "Export CSV",
+                      description: "Download the current ledger view.",
+                      icon: Download,
+                      disabled: !selectedBusinessId || !selectedAccountId,
+                      onSelect: () => setExportDialogOpen(true),
+                    },
+                    {
+                      label: "Print",
+                      description: "Print the current ledger range.",
+                      icon: Printer,
+                      disabled: !selectedBusinessId || !selectedAccountId,
+                      onSelect: () => setPrintDialogOpen(true),
+                    },
+                    {
+                      label: "Upload receipt",
+                      description: "Attach a receipt to the ledger.",
+                      icon: Download,
+                      onSelect: () => {
+                        setUploadType("RECEIPT");
+                        setOpenUpload(true);
+                      },
+                    },
+                    {
+                      label: "Close period",
+                      description: !canClosePeriod ? "Only OWNER/Admin can close periods." : "Lock a reviewed accounting period.",
+                      icon: AlertTriangle,
+                      disabled: !canClosePeriod || !selectedBusinessId || !selectedAccountId,
+                      onSelect: () => setClosePeriodOpen(true),
+                    },
+                  ]}
+                />
               </div>
             }
           />

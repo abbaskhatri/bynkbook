@@ -437,12 +437,47 @@
 
 .bb-app-canvas {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(246, 250, 248, 0.96) 17rem, var(--bb-app-bg) 100%);
+    radial-gradient(circle at 18rem -8rem, color-mix(in srgb, var(--primary) 22%, transparent) 0, transparent 22rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(238, 248, 243, 0.96) 17rem, var(--bb-app-bg) 100%);
 }
 
 .dark .bb-app-canvas {
   background:
-    linear-gradient(180deg, rgba(52, 211, 153, 0.045) 0%, rgba(7, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
+    radial-gradient(circle at 18rem -8rem, rgba(52, 211, 153, 0.18) 0, transparent 22rem),
+    linear-gradient(180deg, rgba(52, 211, 153, 0.075) 0%, rgba(7, 17, 31, 0.96) 18rem, var(--bb-app-bg) 100%);
+}
+
+.bb-modern-sidebar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bb-sidebar-bg) 92%, var(--primary) 8%) 0%, var(--bb-sidebar-bg) 44%);
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--bb-border) 78%, transparent);
+}
+
+.bb-modern-topbar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bb-surface-card) 94%, white 6%) 0%, color-mix(in srgb, var(--bb-surface-card) 88%, transparent) 100%);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--bb-border) 80%, transparent), 0 10px 28px rgba(15, 23, 42, 0.045);
+}
+
+.bb-page-command-surface {
+  position: relative;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bb-surface-card) 94%, white 6%) 0%, var(--bb-surface-card) 100%);
+  border: 1px solid color-mix(in srgb, var(--bb-border) 82%, var(--primary) 18%);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.065), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+}
+
+.bb-page-command-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--primary), color-mix(in srgb, var(--primary) 44%, transparent));
+}
+
+.dark .bb-modern-topbar,
+.dark .bb-page-command-surface {
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--bb-border) 80%, transparent), 0 18px 42px rgba(0, 0, 0, 0.2);
 }
 
 .bb-focus-lift {
@@ -488,6 +523,58 @@
 .bb-checkbox:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 34%, transparent);
+}
+
+.bb-spreadsheet-shell {
+  background: var(--bb-surface-card);
+  border: 1px solid color-mix(in srgb, var(--bb-border) 78%, var(--primary) 22%);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.07), 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+}
+
+.bb-spreadsheet-table {
+  background: var(--bb-surface-card);
+  font-variant-numeric: tabular-nums;
+}
+
+.bb-spreadsheet-table th {
+  height: 1.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--bb-border) 72%, transparent);
+  border-bottom: 1px solid var(--bb-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bb-table-header) 70%, white 30%) 0%, var(--bb-table-header) 100%);
+  font-size: 0.6875rem;
+  color: color-mix(in srgb, var(--bb-text-muted) 86%, var(--primary) 14%);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.bb-spreadsheet-table td {
+  border-right: 1px solid color-mix(in srgb, var(--bb-border-muted) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--bb-border-muted) 82%, transparent);
+}
+
+.bb-spreadsheet-table th:last-child,
+.bb-spreadsheet-table td:last-child {
+  border-right: 0;
+}
+
+.bb-spreadsheet-table tbody tr {
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.bb-spreadsheet-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--bb-surface-soft) 26%, transparent);
+}
+
+.bb-spreadsheet-table tbody tr:hover {
+  background: var(--bb-table-row-hover);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.bb-spreadsheet-table input,
+.bb-spreadsheet-table button,
+.bb-spreadsheet-table [role="combobox"] {
+  font-size: 0.75rem;
 }
 
 /* Keep the whole product on a tighter, more professional radius scale. */

@@ -681,7 +681,6 @@ export default function ReconcilePageClient() {
   const [matches, setMatches] = useState<any[]>([]);
   const [matchGroups, setMatchGroups] = useState<any[]>([]);
   const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
-  const [placementSummaryPartial, setPlacementSummaryPartial] = useState(false);
   const [allMatchGroups, setAllMatchGroups] = useState<any[]>([]);
   const [allMatchGroupsLoading, setAllMatchGroupsLoading] = useState(false);
   const [allMatchGroupsLoadedScope, setAllMatchGroupsLoadedScope] = useState("");
@@ -1561,7 +1560,6 @@ export default function ReconcilePageClient() {
     // Reset first-load truth hydration for the new scope before fetching.
     setBankTruthHydrated(false);
     setMatchGroupsTruthHydrated(false);
-    setPlacementSummaryPartial(false);
     setBankTx([]);
     setBankTruthSnapshot(null);
     setMatchGroups([]);
@@ -1732,12 +1730,10 @@ export default function ReconcilePageClient() {
 
         if (cancelled || requestSeq !== placementSummaryRequestSeqRef.current) return;
         setMatchGroups(matchGroupsFromPlacementSummary(summary));
-        setPlacementSummaryPartial(summary.partial === true);
         setMatchGroupsTruthHydrated(true);
       } catch {
         if (cancelled || requestSeq !== placementSummaryRequestSeqRef.current) return;
         setMatchGroups([]);
-        setPlacementSummaryPartial(true);
         setMatchGroupsTruthHydrated(true);
       } finally {
         if (!cancelled && requestSeq === placementSummaryRequestSeqRef.current) {
@@ -3019,16 +3015,6 @@ const displayBankActiveList = useMemo(() => {
     : activeBankStatusLoading
       ? "Loading"
       : "Not loaded yet";
-  const bankUnmatchedScopeSummary = bankScopeCountsReady
-    ? `All-time ${bankAllTimeUnmatchedLabel} • Range ${bankRangeUnmatchedLabel}`
-    : bankScopeCountsLoading
-      ? "Loading counts..."
-      : "Counts loading.";
-  const bankUnmatchedRowsSummary = bankStatusLoaded.unmatched
-    ? `Loaded ${bankUnmatchedLoadedRowsNoSearch}${bankNextCursorByStatus.unmatched ? "+" : ""} • Visible ${displayBankUnmatchedCount}`
-    : bankLoadingByStatus.unmatched
-      ? "Loading rows..."
-      : "Rows not loaded.";
   const bankScopeCountsNote = bankScopeCountsLoading
     ? "Loading counts..."
     : "Counts loading.";
@@ -3157,12 +3143,6 @@ const displayBankActiveList = useMemo(() => {
     entriesTruthSettling ||
     entriesUpdating;
 
-  const revertsInScope = voidedGroups.length;
-  const revertsInScopeLabel = allMatchGroupsHydrated
-    ? String(revertsInScope)
-    : allMatchGroupsLoading
-      ? "Loading"
-      : "Deferred";
   const issuesVoidHeavyLabel = allMatchGroupsHydrated
     ? String(issuesCounts.voidHeavy)
     : allMatchGroupsLoading
@@ -3216,13 +3196,13 @@ const displayBankActiveList = useMemo(() => {
             setOpenAutoReconcile(true);
           }}
         >
-          <Sparkles className="h-3.5 w-3.5" /> Match suggestions
+          <Sparkles className="h-3.5 w-3.5" /> Auto-match
         </Button>
       </HintWrap>
 
       <AppActionMenu
-        label="Actions"
-        title="Snapshots, exports, history, and diagnostics"
+        label="More"
+        title="Reconcile tools"
         items={[
           {
             label: "Snapshots",
@@ -3320,15 +3300,11 @@ const displayBankActiveList = useMemo(() => {
           {refreshBusy ? <TinySpinner /> : null}
         </span>
         <span className="text-bb-text-muted">
-          Bank <span className="font-semibold text-bb-text">{bankUnmatchedScopeSummary}</span>
-          <span className="text-bb-text-muted"> / {bankUnmatchedRowsSummary}</span>
+          Bank <span className="font-semibold text-bb-text">{displayBankUnmatchedCount} unmatched</span>
         </span>
         <span className="inline-flex items-center gap-1 text-bb-text-muted">
           Entries <span className="font-semibold text-bb-text">Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}</span>
           {entriesSummarySettling ? <TinySpinner /> : null}
-        </span>
-        <span className="text-bb-text-muted">
-          Reverts <span className="font-semibold text-bb-text">{revertsInScopeLabel}</span>
         </span>
         {plaid?.connected ? (
           <span className="text-bb-text-muted">
@@ -3382,7 +3358,7 @@ const displayBankActiveList = useMemo(() => {
 
   return (
     <div className="flex flex-col gap-1.5 overflow-hidden" style={containerStyle}>
-      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
+      <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 py-1.5">
           <PageHeader
             icon={<GitMerge className="h-4 w-4" />}
@@ -3422,14 +3398,6 @@ const displayBankActiveList = useMemo(() => {
                 }
               />
             )}
-          </div>
-        ) : null}
-
-        {placementSummaryPartial ? (
-          <div className="px-3 pb-1">
-            <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-1.5 text-[11px] leading-4 text-bb-status-warning-fg">
-              Placement summary is still partial for the loaded rows.
-            </div>
           </div>
         ) : null}
 
@@ -4120,12 +4088,13 @@ const displayBankActiveList = useMemo(() => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-hidden">
         {/* Expected Entries */}
-        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-bb-surface-card">
+        <div className="bb-spreadsheet-shell flex flex-col min-h-0 overflow-hidden rounded-lg">
           <div className="px-3 py-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="text-sm font-semibold text-bb-text">Expected Entries</div>
-                <div className="hidden sm:block text-[11px] text-bb-text-muted">Ledger entries awaiting reconciliation</div>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-bb-text">Ledger entries</div>
+                <StatusChip label="Source: Ledger" tone="info" />
+                <div className="hidden sm:block text-[11px] text-bb-text-muted">Entered first, waiting for bank match</div>
               </div>
               <div className="text-[11px] text-bb-text-muted min-h-[16px]">
                 {entriesTruthSettling || entriesUpdating ? (
@@ -4310,7 +4279,7 @@ const displayBankActiveList = useMemo(() => {
                 <EmptyState label={entriesEmptyStateLabel} />
               ) : (
                 <>
-                  <table className="w-full min-w-[656px] table-fixed border-collapse">
+                  <table className="bb-spreadsheet-table w-full min-w-[656px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 84 }} />
                     <col />
@@ -4337,6 +4306,7 @@ const displayBankActiveList = useMemo(() => {
                       const isOptimisticPending = Boolean(e?.__optimistic_pending);
 
                       const isMatched = !isOptimisticPending && matchedEntryIdSet.has(e.id);
+                      const isPostDated = String(e?.date ?? "") > new Date().toISOString().slice(0, 10);
 
                       const g = !isOptimisticPending ? (activeGroupByEntryId.get(String(e.id)) ?? null) : null;
                       const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
@@ -4391,8 +4361,8 @@ const displayBankActiveList = useMemo(() => {
                           <td className={`${tdClass} text-right pr-2 overflow-hidden${deEmphasis}`}>
                             <div className="inline-flex max-w-full items-center justify-end gap-1.5">
                               <StatusChip
-                                label={isOptimisticPending ? "Saving" : isMatched ? "Matched" : "Expected"}
-                                tone={isOptimisticPending ? "warning" : isMatched ? "success" : "default"}
+                                label={isOptimisticPending ? "Saving" : isMatched ? "Matched" : isPostDated ? "Post-dated" : "No bank tx"}
+                                tone={isOptimisticPending ? "warning" : isMatched ? "success" : isPostDated ? "info" : "default"}
                               />
                               {hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
                             </div>
@@ -4520,12 +4490,13 @@ const displayBankActiveList = useMemo(() => {
         </div>
 
         {/* Bank Transactions */}
-        <div className="flex flex-col min-h-0 overflow-hidden rounded-lg border bg-bb-surface-card">
+        <div className="bb-spreadsheet-shell flex flex-col min-h-0 overflow-hidden rounded-lg">
           <div className="px-3 py-1.5">
             <div className="flex items-center justify-between gap-2 min-w-0">
               <div className="min-w-0 flex items-center gap-2">
-                <div className="flex items-baseline gap-2">
-                  <div className="text-sm font-semibold text-bb-text">Bank Transactions</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-sm font-semibold text-bb-text">Bank transactions</div>
+                  <StatusChip label="Source: Bank" tone="info" />
                   {connectedPill}
                 </div>
                 <div className="hidden xl:block text-[11px] text-bb-text-muted min-w-0 truncate whitespace-nowrap">
@@ -4762,7 +4733,7 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               ) : bankPanelShowRows ? (
                 <>
-                  <table className="w-full min-w-[640px] table-fixed border-collapse">
+                  <table className="bb-spreadsheet-table w-full min-w-[640px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 30 }} />
                     <col style={{ width: 84 }} />
@@ -4924,6 +4895,15 @@ const displayBankActiveList = useMemo(() => {
                               {t.source ? (
                                 <span className="shrink-0">
                                   <StatusChip label={String(t.source)} tone="default" />
+                                </span>
+                              ) : null}
+
+                              {!isMatched && !isPendingBankTxn && bankTab === "unmatched" ? (
+                                <span className="shrink-0">
+                                  <StatusChip
+                                    label={bankAutoMatchCandidateById.get(txnId) ? "Match found" : "No ledger entry"}
+                                    tone={bankAutoMatchCandidateById.get(txnId) ? "success" : "default"}
+                                  />
                                 </span>
                               ) : null}
                             </div>
