@@ -11,6 +11,7 @@ import { MobileShell } from "@/components/mobile/mobile-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listCategories } from "@/lib/api/categories";
 import { updateEntry } from "@/lib/api/entries";
+import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import {
   hrefWithMobileContext,
   useMobileWorkspaceContext,
@@ -65,13 +66,17 @@ export default function MobileUncategorizedPageClient() {
     try {
       await updateEntry({ businessId: businessId!, accountId: accountId!, entryId, updates: { category_id: categoryId } });
       setAppliedIds((prev) => new Set([...prev, entryId]));
-      queryClient.invalidateQueries({ queryKey: ["entries", businessId, accountId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["entries", businessId, accountId], exact: false }),
+        queryClient.invalidateQueries({ queryKey: attentionSummaryKey(businessId, accountId), exact: false }),
+      ]);
+      await entriesQ.refetch();
     } catch {
       setApplyErrors((prev) => ({ ...prev, [entryId]: "Apply failed — tap to retry." }));
     } finally {
       setApplyingIds((prev) => { const next = new Set(prev); next.delete(entryId); return next; });
     }
-  }, [businessId, accountId, queryClient]);
+  }, [businessId, accountId, entriesQ, queryClient]);
 
   const categoriesQ = useQuery({
     queryKey: ["mobileUncategorized", "categories", businessId],
