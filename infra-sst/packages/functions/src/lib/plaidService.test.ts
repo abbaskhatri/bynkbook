@@ -168,6 +168,7 @@ describe("createLinkToken", () => {
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         webhook: "https://example.com/v1/plaid/webhook",
+        transactions: { days_requested: 730 },
       })
     );
   });
