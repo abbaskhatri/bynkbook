@@ -67,7 +67,7 @@ export function LedgerTableShell(props: {
       : null;
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border border-bb-border bg-bb-surface-card">
+    <div className="bb-spreadsheet-shell flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg">
       <div
         className={
           disableInnerScroll
@@ -77,10 +77,10 @@ export function LedgerTableShell(props: {
               : "h-full min-h-0 overflow-y-auto overflow-x-auto"
         }
       >
-        <table className="w-full table-fixed border-collapse" style={tableMinWidth ? { minWidth: tableMinWidth } : undefined}>
+        <table className="bb-spreadsheet-table w-full table-fixed border-collapse" style={tableMinWidth ? { minWidth: tableMinWidth } : undefined}>
           <colgroup>{safeCols}</colgroup>
 
-          <thead className="sticky top-0 z-40 bg-bb-table-header border-b border-bb-border">
+          <thead className="sticky top-0 z-40 bg-bb-table-header">
             {header}
           </thead>
 
@@ -94,7 +94,7 @@ export function LedgerTableShell(props: {
             {body}
           </tbody>
 
-          <tfoot className="sticky bottom-0 z-20 bg-bb-table-header border-t border-bb-border">
+          <tfoot className="sticky bottom-0 z-20 bg-bb-table-header">
             {footer}
           </tfoot>
         </table>

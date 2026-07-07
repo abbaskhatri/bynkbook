@@ -1688,7 +1688,7 @@ export default function CategoryReviewPageClient() {
   return (
     <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-2 max-w-6xl overflow-hidden">
       {/* Unified header container (match Ledger/Issues) */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Tags className="h-4 w-4" />}
@@ -1735,23 +1735,20 @@ export default function CategoryReviewPageClient() {
                   />
                 </div>
 
-                <div className="ml-2 space-y-1">
-                  <div className="text-[11px] text-muted-foreground">&nbsp;</div>
-                  <div className="h-7 px-2 rounded-md border border-border bg-card flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">Uncategorized only</span>
-                    <PillToggle
-                      checked={onlyUncategorized}
-                      onCheckedChange={(next) => setOnlyUncategorized(next)}
-                    />
-                  </div>
+                <div className="ml-1 flex h-7 items-center gap-2 rounded-md border border-border bg-card px-2">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">Uncategorized only</span>
+                  <PillToggle
+                    checked={onlyUncategorized}
+                    onCheckedChange={(next) => setOnlyUncategorized(next)}
+                  />
                 </div>
+
+                <Button type="button" className="ml-1 h-7 px-3 text-xs" onClick={runFilters} disabled={entriesQ.isLoading}>
+                  Run
+                </Button>
               </>
             }
-            right={
-              <Button type="button" className="h-7 px-3 text-xs" onClick={runFilters} disabled={entriesQ.isLoading}>
-                Run
-              </Button>
-            }
+            right={null}
           />
         </div>
 

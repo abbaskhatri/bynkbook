@@ -70,10 +70,15 @@ export function AppActionMenu({
         <div
           role="menu"
           className={cn(
-            "absolute top-[calc(100%+6px)] z-50 w-64 overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated p-1 shadow-lg",
+            "absolute top-[calc(100%+6px)] z-[120] w-72 overflow-hidden rounded-md border border-bb-border bg-bb-surface-elevated p-1 shadow-lg",
             align === "right" ? "right-0" : "left-0"
           )}
         >
+          {title ? (
+            <div className="border-b border-bb-border px-2 py-1.5 text-[11px] font-semibold uppercase text-bb-text-muted">
+              {title}
+            </div>
+          ) : null}
           {items.map((item) => {
             const Icon = item.icon;
             return (

@@ -812,7 +812,7 @@ export default function ReportsPageClient() {
 
   return (
     <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
-      <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
+      <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<FileText className="h-4 w-4" />}
@@ -899,7 +899,7 @@ export default function ReportsPageClient() {
                         value={ym ? `${ym}-01` : ""}
                         onChange={(next) => setYm(next ? next.slice(0, 7) : "")}
                         placeholder="Select month"
-                        allowClear
+                        allowClear={false}
                       />
                     </div>
                   </div>
@@ -962,31 +962,21 @@ export default function ReportsPageClient() {
                   </div>
                 ) : null}
 
-                <div className="ml-2 flex flex-col justify-end">
-                  <div className="text-[11px] text-bb-text-muted">Range</div>
-                  <div className="text-[11px] text-bb-text-subtle">
-                    {from} → {to}
+                <div className="ml-2 space-y-1">
+                  <div className="text-[11px] text-bb-text-muted">YTD</div>
+                  <div className="flex h-7 items-center">
+                    <PillToggle checked={ytd} onCheckedChange={(next) => setYtd(next)} disabled={rangeMode === "weekly" || rangeMode === "custom"} />
                   </div>
                 </div>
 
-                <div className="ml-4 flex items-center gap-2">
-                  <div className="text-[11px] text-bb-text-muted">YTD</div>
-                  <PillToggle checked={ytd} onCheckedChange={(next) => setYtd(next)} disabled={rangeMode === "weekly" || rangeMode === "custom"} />
-                </div>
-
-                <div className="ml-4 flex items-end gap-3">
-                  <div className="flex flex-col justify-end" />
-                </div>
-              </>
-            }
-            right={
-              <>
-                <Button className="h-7 px-3 text-xs" onClick={run} disabled={!businessId || loading}>
-                  {loading ? (pnl || cashflow ? "Refreshing..." : "Preparing...") : "Run report"}
+                <Button className="ml-2 h-7 px-3 text-xs" onClick={run} disabled={!businessId || loading}>
+                    {loading ? (pnl || cashflow ? "Refreshing..." : "Preparing...") : "Run report"}
                 </Button>
-                {err ? <div className="text-xs text-bb-status-danger-fg ml-2">{err}</div> : null}
+
+                {err ? <div className="ml-2 text-xs text-bb-status-danger-fg">{err}</div> : null}
               </>
             }
+            right={null}
           />
         </div>
 
