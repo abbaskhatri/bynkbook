@@ -373,6 +373,43 @@ describe("syncTransactions", () => {
     expect(failureUpdate.data.error_message).not.toContain("topsecret");
   });
 
+  test("manual sync generic failure keeps feed connected and retryable", async () => {
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          const error: any = new Error("bank sync is temporarily unavailable");
+          error.response = {
+            data: {
+              error_code: "INSTITUTION_ERROR",
+              error_message: "The institution is temporarily unavailable",
+            },
+          };
+          throw error;
+        }),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", requestRefresh: true });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(502);
+    expect(body).toMatchObject({
+      ok: false,
+      error: "Plaid sync failed",
+      errorCode: "INSTITUTION_ERROR",
+      status: "SYNC_ERROR",
+      reconnectRequired: false,
+    });
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const failureUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(failureUpdate.data).toMatchObject({
+      status: "SYNC_ERROR",
+      error_code: "INSTITUTION_ERROR",
+      has_new_transactions: true,
+    });
+  });
+
   test("defers generic transaction sync failure after reconnect without requiring another reconnect", async () => {
     const { syncTransactions, prisma } = await loadSyncTransactions({
       plaid: {
@@ -411,6 +448,29 @@ describe("syncTransactions", () => {
       status: "PENDING_SYNC",
       error_code: "PRODUCT_NOT_READY",
       has_new_transactions: true,
+    });
+  });
+
+  test("status treats generic sync errors as connected instead of reconnect-required", async () => {
+    const { mod } = await loadSyncTransactions({
+      conn: {
+        status: "ERROR",
+        error_code: "PLAID_SYNC_FAILED",
+        error_message: "Bank sync could not finish",
+        plaid_mask: "1234",
+      },
+    });
+
+    const res = await mod.getStatus({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      connected: true,
+      needsAttention: false,
+      errorMessage: null,
+      status: "ERROR",
     });
   });
 });

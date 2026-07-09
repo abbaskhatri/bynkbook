@@ -70,7 +70,7 @@ function plaidSyncFailureUserMessage(status: string, code: string) {
     return "This bank connection needs to be reconnected before transactions can sync.";
   }
 
-  return "Bank sync could not finish. Try again, or reconnect the bank if it keeps happening.";
+  return "Bank sync could not finish. Try again shortly; current transactions are unchanged.";
 }
 
 function canDeferPostReconnectSyncFailure(status: string, code: string) {
@@ -87,6 +87,19 @@ function canDeferPostReconnectSyncFailure(status: string, code: string) {
     return false;
   }
   return true;
+}
+
+function isReconnectRequiredStatus(status: string) {
+  const s = String(status ?? "").trim().toUpperCase();
+  return (
+    s === "REAUTH_REQUIRED" ||
+    s === "LOGIN_REQUIRED" ||
+    s === "ITEM_LOGIN_REQUIRED" ||
+    s === "ENV_MISMATCH_RECONNECT_REQUIRED" ||
+    s === "DISCONNECTED" ||
+    s === "INACTIVE" ||
+    s === "EXPIRED"
+  );
 }
 
 export async function recordPlaidConnectionFailure(params: {
@@ -108,6 +121,32 @@ export async function recordPlaidConnectionFailure(params: {
     },
   });
   return { code, message, status };
+}
+
+async function recordPlaidSyncFailure(params: {
+  prisma: any;
+  businessId: string;
+  accountId: string;
+  error: any;
+}) {
+  const code = plaidErrorCode(params.error);
+  const message = plaidErrorMessage(params.error);
+  const classifiedStatus = reconnectStatusForPlaidFailure(code, message);
+  const reconnectRequired = isReconnectRequiredStatus(classifiedStatus);
+  const status = reconnectRequired ? classifiedStatus : "SYNC_ERROR";
+
+  await params.prisma.bankConnection.updateMany({
+    where: { business_id: params.businessId, account_id: params.accountId },
+    data: {
+      status,
+      error_code: code,
+      error_message: message,
+      ...(reconnectRequired ? {} : { has_new_transactions: true }),
+      updated_at: new Date(),
+    },
+  });
+
+  return { code, message, status, reconnectRequired };
 }
 
 type PlaidWebhookRequest = {
@@ -480,19 +519,13 @@ export async function getStatus(params: { businessId: string; accountId: string;
   const rawStatus = (connRow.status ?? "").toString();
   const statusNorm = rawStatus.trim().toUpperCase();
 
-  // Guardrail: needsAttention is ONLY for true unhealthy states (reauth / error / disconnected),
-  // or when error_code/error_message exists. Do NOT show amber for transitional states.
-  const hasError = !!connRow.error_code || !!connRow.error_message;
-
-  // Explicit allowlists (conservative): unknown statuses are treated as NOT needing attention
-  // unless an error_code/error_message exists.
+  // Guardrail: needsAttention means user action is required, not merely that the
+  // latest Plaid transaction sync failed. Generic sync failures keep the feed connected.
   const UNHEALTHY_STATUSES = new Set<string>([
-    "ERROR",
     "DISCONNECTED",
     "REAUTH_REQUIRED",
     "LOGIN_REQUIRED",
     "ITEM_LOGIN_REQUIRED",
-    "ITEM_ERROR",
     "ENV_MISMATCH_RECONNECT_REQUIRED",
     "INACTIVE",
     "EXPIRED",
@@ -510,14 +543,14 @@ export async function getStatus(params: { businessId: string; accountId: string;
   const isUnhealthyStatus = UNHEALTHY_STATUSES.has(statusNorm);
   const isTransitionalStatus = TRANSITIONAL_STATUSES.has(statusNorm);
 
-  const needsAttention = (hasError || isUnhealthyStatus) && !isTransitionalStatus;
+  const needsAttention = isUnhealthyStatus && !isTransitionalStatus;
 
   function shortDetailFromStatusOrError() {
     // Prefer status-based short copy (user-friendly), then fallback to error_code/message.
     if (statusNorm === "REAUTH_REQUIRED") return "Re-authentication required";
     if (statusNorm === "LOGIN_REQUIRED" || statusNorm === "ITEM_LOGIN_REQUIRED") return "Login required";
     if (statusNorm === "DISCONNECTED") return "Connection disconnected";
-    if (statusNorm === "ERROR" || statusNorm === "ITEM_ERROR") return "Bank connection error";
+    if (statusNorm === "SYNC_ERROR" || statusNorm === "ERROR") return "Bank sync issue";
 
     const code = (connRow.error_code ?? "").toString().trim();
     if (code) {
@@ -549,7 +582,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
 
   return json(200, {
     ok: true,
-    connected: connRow.status === "CONNECTED" || statusNorm === "PENDING_SYNC",
+    connected: connRow.status === "CONNECTED" || statusNorm === "PENDING_SYNC" || statusNorm === "SYNC_ERROR" || statusNorm === "ERROR",
     status: connRow.status,
     institutionName: connRow.institution_name,
     last4: connRow.plaid_mask ?? null,
@@ -610,7 +643,7 @@ export async function syncTransactions(params: {
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
 
   const recordSyncFailure = async (error: any) => {
-    const { code, status } = await recordPlaidConnectionFailure({ prisma, businessId, accountId, error });
+    const { code, status, reconnectRequired } = await recordPlaidSyncFailure({ prisma, businessId, accountId, error });
     if (afterReconnect && canDeferPostReconnectSyncFailure(status, code)) {
       const now = new Date();
       await prisma.bankConnection.updateMany({
@@ -639,7 +672,7 @@ export async function syncTransactions(params: {
       errorCode: code,
       status,
       message: plaidSyncFailureUserMessage(status, code),
-      reconnectRequired: status === "REAUTH_REQUIRED" || status === "ENV_MISMATCH_RECONNECT_REQUIRED",
+      reconnectRequired,
     });
   };
 

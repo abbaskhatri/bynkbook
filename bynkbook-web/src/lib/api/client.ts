@@ -158,7 +158,7 @@ function plaidSyncFailureMessage(payload: any) {
     return "This bank connection needs to be reconnected before transactions can sync.";
   }
 
-  return "Bank sync could not finish. Try again, or reconnect the bank if it keeps happening.";
+  return "Bank sync could not finish. Try again shortly; current transactions are unchanged.";
 }
 
 export async function apiFetch(path: string, init?: ApiFetchInit) {
