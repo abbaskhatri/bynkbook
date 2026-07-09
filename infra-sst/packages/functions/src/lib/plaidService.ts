@@ -242,8 +242,9 @@ export async function createLinkToken(params: {
   businessId: string;
   accountId: string;
   userId: string;
+  mode?: "connect" | "update";
 }) {
-  const { businessId, accountId, userId } = params;
+  const { businessId, accountId, userId, mode = "connect" } = params;
 
   const prisma = await getPrisma();
   const role = await requireMembership(prisma, businessId, userId);
@@ -253,6 +254,25 @@ export async function createLinkToken(params: {
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
   const plaid = await getPlaidClient();
+
+  if (mode === "update") {
+    const conn = await prisma.bankConnection.findFirst({
+      where: { business_id: businessId, account_id: accountId },
+    });
+    if (!conn) return json(400, { ok: false, error: "No bank connection to reconnect" });
+
+    const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+    const res = await plaid.linkTokenCreate({
+      user: { client_user_id: userId },
+      client_name: "BynkBook",
+      country_codes: [CountryCode.Us],
+      language: "en",
+      webhook: plaidWebhookUrl(),
+      access_token: accessToken,
+    });
+
+    return json(200, { ok: true, link_token: res.data.link_token, mode: "update" });
+  }
 
   const res = await plaid.linkTokenCreate({
     user: { client_user_id: userId },
@@ -269,16 +289,46 @@ export async function createLinkToken(params: {
   return json(200, { ok: true, link_token: res.data.link_token });
 }
 
+async function derivePlaidEffectiveStartDate(prisma: any, businessId: string, accountId: string, provided?: string) {
+  const raw = String(provided ?? "").trim();
+  if (raw) {
+    const start = new Date(`${raw}T00:00:00Z`);
+    if (Number.isNaN(start.getTime())) return null;
+    return start;
+  }
+
+  const latestBankTxn = await prisma.bankTransaction.findFirst({
+    where: {
+      business_id: businessId,
+      account_id: accountId,
+      is_removed: false,
+    },
+    select: { posted_date: true },
+    orderBy: [{ posted_date: "desc" as any }, { created_at: "desc" as any }],
+  });
+  if (latestBankTxn?.posted_date) return latestBankTxn.posted_date;
+
+  const account = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { opening_balance_date: true },
+  });
+  if (account?.opening_balance_date) return account.opening_balance_date;
+
+  return new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+}
+
 /**
  * Exchange public token + store mapping and retention start date.
- * Body must include effectiveStartDate (YYYY-MM-DD).
+ * effectiveStartDate is optional for existing BynkBook accounts. If omitted,
+ * start from the latest existing bank transaction, then account opening date,
+ * then today.
  */
 export async function exchangePublicToken(params: {
   businessId: string;
   accountId: string;
   userId: string;
   publicToken: string;
-  effectiveStartDate: string;
+  effectiveStartDate?: string;
   endDate?: string; // optional YYYY-MM-DD (end defaults to today)
   institution?: { name?: string; institution_id?: string };
   plaidAccountId: string;
@@ -293,8 +343,8 @@ export async function exchangePublicToken(params: {
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
-  const start = new Date(`${effectiveStartDate}T00:00:00Z`);
-  if (Number.isNaN(start.getTime())) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
+  const start = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, effectiveStartDate);
+  if (!start) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
 
   const plaid = await getPlaidClient();
   const ex = await plaid.itemPublicTokenExchange({ public_token: publicToken });
@@ -318,6 +368,8 @@ export async function exchangePublicToken(params: {
       plaid_mask: mask ?? null,
       status: "CONNECTED",
       has_new_transactions: false,
+      opening_policy: "MANUAL",
+      opening_adjustment_created_at: new Date(),
     },
     update: {
       plaid_item_id: itemId,
@@ -331,11 +383,13 @@ export async function exchangePublicToken(params: {
       error_code: null,
       error_message: null,
       has_new_transactions: false,
+      opening_policy: "MANUAL",
+      opening_adjustment_created_at: new Date(),
       updated_at: new Date(),
     },
   });
 
-  return json(200, { ok: true, connected: true });
+  return json(200, { ok: true, connected: true, effectiveStartDate: start.toISOString().slice(0, 10) });
 }
 
 export async function getStatus(params: { businessId: string; accountId: string; userId: string }) {

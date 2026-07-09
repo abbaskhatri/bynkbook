@@ -7,13 +7,20 @@ export async function plaidLinkToken(businessId: string, accountId: string) {
   );
 }
 
+export async function plaidReconnectLinkToken(businessId: string, accountId: string) {
+  return apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/plaid/link-token`,
+    { method: "POST", body: JSON.stringify({ mode: "update" }) }
+  );
+}
+
 export async function plaidExchange(
   businessId: string,
   accountId: string,
   body: {
     public_token: string;
     plaidAccountId: string;
-    effectiveStartDate: string;
+    effectiveStartDate?: string;
     endDate?: string; // optional YYYY-MM-DD
     institution?: { name?: string; institution_id?: string };
     mask?: string;

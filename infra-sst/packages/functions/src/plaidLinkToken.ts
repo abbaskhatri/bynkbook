@@ -10,5 +10,17 @@ export async function handler(event: any) {
   if (!businessId) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing businessId" }) };
   if (!accountId) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing accountId" }) };
 
-  return createLinkToken({ businessId, accountId, userId: sub });
+  let body: any = {};
+  try {
+    body = event?.body ? JSON.parse(event.body) : {};
+  } catch {
+    body = {};
+  }
+
+  return createLinkToken({
+    businessId,
+    accountId,
+    userId: sub,
+    mode: body?.mode === "update" || body?.reconnect === true ? "update" : "connect",
+  });
 }

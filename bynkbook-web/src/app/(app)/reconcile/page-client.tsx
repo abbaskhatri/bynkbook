@@ -4654,9 +4654,11 @@ const displayBankActiveList = useMemo(() => {
                   businessName={selectedBusinessName}
                   accountName={selectedAccountName}
                   effectiveStartDate={selectedAccountOpeningDate}
+                  mode={plaidNeedsAttention ? "reconnect" : "connect"}
                   disabled={plaidSyncing || !selectedBusinessId || !selectedAccountId}
                   disabledClassName={disabledBtn}
                   buttonClassName="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                  label={plaidNeedsAttention ? "Reconnect bank" : undefined}
                   onConnected={async (syncResult?: any) => {
                     if (!selectedBusinessId || !selectedAccountId) return;
 

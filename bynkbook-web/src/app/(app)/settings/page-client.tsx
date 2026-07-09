@@ -2841,6 +2841,7 @@ export default function SettingsPageClient() {
                                       businessId={selectedBusinessId}
                                       accountId={a.id}
                                       effectiveStartDate={todayYmd()}
+                                      mode="reconnect"
                                       disabledClassName="opacity-50 cursor-not-allowed"
                                       buttonClassName="h-7 px-2 inline-flex items-center justify-center rounded-md border border-border text-xs font-medium hover:bg-muted/50"
                                       disabled={!selectedBusinessId}

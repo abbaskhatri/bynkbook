@@ -42,6 +42,7 @@ async function loadSyncTransactions(options: {
       },
     })),
     linkTokenCreate: vi.fn(async () => ({ data: { link_token: "link-token" } })),
+    itemPublicTokenExchange: vi.fn(async () => ({ data: { access_token: "access-token-new", item_id: "item-new" } })),
     transactionsSync: vi.fn(async () => ({
       data: {
         added: [],
@@ -65,9 +66,11 @@ async function loadSyncTransactions(options: {
     },
     bankConnection: {
       findFirst: vi.fn(async () => ({ ...baseConn, ...options.conn })),
+      upsert: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
     bankTransaction: {
+      findFirst: vi.fn(async () => null),
       deleteMany: vi.fn(async () => ({ count: 0 })),
       create: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -158,6 +161,32 @@ describe("createLinkToken", () => {
     );
   });
 
+  test("uses Plaid update mode for reconnect link tokens", async () => {
+    const { mod, plaid } = await loadSyncTransactions({});
+
+    const res = await mod.createLinkToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      mode: "update",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ ok: true, link_token: "link-token", mode: "update" });
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access_token: "access-token-redacted",
+      })
+    );
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        products: expect.anything(),
+        transactions: expect.anything(),
+      })
+    );
+  });
+
   test("includes configured webhook URL for business/new-account link tokens", async () => {
     process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
     const { mod, plaid } = await loadSyncTransactions({});
@@ -175,6 +204,55 @@ describe("createLinkToken", () => {
 });
 
 describe("syncTransactions", () => {
+  test("exchange without a date derives from latest bank transaction and suppresses opening adjustment", async () => {
+    const latestPosted = new Date("2026-04-27T00:00:00.000Z");
+    const { mod, prisma } = await loadSyncTransactions({
+      prisma: {
+        bankTransaction: {
+          findFirst: vi.fn(async () => ({ posted_date: latestPosted })),
+          deleteMany: vi.fn(async () => ({ count: 0 })),
+          create: vi.fn(async () => ({})),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+          count: vi.fn(async () => 0),
+          aggregate: vi.fn(async () => ({ _sum: { amount_cents: 0n } })),
+        },
+        bankConnection: {
+          findFirst: vi.fn(async () => ({ ...baseConn })),
+          upsert: vi.fn(async () => ({})),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+      institution: { name: "Bank", institution_id: "ins_1" },
+      mask: "1234",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ ok: true, connected: true, effectiveStartDate: "2026-04-27" });
+    expect(prisma.bankConnection.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          effective_start_date: latestPosted,
+          opening_policy: "MANUAL",
+          opening_adjustment_created_at: expect.any(Date),
+        }),
+        update: expect.objectContaining({
+          effective_start_date: latestPosted,
+          opening_policy: "MANUAL",
+          opening_adjustment_created_at: expect.any(Date),
+        }),
+      })
+    );
+  });
+
   test("only upserts transactions for the mapped Plaid account and safely scopes removals", async () => {
     const matchingAdded = makeTransaction({ transaction_id: "txn-added-mapped" });
     const otherAdded = makeTransaction({ transaction_id: "txn-added-other", account_id: "plaid-acct-2" });

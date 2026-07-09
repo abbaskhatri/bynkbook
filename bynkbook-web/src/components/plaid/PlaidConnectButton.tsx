@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Landmark } from "lucide-react";
-import { plaidApplyOpening, plaidExchange, plaidLinkToken, plaidPreviewOpening, plaidSync } from "@/lib/api/plaid";
+import { plaidExchange, plaidLinkToken, plaidReconnectLinkToken, plaidSync } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
-
-import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 function TinySpinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
@@ -62,12 +60,13 @@ type Props = {
   businessName?: string;
   accountName?: string;
 
-  // Default effective start date if user doesn't choose (we will override via UI)
-  effectiveStartDate: string; // YYYY-MM-DD
+  // Existing-account Plaid connects derive the start date on the server.
+  effectiveStartDate?: string; // legacy fallback only
 
   disabledClassName: string;
   buttonClassName: string;
   disabled?: boolean;
+  mode?: "connect" | "reconnect";
 
   // Label override (e.g., "Switch")
   label?: string;
@@ -83,26 +82,16 @@ type PlaidAccountMeta = {
   subtype?: string;
 };
 
-function ymdToday(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function monthsBackStart(months: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - months);
-  return d.toISOString().slice(0, 10);
-}
-
 export function PlaidConnectButton(props: Props) {
   const {
     businessId,
     accountId,
     businessName,
     accountName,
-    effectiveStartDate,
     disabledClassName,
     buttonClassName,
     disabled,
+    mode = "connect",
     onConnected,
   } = props;
 
@@ -121,25 +110,23 @@ export function PlaidConnectButton(props: Props) {
   const [pendingAccounts, setPendingAccounts] = useState<PlaidAccountMeta[]>([]);
   const [selectedPlaidAccountId, setSelectedPlaidAccountId] = useState<string>("");
 
-  const [historyPreset, setHistoryPreset] = useState<"1" | "3" | "6" | "12" | "custom">("3");
-  const [customStart, setCustomStart] = useState<string>("");
-  const endDate = useMemo(() => ymdToday(), []);
-
   // Initial sync progress
   const [openSyncing, setOpenSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<{ newCount: number; pendingCount: number } | null>(null);
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null);
-
-  // Opening preview / conflict review
-  const [openOpeningReview, setOpenOpeningReview] = useState(false);
-  const [openingPreview, setOpeningPreview] = useState<any>(null);
-  const [openingChoiceBusy, setOpeningChoiceBusy] = useState(false);
 
   // Guard to prevent double-open on rapid clicks
   const openingRef = useRef(false);
 
   // Hold current link handler so we can exit/cleanup safely
   const handlerRef = useRef<ReturnType<NonNullable<typeof window.Plaid>["create"]> | null>(null);
+
+  const resetPendingSelection = useCallback(() => {
+    setPendingPublicToken(null);
+    setPendingInstitution(null);
+    setPendingAccounts([]);
+    setSelectedPlaidAccountId("");
+  }, []);
 
   const runInitialSync = useCallback(async () => {
     setOpenSyncing(true);
@@ -163,6 +150,37 @@ export function PlaidConnectButton(props: Props) {
     }
   }, [accountId, businessId]);
 
+  const completeExistingAccountConnect = useCallback(async (
+    publicToken: string,
+    plaidAccountId: string,
+    account?: PlaidAccountMeta,
+    institution?: any
+  ) => {
+    setBusy(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await plaidExchange(businessId, accountId, {
+        public_token: publicToken,
+        plaidAccountId,
+        institution: institution ?? pendingInstitution ?? undefined,
+        mask: account?.mask ?? undefined,
+      });
+
+      if (!res?.ok) throw new Error(res?.error ?? "Exchange failed");
+
+      setOpenSelect(false);
+      resetPendingSelection();
+
+      const syncRes = await runInitialSync();
+      onConnected(syncRes);
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Plaid connection failed");
+    } finally {
+      setBusy(false);
+    }
+  }, [accountId, businessId, onConnected, pendingInstitution, resetPendingSelection, runInitialSync]);
+
   const launchPlaid = useCallback(async () => {
     if (disabled) return;
     if (busy) return;
@@ -175,7 +193,9 @@ export function PlaidConnectButton(props: Props) {
 
     try {
       // 1) Get link token from backend
-      const lt = await plaidLinkToken(businessId, accountId);
+      const lt = mode === "reconnect"
+        ? await plaidReconnectLinkToken(businessId, accountId)
+        : await plaidLinkToken(businessId, accountId);
       const linkToken = lt?.link_token;
       if (!linkToken) throw new Error("Failed to create link token");
 
@@ -199,6 +219,12 @@ export function PlaidConnectButton(props: Props) {
         token: linkToken,
         onSuccess: async (public_token: string, metadata: any) => {
           try {
+            if (mode === "reconnect" || lt?.mode === "update") {
+              const syncRes = await runInitialSync();
+              onConnected(syncRes);
+              return;
+            }
+
             const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
             const accounts: PlaidAccountMeta[] = accountsRaw
               .map((a: any) => ({
@@ -216,13 +242,16 @@ export function PlaidConnectButton(props: Props) {
 
             if (accounts.length === 0) throw new Error("Plaid returned no accounts");
 
-            // Open selection step (single account only)
+            if (accounts.length === 1) {
+              await completeExistingAccountConnect(public_token, accounts[0].id, accounts[0], institution);
+              return;
+            }
+
+            // Open selection step only when Plaid returns multiple possible accounts.
             setPendingPublicToken(public_token);
             setPendingInstitution(institution);
             setPendingAccounts(accounts);
             setSelectedPlaidAccountId(accounts[0]?.id ?? "");
-            setHistoryPreset("3");
-            setCustomStart("");
 
             setOpenSelect(true);
           } catch (e: any) {
@@ -251,15 +280,19 @@ export function PlaidConnectButton(props: Props) {
         openingRef.current = false;
       }
     }
-  }, [accountId, businessId, busy, disabled]);
+  }, [accountId, businessId, busy, completeExistingAccountConnect, disabled, mode, onConnected, runInitialSync]);
 
   const requestPlaidLaunch = useCallback(() => {
     if (disabled) return;
     if (busy) return;
     setErrorMsg(null);
+    if (mode === "reconnect") {
+      void launchPlaid();
+      return;
+    }
     setConfirmed(false);
     setOpenConfirm(true);
-  }, [busy, disabled]);
+  }, [busy, disabled, launchPlaid, mode]);
 
   return (
     <div className="flex flex-col items-start">
@@ -281,12 +314,12 @@ export function PlaidConnectButton(props: Props) {
         title="Confirm bank connection"
         size="md"
       >
-        <div className="p-3 max-h-[70vh] overflow-y-auto overflow-x-hidden">
+        <div className="space-y-4">
           <div className="text-xs text-bb-text leading-relaxed break-words">
             This connects a live bank via Plaid for the selected BynkBook scope.
           </div>
 
-          <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
+          <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
             <div className="flex items-start justify-between gap-3">
               <span className="text-bb-text-muted">Business</span>
               <span className="text-right font-semibold text-bb-text">{businessName || "Selected business"}</span>
@@ -297,11 +330,11 @@ export function PlaidConnectButton(props: Props) {
             </div>
           </div>
 
-          <div className="mt-3 rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
+          <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
             Bank-level encryption - Read-only access - No password stored
           </div>
 
-          <div className="mt-3 text-xs text-bb-text">
+          <div className="text-xs text-bb-text">
             Before continuing:
             <ul className="list-disc ml-5 mt-1 text-bb-text-muted">
               <li>This will connect a bank feed for this account.</li>
@@ -310,7 +343,7 @@ export function PlaidConnectButton(props: Props) {
             </ul>
           </div>
 
-          <label className="mt-4 flex items-start gap-2 text-xs text-bb-text min-w-0">
+          <label className="flex items-start gap-2 text-xs text-bb-text min-w-0">
             <input
               type="checkbox"
               className="h-4 w-4 mt-0.5 shrink-0"
@@ -322,7 +355,7 @@ export function PlaidConnectButton(props: Props) {
             </span>
           </label>
 
-          <div className="mt-4 flex items-center justify-between border-t border-bb-border pt-3">
+          <div className="flex items-center justify-between border-t border-bb-border pt-3">
             <button
               type="button"
               className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft"
@@ -352,30 +385,26 @@ export function PlaidConnectButton(props: Props) {
         </div>
       </AppDialog>
 
-      {/* Step 2: select exactly one account + history window, then exchange */}
+      {/* Step 2: select exactly one bank account only when Plaid returns multiple accounts. */}
       <AppDialog
         open={openSelect}
-        
         onClose={() => {
           setOpenSelect(false);
-          setPendingPublicToken(null);
-          setPendingInstitution(null);
-          setPendingAccounts([]);
-          setSelectedPlaidAccountId("");
+          resetPendingSelection();
         }}
-        title="Choose account and history"
+        title="Choose bank account"
         size="md"
       >
-        <div className="p-3 overflow-hidden max-h-[70vh]">
+        <div className="space-y-4">
           <div className="text-xs text-bb-text-muted">
             Select exactly one bank account to link to this BynkBook account.
           </div>
 
-          <div className="mt-3 space-y-2">
+          <div className="space-y-2">
             {pendingAccounts.map((a) => {
               const label = `${a.name ?? "Account"}${a.mask ? ` • ****${a.mask}` : ""}${a.subtype ? ` • ${a.subtype}` : a.type ? ` • ${a.type}` : ""}`;
               return (
-                <label key={a.id} className="flex items-center gap-2 text-xs text-bb-text">
+                <label key={a.id} className="flex items-center gap-2 rounded-md border border-bb-border bg-bb-surface-card px-3 py-2 text-xs text-bb-text">
                   <input
                     type="radio"
                     name="plaid-account"
@@ -389,45 +418,7 @@ export function PlaidConnectButton(props: Props) {
             })}
           </div>
 
-          <div className="mt-4">
-            <div className="text-[11px] font-semibold text-bb-text-muted mb-1">History to fetch</div>
-            <select
-              className="h-8 w-full px-2 text-xs rounded-md border border-bb-input-border bg-bb-input-bg text-bb-text focus:outline-none focus:border-ring"
-              value={historyPreset}
-              onChange={(e) => setHistoryPreset(e.target.value as any)}
-            >
-              <option value="1">Last 1 month</option>
-              <option value="3">Last 3 months</option>
-              <option value="6">Last 6 months</option>
-              <option value="12">Last 12 months</option>
-              <option value="custom">Custom start date</option>
-            </select>
-
-            {historyPreset === "custom" ? (
-              <div className="mt-2">
-                <div className="text-[11px] text-bb-text-muted mb-1">Start date (end date is today)</div>
-
-                <AppDatePicker
-                  value={customStart}
-                  onChange={(next) => {
-                    // AppDatePicker doesn't support max; enforce here.
-                    if (!next) {
-                      setCustomStart("");
-                      return;
-                    }
-                    setCustomStart(next <= endDate ? next : endDate);
-                  }}
-                  allowClear
-                />
-              </div>
-            ) : null}
-
-            <div className="mt-2 text-[11px] text-bb-text-muted">
-              Opening balance will be labeled <span className="font-semibold">estimated</span> unless a statement opening is known.
-            </div>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between border-t border-bb-border pt-3">
+          <div className="flex items-center justify-between border-t border-bb-border pt-3">
             <button
               type="button"
               className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft"
@@ -444,205 +435,13 @@ export function PlaidConnectButton(props: Props) {
               onClick={async () => {
                 if (!pendingPublicToken || !selectedPlaidAccountId) return;
 
-                const startDate =
-                  historyPreset === "custom"
-                    ? (customStart || effectiveStartDate)
-                    : monthsBackStart(Number(historyPreset));
-
-                setBusy(true);
-                setErrorMsg(null);
-
-                try {
-                  const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
-                  const res = await plaidExchange(businessId, accountId, {
-                    public_token: pendingPublicToken,
-                    plaidAccountId: selectedPlaidAccountId,
-                    effectiveStartDate: startDate,
-                    endDate: endDate, // optional
-                    institution: pendingInstitution ?? undefined,
-                    mask: selected?.mask ?? undefined,
-                  });
-
-                  if (!res?.ok) throw new Error(res?.error ?? "Exchange failed");
-
-                  // Preview opening (conflict-aware)
-                  const pv: any = await plaidPreviewOpening(businessId, accountId, { effectiveStartDate: startDate });
-                  setOpeningPreview(pv);
-
-                  // If balance unavailable, we cannot compute suggested opening.
-                  // Proceed with connect+sync, but enforce KEEP_MANUAL (B1) and do not touch opening.
-                  if (pv && pv.balanceAvailable === false) {
-                    await plaidApplyOpening(businessId, accountId, {
-                      choice: "KEEP_MANUAL",
-                      effectiveStartDate: startDate,
-                      suggestedOpeningCents: undefined,
-                    });
-
-                    setOpenSelect(false);
-                    setPendingPublicToken(null);
-                    setPendingInstitution(null);
-                    setPendingAccounts([]);
-                    setSelectedPlaidAccountId("");
-
-                    const syncRes = await runInitialSync();
-
-                    onConnected(syncRes);
-                    return;
-                  }
-
-                  // If conflict exists, open review dialog and let user choose A/B/C
-                  const conflict = pv?.conflict ?? {};
-                  if (conflict.hasRealEntries || conflict.hasManualOpeningNonZero || conflict.hasMatchesOrClearing || conflict.hasExistingBankTxns) {
-                    setOpenSelect(false);
-                    setOpenOpeningReview(true);
-                    return;
-                  }
-
-                  // No conflict and balance available -> auto apply Plaid suggested opening
-                  if (pv?.suggestedOpeningCents != null) {
-                    await plaidApplyOpening(businessId, accountId, {
-                      choice: "APPLY_PLAID",
-                      effectiveStartDate: startDate,
-                      suggestedOpeningCents: String(pv.suggestedOpeningCents),
-                    });
-                  }
-
-                  setOpenSelect(false);
-                  setPendingPublicToken(null);
-                  setPendingInstitution(null);
-                  setPendingAccounts([]);
-                  setSelectedPlaidAccountId("");
-
-                  // Immediately run initial sync (production-grade UX)
-                  const syncRes = await runInitialSync();
-
-                  onConnected(syncRes);
-                } catch (e: any) {
-                  setErrorMsg(e?.message ?? "Plaid connection failed");
-                } finally {
-                  setBusy(false);
-                }
+                const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
+                await completeExistingAccountConnect(pendingPublicToken, selectedPlaidAccountId, selected);
               }}
             >
               {busy ? "Connecting…" : "Connect"}
             </button>
           </div>
-        </div>
-      </AppDialog>
-
-      {/* Initial sync progress dialog (separate, not nested) */}
-      <AppDialog
-        open={openOpeningReview}
-        onClose={() => {
-          // If user closes, treat as cancel connect (disconnect mapping)
-          setOpenOpeningReview(false);
-          setOpeningPreview(null);
-        }}
-        title="Review opening balance"
-        size="md"
-      >
-        <div className="p-3 max-h-[70vh] overflow-y-auto">
-          <div className="text-xs text-bb-text">
-            We found existing activity or a manual opening for this account. Choose how to handle the opening balance.
-          </div>
-
-          <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-bb-text-muted">Plaid suggested opening</span>
-              <span className="font-semibold text-bb-text">
-                {String(openingPreview?.suggestedOpeningCents ?? "—")}
-              </span>
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-bb-text-muted">Start date</span>
-              <span className="font-semibold text-bb-text">{String(openingPreview?.effectiveStartDate ?? "")}</span>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-col gap-2">
-            <button
-              type="button"
-              className="h-9 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50 text-left"
-              disabled={openingChoiceBusy || openingPreview?.suggestedOpeningCents == null}
-              onClick={async () => {
-                setOpeningChoiceBusy(true);
-                try {
-                  await plaidApplyOpening(businessId, accountId, {
-                    choice: "APPLY_PLAID",
-                    effectiveStartDate: String(openingPreview?.effectiveStartDate),
-                    suggestedOpeningCents: String(openingPreview?.suggestedOpeningCents),
-                  });
-
-                  setOpenOpeningReview(false);
-                  const syncRes = await runInitialSync();
-
-                  onConnected(syncRes);
-                } finally {
-                  setOpeningChoiceBusy(false);
-                }
-              }}
-            >
-              <div className="font-semibold">A) Use Plaid suggested opening</div>
-              <div className="text-[11px] text-bb-text-muted">
-                Updates the single canonical opening entry and updates account opening fields.
-              </div>
-            </button>
-
-            <button
-              type="button"
-              className="h-9 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft disabled:opacity-50 text-left"
-              disabled={openingChoiceBusy}
-              onClick={async () => {
-                setOpeningChoiceBusy(true);
-                try {
-                  await plaidApplyOpening(businessId, accountId, {
-                    choice: "KEEP_MANUAL",
-                    effectiveStartDate: String(openingPreview?.effectiveStartDate),
-                    suggestedOpeningCents: String(openingPreview?.suggestedOpeningCents ?? "0"),
-                  });
-
-                  setOpenOpeningReview(false);
-                  const syncRes = await runInitialSync();
-
-                  onConnected(syncRes);
-                } finally {
-                  setOpeningChoiceBusy(false);
-                }
-              }}
-            >
-              <div className="font-semibold">B) Keep manual opening</div>
-              <div className="text-[11px] text-bb-text-muted">
-                Imports Plaid transactions but does not create/overwrite the opening entry or account opening fields. Stores Plaid suggestion for reference.
-              </div>
-            </button>
-
-            <button
-              type="button"
-              className="h-9 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft disabled:opacity-50 text-left"
-              disabled={openingChoiceBusy}
-              onClick={async () => {
-                setOpeningChoiceBusy(true);
-                try {
-                  await plaidApplyOpening(businessId, accountId, {
-                    choice: "CANCEL",
-                    effectiveStartDate: String(openingPreview?.effectiveStartDate),
-                  });
-                  setOpenOpeningReview(false);
-                } finally {
-                  setOpeningChoiceBusy(false);
-                }
-              }}
-            >
-              <div className="font-semibold">C) Cancel connect</div>
-              <div className="text-[11px] text-bb-text-muted">Disconnects and makes no changes.</div>
-            </button>
-          </div>
-
-          {openingPreview?.balanceAvailable === false ? (
-            <div className="mt-3 text-xs text-rose-600">
-              Balance unavailable — cannot compute Plaid suggested opening.
-            </div>
-          ) : null}
         </div>
       </AppDialog>
 
@@ -652,7 +451,7 @@ export function PlaidConnectButton(props: Props) {
         title="Initial sync"
         size="sm"
       >
-        <div className="p-3 overflow-hidden max-h-[70vh]">
+        <div className="space-y-3">
           <div className="text-xs text-bb-text flex items-center gap-2">
             <TinySpinner /> Syncing transactions…
           </div>
