@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import dynamic from "next/dynamic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import "aws-amplify/auth/enable-oauth-listener";
 import { configureAmplify } from "@/lib/auth/amplify";
 import { ThemeProvider } from "@/lib/theme";
 

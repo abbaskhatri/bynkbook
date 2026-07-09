@@ -24,7 +24,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ])) as T;
 }
 
-async function waitForOAuthUser(onRetrying: () => void, timeoutMs = 10000) {
+async function waitForOAuthUser(onRetrying: () => void, timeoutMs = 30000) {
   const startedAt = Date.now();
   let attempts = 0;
   let lastError: unknown = null;
@@ -33,6 +33,7 @@ async function waitForOAuthUser(onRetrying: () => void, timeoutMs = 10000) {
     attempts += 1;
 
     try {
+      await withTimeout(fetchAuthSession(), 2500).catch(() => {});
       await withTimeout(getCurrentUser(), 2500);
       return;
     } catch (error) {

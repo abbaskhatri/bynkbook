@@ -3,8 +3,8 @@ import { signOut } from "aws-amplify/auth";
 const SESSION_STARTED_AT_KEY = "bynkbook.auth.sessionStartedAt";
 const SESSION_LAST_ACTIVITY_KEY = "bynkbook.auth.lastActivityAt";
 
-const DEFAULT_IDLE_MINUTES = 30;
-const DEFAULT_MAX_HOURS = 12;
+const DEFAULT_WEEKLY_IDLE_MINUTES = 7 * 24 * 60;
+const DEFAULT_WEEKLY_MAX_HOURS = 7 * 24;
 
 export type SessionExpiryReason = "idle" | "max_age" | "unknown";
 
@@ -14,10 +14,10 @@ function readPositiveNumber(value: string | undefined, fallback: number) {
 }
 
 export const SESSION_IDLE_TIMEOUT_MS =
-  readPositiveNumber(process.env.NEXT_PUBLIC_AUTH_IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_MINUTES) * 60_000;
+  readPositiveNumber(process.env.NEXT_PUBLIC_AUTH_IDLE_TIMEOUT_MINUTES, DEFAULT_WEEKLY_IDLE_MINUTES) * 60_000;
 
 export const SESSION_MAX_AGE_MS =
-  readPositiveNumber(process.env.NEXT_PUBLIC_AUTH_MAX_SESSION_HOURS, DEFAULT_MAX_HOURS) * 60 * 60_000;
+  readPositiveNumber(process.env.NEXT_PUBLIC_AUTH_MAX_SESSION_HOURS, DEFAULT_WEEKLY_MAX_HOURS) * 60 * 60_000;
 
 function readTimestamp(key: string): number | null {
   if (typeof window === "undefined") return null;
