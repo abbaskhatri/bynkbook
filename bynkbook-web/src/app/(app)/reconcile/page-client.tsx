@@ -4526,7 +4526,14 @@ const displayBankActiveList = useMemo(() => {
                       {plaidNeedsAttention && plaid?.errorMessage ? <span className="text-bb-text-subtle"> • </span> : null}
                       {plaidNeedsAttention && plaid?.errorMessage ? <span className="text-bb-status-warning-fg">{plaid.errorMessage}</span> : null}
                       {bankUpdatesAvailable ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {bankUpdatesAvailable ? <span className="text-bb-status-warning-fg">Bank reports new activity; sync to refresh transactions.</span> : null}
+                      {bankUpdatesAvailable ? (
+                        <span
+                          className="text-bb-status-warning-fg"
+                          title="Plaid reported bank activity. Sync checks for new posted transactions."
+                        >
+                          Updates available
+                        </span>
+                      ) : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
                       {syncMsg ? <span className="truncate">{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
