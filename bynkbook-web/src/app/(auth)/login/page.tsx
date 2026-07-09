@@ -44,7 +44,7 @@ async function waitForAmplifySession(timeoutMs = 8000) {
 
   try {
     await Promise.race([
-      fetchAuthSession({ forceRefresh: true }),
+      fetchAuthSession(),
       new Promise((_, reject) => {
         timeout = globalThis.setTimeout(() => reject(new Error("Timed out preparing session.")), timeoutMs);
       }),

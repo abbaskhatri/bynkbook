@@ -21,6 +21,30 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ])) as T;
 }
 
+async function waitForOAuthSession(onRetrying: () => void, timeoutMs = 30000) {
+  const startedAt = Date.now();
+  let attempts = 0;
+  let lastError: unknown = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    attempts += 1;
+
+    try {
+      await withTimeout(fetchAuthSession(), 6000);
+      await withTimeout(getCurrentUser(), 6000);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempts === 2) onRetrying();
+      await sleep(600);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Timed out finishing sign-in. Please try again.");
+}
+
 export default function OAuthCallbackClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -32,8 +56,7 @@ export default function OAuthCallbackClient() {
     (async () => {
       try {
         await sleep(150);
-        await withTimeout(fetchAuthSession({ forceRefresh: true }), 12000);
-        await withTimeout(getCurrentUser(), 8000);
+        await waitForOAuthSession(() => setMsg("Finishing sign-in… (retrying)"));
         markSessionAuthenticated();
 
         const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
@@ -42,24 +65,9 @@ export default function OAuthCallbackClient() {
         const next = sanitizeAuthNext(nextFromQuery || stored, "/dashboard");
         router.replace(next);
       } catch (e: any) {
-        try {
-          setMsg("Finishing sign-in… (retrying)");
-          await sleep(600);
-          await withTimeout(fetchAuthSession({ forceRefresh: true }), 12000);
-          await withTimeout(getCurrentUser(), 8000);
-          markSessionAuthenticated();
-
-          const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
-          if (typeof window !== "undefined") window.sessionStorage.removeItem(NEXT_KEY);
-
-          const next = sanitizeAuthNext(nextFromQuery || stored, "/dashboard");
-          router.replace(next);
-          return;
-        } catch {
-          const message = e?.message ?? "Sign-in failed. Please try again.";
-          setMsg(message);
-          setTimeout(() => router.replace("/login"), 900);
-        }
+        const message = e?.message ?? "Sign-in failed. Please try again.";
+        setMsg(message);
+        setTimeout(() => router.replace("/login"), 1400);
       }
     })();
   }, [router, nextFromQuery]);

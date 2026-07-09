@@ -83,6 +83,11 @@ export async function expireSessionIfNeeded() {
   const reason = getSessionExpiryReason();
   if (!reason) return null;
 
+  if (reason === "unknown") {
+    markSessionAuthenticated();
+    return null;
+  }
+
   await signOutAndClearSession().catch(() => {
     clearSessionPolicyState();
   });
