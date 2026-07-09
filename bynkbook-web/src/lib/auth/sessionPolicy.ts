@@ -72,8 +72,15 @@ export function getSessionExpiryReason(now = Date.now()): SessionExpiryReason | 
 }
 
 export async function signOutAndClearSession() {
+  const redirectUrl = process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT;
+
+  clearSessionPolicyState();
+
   try {
-    await signOut();
+    await signOut({
+      global: false,
+      ...(redirectUrl ? { oauth: { redirectUrl } } : {}),
+    });
   } finally {
     clearSessionPolicyState();
   }

@@ -20,6 +20,10 @@ import {
 const NEXT_KEY = "bb_auth_next";
 const GOOGLE_PROVIDER = "Google";
 const GOOGLE_PROVIDER_PARAM = "google";
+const GOOGLE_SIGN_IN_OPTIONS = {
+  provider: GOOGLE_PROVIDER,
+  options: { prompt: "SELECT_ACCOUNT" },
+} as const;
 
 function getOAuthRedirectOrigin() {
   if (typeof window === "undefined") return null;
@@ -99,7 +103,7 @@ function LoginInner() {
 
     window.sessionStorage.setItem(NEXT_KEY, nextUrl);
 
-    signInWithRedirect({ provider: GOOGLE_PROVIDER }).catch((err: any) => {
+    signInWithRedirect(GOOGLE_SIGN_IN_OPTIONS).catch((err: any) => {
       const msg = err?.message ?? "Google sign-in failed";
 
       if (/already a signed in user/i.test(msg)) {
@@ -113,7 +117,7 @@ function LoginInner() {
 
   async function startGoogleSignIn() {
     try {
-      await signInWithRedirect({ provider: GOOGLE_PROVIDER });
+      await signInWithRedirect(GOOGLE_SIGN_IN_OPTIONS);
     } catch (err: any) {
       const msg = err?.message ?? "Google sign-in failed";
 

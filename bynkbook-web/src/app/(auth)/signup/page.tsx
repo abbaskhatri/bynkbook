@@ -13,6 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sanitizeAuthNext } from "@/lib/auth/sessionPolicy";
 
+const GOOGLE_SIGN_IN_OPTIONS = {
+  provider: "Google",
+  options: { prompt: "SELECT_ACCOUNT" },
+} as const;
+
 function SignupInner() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -136,7 +141,7 @@ function SignupInner() {
                       className="h-11 w-full rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50 dark:border-bb-border dark:bg-bb-surface-elevated dark:text-bb-text dark:hover:bg-bb-table-row-hover"
                       onClick={async () => {
                         if (typeof window !== "undefined") window.sessionStorage.setItem("bb_auth_next", nextUrl);
-                        await signInWithRedirect({ provider: "Google" });
+                        await signInWithRedirect(GOOGLE_SIGN_IN_OPTIONS);
                       }}
                     >
                       Continue with Google
