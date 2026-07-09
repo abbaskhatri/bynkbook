@@ -131,19 +131,19 @@ export default function Home() {
           </header>
 
           <div className="flex flex-1 items-center py-12 lg:py-16">
-            <div className="max-w-3xl">
+            <div className="max-w-xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-100">
                 <span className="h-2 w-2 rounded-full bg-emerald-300" />
                 Launch-ready bookkeeping controls
               </div>
 
-              <h1 className="mt-6 max-w-2xl text-5xl font-semibold leading-[0.98] text-white sm:text-6xl lg:text-7xl">
+              <h1 className="mt-6 max-w-xl text-5xl font-semibold leading-[0.98] text-white sm:text-6xl lg:text-7xl">
                 BynkBook
               </h1>
-              <p className="mt-5 max-w-2xl text-2xl font-semibold leading-tight text-emerald-100 sm:text-3xl">
+              <p className="mt-5 max-w-xl text-2xl font-semibold leading-tight text-emerald-100 sm:text-3xl lg:text-[2rem]">
                 Close cleaner books without slowing your team down.
               </p>
-              <p className="mt-5 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
+              <p className="mt-5 max-w-xl text-base leading-8 text-slate-300 sm:text-lg">
                 Reconciliation, period close, vendor payables, reports, and audit visibility in one calm workspace built for serious operators.
               </p>
 
@@ -170,7 +170,7 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="mt-10 grid max-w-xl gap-3 sm:grid-cols-3">
+              <div className="mt-10 grid max-w-lg gap-3 sm:grid-cols-3">
                 <HeroStat label="Reconcile focus" value="3x" note="fewer clicks" />
                 <HeroStat label="Session control" value="12h" note="max age" />
                 <HeroStat label="Audit trail" value="100%" note="scoped activity" />
