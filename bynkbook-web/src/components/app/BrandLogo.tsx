@@ -24,11 +24,46 @@ const fullAssetsDefault = {
   lg: { src: "/brand/bynkbook-logo-horizontal.png", width: 176, height: 38 },
 } as const;
 
-const fullAssetsLight = {
-  sm: { src: "/brand/bynkbook-logo-horizontal-white.png", width: 112, height: 24 },
-  md: { src: "/brand/bynkbook-logo-horizontal-white.png", width: 136, height: 30 },
-  lg: { src: "/brand/bynkbook-logo-horizontal-white.png", width: 176, height: 38 },
+const fullTextSizes = {
+  sm: "text-[24px]",
+  md: "text-[30px]",
+  lg: "text-[38px]",
 } as const;
+
+const fullTextGaps = {
+  sm: "gap-2",
+  md: "gap-2.5",
+  lg: "gap-3",
+} as const;
+
+function LightFullLogo({
+  size,
+  className,
+  priority,
+}: {
+  size: "sm" | "md" | "lg";
+  className?: string;
+  priority: boolean;
+}) {
+  const icon = iconAssets[size];
+
+  return (
+    <div className={cn("inline-flex shrink-0 items-center", fullTextGaps[size], className)} aria-label="BynkBook">
+      <Image
+        src={icon.src}
+        alt=""
+        width={icon.width}
+        height={icon.height}
+        priority={priority}
+        className="h-auto w-auto max-w-full select-none object-contain"
+        aria-hidden="true"
+      />
+      <span className={cn("select-none font-semibold leading-none tracking-tight text-white", fullTextSizes[size])}>
+        BynkBook
+      </span>
+    </div>
+  );
+}
 
 export function BrandLogo({
   collapsed = false,
@@ -43,12 +78,13 @@ export function BrandLogo({
   const asset =
     resolvedVariant === "icon"
       ? iconAssets[size]
-      : tone === "light"
-        ? fullAssetsLight[size]
-        : fullAssetsDefault[size];
+      : fullAssetsDefault[size];
 
-  const lightAsset = resolvedVariant === "full" ? fullAssetsLight[size] : null;
   const imageClass = "h-auto w-auto max-w-full select-none object-contain";
+
+  if (resolvedVariant === "full" && tone === "light") {
+    return <LightFullLogo size={size} priority={priority} className={className} />;
+  }
 
   return (
     <div
@@ -58,7 +94,7 @@ export function BrandLogo({
         className
       )}
     >
-      {tone === "auto" && lightAsset ? (
+      {tone === "auto" && resolvedVariant === "full" ? (
         <>
           <Image
             src={asset.src}
@@ -68,13 +104,10 @@ export function BrandLogo({
             priority={priority}
             className={cn(imageClass, "dark:hidden")}
           />
-          <Image
-            src={lightAsset.src}
-            alt="BynkBook"
-            width={lightAsset.width}
-            height={lightAsset.height}
+          <LightFullLogo
+            size={size}
             priority={priority}
-            className={cn(imageClass, "hidden drop-shadow-[0_1px_0_rgba(0,0,0,0.35)] dark:block")}
+            className="hidden drop-shadow-[0_1px_0_rgba(0,0,0,0.35)] dark:inline-flex"
           />
         </>
       ) : (
