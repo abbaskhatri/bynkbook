@@ -372,6 +372,47 @@ describe("syncTransactions", () => {
     expect(failureUpdate.data.error_message).not.toContain("access-sandbox-secret123");
     expect(failureUpdate.data.error_message).not.toContain("topsecret");
   });
+
+  test("defers generic transaction sync failure after reconnect without requiring another reconnect", async () => {
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          const error: any = new Error("transactions are not ready yet");
+          error.response = {
+            data: {
+              error_code: "PRODUCT_NOT_READY",
+              error_message: "Transactions are still being prepared",
+            },
+          };
+          throw error;
+        }),
+      },
+    });
+
+    const res = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      afterReconnect: true,
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      pendingSync: true,
+      newCount: 0,
+      message: "Bank reconnected. Transactions are still being prepared by the bank and will sync shortly.",
+    });
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const pendingUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(pendingUpdate.data).toMatchObject({
+      status: "PENDING_SYNC",
+      error_code: "PRODUCT_NOT_READY",
+      has_new_transactions: true,
+    });
+  });
 });
 
 describe("handleWebhook", () => {

@@ -22,5 +22,6 @@ export async function handler(event: any) {
     accountId,
     userId: sub,
     requestRefresh: body?.refresh === true || body?.forceRefresh === true,
+    afterReconnect: body?.afterReconnect === true,
   });
 }

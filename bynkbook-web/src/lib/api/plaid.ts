@@ -44,10 +44,10 @@ export async function plaidDisconnect(businessId: string, accountId: string) {
   });
 }
 
-export async function plaidSync(businessId: string, accountId: string, options?: { refresh?: boolean }) {
+export async function plaidSync(businessId: string, accountId: string, options?: { refresh?: boolean; afterReconnect?: boolean }) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
     method: "POST",
-    body: JSON.stringify({ refresh: options?.refresh === true }),
+    body: JSON.stringify({ refresh: options?.refresh === true, afterReconnect: options?.afterReconnect === true }),
   });
 }
 

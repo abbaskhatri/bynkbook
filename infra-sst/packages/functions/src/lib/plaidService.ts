@@ -73,6 +73,22 @@ function plaidSyncFailureUserMessage(status: string, code: string) {
   return "Bank sync could not finish. Try again, or reconnect the bank if it keeps happening.";
 }
 
+function canDeferPostReconnectSyncFailure(status: string, code: string) {
+  const text = `${status} ${code}`.toUpperCase();
+  if (
+    text.includes("REAUTH_REQUIRED") ||
+    text.includes("ITEM_LOGIN_REQUIRED") ||
+    text.includes("LOGIN_REQUIRED") ||
+    text.includes("USER_PERMISSION_REVOKED") ||
+    text.includes("PENDING_EXPIRATION") ||
+    text.includes("ENV_MISMATCH_RECONNECT_REQUIRED") ||
+    text.includes("INVALID_ACCESS_TOKEN")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function recordPlaidConnectionFailure(params: {
   prisma: any;
   businessId: string;
@@ -488,6 +504,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
     "SYNCING",
     "UPDATING",
     "INITIALIZING",
+    "PENDING_SYNC",
   ]);
 
   const isUnhealthyStatus = UNHEALTHY_STATUSES.has(statusNorm);
@@ -532,7 +549,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
 
   return json(200, {
     ok: true,
-    connected: connRow.status === "CONNECTED",
+    connected: connRow.status === "CONNECTED" || statusNorm === "PENDING_SYNC",
     status: connRow.status,
     institutionName: connRow.institution_name,
     last4: connRow.plaid_mask ?? null,
@@ -571,8 +588,14 @@ export async function disconnectBankConnection(params: { businessId: string; acc
  * Sync transactions (cursor-based) + retention + balance + webhook flag clearing + opening adjustment entry.
  * Returns: newCount, upgradedCount, duplicateCount, pendingCount, lastSyncAt
  */
-export async function syncTransactions(params: { businessId: string; accountId: string; userId: string; requestRefresh?: boolean }) {
-  const { businessId, accountId, userId, requestRefresh } = params;
+export async function syncTransactions(params: {
+  businessId: string;
+  accountId: string;
+  userId: string;
+  requestRefresh?: boolean;
+  afterReconnect?: boolean;
+}) {
+  const { businessId, accountId, userId, requestRefresh, afterReconnect } = params;
 
   const prisma = await getPrisma();
   const role = await requireMembership(prisma, businessId, userId);
@@ -588,6 +611,28 @@ export async function syncTransactions(params: { businessId: string; accountId: 
 
   const recordSyncFailure = async (error: any) => {
     const { code, status } = await recordPlaidConnectionFailure({ prisma, businessId, accountId, error });
+    if (afterReconnect && canDeferPostReconnectSyncFailure(status, code)) {
+      const now = new Date();
+      await prisma.bankConnection.updateMany({
+        where: { business_id: businessId, account_id: accountId },
+        data: {
+          status: "PENDING_SYNC",
+          error_code: code,
+          error_message: plaidErrorMessage(error),
+          has_new_transactions: true,
+          updated_at: now,
+        },
+      });
+      return json(200, {
+        ok: true,
+        pendingSync: true,
+        newCount: 0,
+        upgradedCount: 0,
+        duplicateCount: 0,
+        pendingCount: 0,
+        message: "Bank reconnected. Transactions are still being prepared by the bank and will sync shortly.",
+      });
+    }
     return json(502, {
       ok: false,
       error: "Plaid sync failed",

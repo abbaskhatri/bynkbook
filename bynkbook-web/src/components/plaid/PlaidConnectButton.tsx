@@ -128,17 +128,20 @@ export function PlaidConnectButton(props: Props) {
     setSelectedPlaidAccountId("");
   }, []);
 
-  const runInitialSync = useCallback(async () => {
+  const runInitialSync = useCallback(async (options?: { afterReconnect?: boolean }) => {
     setOpenSyncing(true);
     setSyncInfo(null);
     setSyncErrorMsg(null);
 
     try {
-      const syncResult: any = await plaidSync(businessId, accountId);
+      const syncResult: any = await plaidSync(businessId, accountId, { afterReconnect: options?.afterReconnect === true });
       setSyncInfo({
         newCount: Number(syncResult?.newCount ?? 0),
         pendingCount: Number(syncResult?.pendingCount ?? 0),
       });
+      if (syncResult?.pendingSync) {
+        setSyncErrorMsg(syncResult?.message ?? "Bank reconnected. Transactions will sync shortly.");
+      }
       return syncResult;
     } catch (e: any) {
       const message = e?.message ?? "Initial transaction sync failed";
@@ -220,7 +223,7 @@ export function PlaidConnectButton(props: Props) {
         onSuccess: async (public_token: string, metadata: any) => {
           try {
             if (mode === "reconnect" || lt?.mode === "update") {
-              const syncRes = await runInitialSync();
+              const syncRes = await runInitialSync({ afterReconnect: true });
               onConnected(syncRes);
               return;
             }
