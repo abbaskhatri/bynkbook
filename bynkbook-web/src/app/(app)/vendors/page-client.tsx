@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/app/page-header";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -482,29 +483,33 @@ export default function VendorsPageClient() {
         title="Add vendor"
         size="xs"
         footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => setCreateOpen(false)} disabled={createLoading}>
+          <DialogFooter
+            right={
+              <>
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)} disabled={createLoading}>
               Cancel
             </Button>
-            <Button className="h-7 px-3 text-xs" onClick={onCreate} disabled={createLoading || !name.trim()}>
+            <Button size="sm" onClick={onCreate} disabled={createLoading || !name.trim()}>
               {createLoading ? "Creating…" : "Create"}
             </Button>
-          </div>
+              </>
+            }
+          />
         }
       >
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <div className="text-[11px] text-bb-text-muted">Name</div>
-            <Input className="h-7 text-xs" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-bb-text-muted">Name</div>
+            <Input className="h-9 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
           </div>
 
-          <div className="space-y-1">
-            <div className="text-[11px] text-bb-text-muted">Notes (optional)</div>
-            <Input className="h-7 text-xs" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-bb-text-muted">Notes (optional)</div>
+            <Input className="h-9 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
           </div>
 
-          <div className="space-y-1">
-            <div className="text-[11px] text-bb-text-muted">Default category (optional)</div>
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-bb-text-muted">Default category (optional)</div>
             <CategoryCombobox
               options={categoryRows}
               categoryId={defaultCategoryId || null}
@@ -512,7 +517,7 @@ export default function VendorsPageClient() {
               disabled={categoriesLoading && categoryRows.length === 0}
               allowClear={!!defaultCategoryId}
               clearLabel="None"
-              inputClassName="h-7 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text placeholder:text-bb-text-muted disabled:cursor-not-allowed disabled:opacity-60"
+              inputClassName="h-9 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-3 text-sm text-bb-text placeholder:text-bb-text-muted disabled:cursor-not-allowed disabled:opacity-60"
               onChange={(value, option) => {
                 if (option?.id) {
                   setDefaultCategoryId(String(option.id));

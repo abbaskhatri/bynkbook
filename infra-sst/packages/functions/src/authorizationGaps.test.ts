@@ -125,8 +125,13 @@ describe("P1 authorization gaps", () => {
 
     expect([...actionKeys].sort()).toEqual(expect.arrayContaining([
       "budgets.write",
+      "ap.bills.write",
+      "ap.payments.write",
+      "bookkeeping.preferences.write",
       "category.review.bulk.apply",
       "goals.write",
+      "ledger.categories.write",
+      "ledger.entry.update",
       "ledger.transfer.write",
       "reconcile.adjustment.mark",
       "reconcile.adjustment.unmark",
@@ -146,6 +151,8 @@ describe("P1 authorization gaps", () => {
       "team.invite.revoke",
       "team.member.remove",
       "team.member.role_change",
+      "uploads.write",
+      "vendors.write",
     ]));
 
     const unmapped = [...actionKeys].filter((key) => !(key in ACTION_POLICY_KEY));

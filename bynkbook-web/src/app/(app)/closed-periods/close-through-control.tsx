@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
@@ -30,6 +30,15 @@ function monthEndYmd(month: string) {
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   const d = days[Math.max(1, Math.min(12, m)) - 1] ?? 30;
   return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function MetricTile({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
+      <div className="truncate text-[11px] text-bb-text-muted">{label}</div>
+      <div className="mt-1 text-base font-semibold leading-6 text-bb-text tabular-nums">{value}</div>
+    </div>
+  );
 }
 
 export type CloseThroughControlProps = {
@@ -131,7 +140,7 @@ export function CloseThroughControl({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2">
           <div className="text-[11px] font-semibold text-bb-text-muted">Close through</div>
 
@@ -161,83 +170,81 @@ export function CloseThroughControl({
           </div>
 
           {/* Range inputs */}
-          <div className="flex flex-wrap items-end gap-2">
+          <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {mode === "MONTH" ? (
-              <div className="space-y-1">
-                <div className="text-[11px] text-bb-text-muted">Month</div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <div className="text-xs font-medium text-bb-text-muted">Month</div>
 
-                <div className="w-[170px]">
-                  <AppDatePicker
-                    value={monthMode ? `${monthMode}-01` : ""}
-                    onChange={(next) => {
-                      // Store as YYYY-MM (month selector), derived from picked date
-                      setMonthMode(next ? next.slice(0, 7) : "");
-                    }}
-                    placeholder="Select month"
-                    disabled={loading || !businessId || !canClose}
-                    allowClear
-                  />
-                </div>
+                <AppDatePicker
+                  value={monthMode ? `${monthMode}-01` : ""}
+                  onChange={(next) => {
+                    // Store as YYYY-MM (month selector), derived from picked date
+                    setMonthMode(next ? next.slice(0, 7) : "");
+                  }}
+                  placeholder="Select month"
+                  disabled={loading || !businessId || !canClose}
+                  allowClear
+                  buttonClassName="h-9 text-sm"
+                />
               </div>
             ) : mode === "WEEK" ? (
               <>
-                <div className="space-y-1">
-                  <div className="text-[11px] text-bb-text-muted">Week start</div>
-                  <div className="w-[170px]">
-                    <AppDatePicker
-                      value={weekStart}
-                      onChange={(next) => setWeekStart(next)}
-                      disabled={loading || !businessId || !canClose}
-                      allowClear={false}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-bb-text-muted">Week start</div>
+                  <AppDatePicker
+                    value={weekStart}
+                    onChange={(next) => setWeekStart(next)}
+                    disabled={loading || !businessId || !canClose}
+                    allowClear={false}
+                    buttonClassName="h-9 text-sm"
+                  />
                 </div>
 
-                <div className="space-y-1">
-                  <div className="text-[11px] text-bb-text-muted">Week end</div>
-                  <div className="w-[170px]">
-                    <AppDatePicker
-                      value={effective.to}
-                      onChange={() => {
-                        /* read-only */
-                      }}
-                      disabled
-                      allowClear={false}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-bb-text-muted">Week end</div>
+                  <AppDatePicker
+                    value={effective.to}
+                    onChange={() => {
+                      /* read-only */
+                    }}
+                    disabled
+                    allowClear={false}
+                    buttonClassName="h-9 text-sm"
+                  />
                 </div>
               </>
             ) : (
               <>
-                <div className="space-y-1">
-                  <div className="text-[11px] text-bb-text-muted">From</div>
-                  <div className="w-[170px]">
-                    <AppDatePicker
-                      value={customFrom}
-                      onChange={(next) => setCustomFrom(next)}
-                      disabled={loading || !businessId || !canClose}
-                      allowClear={false}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-bb-text-muted">From</div>
+                  <AppDatePicker
+                    value={customFrom}
+                    onChange={(next) => setCustomFrom(next)}
+                    disabled={loading || !businessId || !canClose}
+                    allowClear={false}
+                    buttonClassName="h-9 text-sm"
+                  />
                 </div>
 
-                <div className="space-y-1">
-                  <div className="text-[11px] text-bb-text-muted">To</div>
-                  <div className="w-[170px]">
-                    <AppDatePicker
-                      value={customTo}
-                      onChange={(next) => setCustomTo(next)}
-                      disabled={loading || !businessId || !canClose}
-                      allowClear={false}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-bb-text-muted">To</div>
+                  <AppDatePicker
+                    value={customTo}
+                    onChange={(next) => setCustomTo(next)}
+                    disabled={loading || !businessId || !canClose}
+                    allowClear={false}
+                    buttonClassName="h-9 text-sm"
+                  />
                 </div>
               </>
             )}
+            </div>
 
             <Button
               variant="outline"
-              className="h-7 px-3 text-xs"
+              size="sm"
+              className="h-9 px-4"
               onClick={runPreview}
               disabled={loading || previewBusy || !businessId || !canClose}
             >
@@ -258,7 +265,6 @@ export function CloseThroughControl({
             </div>
           ) : null}
         </div>
-
         <div className="text-xs text-bb-text-muted">
           {canReopen ? "You can reopen months (OWNER only)." : "Only OWNER can reopen months."}{" "}
           {canClose ? "" : "Only OWNER/ADMIN can close periods."}
@@ -282,23 +288,11 @@ export function CloseThroughControl({
           {!preview ? (
             <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
           ) : (
-            <div className="grid grid-cols-4 gap-3">
-              <div className="rounded-md border border-bb-border p-3">
-                <div className="text-[11px] text-bb-text-muted">Total</div>
-                <div className="text-sm font-semibold">{stats.entries_total}</div>
-              </div>
-              <div className="rounded-md border border-bb-border p-3">
-                <div className="text-[11px] text-bb-text-muted">Reconciled</div>
-                <div className="text-sm font-semibold">{stats.entries_reconciled}</div>
-              </div>
-              <div className="rounded-md border border-bb-border p-3">
-                <div className="text-[11px] text-bb-text-muted">Unreconciled</div>
-                <div className="text-sm font-semibold">{stats.entries_unreconciled}</div>
-              </div>
-              <div className="rounded-md border border-bb-border p-3">
-                <div className="text-[11px] text-bb-text-muted">Open issues</div>
-                <div className="text-sm font-semibold">{stats.issues_open}</div>
-              </div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <MetricTile label="Total" value={stats.entries_total} />
+              <MetricTile label="Reconciled" value={stats.entries_reconciled} />
+              <MetricTile label="Unreconciled" value={stats.entries_unreconciled} />
+              <MetricTile label="Open issues" value={stats.issues_open} />
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -36,6 +37,19 @@ function roleUpper(r: any) {
 function canWrite(role: string) {
   // Vendor create/update: OWNER/ADMIN/BOOKKEEPER/ACCOUNTANT
   return ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(roleUpper(role));
+}
+
+async function requirePolicyWrite(prisma: any, args: { businessId: string; actorUserId: string; actorRole: string; endpoint: string }) {
+  const az = await authorizeWrite(prisma, {
+    businessId: args.businessId,
+    actorUserId: args.actorUserId,
+    actorRole: args.actorRole,
+    actionKey: "vendors.write",
+    requiredLevel: "VIEW",
+    endpointForLog: args.endpoint,
+  });
+  if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
+  return null;
 }
 
 export async function handler(event: any) {
@@ -98,6 +112,13 @@ export async function handler(event: any) {
   // CREATE
   if (method === "POST" && path === `/v1/businesses/${biz}/vendors`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      endpoint: "POST /v1/businesses/{businessId}/vendors",
+    });
+    if (denied) return denied;
 
     const body = readBody(event);
     const name = String(body?.name ?? "").trim();
@@ -159,6 +180,13 @@ export async function handler(event: any) {
   // UPDATE
   if ((method === "PATCH" || method === "PUT") && vendorId && path === `/v1/businesses/${biz}/vendors/${vendorId}`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      endpoint: `${method} /v1/businesses/{businessId}/vendors/{vendorId}`,
+    });
+    if (denied) return denied;
 
     const vid = String(vendorId).trim();
     const body = readBody(event);
@@ -219,6 +247,13 @@ export async function handler(event: any) {
   // DELETE
   if (method === "DELETE" && vendorId && path === `/v1/businesses/${biz}/vendors/${vendorId}`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      endpoint: "DELETE /v1/businesses/{businessId}/vendors/{vendorId}",
+    });
+    if (denied) return denied;
 
     const vid = String(vendorId).trim();
 

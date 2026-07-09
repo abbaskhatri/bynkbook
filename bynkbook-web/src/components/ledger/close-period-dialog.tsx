@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { previewClosedPeriods, closeThroughDate } from "@/lib/api/closedPeriods";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
+import { DialogFooter } from "@/components/primitives/DialogFooter";
 import { tabButtonClass } from "@/components/primitives/tokens";
 
 type RangeMode = "MONTH" | "WEEK" | "CUSTOM";
@@ -55,6 +56,15 @@ function addDays(ymd: string, n: number) {
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const dd = String(dt.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function MetricTile({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
+      <div className="truncate text-[11px] text-bb-text-muted">{label}</div>
+      <div className="mt-1 text-base font-semibold leading-6 text-bb-text tabular-nums">{value}</div>
+    </div>
+  );
 }
 
 export function ClosePeriodDialog(props: {
@@ -154,30 +164,33 @@ export function ClosePeriodDialog(props: {
       title="Close period"
       size="md"
       footer={
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-bb-text-muted">
-            Account: <span className="font-medium text-bb-text">{accountName ?? "Selected account"}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" className="h-7 px-3 text-xs" onClick={() => onOpenChange(false)} disabled={loading}>
+        <DialogFooter
+          left={
+            <div className="text-sm text-bb-text-muted">
+              Account: <span className="font-semibold text-bb-text">{accountName ?? "Selected account"}</span>
+            </div>
+          }
+          right={
+            <>
+            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={loading}>
               Cancel
             </Button>
             <Button
-              className="h-7 px-3 text-xs"
+              size="sm"
               onClick={doClose}
               disabled={closeDisabled}
               title={!preview ? "Run preview first" : undefined}
             >
               Close
             </Button>
-          </div>
-        </div>
+            </>
+          }
+        />
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         {/* Mode tabs */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {[
             { k: "MONTH", label: "Month" },
             { k: "WEEK", label: "Week" },
@@ -200,95 +213,73 @@ export function ClosePeriodDialog(props: {
         </div>
 
         {/* Range inputs */}
-        <div className="flex flex-wrap items-end gap-2">
-          {mode === "MONTH" ? (
-            <div className="space-y-1">
-              <div className="text-[11px] text-bb-text-muted">Month</div>
+        <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {mode === "MONTH" ? (
+              <div className="space-y-1.5 sm:col-span-2">
+                <div className="text-xs font-medium text-bb-text-muted">Month</div>
 
-              <div className="w-[170px]">
                 <AppDatePicker
                   value={month ? `${month}-01` : ""}
                   onChange={(next) => setMonth(next ? next.slice(0, 7) : "")}
                   placeholder="Select month"
                   allowClear
+                  buttonClassName="h-9 text-sm"
                 />
               </div>
-            </div>
-          ) : mode === "WEEK" ? (
-            <>
-              <div className="space-y-1">
-                <div className="text-[11px] text-bb-text-muted">Week start</div>
-                <div className="w-[170px]">
-                  <AppDatePicker value={weekStart} onChange={(next) => setWeekStart(next)} allowClear={false} />
-                </div>
+            ) : mode === "WEEK" ? (
+              <>
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-bb-text-muted">Week start</div>
+                <AppDatePicker value={weekStart} onChange={(next) => setWeekStart(next)} allowClear={false} buttonClassName="h-9 text-sm" />
               </div>
 
-              <div className="space-y-1">
-                <div className="text-[11px] text-bb-text-muted">Week end</div>
-                <div className="w-[170px]">
-                  <AppDatePicker value={effective.to} onChange={() => {}} disabled allowClear={false} />
-                </div>
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-bb-text-muted">Week end</div>
+                <AppDatePicker value={effective.to} onChange={() => {}} disabled allowClear={false} buttonClassName="h-9 text-sm" />
               </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-1">
-                <div className="text-[11px] text-bb-text-muted">From</div>
-                <div className="w-[170px]">
-                  <AppDatePicker value={from} onChange={(next) => setFrom(next)} allowClear={false} />
-                </div>
+              </>
+            ) : (
+              <>
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-bb-text-muted">From</div>
+                <AppDatePicker value={from} onChange={(next) => setFrom(next)} allowClear={false} buttonClassName="h-9 text-sm" />
               </div>
 
-              <div className="space-y-1">
-                <div className="text-[11px] text-bb-text-muted">To</div>
-                <div className="w-[170px]">
-                  <AppDatePicker value={to} onChange={(next) => setTo(next)} allowClear={false} />
-                </div>
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-bb-text-muted">To</div>
+                <AppDatePicker value={to} onChange={(next) => setTo(next)} allowClear={false} buttonClassName="h-9 text-sm" />
               </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
 
-          <Button variant="outline" className="h-7 px-3 text-xs" onClick={runPreview} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-9 px-4" onClick={runPreview} disabled={loading}>
             {loading ? "Loading…" : "Preview"}
           </Button>
 
-          {err ? <div className="text-xs text-bb-status-danger-fg">{err}</div> : null}
+          {err ? <div className="sm:col-span-2 text-sm text-bb-status-danger-fg">{err}</div> : null}
         </div>
 
         {/* Stats */}
-        <div className="rounded-md border border-bb-border overflow-hidden">
-          <div className="bg-bb-table-header px-3 h-9 flex items-center justify-between">
-            <div className="text-xs font-semibold text-bb-text">Reconciliation</div>
-            <div className={`text-xs font-semibold ${preview ? (isClean ? "text-primary" : "text-bb-status-warning-fg") : "text-bb-text-muted"}`}>
+        <div className="overflow-hidden rounded-md border border-bb-border">
+          <div className="bg-bb-table-header px-4 h-11 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-bb-text">Reconciliation</div>
+            <div className={`text-sm font-semibold ${preview ? (isClean ? "text-primary" : "text-bb-status-warning-fg") : "text-bb-text-muted"}`}>
               {preview ? (isClean ? "Clean (recommended)" : "Not clean") : "Run preview"}
             </div>
           </div>
 
-          <div className="px-3 py-3">
+          <div className="px-4 py-4">
             {!preview ? (
               <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <div className="rounded-md border border-bb-border p-3">
-                  <div className="text-[11px] text-bb-text-muted">Total</div>
-                  <div className="text-sm font-semibold">{stats.entries_total}</div>
-                </div>
-                <div className="rounded-md border border-bb-border p-3">
-                  <div className="text-[11px] text-bb-text-muted">Reconciled</div>
-                  <div className="text-sm font-semibold">{stats.entries_reconciled}</div>
-                </div>
-                <div className="rounded-md border border-bb-border p-3">
-                  <div className="text-[11px] text-bb-text-muted">Unreconciled</div>
-                  <div className="text-sm font-semibold">{stats.entries_unreconciled}</div>
-                </div>
-                <div className="rounded-md border border-bb-border p-3">
-                  <div className="text-[11px] text-bb-text-muted">Open issues</div>
-                  <div className="text-sm font-semibold">{stats.issues_open}</div>
-                </div>
-                <div className="rounded-md border border-bb-border p-3">
-                  <div className="text-[11px] text-bb-text-muted">Uncategorized</div>
-                  <div className="text-sm font-semibold">{uncategorizedCount}</div>
-                </div>
+                <MetricTile label="Total" value={stats.entries_total} />
+                <MetricTile label="Reconciled" value={stats.entries_reconciled} />
+                <MetricTile label="Unreconciled" value={stats.entries_unreconciled} />
+                <MetricTile label="Open issues" value={stats.issues_open} />
+                <MetricTile label="Uncategorized" value={uncategorizedCount} />
               </div>
             )}
           </div>

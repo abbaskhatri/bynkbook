@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getCurrentUser, signOut } from "aws-amplify/auth";
+import { getCurrentUser } from "aws-amplify/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Building2, CalendarDays, Globe2, Landmark, ShieldCheck } from "lucide-react";
 
@@ -15,6 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  expireSessionIfNeeded,
+  sanitizeAuthNext,
+  sessionExpiredLoginUrl,
+  signOutAndClearSession,
+} from "@/lib/auth/sessionPolicy";
 
 export default function CreateBusinessClient() {
   const router = useRouter();
@@ -23,14 +29,14 @@ export default function CreateBusinessClient() {
 
   async function onSignOut() {
     try {
-      await signOut();
+      await signOutAndClearSession();
     } finally {
       qc.clear();
       router.replace("/login");
     }
   }
 
-  const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
+  const nextUrl = useMemo(() => sanitizeAuthNext(sp.get("next")), [sp]);
 
   const [checkingSession, setCheckingSession] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -54,6 +60,12 @@ export default function CreateBusinessClient() {
     (async () => {
       try {
         await getCurrentUser();
+        const expired = await expireSessionIfNeeded();
+        if (expired) {
+          qc.clear();
+          router.replace(sessionExpiredLoginUrl(expired, `/create-business?next=${encodeURIComponent(nextUrl)}`));
+          return;
+        }
       } catch {
         router.replace(
           `/login?next=${encodeURIComponent(`/create-business?next=${encodeURIComponent(nextUrl)}`)}`
@@ -63,7 +75,7 @@ export default function CreateBusinessClient() {
         setCheckingSession(false);
       }
     })();
-  }, [router, nextUrl]);
+  }, [qc, router, nextUrl]);
 
   const businessesQ = useBusinesses({ enabled: !checkingSession });
 

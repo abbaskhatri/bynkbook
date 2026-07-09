@@ -3,12 +3,13 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchAuthSession, signOut } from "aws-amplify/auth";
+import { fetchAuthSession } from "aws-amplify/auth";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 
 import { userFacingErrorMessage } from "@/lib/errors/app-error";
+import { signOutAndClearSession } from "@/lib/auth/sessionPolicy";
 import { formatDateOnlyShort, normalizeDateOnly } from "@/lib/dateOnly";
 import { parseMoneyToCents } from "@/lib/money";
 
@@ -731,8 +732,12 @@ export default function SettingsPageClient() {
   }
 
   async function onSignOut() {
-    await signOut();
-    router.replace("/login");
+    try {
+      await signOutAndClearSession();
+    } finally {
+      qc.clear();
+      router.replace("/login");
+    }
   }
 
   async function onCreateAccount() {
@@ -2482,7 +2487,9 @@ export default function SettingsPageClient() {
                     setDeleteConfirmText("");
                   }}
                   title="Delete account"
+                  description="Permanent deletion is only allowed when the account has no related accounting records."
                   size="sm"
+                  tone="danger"
                   footer={
                     <div className="flex items-center justify-end gap-2">
                       <Button
@@ -3614,7 +3621,9 @@ export default function SettingsPageClient() {
         open={archiveConfirmOpen}
         onClose={() => setArchiveConfirmOpen(false)}
         title={archiveTarget?.action === "archive" ? "Archive account" : "Unarchive account"}
+        description={archiveTarget?.action === "archive" ? "Archive keeps accounting history intact and hides the account from active views." : undefined}
         size="sm"
+        tone={archiveTarget?.action === "archive" ? "warning" : "default"}
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" onClick={() => setArchiveConfirmOpen(false)}>
@@ -3690,7 +3699,9 @@ export default function SettingsPageClient() {
           setResetBusinessOpen(false);
         }}
         title="Reset business"
+        description="This clears operational data but keeps the workspace and setup."
         size="sm"
+        tone="warning"
       >
         <div className="space-y-4">
           <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
@@ -3772,7 +3783,9 @@ export default function SettingsPageClient() {
           setDeleteBusinessConfirm("");
         }}
         title="Delete business"
+        description="This permanently deletes the business and all related data."
         size="sm"
+        tone="danger"
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button

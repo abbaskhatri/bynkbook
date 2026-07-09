@@ -203,7 +203,7 @@ export function AppDatePicker({
                     inputH7,
                     showIcon ? "pl-8" : "pl-2",
                     allowClear ? "pr-8" : "pr-2",
-                    "text-left flex items-center whitespace-nowrap",
+                    "relative text-left flex items-center whitespace-nowrap",
                     disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-bb-table-row-hover",
                     buttonClassName,
                 ].join(" ")}

@@ -11,11 +11,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { sanitizeAuthNext } from "@/lib/auth/sessionPolicy";
 
 function SignupInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
+  const nextUrl = useMemo(() => sanitizeAuthNext(sp.get("next")), [sp]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -155,6 +156,8 @@ function SignupInner() {
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           autoComplete="username"
+                          autoCapitalize="none"
+                          autoCorrect="off"
                           className="h-11 rounded-xl"
                           placeholder="name@company.com"
                         />
@@ -187,9 +190,9 @@ function SignupInner() {
                           setErr(null);
                           try {
                             const res = await signUp({
-                              username: email,
+                              username: email.trim(),
                               password,
-                              options: { userAttributes: { email } },
+                              options: { userAttributes: { email: email.trim() } },
                             });
 
                             if (res?.nextStep?.signUpStep === "CONFIRM_SIGN_UP") {

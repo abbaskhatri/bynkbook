@@ -137,8 +137,8 @@ export async function handler(event: any) {
       safeQuery(
         "rolePolicies",
         () =>
-          typeof p.rolePolicy?.findMany === "function"
-            ? p.rolePolicy.findMany({
+          typeof p.businessRolePolicy?.findMany === "function"
+            ? p.businessRolePolicy.findMany({
                 where: { business_id: businessId },
                 orderBy: { role: "asc" },
               })
@@ -148,8 +148,8 @@ export async function handler(event: any) {
       safeQuery(
         "preferences",
         () =>
-          typeof p.bookkeepingPreference?.findUnique === "function"
-            ? p.bookkeepingPreference.findUnique({
+          typeof p.bookkeepingPreferences?.findUnique === "function"
+            ? p.bookkeepingPreferences.findUnique({
                 where: { business_id: businessId },
               })
             : Promise.resolve(null),
@@ -206,6 +206,31 @@ export async function handler(event: any) {
           p.bankConnection.findMany({
             where: { business_id: businessId },
             orderBy: [{ created_at: "asc" }],
+            select: {
+              id: true,
+              business_id: true,
+              account_id: true,
+              effective_start_date: true,
+              sync_cursor: true,
+              last_sync_at: true,
+              has_new_transactions: true,
+              last_known_balance_cents: true,
+              last_known_balance_at: true,
+              opening_adjustment_created_at: true,
+              opening_policy: true,
+              suggested_opening_cents: true,
+              suggested_opening_date: true,
+              suggested_balance_cents: true,
+              suggested_balance_at: true,
+              institution_name: true,
+              institution_id: true,
+              plaid_mask: true,
+              status: true,
+              error_code: true,
+              error_message: true,
+              created_at: true,
+              updated_at: true,
+            },
           }),
         []
       ),
@@ -214,7 +239,7 @@ export async function handler(event: any) {
         () =>
           p.bankTransaction.findMany({
             where: { business_id: businessId },
-            orderBy: [{ date: "asc" }, { created_at: "asc" }],
+            orderBy: [{ posted_date: "asc" }, { created_at: "asc" }],
           }),
         []
       ),

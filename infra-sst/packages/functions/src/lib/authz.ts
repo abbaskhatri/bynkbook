@@ -129,8 +129,15 @@ export const ACTION_POLICY_KEY: Record<string, string> = {
 
   // Reconcile
   "ledger.transfer.write": "ledger",
+  "ledger.entry.update": "ledger",
+  "ledger.categories.write": "ledger",
+  "uploads.write": "ledger",
   "budgets.write": "ledger",
   "goals.write": "ledger",
+  "bookkeeping.preferences.write": "settings",
+  "vendors.write": "vendors",
+  "ap.bills.write": "invoices",
+  "ap.payments.write": "invoices",
   "reconcile.match.create": "reconcile",
   "reconcile.match.batch": "reconcile",
   "reconcile.match.void": "reconcile",
@@ -162,8 +169,15 @@ export const ACTION_WAVE: Record<string, number> = {
 
   // Wave 2: core financial writes (ledger + reconcile)
   "ledger.transfer.write": 2,
+  "ledger.entry.update": 2,
+  "ledger.categories.write": 2,
+  "uploads.write": 2,
   "budgets.write": 2,
   "goals.write": 2,
+  "bookkeeping.preferences.write": 2,
+  "vendors.write": 2,
+  "ap.bills.write": 2,
+  "ap.payments.write": 2,
   "reconcile.match.create": 2,
   "reconcile.match.batch": 2,
   "reconcile.match.void": 2,
@@ -224,6 +238,8 @@ async function getPolicyForRole(prisma: any, businessId: string, role: string): 
   const R = String(role ?? "").toUpperCase();
   const fallback = defaultRolePolicyFor(R);
 
+  if (typeof prisma.businessRolePolicy?.findFirst !== "function") return fallback;
+
   const row = await prisma.businessRolePolicy.findFirst({
     where: { business_id: businessId, role: R },
     select: { policy_json: true },
@@ -250,6 +266,10 @@ async function getBusinessAuthz(prisma: any, businessId: string): Promise<{ mode
   if (forced) {
     const fm = normalizeMode(forced);
     if (fm === "OFF" || fm === "SOFT") return { mode: fm, wave: 0 };
+  }
+
+  if (typeof prisma.business?.findFirst !== "function") {
+    return { mode: "OFF", wave: 0 };
   }
 
   const row = await prisma.business.findFirst({

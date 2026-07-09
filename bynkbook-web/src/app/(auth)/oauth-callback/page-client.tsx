@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession, getCurrentUser } from "aws-amplify/auth";
+import { markSessionAuthenticated, sanitizeAuthNext } from "@/lib/auth/sessionPolicy";
 
 const NEXT_KEY = "bb_auth_next";
 
@@ -24,7 +25,7 @@ export default function OAuthCallbackClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const nextFromQuery = useMemo(() => sp.get("next"), [sp]);
+  const nextFromQuery = useMemo(() => sanitizeAuthNext(sp.get("next"), ""), [sp]);
   const [msg, setMsg] = useState("Finishing sign-in…");
 
   useEffect(() => {
@@ -33,11 +34,12 @@ export default function OAuthCallbackClient() {
         await sleep(150);
         await withTimeout(fetchAuthSession({ forceRefresh: true }), 12000);
         await withTimeout(getCurrentUser(), 8000);
+        markSessionAuthenticated();
 
         const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
         if (typeof window !== "undefined") window.sessionStorage.removeItem(NEXT_KEY);
 
-        const next = nextFromQuery ?? stored ?? "/dashboard";
+        const next = sanitizeAuthNext(nextFromQuery || stored, "/dashboard");
         router.replace(next);
       } catch (e: any) {
         try {
@@ -45,11 +47,12 @@ export default function OAuthCallbackClient() {
           await sleep(600);
           await withTimeout(fetchAuthSession({ forceRefresh: true }), 12000);
           await withTimeout(getCurrentUser(), 8000);
+          markSessionAuthenticated();
 
           const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
           if (typeof window !== "undefined") window.sessionStorage.removeItem(NEXT_KEY);
 
-          const next = nextFromQuery ?? stored ?? "/dashboard";
+          const next = sanitizeAuthNext(nextFromQuery || stored, "/dashboard");
           router.replace(next);
           return;
         } catch {

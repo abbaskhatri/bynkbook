@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { randomUUID } from "node:crypto";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -34,6 +35,30 @@ function roleUpper(r: any) {
 
 function canWrite(role: string) {
   return ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(roleUpper(role));
+}
+
+async function requirePolicyWrite(
+  prisma: any,
+  args: {
+    businessId: string;
+    accountId?: string | null;
+    actorUserId: string;
+    actorRole: string;
+    actionKey: "ap.bills.write" | "ap.payments.write";
+    endpoint: string;
+  }
+) {
+  const az = await authorizeWrite(prisma, {
+    businessId: args.businessId,
+    scopeAccountId: args.accountId ?? null,
+    actorUserId: args.actorUserId,
+    actorRole: args.actorRole,
+    actionKey: args.actionKey,
+    requiredLevel: "VIEW",
+    endpointForLog: args.endpoint,
+  });
+  if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
+  return null;
 }
 
 function toBigIntSafe(v: any): bigint {
@@ -324,6 +349,14 @@ export async function handler(event: any) {
   // ---------- Create Bill ----------
   if (method === "POST" && vendorId && path === `/v1/businesses/${biz}/vendors/${vendorId}/bills`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.bills.write",
+      endpoint: "POST /v1/businesses/{businessId}/vendors/{vendorId}/bills",
+    });
+    if (denied) return denied;
 
     const body = readBody(event);
     if (!body) return json(400, { ok: false, error: "Invalid JSON body" });
@@ -423,6 +456,14 @@ export async function handler(event: any) {
   // ---------- Update Bill ----------
   if (method === "PATCH" && vendorId && billId && path === `/v1/businesses/${biz}/vendors/${vendorId}/bills/${billId}`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.bills.write",
+      endpoint: "PATCH /v1/businesses/{businessId}/vendors/{vendorId}/bills/{billId}",
+    });
+    if (denied) return denied;
 
     const body = readBody(event);
     if (!body) return json(400, { ok: false, error: "Invalid JSON body" });
@@ -503,6 +544,14 @@ export async function handler(event: any) {
   // ---------- Void Bill (409 MUST_UNAPPLY_FIRST if any active apps) ----------
   if (method === "POST" && vendorId && billId && path === `/v1/businesses/${biz}/vendors/${vendorId}/bills/${billId}/void`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.bills.write",
+      endpoint: "POST /v1/businesses/{businessId}/vendors/{vendorId}/bills/{billId}/void",
+    });
+    if (denied) return denied;
 
     const vid = String(vendorId).trim();
     const bid = String(billId).trim();
@@ -752,6 +801,14 @@ export async function handler(event: any) {
   // ---------- Vendor-first payment: create ledger entry (entry_kind=VENDOR_PAYMENT, category=Purchase) ----------
   if (method === "POST" && vendorId && path === `/v1/businesses/${biz}/vendors/${vendorId}/payments`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.payments.write",
+      endpoint: "POST /v1/businesses/{businessId}/vendors/{vendorId}/payments",
+    });
+    if (denied) return denied;
 
     const body = readBody(event);
     if (!body) return json(400, { ok: false, error: "Invalid JSON body" });
@@ -942,6 +999,15 @@ AND (
   // ---------- Apply payment (SAME VENDOR ONLY; abs(entry.amount_cents); prevent over-apply bill + entry) ----------
   if (method === "POST" && accountId && entryId && path === `/v1/businesses/${biz}/accounts/${accountId}/entries/${entryId}/ap/apply`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      accountId: String(accountId),
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.payments.write",
+      endpoint: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/ap/apply",
+    });
+    if (denied) return denied;
 
     const body = readBody(event);
     if (!body) return json(400, { ok: false, error: "Invalid JSON body" });
@@ -1103,6 +1169,15 @@ AND (
   // ---------- Unapply (auditable; SAME VENDOR ONLY) ----------
   if (method === "POST" && accountId && entryId && path === `/v1/businesses/${biz}/accounts/${accountId}/entries/${entryId}/ap/unapply`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      accountId: String(accountId),
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.payments.write",
+      endpoint: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/ap/unapply",
+    });
+    if (denied) return denied;
 
     const body = readBody(event);
     if (!body) return json(400, { ok: false, error: "Invalid JSON body" });
@@ -1207,6 +1282,15 @@ AND (
   // ---------- Unapply ALL and soft-delete payment entry (explicit, auditable) ----------
   if (method === "POST" && accountId && entryId && path === `/v1/businesses/${biz}/accounts/${accountId}/entries/${entryId}/ap/unapply-and-delete`) {
     if (!canWrite(myRole)) return json(403, { ok: false, error: "Insufficient permissions" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      accountId: String(accountId),
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ap.payments.write",
+      endpoint: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/ap/unapply-and-delete",
+    });
+    if (denied) return denied;
 
     const body = readBody(event) ?? {};
     const acctId = String(accountId).trim();

@@ -5390,7 +5390,9 @@ export default function LedgerPageClient() {
         open={!!deleteDialog}
         onClose={() => setDeleteDialog(null)}
         title={deleteDialog?.mode === "hard" ? "Delete permanently" : "Move entry to Deleted"}
+        description={deleteDialog?.mode === "hard" ? "This cannot be undone." : "This keeps the entry restorable from Deleted."}
         size="xs"
+        tone={deleteDialog?.mode === "hard" ? "danger" : "default"}
         disableOverlayClose={false}
         footer={
           <div className="flex items-center justify-end gap-2">

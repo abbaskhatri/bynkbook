@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -31,6 +32,19 @@ async function requireRole(prisma: any, userId: string, businessId: string) {
 
 function canWrite(role: string | null) {
   return role === "OWNER" || role === "ADMIN" || role === "BOOKKEEPER" || role === "ACCOUNTANT";
+}
+
+async function requirePolicyWrite(prisma: any, args: { businessId: string; actorUserId: string; actorRole: string; endpoint: string }) {
+  const az = await authorizeWrite(prisma, {
+    businessId: args.businessId,
+    actorUserId: args.actorUserId,
+    actorRole: args.actorRole,
+    actionKey: "ledger.categories.write",
+    requiredLevel: "VIEW",
+    endpointForLog: args.endpoint,
+  });
+  if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
+  return null;
 }
 
 export async function handler(event: any) {
@@ -75,6 +89,13 @@ export async function handler(event: any) {
   // POST /v1/businesses/{businessId}/categories
   if (method === "POST" && path === `/v1/businesses/${biz}/categories`) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Forbidden" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: role,
+      endpoint: "POST /v1/businesses/{businessId}/categories",
+    });
+    if (denied) return denied;
 
     const body = event?.body ? JSON.parse(event.body) : {};
     const nameRaw = String(body?.name ?? "").trim();
@@ -139,6 +160,13 @@ export async function handler(event: any) {
   // PATCH /v1/businesses/{businessId}/categories/{categoryId}
   if (method === "PATCH" && path === `/v1/businesses/${biz}/categories/${categoryId}`) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Forbidden" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: role,
+      endpoint: "PATCH /v1/businesses/{businessId}/categories/{categoryId}",
+    });
+    if (denied) return denied;
 
     const id = categoryId.toString().trim();
     if (!id) return json(400, { ok: false, error: "Missing categoryId" });
@@ -201,6 +229,13 @@ export async function handler(event: any) {
   // Hard delete only if truly unused AND already archived.
   if (method === "DELETE" && path === `/v1/businesses/${biz}/categories/${categoryId}`) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Forbidden" });
+    const denied = await requirePolicyWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: role,
+      endpoint: "DELETE /v1/businesses/{businessId}/categories/{categoryId}",
+    });
+    if (denied) return denied;
 
     const id = categoryId.toString().trim();
     if (!id) return json(400, { ok: false, error: "Missing categoryId" });

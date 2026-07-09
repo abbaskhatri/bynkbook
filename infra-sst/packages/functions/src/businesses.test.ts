@@ -27,6 +27,18 @@ async function loadHandler(role = "OWNER", ownerUserId = "actor") {
       })),
       delete: vi.fn(async () => ({ id: "biz-1" })),
     },
+    businessRolePolicy: {
+      findMany: vi.fn(async () => [{ role: "OWNER", policy_json: { ledger: "FULL" } }]),
+    },
+    bookkeepingPreferences: {
+      findUnique: vi.fn(async () => ({ business_id: "biz-1", days_tolerance: 3 })),
+    },
+    bankConnection: {
+      findMany: vi.fn(async () => []),
+    },
+    bankTransaction: {
+      findMany: vi.fn(async () => []),
+    },
   };
 
   vi.doMock("./lib/db", () => ({
@@ -94,5 +106,34 @@ describe("business hard delete confirmation", () => {
     expect(res.statusCode).toBe(403);
     expect(logActivity).not.toHaveBeenCalled();
     expect(prisma.business.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("business backup", () => {
+  test("uses current Prisma models, sorted bank dates, and redacted bank connection select", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { handler, prisma } = await loadHandler("OWNER");
+
+    const res = await handler(event("GET", "/v1/businesses/biz-1/backup", "biz-1"));
+
+    expect(res.statusCode).toBe(200);
+    expect(prisma.businessRolePolicy.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { business_id: "biz-1" } })
+    );
+    expect(prisma.bookkeepingPreferences.findUnique).toHaveBeenCalledWith({
+      where: { business_id: "biz-1" },
+    });
+    expect(prisma.bankTransaction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ posted_date: "asc" }, { created_at: "asc" }],
+      })
+    );
+
+    const bankConnectionCall = (prisma.bankConnection.findMany as any).mock.calls[0]?.[0];
+    expect(bankConnectionCall).toBeTruthy();
+    expect(bankConnectionCall.select).toBeTruthy();
+    expect(bankConnectionCall.select.access_token_ciphertext).toBeUndefined();
+    expect(bankConnectionCall.select.plaid_item_id).toBeUndefined();
+    expect(bankConnectionCall.select.plaid_account_id).toBeUndefined();
   });
 });

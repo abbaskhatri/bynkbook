@@ -5510,7 +5510,7 @@ const displayBankActiveList = useMemo(() => {
                                         snapshot.id,
                                         k
                                       );
-                                      if (res?.url) window.open(res.url, "_blank");
+                                      if (res?.url) window.open(res.url, "_blank", "noopener,noreferrer");
                                     } catch {
                                       // ignore
                                     } finally {

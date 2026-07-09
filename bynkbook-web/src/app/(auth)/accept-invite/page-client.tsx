@@ -8,6 +8,7 @@ import { acceptInvite } from "@/lib/api/team";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { expireSessionIfNeeded } from "@/lib/auth/sessionPolicy";
 
 export default function AcceptInviteClient() {
   const router = useRouter();
@@ -37,6 +38,8 @@ export default function AcceptInviteClient() {
       // Backend accept endpoint is JWT-protected
       try {
         await getCurrentUser();
+        const expired = await expireSessionIfNeeded();
+        if (expired) throw new Error("Session expired");
       } catch {
         setNeedsAuth(true);
         setMsg("Sign in to accept this invite.");

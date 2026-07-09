@@ -11,6 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  expireSessionIfNeeded,
+  markSessionAuthenticated,
+  sanitizeAuthNext,
+} from "@/lib/auth/sessionPolicy";
 
 const NEXT_KEY = "bb_auth_next";
 const GOOGLE_PROVIDER = "Google";
@@ -53,8 +58,9 @@ function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
+  const nextUrl = useMemo(() => sanitizeAuthNext(sp.get("next")), [sp]);
   const oauthStart = useMemo(() => sp.get("oauth"), [sp]);
+  const reason = useMemo(() => sp.get("reason"), [sp]);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -68,6 +74,15 @@ function LoginInner() {
     (async () => {
       try {
         await getCurrentUser();
+        const expired = await expireSessionIfNeeded();
+        if (expired) {
+          setError(
+            expired === "idle"
+              ? "Your session timed out after inactivity. Please sign in again."
+              : "Your session expired. Please sign in again."
+          );
+          return;
+        }
         await waitForAmplifySession().catch(() => {});
         router.replace(nextUrl);
       } catch {
@@ -77,6 +92,14 @@ function LoginInner() {
       }
     })();
   }, [router, nextUrl]);
+
+  useEffect(() => {
+    if (reason === "idle") {
+      setError("Your session timed out after inactivity. Please sign in again.");
+    } else if (reason === "max_age" || reason === "unknown") {
+      setError("Your session expired. Please sign in again.");
+    }
+  }, [reason]);
 
   useEffect(() => {
     if (checkingSession || needsNewPassword || typeof window === "undefined") return;
@@ -125,10 +148,11 @@ function LoginInner() {
     setError(null);
 
     try {
-      const result = await signIn({ username, password });
+      const result = await signIn({ username: username.trim(), password });
 
       if (result.isSignedIn) {
         await waitForAmplifySession().catch(() => {});
+        markSessionAuthenticated();
         router.replace(nextUrl);
         return;
       }
@@ -280,6 +304,8 @@ function LoginInner() {
 
                         try {
                           await confirmSignIn({ challengeResponse: newPassword });
+                          await waitForAmplifySession().catch(() => {});
+                          markSessionAuthenticated();
                           router.replace(nextUrl);
                         } catch (err: any) {
                           setError(err?.message ?? "Failed to set new password");
@@ -376,6 +402,8 @@ function LoginInner() {
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                             autoComplete="username"
+                            autoCapitalize="none"
+                            autoCorrect="off"
                             className="h-11 rounded-xl"
                             placeholder="name@company.com"
                           />
@@ -409,7 +437,7 @@ function LoginInner() {
                           </div>
                         ) : null}
 
-                        <Button type="submit" className="h-11 w-full rounded-xl" disabled={submitting}>
+                        <Button type="submit" className="h-11 w-full rounded-xl" disabled={submitting || !username.trim() || !password}>
                           <span>{submitting ? "Signing in…" : "Sign in"}</span>
                           {!submitting ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
                         </Button>

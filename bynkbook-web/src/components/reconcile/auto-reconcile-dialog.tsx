@@ -623,6 +623,7 @@ export function AutoReconcileDialog(props: {
       open={open}
       onClose={() => onOpenChange(false)}
       title="Match suggestions"
+      description="Review deterministic bank-to-ledger matches before applying them."
       size="lg"
       footer={
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -670,6 +671,9 @@ export function AutoReconcileDialog(props: {
       <div className="flex flex-col max-h-[70vh]">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-bb-border px-3 py-2 text-xs text-bb-text-muted">
           <span>
+            Selected: <span className="font-medium text-bb-text">{selected.size}</span>
+          </span>
+          <span>
             Ready: <span className="font-medium text-bb-text">{counts.ready}</span>
           </span>
           <span>
@@ -684,7 +688,7 @@ export function AutoReconcileDialog(props: {
             disabled={applyBusy || counts.ready === 0}
             onClick={() => setSelected(new Set(suggestions.filter((s) => s.quality === "READY").map((s) => s.id)))}
           >
-            Select ready
+            Ready
           </button>
           <button
             type="button"
@@ -692,7 +696,7 @@ export function AutoReconcileDialog(props: {
             disabled={applyBusy || counts.total === 0}
             onClick={() => setSelected(new Set(suggestions.map((s) => s.id)))}
           >
-            Select all
+            All
           </button>
           <button
             type="button"
@@ -795,15 +799,24 @@ export function AutoReconcileDialog(props: {
                         </div>
                       ) : null}
 
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <span>{badge(suggestionKindLabel(s.kind))}</span>
-                        {s.reasons.map((r) => (
-                          <span key={r}>{badge(r)}</span>
-                        ))}
-                        {s.cautionReasons.map((r) => (
-                          <span key={r}>{badge(r)}</span>
-                        ))}
                         {stBadge}
+                        {s.reasons.length || s.cautionReasons.length ? (
+                          <details className="min-w-0">
+                            <summary className="h-6 cursor-pointer list-none rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] leading-6 text-bb-text hover:bg-bb-table-row-hover [&::-webkit-details-marker]:hidden">
+                              Signals
+                            </summary>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {s.reasons.map((r) => (
+                                <span key={r}>{badge(r)}</span>
+                              ))}
+                              {s.cautionReasons.map((r) => (
+                                <span key={r}>{badge(r)}</span>
+                              ))}
+                            </div>
+                          </details>
+                        ) : null}
                       </div>
                     </div>
                   </div>

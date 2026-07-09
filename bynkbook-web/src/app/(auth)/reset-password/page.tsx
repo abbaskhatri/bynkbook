@@ -11,13 +11,14 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { sanitizeAuthNext } from "@/lib/auth/sessionPolicy";
 
 function ResetPasswordInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
   const email = sp.get("email") ?? "";
-  const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
+  const nextUrl = useMemo(() => sanitizeAuthNext(sp.get("next")), [sp]);
 
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");

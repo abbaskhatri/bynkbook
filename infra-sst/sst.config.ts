@@ -9,8 +9,13 @@ export default $config({
   },
 
   async run() {
-    const awsAccountId = "116846786465";
-    const region = "us-east-1";
+    const optionalEnv = (name: string, fallback: string) => process.env[name]?.trim() || fallback;
+    const csvEnv = (name: string, fallback: string[]) =>
+      (process.env[name]?.trim()
+        ? process.env[name]!.split(",").map((part) => part.trim()).filter(Boolean)
+        : fallback);
+    const awsAccountId = optionalEnv("BYNKBOOK_AWS_ACCOUNT_ID", "116846786465");
+    const region = optionalEnv("BYNKBOOK_AWS_REGION", "us-east-1");
     const isProd = $app.stage === "prod";
     const resourcePrefix = isProd ? "ledrigo-prod" : "ledrigo-dev";
     const secretArnFor = (secretId: string) =>
@@ -24,13 +29,13 @@ export default $config({
     };
     const uploadsBucketName = isProd
       ? process.env.BYNKBOOK_PROD_UPLOADS_BUCKET_NAME
-      : "ledrigo-dev-uploads-116846786465-us-east-1";
+      : optionalEnv("BYNKBOOK_DEV_UPLOADS_BUCKET_NAME", "ledrigo-dev-uploads-116846786465-us-east-1");
     const cognitoUserPoolId = isProd
       ? process.env.BYNKBOOK_PROD_COGNITO_USER_POOL_ID
-      : "us-east-1_tmyPJwsJb";
+      : optionalEnv("BYNKBOOK_DEV_COGNITO_USER_POOL_ID", "us-east-1_tmyPJwsJb");
     const cognitoAppClientId = isProd
       ? process.env.BYNKBOOK_PROD_COGNITO_APP_CLIENT_ID
-      : "38gus49pnfilbc4u2f7b68ist7";
+      : optionalEnv("BYNKBOOK_DEV_COGNITO_APP_CLIENT_ID", "38gus49pnfilbc4u2f7b68ist7");
 
     if (!uploadsBucketName) throw new Error("Missing BYNKBOOK_PROD_UPLOADS_BUCKET_NAME for prod stage");
     if (!cognitoUserPoolId) throw new Error("Missing BYNKBOOK_PROD_COGNITO_USER_POOL_ID for prod stage");
@@ -49,14 +54,16 @@ export default $config({
     const databaseSecretId = `${resourcePrefix}/rds/database_url`;
     const databaseCaSecretId = isProd
       ? process.env.BYNKBOOK_PROD_DB_CA_SECRET_ID
-      : "ledrigo-dev/rds/ca_bundle_us_east_1";
+      : optionalEnv("BYNKBOOK_DEV_DB_CA_SECRET_ID", "ledrigo-dev/rds/ca_bundle_us_east_1");
 
     if (!databaseCaSecretId) throw new Error("Missing BYNKBOOK_PROD_DB_CA_SECRET_ID for prod stage");
 
     const databaseSecretArn = secretArnFor(databaseSecretId);
     const databaseCaSecretArn = secretArnFor(databaseCaSecretId);
     const uploadsBucketPrivateArn = `arn:aws:s3:::${uploadsBucketName}/private/biz/*`;
-    const sharedKmsKeyArn = `arn:aws:kms:${region}:${awsAccountId}:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36`;
+    const sharedKmsKeyArn = isProd
+      ? optionalEnv("BYNKBOOK_PROD_KMS_KEY_ARN", `arn:aws:kms:${region}:${awsAccountId}:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36`)
+      : optionalEnv("BYNKBOOK_DEV_KMS_KEY_ARN", `arn:aws:kms:${region}:${awsAccountId}:key/7f953e5a-b3c9-4354-9ba9-e4f980717c36`);
     const plaidEnv = isProd
       ? requiredEnv("BYNKBOOK_PROD_PLAID_ENV")
       : (process.env.BYNKBOOK_DEV_PLAID_ENV?.trim() || "sandbox");
@@ -82,7 +89,10 @@ export default $config({
     const plaidClientIdSecretArn = secretArnFor(plaidClientIdSecretId);
     const plaidSecretSecretArn = secretArnFor(plaidSecretSecretId);
 
-    const api = new sst.aws.ApiGatewayV2("ledrigo-dev-sst-api", {
+    const vpcSecurityGroups = csvEnv("BYNKBOOK_VPC_SECURITY_GROUP_IDS", ["sg-0fe7b2ad87e2b2bb8"]);
+    const vpcPrivateSubnets = csvEnv("BYNKBOOK_VPC_PRIVATE_SUBNET_IDS", ["subnet-016a9caf338ab17e3", "subnet-04ff62b426b19d70b"]);
+
+    const api = new sst.aws.ApiGatewayV2(optionalEnv("BYNKBOOK_API_NAME", `${resourcePrefix}-sst-api`), {
       cors: {
         allowHeaders: ["authorization", "content-type"],
         allowMethods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
@@ -135,14 +145,14 @@ export default $config({
       memory: "512 MB",
       timeout: "20 seconds",
       vpc: {
-        securityGroups: ["sg-0fe7b2ad87e2b2bb8"],
-        privateSubnets: ["subnet-016a9caf338ab17e3", "subnet-04ff62b426b19d70b"],
+        securityGroups: vpcSecurityGroups,
+        privateSubnets: vpcPrivateSubnets,
       },
       environment: {
         DB_URL_SECRET_ID: databaseSecretId,
         DB_SSL_CA_SECRET_ID: databaseCaSecretId,
         DB_SSL_REJECT_UNAUTHORIZED: "true",
-        CACHE_BUSTER: "20260207171000",
+        CACHE_BUSTER: optionalEnv("BYNKBOOK_CACHE_BUSTER", "20260207171000"),
       },
       permissions: [
         // CloudWatch Logs (required for any console.log / error logging)
@@ -795,14 +805,14 @@ api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryI
       memory: "512 MB",
       timeout: "20 seconds",
       vpc: {
-        securityGroups: ["sg-0fe7b2ad87e2b2bb8"],
-        privateSubnets: ["subnet-016a9caf338ab17e3", "subnet-04ff62b426b19d70b"],
+        securityGroups: vpcSecurityGroups,
+        privateSubnets: vpcPrivateSubnets,
       },
       environment: {
         DB_URL_SECRET_ID: databaseSecretId,
         DB_SSL_CA_SECRET_ID: databaseCaSecretId,
         DB_SSL_REJECT_UNAUTHORIZED: "true",
-        CACHE_BUSTER: "202601030001",
+        CACHE_BUSTER: optionalEnv("BYNKBOOK_ISSUES_CACHE_BUSTER", "202601030001"),
       },
       permissions: [
         // CloudWatch Logs (required for any console.log / error logging)

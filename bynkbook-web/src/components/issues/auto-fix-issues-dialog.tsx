@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AppDialog } from "@/components/primitives/AppDialog";
+import { AppDialog, DialogNotice, DialogSection } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import {
   bulkApplyIssues,
@@ -51,7 +51,13 @@ function pluralize(count: number, singular: string, plural?: string) {
   return count === 1 ? singular : (plural ?? `${singular}s`);
 }
 
-function sectionCard(title: string, count: number, body: React.ReactNode, tone: "default" | "success" | "warning" = "default") {
+function sectionCard(
+  title: string,
+  count: number,
+  body: React.ReactNode,
+  tone: "default" | "success" | "warning" = "default",
+  collapsed = false
+) {
   const toneCls =
     tone === "success"
       ? "border-bb-status-success-border bg-bb-status-success-bg"
@@ -59,14 +65,29 @@ function sectionCard(title: string, count: number, body: React.ReactNode, tone: 
         ? "border-bb-status-warning-border bg-bb-status-warning-bg"
         : "border-bb-border bg-bb-surface-card";
 
-  return (
-    <section className={`rounded-2xl border ${toneCls}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-inherit/60 px-4 py-3">
-        <div className="text-sm font-semibold text-bb-text">{title}</div>
-        <div className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-bb-border bg-bb-surface-soft px-2 text-[11px] font-medium text-bb-text-muted">
-          {count}
-        </div>
+  const header = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-sm font-semibold text-bb-text">{title}</div>
+      <div className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-bb-border bg-bb-surface-soft px-2 text-[11px] font-medium text-bb-text-muted">
+        {count}
       </div>
+    </div>
+  );
+
+  if (collapsed) {
+    return (
+      <details className={`rounded-lg border ${toneCls}`}>
+        <summary className="cursor-pointer list-none px-3 py-2 [&::-webkit-details-marker]:hidden">
+          {header}
+        </summary>
+        <div className="border-t border-bb-border-muted p-3">{body}</div>
+      </details>
+    );
+  }
+
+  return (
+    <section className={`rounded-lg border ${toneCls}`}>
+      <div className="border-b border-bb-border-muted px-3 py-2">{header}</div>
       <div className="p-3">{body}</div>
     </section>
   );
@@ -96,7 +117,7 @@ function confidenceLabel(value: string | null | undefined) {
 function ItemRow({ item, showAction = true }: { item: BulkIssuePreviewItem; showAction?: boolean }) {
   const amount = formatUsdAccountingFromCents(item.amount_cents);
   return (
-    <div className="rounded-xl border border-bb-border bg-bb-surface-card px-3 py-2.5">
+    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -148,7 +169,7 @@ function ItemsList({
   showAction?: boolean;
 }) {
   if (!items.length) {
-    return <div className="rounded-xl border border-dashed border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-bb-text-muted">{emptyText}</div>;
+    return <div className="rounded-md border border-dashed border-bb-border bg-bb-surface-soft px-3 py-3 text-sm text-bb-text-muted">{emptyText}</div>;
   }
 
   return (
@@ -282,7 +303,7 @@ export function AutoFixIssuesDialog(props: {
             }}
             disabled={loadingPreview || applying || !preview || safeCount === 0}
           >
-            {applying ? "Applying..." : `Apply ${safeCount} Safe ${pluralize(safeCount, "Fix")}`}
+            {applying ? "Applying..." : `Apply ${safeCount} safe ${pluralize(safeCount, "fix")}`}
           </Button>
         ) : null}
       </div>
@@ -300,68 +321,29 @@ export function AutoFixIssuesDialog(props: {
     >
       <div className="space-y-4">
         {error ? (
-          <div className="rounded-2xl border border-bb-status-danger-border bg-bb-status-danger-bg px-4 py-3 text-sm text-bb-status-danger-fg">
-            {error}
-          </div>
+          <DialogNotice tone="danger">{error}</DialogNotice>
         ) : null}
 
         {loadingPreview ? (
           <div className="space-y-3">
-            <div className="rounded-2xl border border-bb-border bg-bb-surface-soft px-4 py-3 text-sm text-bb-text-muted">
-              Loading deterministic preview…
-            </div>
+            <DialogNotice>Loading deterministic preview...</DialogNotice>
             <div className="grid gap-3 md:grid-cols-3">
-              <div className="h-24 rounded-2xl border border-bb-border bg-bb-surface-soft" />
-              <div className="h-24 rounded-2xl border border-bb-border bg-bb-surface-soft" />
-              <div className="h-24 rounded-2xl border border-bb-border bg-bb-surface-soft" />
+              <div className="h-24 rounded-lg border border-bb-border bg-bb-surface-soft" />
+              <div className="h-24 rounded-lg border border-bb-border bg-bb-surface-soft" />
+              <div className="h-24 rounded-lg border border-bb-border bg-bb-surface-soft" />
             </div>
           </div>
         ) : null}
 
         {!loadingPreview && !preview && !error ? (
-          <div className="rounded-2xl border border-bb-border bg-bb-surface-soft px-4 py-3 text-sm text-bb-text-muted">
-            Select one or more issues to preview bulk fixes.
-          </div>
+          <DialogNotice>Select one or more issues to preview bulk fixes.</DialogNotice>
         ) : null}
 
         {preview ? (
           <>
-            <section className="rounded-2xl border border-bb-border bg-bb-surface-soft/70 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold text-bb-text">Preview summary</div>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
-                  Requested {preview.requested_count}
-                </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
-                  Open {preview.valid_open_selected_count}
-                </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
-                  Safe {safeCount}
-                </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
-                  Likely duplicate {likelyDuplicateCount}
-                </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
-                  Needs review {needsReviewCount}
-                </span>
-                <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
-                  Unsupported {unsupportedCount}
-                </span>
-              </div>
-
-              <div className="mt-3 space-y-1.5">
-                {(preview.summary_lines ?? []).map((line, idx) => (
-                  <div key={`preview-line-${idx}`} className="text-sm text-bb-text-muted">
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </section>
-
             {applyResult ? (
-              <section className="rounded-2xl border border-bb-status-success-border bg-bb-status-success-bg px-4 py-3">
-                <div className="text-sm font-semibold text-bb-text">Apply result</div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+              <DialogSection title="Apply result">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex h-6 items-center rounded-md border border-bb-status-success-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
                     Applied {applyResult.applied_count}
                   </span>
@@ -379,8 +361,36 @@ export function AutoFixIssuesDialog(props: {
                     </div>
                   ))}
                 </div>
-              </section>
-            ) : null}
+              </DialogSection>
+            ) : (
+              <DialogSection title="Preview summary">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
+                    Requested {preview.requested_count}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
+                    Open {preview.valid_open_selected_count}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
+                    Safe {safeCount}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
+                    Review {likelyDuplicateCount + needsReviewCount}
+                  </span>
+                  <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text-muted">
+                    Unsupported {unsupportedCount}
+                  </span>
+                </div>
+
+                <div className="mt-3 space-y-1.5">
+                  {(preview.summary_lines ?? []).map((line, idx) => (
+                    <div key={`preview-line-${idx}`} className="text-sm text-bb-text-muted">
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              </DialogSection>
+            )}
 
             <div className="grid gap-4">
               {sectionCard(
@@ -397,7 +407,7 @@ export function AutoFixIssuesDialog(props: {
                 "Likely duplicate — review before apply",
                 likelyDuplicateCount,
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     These look like posted-twice transactions. Merge and consolidation decisions remain manual.
                   </div>
                   <ItemsList
@@ -406,7 +416,8 @@ export function AutoFixIssuesDialog(props: {
                     showAction={false}
                   />
                 </div>,
-                "warning"
+                "warning",
+                true
               )}
 
               {sectionCard(
@@ -417,6 +428,9 @@ export function AutoFixIssuesDialog(props: {
                   emptyText="No selected issues need additional review."
                   showAction={false}
                 />
+                ,
+                "default",
+                true
               )}
 
               {sectionCard(
@@ -427,6 +441,9 @@ export function AutoFixIssuesDialog(props: {
                   emptyText="No unsupported selected issues."
                   showAction={false}
                 />
+                ,
+                "default",
+                true
               )}
             </div>
           </>

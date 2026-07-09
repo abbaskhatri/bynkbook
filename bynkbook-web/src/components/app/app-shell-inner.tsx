@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentUser, signOut } from "aws-amplify/auth";
+import { getCurrentUser } from "aws-amplify/auth";
 import {
   Bell,
   Menu,
@@ -45,6 +45,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
 import GlobalSearch from "@/components/app/global-search";
 import BrandLogo from "@/components/app/BrandLogo";
+import {
+  expireSessionIfNeeded,
+  getSessionExpiryReason,
+  recordSessionActivity,
+  sessionExpiredLoginUrl,
+  signOutAndClearSession,
+  type SessionExpiryReason,
+} from "@/lib/auth/sessionPolicy";
 
 function navVariant(active: boolean) {
   return active ? "default" : "ghost";
@@ -193,6 +201,16 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     (async () => {
       try {
         const u: any = await getCurrentUser();
+        const expired = await expireSessionIfNeeded();
+        if (expired) {
+          qc.clear();
+          setCurrentUserId(null);
+          setCurrentUserEmail(null);
+          setIsAuthed(false);
+          router.replace(sessionExpiredLoginUrl(expired, currentUrlRef.current));
+          return;
+        }
+
         setIsAuthed(true);
 
         // Prefer stable identifier for activity "You" label.
@@ -213,7 +231,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         setAuthChecked(true);
       }
     })();
-  }, [pathname, router]);
+  }, [pathname, qc, router]);
 
   // Hooks must always run; decide chrome after
   const isAuthRoute = isAuthPathname(pathname);
@@ -224,7 +242,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   async function onSignOut() {
     try {
-      await signOut();
+      await signOutAndClearSession();
     } finally {
       // Local-first: clear cached app state and return to login
       qc.clear();
@@ -285,6 +303,66 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }
 
   const appDataEnabled = !isAuthRoute && authChecked && isAuthed;
+
+  useEffect(() => {
+    if (!appDataEnabled) return;
+
+    let lastActivityWrite = 0;
+    let expiring = false;
+
+    const expire = async (reason: SessionExpiryReason) => {
+      if (expiring) return;
+      expiring = true;
+
+      try {
+        await signOutAndClearSession();
+      } finally {
+        qc.clear();
+        setCurrentUserId(null);
+        setCurrentUserEmail(null);
+        setIsAuthed(false);
+        router.replace(sessionExpiredLoginUrl(reason, currentUrlRef.current));
+      }
+    };
+
+    const checkSession = () => {
+      const reason = getSessionExpiryReason();
+      if (reason) void expire(reason);
+    };
+
+    const onUserActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityWrite < 15_000) return;
+      lastActivityWrite = now;
+      recordSessionActivity(now);
+    };
+
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible") checkSession();
+    };
+
+    const activityEvents = ["pointerdown", "keydown", "touchstart", "wheel"] as const;
+    for (const event of activityEvents) {
+      window.addEventListener(event, onUserActivity, { passive: true });
+    }
+    window.addEventListener("focus", checkSession);
+    window.addEventListener("storage", checkSession);
+    document.addEventListener("visibilitychange", onVisibilityOrFocus);
+
+    const interval = window.setInterval(checkSession, 60_000);
+    checkSession();
+
+    return () => {
+      window.clearInterval(interval);
+      for (const event of activityEvents) {
+        window.removeEventListener(event, onUserActivity);
+      }
+      window.removeEventListener("focus", checkSession);
+      window.removeEventListener("storage", checkSession);
+      document.removeEventListener("visibilitychange", onVisibilityOrFocus);
+    };
+  }, [appDataEnabled, qc, router]);
+
   const businessesQ = useBusinesses({ enabled: appDataEnabled });
 
   // Stage 1: if signed in but has no businesses, force create-business (except when already there)

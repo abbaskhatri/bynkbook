@@ -1,6 +1,7 @@
   import { getPrisma } from "./lib/db";
   import { assertNotClosedPeriod } from "./lib/closedPeriods";
   import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
+  import { authorizeWrite } from "./lib/authz";
 
   const ENTRY_TYPES = ["EXPENSE", "INCOME", "TRANSFER", "ADJUSTMENT"] as const;
   const ENTRY_STATUS = ["EXPECTED", "CLEARED"] as const;
@@ -131,6 +132,17 @@
       const role = await requireMembership(prisma, biz, sub);
       if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
       if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+      const az = await authorizeWrite(prisma, {
+        businessId: biz,
+        scopeAccountId: acct,
+        actorUserId: sub,
+        actorRole: role,
+        actionKey: "ledger.entry.update",
+        requiredLevel: "VIEW",
+        endpointForLog: `${method} /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}`,
+      });
+      if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
 
       const acctOk = await requireAccountInBusiness(prisma, biz, acct);
       if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });

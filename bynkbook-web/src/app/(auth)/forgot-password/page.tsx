@@ -11,11 +11,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { sanitizeAuthNext } from "@/lib/auth/sessionPolicy";
 
 function ForgotPasswordInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const nextUrl = useMemo(() => sp.get("next") ?? "/dashboard", [sp]);
+  const nextUrl = useMemo(() => sanitizeAuthNext(sp.get("next")), [sp]);
 
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -136,6 +137,8 @@ function ForgotPasswordInner() {
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         autoComplete="username"
+                        autoCapitalize="none"
+                        autoCorrect="off"
                         className="h-11 rounded-xl"
                         placeholder="name@company.com"
                       />
@@ -161,10 +164,10 @@ function ForgotPasswordInner() {
                         setErr(null);
                         setMsg(null);
                         try {
-                          await resetPassword({ username: email });
+                          await resetPassword({ username: email.trim() });
                           setMsg("Code sent. Continue to enter your code and new password.");
                           router.replace(
-                            `/reset-password?email=${encodeURIComponent(email)}&next=${encodeURIComponent(nextUrl)}`
+                            `/reset-password?email=${encodeURIComponent(email.trim())}&next=${encodeURIComponent(nextUrl)}`
                           );
                         } catch (e: any) {
                           setErr(e?.message ?? "Failed to start reset");

@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -101,6 +102,16 @@ export async function handler(event: any) {
   // PUT /v1/businesses/{businessId}/bookkeeping/preferences
   if (method === "PUT" && path === `/v1/businesses/${biz}/bookkeeping/preferences`) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Forbidden" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "bookkeeping.preferences.write",
+      requiredLevel: "VIEW",
+      endpointForLog: "PUT /v1/businesses/{businessId}/bookkeeping/preferences",
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
 
     const body = event?.body ? JSON.parse(event.body) : {};
 

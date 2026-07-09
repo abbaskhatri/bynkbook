@@ -11,9 +11,6 @@
     "bookkeeping-app/**",
     "**/*.backup.ts",
     "**/*.bak.*",
-    "**/*.bak_*/**",
-
-    // Exclude archived SST starter handler kept only for historical local templates.
-    "packages/functions/src/lambda.ts"
+    "**/*.bak_*/**"
   ]
 }

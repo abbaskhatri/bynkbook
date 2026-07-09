@@ -18,6 +18,19 @@ function completeEvent(body: any) {
   };
 }
 
+function downloadEvent() {
+  return {
+    pathParameters: { businessId, uploadId },
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: userId } } },
+      http: {
+        method: "GET",
+        path: `/v1/businesses/${businessId}/uploads/${uploadId}/download`,
+      },
+    },
+  };
+}
+
 function field(type: string, text: string, confidence = 99) {
   return {
     Type: { Text: type },
@@ -56,6 +69,7 @@ function makeUploadRow(overrides: Record<string, any> = {}) {
     created_by_user_id: userId,
     created_at: new Date("2026-04-15T12:00:00.000Z"),
     completed_at: null,
+    deleted_at: null,
     meta: null,
     ...overrides,
   };
@@ -134,12 +148,14 @@ async function loadUploadsHandler(prisma: any, textractResponse = textractInvoic
     },
   }));
 
+  const getSignedUrl = vi.fn(async () => "https://uploads.example.test/signed");
+
   vi.doMock("@aws-sdk/s3-request-presigner", () => ({
-    getSignedUrl: vi.fn(async () => "https://uploads.example.test/signed"),
+    getSignedUrl,
   }));
 
   const mod = await import("./uploads");
-  return { handler: mod.handler, s3Send, textractSend };
+  return { handler: mod.handler, s3Send, textractSend, getSignedUrl };
 }
 
 function bodyOf(res: any) {
@@ -279,5 +295,32 @@ describe("uploads.complete invoice review-only guard", () => {
     expect(prisma.vendor.create).not.toHaveBeenCalled();
     expect(prisma.bill.create).not.toHaveBeenCalled();
     expectScopedUploadLookup(prisma);
+  });
+});
+
+describe("uploads.download deletion guard", () => {
+  test("soft-deleted uploads are not downloadable", async () => {
+    const deletedRow = makeUploadRow({
+      status: "COMPLETED",
+      deleted_at: new Date("2026-04-16T12:00:00.000Z"),
+    });
+    const prisma = makePrisma(deletedRow);
+    prisma.upload.findFirst = vi.fn(async (args: any) => {
+      if (args?.where?.deleted_at === null && deletedRow.deleted_at) return null;
+      return deletedRow;
+    });
+
+    const { handler, getSignedUrl } = await loadUploadsHandler(prisma);
+
+    const res = await handler(downloadEvent());
+
+    expect(res.statusCode).toBe(404);
+    expect(bodyOf(res)).toMatchObject({ ok: false, error: "Upload not found" });
+    expect(prisma.upload.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: uploadId, business_id: businessId, deleted_at: null },
+      })
+    );
+    expect(getSignedUrl).not.toHaveBeenCalled();
   });
 });

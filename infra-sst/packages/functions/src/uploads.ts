@@ -7,6 +7,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { streamToString } from "./lib/csv/streamToString";
 import { parseBankStatementCsv } from "./lib/csv/parseBankStatementCsv";
 import { computeImportHash, normalizeDesc } from "./lib/csv/importHash";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -164,9 +165,20 @@ export async function handler(event: any) {
 
   const role = await requireMembership(prisma, biz, sub);
   if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
-  const requireWrite = () => {
-    if (canWrite(role)) return null;
-    return json(403, { ok: false, error: "Insufficient permissions" });
+  const requireWrite = async () => {
+    if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "uploads.write",
+      requiredLevel: "VIEW",
+      endpointForLog: `${method ?? "UNKNOWN"} ${uploadsBasePath}`,
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
+
+    return null;
   };
 
   const region = process.env.AWS_REGION || "us-east-1";
@@ -182,7 +194,7 @@ export async function handler(event: any) {
   // INIT (presign PUT)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/init`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     let body: any = {};
@@ -359,7 +371,7 @@ export async function handler(event: any) {
   // MARK UPLOADED (client confirms PUT succeeded)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/mark-uploaded`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     let body: any = {};
@@ -410,7 +422,7 @@ export async function handler(event: any) {
   // COMPLETE (verify object exists)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/complete`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     let body: any = {};
@@ -731,14 +743,14 @@ export async function handler(event: any) {
   // CREATE ENTRY FROM UPLOAD (POST /uploads/{uploadId}/create-entry)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/create-entry`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     const requestedUploadId = uploadId?.toString?.().trim();
     if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
 
     const row = await prisma.upload.findFirst({
-      where: { id: requestedUploadId, business_id: biz },
+      where: { id: requestedUploadId, business_id: biz, deleted_at: null },
       select: { id: true, account_id: true, upload_type: true, original_filename: true, status: true, meta: true },
     });
     if (!row) return json(404, { ok: false, error: "Upload not found" });
@@ -831,7 +843,7 @@ export async function handler(event: any) {
   // body: { upload_ids: string[] }
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/create-entries`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     try {
@@ -957,7 +969,7 @@ export async function handler(event: any) {
   // Safe for scale: paging via created_at/id cursor. Idempotent: never double-creates bills.
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/backfill-bills`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     let body: any = {};
@@ -1086,7 +1098,7 @@ export async function handler(event: any) {
   // Strict checks: 409 if referenced by Bill.upload_id or Entry.sourceUploadId
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/delete`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     const requestedUploadId = uploadId?.toString?.().trim();
@@ -1124,14 +1136,14 @@ export async function handler(event: any) {
   // Manual CSV import -> BankTransaction rows ONLY (no ledger mutations)
   // -------------------------
   if (method === "POST" && path === `${uploadsBasePath}/${uploadId}/import`) {
-    const denied = requireWrite();
+    const denied = await requireWrite();
     if (denied) return denied;
 
     const requestedUploadId = uploadId?.toString?.().trim();
     if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
 
     const row = await prisma.upload.findFirst({
-      where: { id: requestedUploadId, business_id: biz },
+      where: { id: requestedUploadId, business_id: biz, deleted_at: null },
       select: {
         id: true,
         business_id: true,
@@ -1380,7 +1392,7 @@ export async function handler(event: any) {
     if (!requestedUploadId) return json(400, { ok: false, error: "Missing uploadId" });
 
     const row = await prisma.upload.findFirst({
-      where: { id: requestedUploadId, business_id: biz },
+      where: { id: requestedUploadId, business_id: biz, deleted_at: null },
       select: {
         id: true,
         business_id: true,

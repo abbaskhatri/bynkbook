@@ -1,5 +1,6 @@
 import { fetchAuthSession } from "aws-amplify/auth";
 import { metrics } from "@/lib/perf/metrics";
+import { expireSessionIfNeeded } from "@/lib/auth/sessionPolicy";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -50,6 +51,14 @@ async function fetchSessionToken(forceRefresh: boolean): Promise<string | null> 
 }
 
 async function getAuthToken(): Promise<string | null> {
+  const expired = await expireSessionIfNeeded();
+  if (expired) {
+    cachedToken = null;
+    tokenExpiresAt = 0;
+    tokenPromise = null;
+    return null;
+  }
+
   const now = Date.now();
 
   // Valid cached token
