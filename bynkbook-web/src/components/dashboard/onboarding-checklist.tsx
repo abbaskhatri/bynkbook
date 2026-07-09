@@ -162,6 +162,7 @@ export function OnboardingChecklist({
               {!step.done && step.href ? (
                 <Link
                   href={step.href}
+                  prefetch={false}
                   className="text-[11px] font-medium text-primary hover:underline shrink-0"
                 >
                   Go →

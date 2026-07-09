@@ -209,6 +209,7 @@ function DashboardCommandAction({
   return (
     <Link
       href={href}
+      prefetch={false}
       className={`group flex min-h-[76px] items-center gap-3 rounded-lg border border-bb-border bg-bb-surface-card px-3 py-3 text-left shadow-sm transition-colors ${classes.border}`}
     >
       <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${classes.bg}`}>
@@ -1707,6 +1708,7 @@ export default function DashboardPageClient() {
                       {ledgerHref ? (
                         <Link
                           href={ledgerHref}
+                          prefetch={false}
                           className="text-[11px] font-medium text-primary hover:underline shrink-0"
                           title="Open ledger to inspect this entry"
                         >
