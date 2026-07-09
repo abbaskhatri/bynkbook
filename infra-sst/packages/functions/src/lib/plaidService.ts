@@ -54,6 +54,25 @@ function reconnectStatusForPlaidFailure(code: string, message: string) {
   return "ERROR";
 }
 
+function plaidSyncFailureUserMessage(status: string, code: string) {
+  const text = `${status} ${code}`.toUpperCase();
+  if (
+    text.includes("REAUTH_REQUIRED") ||
+    text.includes("ITEM_LOGIN_REQUIRED") ||
+    text.includes("LOGIN_REQUIRED") ||
+    text.includes("USER_PERMISSION_REVOKED") ||
+    text.includes("PENDING_EXPIRATION")
+  ) {
+    return "Your bank needs you to reconnect before BynkBook can sync transactions.";
+  }
+
+  if (text.includes("ENV_MISMATCH_RECONNECT_REQUIRED") || text.includes("INVALID_ACCESS_TOKEN")) {
+    return "This bank connection needs to be reconnected before transactions can sync.";
+  }
+
+  return "Bank sync could not finish. Try again, or reconnect the bank if it keeps happening.";
+}
+
 export async function recordPlaidConnectionFailure(params: {
   prisma: any;
   businessId: string;
@@ -388,39 +407,6 @@ export async function getStatus(params: { businessId: string; accountId: string;
     }
   }
 
-  // Backfill plaid_mask for legacy connections (best-effort, never break status)
-  if (!conn.plaid_mask) {
-    try {
-      const plaid = await getPlaidClient();
-      const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
-
-      // Try balance endpoint first (usually includes mask)
-      let mask: string | null = null;
-      try {
-        const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
-        const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-        mask = acct?.mask ? String(acct.mask) : null;
-      } catch { }
-
-      // Fallback: accountsGet (also includes mask)
-      if (!mask) {
-        try {
-          const ar = await plaid.accountsGet({ access_token: accessToken });
-          const acct2 = ar.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-          mask = acct2?.mask ? String(acct2.mask) : null;
-        } catch { }
-      }
-
-      if (mask) {
-        await prisma.bankConnection.updateMany({
-          where: { business_id: businessId, account_id: accountId },
-          data: { plaid_mask: mask, updated_at: new Date() },
-        });
-        (conn as any).plaid_mask = mask;
-      }
-    } catch { }
-  }
-
   const rawStatus = (connRow.status ?? "").toString();
   const statusNorm = rawStatus.trim().toUpperCase();
 
@@ -547,8 +533,15 @@ export async function syncTransactions(params: { businessId: string; accountId: 
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
 
   const recordSyncFailure = async (error: any) => {
-    const { code } = await recordPlaidConnectionFailure({ prisma, businessId, accountId, error });
-    return json(502, { ok: false, error: "Plaid sync failed", errorCode: code });
+    const { code, status } = await recordPlaidConnectionFailure({ prisma, businessId, accountId, error });
+    return json(502, {
+      ok: false,
+      error: "Plaid sync failed",
+      errorCode: code,
+      status,
+      message: plaidSyncFailureUserMessage(status, code),
+      reconnectRequired: status === "REAUTH_REQUIRED" || status === "ENV_MISMATCH_RECONNECT_REQUIRED",
+    });
   };
 
   try {

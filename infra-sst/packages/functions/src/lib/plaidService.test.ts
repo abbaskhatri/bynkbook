@@ -274,7 +274,14 @@ describe("syncTransactions", () => {
     const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
     const body = JSON.parse(res.body);
     expect(res.statusCode).toBe(502);
-    expect(body).toEqual({ ok: false, error: "Plaid sync failed", errorCode: "INVALID_ACCESS_TOKEN" });
+    expect(body).toEqual({
+      ok: false,
+      error: "Plaid sync failed",
+      errorCode: "INVALID_ACCESS_TOKEN",
+      status: "ENV_MISMATCH_RECONNECT_REQUIRED",
+      message: "This bank connection needs to be reconnected before transactions can sync.",
+      reconnectRequired: true,
+    });
 
     const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
     const failureUpdate = connectionUpdateCalls.at(-1)![0];

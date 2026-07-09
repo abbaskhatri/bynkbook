@@ -121,6 +121,18 @@ type RefreshBankAndMatchesOptions = {
   skipLegacyMatches?: boolean;
   statuses?: BankTab[];
 };
+type PlaidStatusState = {
+  connected?: boolean;
+  institutionName?: string | null;
+  last4?: string | null;
+  status?: string | null;
+  lastSyncAt?: string | null;
+  needsAttention?: boolean;
+  errorMessage?: string | null;
+  hasNewTransactions?: boolean;
+  lastKnownBalanceCents?: string | null;
+  lastKnownBalanceAt?: string | null;
+};
 type CountProbeResult = { count: number; capped: boolean };
 type BankUnmatchedScopeCounts = {
   scopeKey: string;
@@ -718,7 +730,7 @@ export default function ReconcilePageClient() {
   // Plaid status + sync UI
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [plaidSyncing, setPlaidSyncing] = useState(false);
-  const [plaid, setPlaid] = useState<any>(null);
+  const [plaid, setPlaid] = useState<PlaidStatusState | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
 
@@ -3262,9 +3274,12 @@ const displayBankActiveList = useMemo(() => {
     const bal = plaid?.lastKnownBalanceCents ? toBigIntSafe(plaid.lastKnownBalanceCents) : null;
     return bal !== null ? formatUsdFromCents(bal) : "—";
   }, [plaid?.lastKnownBalanceCents]);
+  const plaidNeedsAttention = !!plaid?.needsAttention;
+  const plaidHealthyConnected = !!plaid?.connected && !plaidNeedsAttention;
+  const plaidHasConnection = plaidHealthyConnected || plaidNeedsAttention || !!plaid?.institutionName;
   const transactionSyncText = plaid?.lastSyncAt ? new Date(plaid.lastSyncAt).toLocaleString() : "";
   const bankUpdatesAvailable =
-    !!plaid?.connected &&
+    plaidHealthyConnected &&
     !!plaid?.hasNewTransactions &&
     !plaidSyncing;
 
@@ -3307,12 +3322,12 @@ const displayBankActiveList = useMemo(() => {
           Entries <span className="font-semibold text-bb-text">Expected {entryStateSummary.expectedN} • Matched {entryStateSummary.matchedN}</span>
           {entriesSummarySettling ? <TinySpinner /> : null}
         </span>
-        {plaid?.connected ? (
+        {plaidHasConnection ? (
           <span className="text-bb-text-muted">
             Balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
           </span>
         ) : null}
-        {plaid?.connected && transactionSyncText ? (
+        {plaidHasConnection && transactionSyncText ? (
           <span className="text-bb-text-muted">
             Sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
           </span>
@@ -3343,10 +3358,14 @@ const displayBankActiveList = useMemo(() => {
 
   const connectedPill = (
     <span
-      className={`inline-flex items-center px-2 h-5 rounded-full border text-[11px] font-medium whitespace-nowrap leading-none ${plaid?.connected ? "bg-bb-table-header text-bb-text border-bb-border" : "bg-bb-surface-card text-bb-text-muted border-bb-border"
+      className={`inline-flex items-center px-2 h-5 rounded-full border text-[11px] font-medium whitespace-nowrap leading-none ${plaidNeedsAttention
+        ? "bg-bb-status-warning-bg text-bb-status-warning-fg border-bb-status-warning-border"
+        : plaidHealthyConnected
+          ? "bg-bb-table-header text-bb-text border-bb-border"
+          : "bg-bb-surface-card text-bb-text-muted border-bb-border"
         }`}
     >
-      {plaidLoading ? "Loading…" : plaid?.connected ? "Connected" : "Not connected"}
+      {plaidLoading ? "Loading…" : plaidNeedsAttention ? "Needs attention" : plaidHealthyConnected ? "Connected" : "Not connected"}
     </span>
   );
 
@@ -4501,9 +4520,11 @@ const displayBankActiveList = useMemo(() => {
                   {connectedPill}
                 </div>
                 <div className="hidden xl:block text-[11px] text-bb-text-muted min-w-0 truncate whitespace-nowrap">
-                  {plaid?.connected ? (
+                  {plaidHasConnection ? (
                     <>
                       {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
+                      {plaidNeedsAttention && plaid?.errorMessage ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {plaidNeedsAttention && plaid?.errorMessage ? <span className="text-bb-status-warning-fg">{plaid.errorMessage}</span> : null}
                       {bankUpdatesAvailable ? <span className="text-bb-text-subtle"> • </span> : null}
                       {bankUpdatesAvailable ? <span className="text-bb-status-warning-fg">Bank reports new activity; sync to refresh transactions.</span> : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
@@ -4518,7 +4539,7 @@ const displayBankActiveList = useMemo(() => {
               </div>
 
               <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
-                {!plaid?.connected ? (
+                {!plaidHealthyConnected ? (
                   <button
                     type="button"
                     className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
@@ -4579,8 +4600,14 @@ const displayBankActiveList = useMemo(() => {
                             setBankCountRefreshSeq((n) => n + 1);
                           });
                         } catch (e: any) {
-                          setSyncMsg(`Sync failed: ${e?.message ?? "Unable to refresh transactions"}`);
+                          setSyncMsg(e?.message ?? "Unable to refresh transactions");
                           setPendingMsg("Keeping the current transaction list until sync succeeds.");
+                          try {
+                            const st = await plaidStatus(selectedBusinessId, selectedAccountId);
+                            setPlaid(st);
+                          } catch {
+                            // Keep the existing status if the follow-up status check also fails.
+                          }
                         } finally {
                           setPlaidSyncing(false);
                         }
@@ -4594,13 +4621,17 @@ const displayBankActiveList = useMemo(() => {
             </div>
           </div>
 
-          {!plaid?.connected ? (
+          {!plaidHealthyConnected ? (
             <div className="mx-3 mb-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold text-bb-text">Bank connection settings</div>
+                  <div className="text-xs font-semibold text-bb-text">
+                    {plaidNeedsAttention ? "Reconnect bank feed" : "Bank connection settings"}
+                  </div>
                   <div className="mt-1 text-[11px] text-bb-text-muted">
-                    Connect a live bank feed via Plaid only for the selected business and account.
+                    {plaidNeedsAttention
+                      ? "Reconnect through Plaid to refresh transactions for this account."
+                      : "Connect a live bank feed via Plaid only for the selected business and account."}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
                     <span className="text-bb-text-muted">

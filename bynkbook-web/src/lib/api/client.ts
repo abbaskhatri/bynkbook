@@ -129,6 +129,38 @@ function joinSignals(signals: Array<AbortSignal | null | undefined>) {
   return controller.signal;
 }
 
+function apiError(status: number, message: string, payload?: any) {
+  const err: any = new Error(message);
+  err.status = status;
+  err.code = payload?.code ?? payload?.errorCode;
+  err.payload = payload;
+  return err;
+}
+
+function plaidSyncFailureMessage(payload: any) {
+  const status = String(payload?.status ?? "").toUpperCase();
+  const code = String(payload?.errorCode ?? payload?.code ?? "").toUpperCase();
+  const message = String(payload?.message ?? "").trim();
+
+  if (message) return message;
+
+  if (
+    status === "REAUTH_REQUIRED" ||
+    code.includes("LOGIN") ||
+    code.includes("REAUTH") ||
+    code.includes("USER_PERMISSION_REVOKED") ||
+    code.includes("PENDING_EXPIRATION")
+  ) {
+    return "Your bank needs you to reconnect before BynkBook can sync transactions.";
+  }
+
+  if (status === "ENV_MISMATCH_RECONNECT_REQUIRED" || code.includes("INVALID_ACCESS_TOKEN")) {
+    return "This bank connection needs to be reconnected before transactions can sync.";
+  }
+
+  return "Bank sync could not finish. Try again, or reconnect the bank if it keeps happening.";
+}
+
 export async function apiFetch(path: string, init?: ApiFetchInit) {
   const t0 = performance.now();
 
@@ -198,22 +230,16 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
     }
 
     if (res.status === 409 && payload?.code === "CANNOT_CLOSE_BEYOND_TODAY") {
-      const err: any = new Error(payload?.error || "Cannot close beyond today.");
-      err.status = 409;
-      err.code = "CANNOT_CLOSE_BEYOND_TODAY";
-      err.payload = payload;
-      throw err;
+      throw apiError(409, payload?.error || "Cannot close beyond today.", payload);
     }
 
     if (res.status === 409 && payload?.code === "ENTRY_MATCHED_REQUIRES_UNMATCH") {
-      const err: any = new Error(
+      throw apiError(
+        409,
         payload?.message ||
-          "This entry is matched to a bank transaction. Unmatch or revert the match before deleting it."
+          "This entry is matched to a bank transaction. Unmatch or revert the match before deleting it.",
+        payload
       );
-      err.status = 409;
-      err.code = "ENTRY_MATCHED_REQUIRES_UNMATCH";
-      err.payload = payload;
-      throw err;
     }
 
     if (
@@ -228,11 +254,24 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
         "MATCHED_DELETE_FAILED",
       ].includes(String(payload.code))
     ) {
-      const err: any = new Error(payload?.error || "Matched entry could not be unmatched and deleted.");
-      err.status = res.status;
-      err.code = payload.code;
-      err.payload = payload;
-      throw err;
+      throw apiError(res.status, payload?.error || "Matched entry could not be unmatched and deleted.", payload);
+    }
+
+    const plaidPayloadCode = String(payload?.errorCode ?? payload?.code ?? "").toUpperCase();
+    const plaidPayloadStatus = String(payload?.status ?? "").toUpperCase();
+    const isPlaidFailure =
+      payload?.error === "Plaid sync failed" ||
+      payload?.reconnectRequired === true ||
+      plaidPayloadStatus === "REAUTH_REQUIRED" ||
+      plaidPayloadStatus === "ENV_MISMATCH_RECONNECT_REQUIRED" ||
+      plaidPayloadCode.startsWith("PLAID") ||
+      plaidPayloadCode.includes("ITEM_LOGIN_REQUIRED") ||
+      plaidPayloadCode.includes("INVALID_ACCESS_TOKEN") ||
+      plaidPayloadCode.includes("USER_PERMISSION_REVOKED") ||
+      plaidPayloadCode.includes("PENDING_EXPIRATION");
+
+    if (isPlaidFailure) {
+      throw apiError(res.status, plaidSyncFailureMessage(payload), payload);
     }
 
     if (!text) {
