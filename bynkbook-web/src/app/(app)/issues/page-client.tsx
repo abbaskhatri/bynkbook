@@ -91,6 +91,55 @@ type ApiIssue = {
   entry_category_name?: string | null;
 };
 
+function QueueCard(props: {
+  title: string;
+  count: number;
+  hint: string;
+  tone?: "success" | "warning" | "info" | "danger";
+  active?: boolean;
+  actionLabel: string;
+  onAction?: () => void;
+  disabled?: boolean;
+}) {
+  const toneClass =
+    props.tone === "success"
+      ? "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg"
+      : props.tone === "danger"
+        ? "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg"
+        : props.tone === "info"
+          ? "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"
+          : "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg";
+
+  return (
+    <div
+      className={[
+        "rounded-lg border bg-card p-3 transition-colors",
+        props.active ? "border-primary/35 shadow-sm" : "border-border",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-foreground">{props.title}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{props.hint}</div>
+        </div>
+        <div className={`inline-flex h-6 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-semibold ${toneClass}`}>
+          {props.count}
+        </div>
+      </div>
+
+      <Button
+        type="button"
+        variant={props.tone === "success" ? "default" : "outline"}
+        className="mt-3 h-7 px-3 text-xs"
+        onClick={props.onAction}
+        disabled={props.disabled}
+      >
+        {props.actionLabel}
+      </Button>
+    </div>
+  );
+}
+
 export default function IssuesPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -453,6 +502,16 @@ export default function IssuesPageClient() {
     const dup = issues.filter((x) => x.kind === "DUPLICATE").length;
     const stale = issues.filter((x) => x.kind === "STALE_CHECK").length;
     return { openTotal, dup, stale };
+  }, [issues]);
+
+  const selectedQueueLabel = useMemo(() => {
+    if (filterIssueType === "DUPLICATE") return "Duplicate groups";
+    if (filterIssueType === "STALE_CHECK") return "Stale checks";
+    return "All issues";
+  }, [filterIssueType]);
+
+  const safeStaleCount = useMemo(() => {
+    return issues.filter((x) => x.kind === "STALE_CHECK").length;
   }, [issues]);
 
   // ================================
@@ -834,251 +893,242 @@ export default function IssuesPageClient() {
       </div>
 
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
-        <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card">
-          <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
-            <table className="w-full table-fixed border-collapse">
-              <colgroup>
-                <col style={{ width: 36 }} />
-                <col style={{ width: 180 }} />
-                <col style={{ width: 120 }} />
-                <col style={{ width: 120 }} />
-                <col />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 120 }} />
-              </colgroup>
+        <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="min-h-0 overflow-y-auto rounded-lg border border-border bg-card p-3">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+              <QueueCard
+                title="Safe stale checks"
+                count={safeStaleCount}
+                hint="Quick acknowledge"
+                tone="success"
+                active={filterIssueType === "STALE_CHECK"}
+                actionLabel="Show stale"
+                onAction={() => setFilterIssueType("STALE_CHECK")}
+              />
+              <QueueCard
+                title="Duplicate groups"
+                count={kpi.dup}
+                hint="Compare before action"
+                tone="warning"
+                active={filterIssueType === "DUPLICATE"}
+                actionLabel="Review groups"
+                onAction={() => setFilterIssueType("DUPLICATE")}
+              />
+              <QueueCard
+                title="All open issues"
+                count={kpi.openTotal}
+                hint="Everything needing attention"
+                tone="info"
+                active={filterIssueType === "ALL"}
+                actionLabel="Show all"
+                onAction={() => setFilterIssueType("ALL")}
+              />
+              <QueueCard
+                title="Selected fixes"
+                count={selectedCount}
+                hint="Preview deterministic bulk fixes"
+                tone="success"
+                actionLabel="Preview Auto Fix"
+                onAction={() => setAutoFixDialogOpen(true)}
+                disabled={!selectedIssueBackendIds.length}
+              />
+            </div>
+          </div>
 
-              <thead className="sticky top-0 z-10 bg-muted/50 border-b border-border">
-                <tr className="h-[28px]">
-                  <th className="px-2 text-center text-xs font-medium text-muted-foreground">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+            <div className="shrink-0 border-b border-border px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-foreground">{selectedQueueLabel}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Compare evidence here; destructive duplicate decisions still open the review dialog.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
                       className={checkboxClass}
                       checked={allSelected}
                       onChange={toggleAll}
-                      aria-label="Select all"
+                      aria-label="Select all loaded issues"
                     />
-                  </th>
-                  <th className="px-2 text-left text-xs font-medium text-muted-foreground">TYPE</th>
-                  <th className="px-2 text-left text-xs font-medium text-muted-foreground">PAYEE</th>
-                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">AMOUNT</th>
-                  <th className="px-2 text-left text-xs font-medium text-muted-foreground">DETAILS</th>
-                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">SEVERITY</th>
-                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">STATUS</th>
-                  <th className="px-2 text-right text-xs font-medium text-muted-foreground">ACTIONS</th>
-                </tr>
-              </thead>
+                    Select all
+                  </label>
+                  {selectedCount > 0 ? (
+                    <Button variant="outline" className="h-7 px-2 text-xs" onClick={clearSelection}>
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
 
-              <tbody>
-                {issuesQ.isLoading ? (
-                  <>
-                    {Array.from({ length: 10 }).map((_, i) => (
-                      <tr key={`sk-${i}`} className="h-[24px] border-b border-border">
-                        <td className="px-2 py-0.5">
-                          <div className="h-3 w-3 rounded bg-muted animate-pulse" />
-                        </td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-24 rounded bg-muted animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-40 rounded bg-muted animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-muted animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-full rounded bg-muted animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-20 ml-auto rounded bg-muted animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-muted animate-pulse" /></td>
-                        <td className="px-2 py-0.5"><div className="h-3 w-16 ml-auto rounded bg-muted animate-pulse" /></td>
-                      </tr>
-                    ))}
-                  </>
-                ) : issuesQ.isError ? (
-                  <tr>
-                    <td colSpan={8} className="p-3 text-xs text-bb-status-danger-fg" role="alert">
-                      <div className="flex items-center justify-between gap-3">
-                        <span>
-                          Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong."}
-                        </span>
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline"
-                          onClick={() => void issuesQ.refetch()}
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : renderRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="p-3 text-xs text-muted-foreground">
-                      {lastScanAt
-                        ? `No open issues. Last scan: ${formatScanLabel(lastScanAt)}.`
-                        : "No issues yet. Run Scan to generate issues."}
-                    </td>
-                  </tr>
-                ) : null}
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {issuesQ.isLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={`sk-${i}`} className="h-20 rounded-lg border border-border bg-muted/45 animate-pulse" />
+                  ))}
+                </div>
+              ) : issuesQ.isError ? (
+                <div className="rounded-lg border border-bb-status-danger-border bg-bb-status-danger-bg p-3 text-xs text-bb-status-danger-fg" role="alert">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Failed to load issues: {appErrorMessageOrNull(issuesQ.error) ?? "Something went wrong."}</span>
+                    <button type="button" className="text-xs font-medium hover:underline" onClick={() => void issuesQ.refetch()}>
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              ) : renderRows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border bg-muted/35 p-4 text-sm text-muted-foreground">
+                  {lastScanAt
+                    ? `No open issues. Last scan: ${formatScanLabel(lastScanAt)}.`
+                    : "No issues yet. Run Scan to generate issues."}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {renderRows.map((row) => {
+                    const chip =
+                      "inline-flex h-5 items-center rounded-md border px-1.5 text-[10px] font-semibold leading-none";
 
-                {renderRows.map((row) => {
-                  const pill =
-                    "inline-flex items-center justify-center h-5 rounded-full border px-2 text-[11px] font-semibold leading-none";
-                  const severityPill = pill + " border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg";
-                  const statusPill = pill + " border-border bg-card text-foreground";
+                    if (row.rowType === "GROUP") {
+                      const g = row;
+                      const head = g.head;
+                      const isExpanded = !!expandedGroups[g.groupKey];
+                      const groupSelected = g.members.every((m) => !!selectedIds[`${m.id}|${m.kind}`]);
+                      const actionLabel = String(head.details ?? "").toLowerCase().includes("matched")
+                        ? "Review match"
+                        : "Compare";
 
-                  if (row.rowType === "GROUP") {
-                    const g = row;
-                    const head = g.head;
+                      return (
+                        <div key={`group|${g.groupKey}`} className="rounded-lg border border-border bg-card p-3">
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              className={checkboxClass}
+                              checked={groupSelected}
+                              onChange={() => toggleGroupSelection(g.groupKey, g.members)}
+                              aria-label={`Select group: ${head.payee || "Unknown payee"} (${g.count} entries)`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="inline-flex min-w-0 items-center gap-1 text-sm font-semibold text-foreground hover:text-primary"
+                                  onClick={() => toggleGroup(g.groupKey)}
+                                >
+                                  <span className="text-xs">{isExpanded ? "▾" : "▸"}</span>
+                                  <span className="truncate">{head.payee || "Untitled payee"}</span>
+                                </button>
+                                <span className={`${chip} border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg`}>
+                                  Duplicate group
+                                </span>
+                                <span className={`${chip} border-border bg-muted text-muted-foreground`}>
+                                  {g.count} entries
+                                </span>
+                                {g.hasStale ? (
+                                  <span className={`${chip} border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg`}>
+                                    stale too
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {head.details} · {head.date || "No date"} · {head.methodDisplay || "No method"}
+                              </div>
 
-                    const typeLabel = `Duplicate (${g.count})`;
-                    const severityLabel = "Warning";
-                    const statusLabel = head.status === "RESOLVED" ? "Resolved" : "Open";
+                              {isExpanded ? (
+                                <div className="mt-3 space-y-2 border-t border-border pt-2">
+                                  {g.members.map((m) => (
+                                    <div key={`${m.id}|${m.kind}|child`} className="flex items-center justify-between gap-3 rounded-md bg-muted/35 px-2 py-1.5">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-xs font-medium text-foreground">{m.payee || "Untitled payee"}</div>
+                                        <div className="truncate text-[11px] text-muted-foreground">{m.date} · {m.methodDisplay || "No method"}</div>
+                                      </div>
+                                      <div className={`shrink-0 text-xs font-semibold tabular-nums ${m.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                        {m.amountStr}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className={`text-sm font-semibold tabular-nums ${head.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                                {head.amountStr}
+                              </div>
+                              <Button
+                                className="mt-2 h-7 px-3 text-xs"
+                                onClick={() => setFixDialog({ id: head.id, kind: "DUPLICATE" })}
+                              >
+                                {actionLabel}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
 
-                    const isExpanded = !!expandedGroups[g.groupKey];
-                    const actionLabel = String(head.details ?? "").toLowerCase().includes("matched")
+                    const r = row.item;
+                    const isDup = r.kind === "DUPLICATE";
+                    const isStale = r.kind === "STALE_CHECK";
+                    const rowKey = row.rowKey;
+                    const actionLabel = isDup && String(r.details ?? "").toLowerCase().includes("matched")
                       ? "Review match"
-                      : "Review";
+                      : isStale
+                        ? "Acknowledge"
+                        : "Review";
 
                     return (
-                      <tr key={`group|${g.groupKey}`} className="h-[24px] border-b border-border">
-                        <td className="px-2 py-0.5 text-center">
+                      <div key={rowKey} className="rounded-lg border border-border bg-card p-3">
+                        <div className="flex items-start gap-3">
                           <input
                             type="checkbox"
                             className={checkboxClass}
-                            checked={g.members.every((m) => !!selectedIds[`${m.id}|${m.kind}`])}
-                            onChange={() => toggleGroupSelection(g.groupKey, g.members)}
-                            aria-label={`Select group: ${head.payee || "Unknown payee"} (${g.count} entries)`}
+                            checked={!!selectedIds[rowKey]}
+                            onChange={() => toggleRow(rowKey)}
+                            aria-label={`Select row: ${r.payee || "Unknown payee"}`}
                           />
-                        </td>
-
-                        <td className="px-2 py-0.5 align-middle">
-                          <div className="flex items-center gap-1 whitespace-nowrap">
-                            <button
-                              type="button"
-                              className="h-5 w-5 rounded hover:bg-muted inline-flex items-center justify-center shrink-0"
-                              onClick={() => toggleGroup(g.groupKey)}
-                              aria-label={isExpanded ? "Collapse group" : "Expand group"}
-                              title={isExpanded ? "Collapse" : "Expand"}
-                            >
-                              <span className="text-xs">{isExpanded ? "▾" : "▸"}</span>
-                            </button>
-
-                            <span className={pill + " border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"}>{typeLabel}</span>
-
-                            {g.hasStale ? (
-                              <span className={pill + " border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"}>Stale</span>
-                            ) : null}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate text-sm font-semibold text-foreground">{r.payee || "Untitled payee"}</span>
+                              <span
+                                className={`${chip} ${
+                                  isDup
+                                    ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
+                                    : isStale
+                                      ? "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"
+                                      : "border-border bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {isDup ? "Duplicate" : isStale ? "Stale check" : "Issue"}
+                              </span>
+                              <span className={`${chip} border-border bg-card text-muted-foreground`}>
+                                {r.status === "RESOLVED" ? "Resolved" : "Open"}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {r.details} · {r.date || "No date"} · {r.methodDisplay || "No method"}
+                            </div>
                           </div>
-                        </td>
-
-                        <td className="px-2 py-0.5 text-xs font-medium text-foreground truncate">{head.payee || "—"}</td>
-
-                        <td className="px-2 py-0.5 text-xs text-right tabular-nums">
-                          <span className={head.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}>
-                            {head.amountStr}
-                          </span>
-                        </td>
-
-                        <td className="px-2 py-0.5 text-xs text-foreground truncate">
-                          {head.details} • {g.count} entries • {head.date} • {head.methodDisplay || "—"}
-                        </td>
-
-                        <td className="px-2 py-0.5 text-right">
-                          <span className={severityPill}>{severityLabel}</span>
-                        </td>
-
-                        <td className="px-2 py-0.5 text-right">
-                          <span className={statusPill}>{statusLabel}</span>
-                        </td>
-
-                        <td className="px-2 py-0.5">
-                          <div className="flex items-center justify-end">
+                          <div className="shrink-0 text-right">
+                            <div className={`text-sm font-semibold tabular-nums ${r.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}`}>
+                              {r.amountStr}
+                            </div>
                             <Button
-                              className="h-6 px-4 text-xs min-w-[72px]"
-                              onClick={() => {
-                                setFixDialog({ id: head.id, kind: "DUPLICATE" });
-                              }}
+                              className="mt-2 h-7 px-3 text-xs"
+                              onClick={() => setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" })}
                             >
                               {actionLabel}
                             </Button>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  }
-
-                  const r = row.item;
-                  const isDup = r.kind === "DUPLICATE";
-                  const isStale = r.kind === "STALE_CHECK";
-                  const typeLabel = isDup ? "Duplicate" : isStale ? "Stale check" : "Issue";
-                  const severityLabel = "Warning";
-                  const statusLabel = r.status === "RESOLVED" ? "Resolved" : "Open";
-                  const rowKey = row.rowKey;
-                  const actionLabel = isDup && String(r.details ?? "").toLowerCase().includes("matched")
-                    ? "Review match"
-                    : "Review";
-
-                  return (
-                    <tr key={rowKey} className="h-[24px] border-b border-border">
-                      <td className="px-2 py-0.5 text-center">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={!!selectedIds[rowKey]}
-                          onChange={() => toggleRow(rowKey)}
-                          aria-label={`Select row: ${r.payee || "Unknown payee"} (${typeLabel})`}
-                        />
-                      </td>
-
-                      <td className={"px-2 py-0.5 align-middle " + (row.isChild ? "pl-8" : "")}>
-                        <span
-                          className={
-                            pill +
-                            " " +
-                            (isDup
-                              ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
-                              : isStale
-                                ? "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"
-                                : "border-border bg-card text-foreground")
-                          }
-                        >
-                          {typeLabel}
-                        </span>
-                      </td>
-
-                      <td className="px-2 py-0.5 text-xs font-medium text-foreground truncate">{r.payee || "—"}</td>
-
-                      <td className="px-2 py-0.5 text-xs text-right tabular-nums">
-                        <span className={r.amountStr.startsWith("(") ? "text-bb-amount-negative" : "text-bb-amount-neutral"}>
-                          {r.amountStr}
-                        </span>
-                      </td>
-
-                      <td className="px-2 py-0.5 text-xs text-foreground truncate">
-                        {r.details} • {r.date} • {r.methodDisplay || "—"}
-                      </td>
-
-                      <td className="px-2 py-0.5 text-right">
-                        <span className={severityPill}>{severityLabel}</span>
-                      </td>
-
-                      <td className="px-2 py-0.5 text-right">
-                        <span className={statusPill}>{statusLabel}</span>
-                      </td>
-
-                      <td className="px-2 py-0.5">
-                        <div className="flex items-center justify-end">
-                          <Button
-                            className="h-6 px-4 text-xs min-w-[72px]"
-                            onClick={() => {
-                              setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" });
-                            }}
-                          >
-                            {actionLabel}
-                          </Button>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
 
-                {(issuesQ.hasNextPage || issuesQ.isFetchingNextPage) && !issuesQ.isLoading && !issuesQ.isError ? (
-                  <tr>
-                    <td colSpan={8} className="p-3 text-center">
+                  {(issuesQ.hasNextPage || issuesQ.isFetchingNextPage) && !issuesQ.isLoading && !issuesQ.isError ? (
+                    <div className="pt-2 text-center">
                       <Button
                         variant="outline"
                         className="h-8 px-3 text-xs"
@@ -1094,11 +1144,11 @@ export default function IssuesPageClient() {
                           "Load more"
                         )}
                       </Button>
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : null}

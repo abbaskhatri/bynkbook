@@ -196,6 +196,70 @@ function categorySuggestionButtonClass(rawTier: unknown, isPrimary: boolean) {
   return "border-border bg-card text-foreground hover:bg-muted/50";
 }
 
+function ReviewMetric(props: {
+  label: string;
+  value: number | string;
+  hint: string;
+  tone?: "default" | "success" | "warning" | "info";
+}) {
+  const valueClass =
+    props.tone === "success"
+      ? "text-bb-status-success-fg"
+      : props.tone === "warning"
+        ? "text-bb-status-warning-fg"
+        : props.tone === "info"
+          ? "text-bb-status-info-fg"
+          : "text-foreground";
+
+  return (
+    <div className="min-w-[132px] flex-1 rounded-lg border border-border bg-card px-3 py-2">
+      <div className={`text-2xl font-semibold leading-7 tabular-nums ${valueClass}`}>{props.value}</div>
+      <div className="mt-0.5 text-xs font-semibold text-foreground">{props.label}</div>
+      <div className="text-[11px] text-muted-foreground">{props.hint}</div>
+    </div>
+  );
+}
+
+function QueueCard(props: {
+  title: string;
+  count: number;
+  hint: string;
+  tone?: "success" | "warning" | "info";
+  actionLabel: string;
+  onAction?: () => void;
+  disabled?: boolean;
+}) {
+  const countClass =
+    props.tone === "success"
+      ? "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg"
+      : props.tone === "warning"
+        ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
+        : "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg";
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-foreground">{props.title}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{props.hint}</div>
+        </div>
+        <div className={`inline-flex h-6 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-semibold ${countClass}`}>
+          {props.count}
+        </div>
+      </div>
+      <Button
+        type="button"
+        variant={props.tone === "success" ? "default" : "outline"}
+        className="mt-3 h-7 px-3 text-xs"
+        onClick={props.onAction}
+        disabled={props.disabled}
+      >
+        {props.actionLabel}
+      </Button>
+    </div>
+  );
+}
+
 type CategoryReviewEntriesPage = Awaited<ReturnType<typeof listEntriesPage>>;
 
 export default function CategoryReviewPageClient() {
@@ -1684,6 +1748,16 @@ export default function CategoryReviewPageClient() {
     autoFixButtonReadyCount === 0
       ? "Review loaded rows and find safe category matches."
       : `${autoFixButtonReadyCount} safe Auto Fix suggestion${autoFixButtonReadyCount === 1 ? "" : "s"} ready on loaded rows.`;
+  const noConfidentSuggestionCount = useMemo(() => {
+    return visibleRows.filter((row: any) => {
+      const id = String(row.id);
+      if (row.category_id) return false;
+      if (!hasSuggestionEntry(sugByEntryId, id)) return false;
+      const rowSuggestions = Array.isArray(sugByEntryId[id]) ? sugByEntryId[id] : [];
+      return rowSuggestions.length === 0;
+    }).length;
+  }, [visibleRows, sugByEntryId]);
+  const reviewNeededCount = autoFixReviewNeededCount + noConfidentSuggestionCount;
 
   return (
     <div className="flex min-h-0 h-[calc(100vh-96px)] flex-col gap-2 max-w-6xl overflow-hidden">
@@ -1692,7 +1766,7 @@ export default function CategoryReviewPageClient() {
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Tags className="h-4 w-4" />}
-            title="Category Review"
+            title="Categorize transactions"
             afterTitle={
               <AccountingScopePills
                 businessName={selectedBusinessName}
@@ -1705,6 +1779,32 @@ export default function CategoryReviewPageClient() {
         </div>
 
         <div className="mt-2 h-px bg-border" />
+
+        <div className="grid gap-2 px-3 py-2 sm:grid-cols-3 lg:grid-cols-4">
+          <ReviewMetric
+            label={applied.onlyUncategorized ? "Uncategorized" : "Loaded rows"}
+            value={loadedCount}
+            hint="in the current queue"
+          />
+          <ReviewMetric
+            label="Safe suggestions"
+            value={autoFixButtonReadyCount}
+            hint="ready for review/apply"
+            tone="success"
+          />
+          <ReviewMetric
+            label="Needs review"
+            value={reviewNeededCount}
+            hint="choose or skip"
+            tone="warning"
+          />
+          <ReviewMetric
+            label="Selected"
+            value={selectedCount}
+            hint="queued by you"
+            tone="info"
+          />
+        </div>
 
         <div className="px-3 py-2">
           <FilterBar
@@ -1818,7 +1918,7 @@ export default function CategoryReviewPageClient() {
         <CHeader className="shrink-0 pb-2">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="inline-flex items-center gap-2">
-              {applied.onlyUncategorized ? "Uncategorized" : "Review rows"}
+              Review queue
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
                 {loadedCount}
               </span>
@@ -1929,6 +2029,47 @@ export default function CategoryReviewPageClient() {
             </div>
           ) : null}
 
+          <div className="grid shrink-0 gap-2 lg:grid-cols-4">
+            <QueueCard
+              title="Apply safe suggestions"
+              count={autoFixButtonReadyCount}
+              hint="Vendor, history, or deterministic matches"
+              tone="success"
+              actionLabel="Review Auto Fix"
+              onAction={handleReviewAutoFix}
+              disabled={autoFixButtonDisabled}
+            />
+            <QueueCard
+              title="Review protected"
+              count={autoFixReviewNeededCount}
+              hint="Sensitive or lower-confidence suggestions"
+              tone="warning"
+              actionLabel="Review rows"
+              onAction={() => {
+                setGroupedByCategory(false);
+                if (!suggestionsLoadedForCurrentFilters) loadSuggestionsForCurrentFilters();
+              }}
+            />
+            <QueueCard
+              title="No confident match"
+              count={noConfidentSuggestionCount}
+              hint="Choose a category manually"
+              tone="info"
+              actionLabel="Load suggestions"
+              onAction={loadSuggestionsForCurrentFilters}
+              disabled={sugLoading || sugUpdating || suggestionTargets.length === 0}
+            />
+            <QueueCard
+              title="Selected rows"
+              count={selectedCount}
+              hint="Bulk category or suggestion picks"
+              tone="info"
+              actionLabel="Clear selection"
+              onAction={clearSelection}
+              disabled={selectedCount === 0}
+            />
+          </div>
+
           {!entriesQ.isLoading ? (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{reviewStatusText}</span>
@@ -1965,9 +2106,28 @@ export default function CategoryReviewPageClient() {
           ) : visibleRows.length === 0 ? (
             <div className="text-sm text-muted-foreground">No entries match these filters.</div>
           ) : (
-            <div className="relative min-h-0 flex-1 rounded-lg border border-border overflow-hidden bg-card">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
               {tableUpdating ? <UpdatingOverlay /> : null}
-              <div className={`min-h-0 h-full ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
+              <div className="shrink-0 border-b border-border bg-muted/35 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-foreground">Safe suggestions</div>
+                    <div className="text-xs text-muted-foreground">
+                      Apply trusted groups quickly; rows that need judgment stay explicit.
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-7 px-3 text-xs"
+                    disabled={applyBusy || sugLoading || sugUpdating || suggestionTargets.length === 0}
+                    onClick={loadSuggestionsForCurrentFilters}
+                  >
+                    {suggestionsLoadedForCurrentFilters ? "Refresh suggestions" : "Suggest categories"}
+                  </Button>
+                </div>
+              </div>
+              <div className={`min-h-0 flex-1 ${tableUpdating ? "pointer-events-none select-none blur-[1px]" : ""}`}>
                 <div className="h-full overflow-auto">
                   <table className="w-full min-w-[780px] table-fixed border-separate border-spacing-0">
                     <colgroup>
