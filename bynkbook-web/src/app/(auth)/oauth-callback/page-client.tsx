@@ -21,7 +21,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ])) as T;
 }
 
-async function waitForOAuthSession(onRetrying: () => void, timeoutMs = 30000) {
+async function waitForOAuthUser(onRetrying: () => void, timeoutMs = 10000) {
   const startedAt = Date.now();
   let attempts = 0;
   let lastError: unknown = null;
@@ -30,13 +30,12 @@ async function waitForOAuthSession(onRetrying: () => void, timeoutMs = 30000) {
     attempts += 1;
 
     try {
-      await withTimeout(fetchAuthSession(), 6000);
-      await withTimeout(getCurrentUser(), 6000);
+      await withTimeout(getCurrentUser(), 2500);
       return;
     } catch (error) {
       lastError = error;
-      if (attempts === 2) onRetrying();
-      await sleep(600);
+      if (attempts === 4) onRetrying();
+      await sleep(attempts < 5 ? 150 : 500);
     }
   }
 
@@ -55,9 +54,9 @@ export default function OAuthCallbackClient() {
   useEffect(() => {
     (async () => {
       try {
-        await sleep(150);
-        await waitForOAuthSession(() => setMsg("Finishing sign-in… (retrying)"));
+        await waitForOAuthUser(() => setMsg("Finishing sign-in… (retrying)"));
         markSessionAuthenticated();
+        void fetchAuthSession().catch(() => {});
 
         const stored = typeof window !== "undefined" ? window.sessionStorage.getItem(NEXT_KEY) : null;
         if (typeof window !== "undefined") window.sessionStorage.removeItem(NEXT_KEY);
