@@ -4,7 +4,7 @@ $ExpectedBranch = "main"
 $ExpectedAwsProfile = "ledrigo-dev"
 $ExpectedAwsAccount = "116846786465"
 $ProductionAppUrl = "https://app.bynkbook.com"
-$ProductionApiUrl = "https://actwy6st05.execute-api.us-east-1.amazonaws.com"
+$ProductionApiUrl = "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com"
 $HasFailure = $false
 
 function Write-Pass {

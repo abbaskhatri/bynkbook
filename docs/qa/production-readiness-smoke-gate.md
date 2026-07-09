@@ -45,7 +45,7 @@ Production app:
 https://app.bynkbook.com
 
 Production API:
-https://actwy6st05.execute-api.us-east-1.amazonaws.com
+https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com
 
 Expected AWS account:
 116846786465

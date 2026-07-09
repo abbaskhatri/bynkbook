@@ -74,7 +74,7 @@ function burstAllowed(businessId: string) {
     burst.set(businessId, { windowStart: now, count: 1 });
     return true;
   }
-  if (w.count >= 20) return false; // 20 requests/minute/business (best-effort)
+  if (w.count >= 8) return false; // 8 requests/minute/business (best-effort)
   w.count += 1;
   return true;
 }
@@ -113,7 +113,7 @@ async function openAiText(args: {
   system: string;
   user: string;
   maxTokens: number;
-}) {
+}): Promise<{ text: string; usage: Record<string, number> | null }> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -138,7 +138,24 @@ async function openAiText(args: {
 
   const data: any = await res.json();
   const out = data?.choices?.[0]?.message?.content ?? "";
-  return String(out ?? "").trim();
+  const usage = data?.usage && typeof data.usage === "object"
+    ? {
+        input_tokens: Number(data.usage.prompt_tokens ?? data.usage.input_tokens ?? 0),
+        output_tokens: Number(data.usage.completion_tokens ?? data.usage.output_tokens ?? 0),
+        total_tokens: Number(data.usage.total_tokens ?? 0),
+      }
+    : null;
+  return { text: String(out ?? "").trim(), usage };
+}
+
+function clampText(value: any, maxChars: number) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 14)).trim()}... [trimmed]`;
+}
+
+function compactJson(value: any, maxChars: number) {
+  const text = JSON.stringify(value ?? null, null, 2);
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 18)).trim()}\n... [trimmed JSON]`;
 }
 
 function parseJsonModelOutput(raw: string) {
@@ -218,8 +235,6 @@ export async function handler(event: any) {
     return json(429, { ok: false, error: "AI daily limit reached for this business.", usage: quota });
   }
 
-  const { apiKey, model } = await getOpenAiConfig();
-
   try {
 
         // /v1/ai/anomalies (deterministic; read-only; does NOT consume LLM quota)
@@ -294,8 +309,8 @@ export async function handler(event: any) {
 
         // /v1/ai/merchant-normalize (LLM; suggestion-only)
     if (path.endsWith("/v1/ai/merchant-normalize")) {
-      const payee = String(body.payee ?? "").trim();
-      const memo = String(body.memo ?? "").trim();
+      const payee = clampText(body.payee, 180);
+      const memo = clampText(body.memo, 240);
 
       if (!payee) return json(400, { ok: false, error: "Missing payee" });
 
@@ -308,7 +323,8 @@ export async function handler(event: any) {
 
       const user = `Payee: ${payee}\nMemo: ${memo}`;
 
-      const raw = await openAiText({ model, apiKey, system, user, maxTokens: 120 });
+      const ai = await openAiText({ model, apiKey, system, user, maxTokens: 90 });
+      const raw = ai.text;
       const parsed = safeJsonParse(raw) ?? {};
 
       const merchant = String(parsed.merchant ?? "").trim();
@@ -319,7 +335,7 @@ export async function handler(event: any) {
         businessId,
         actorUserId: sub,
         eventType: "AI_CHAT" as ActivityEventType, // reuse quota bucket; optional to add dedicated type later
-        payloadJson: { scope: "merchant-normalize", model },
+        payloadJson: { scope: "merchant-normalize", model, openaiUsage: ai.usage },
         scopeAccountId: null,
       });
 
@@ -356,8 +372,8 @@ export async function handler(event: any) {
       const context = {
         date: String(row.date).slice(0, 10),
         amount_cents: Number(row.amount_cents),
-        payee: String(row.payee ?? ""),
-        memo: String(row.memo ?? ""),
+        payee: clampText(row.payee, 180),
+        memo: clampText(row.memo, 240),
         category: String(cat?.name ?? "Uncategorized"),
         account: String(acct?.name ?? ""),
       };
@@ -371,13 +387,15 @@ export async function handler(event: any) {
         `Explain why this entry may have its current category and what it likely represents.\n\n` +
         `Entry context:\n${JSON.stringify(context, null, 2)}`;
 
-      const answer = await openAiText({ model, apiKey, system, user, maxTokens: 320 });
+      const { apiKey, model } = await getOpenAiConfig();
+      const ai = await openAiText({ model, apiKey, system, user, maxTokens: 220 });
+      const answer = ai.text;
 
       await logActivity(prisma, {
         businessId,
         actorUserId: sub,
         eventType: "AI_EXPLAIN_ENTRY" as ActivityEventType,
-        payloadJson: { entryId, scope: "entry", model },
+        payloadJson: { entryId, scope: "entry", model, openaiUsage: ai.usage },
         scopeAccountId: row.account_id,
       });
 
@@ -386,7 +404,7 @@ export async function handler(event: any) {
 
     // /v1/ai/explain-report
     if (path.endsWith("/v1/ai/explain-report")) {
-      const reportTitle = String(body.reportTitle ?? "Report").trim();
+      const reportTitle = clampText(body.reportTitle ?? "Report", 120);
       const period = body.period ?? null;
       const summary = body.summary ?? null;
 
@@ -398,16 +416,18 @@ export async function handler(event: any) {
       const user =
         `Explain this report in plain language.\n\n` +
         `Title: ${reportTitle}\n` +
-        `Period: ${JSON.stringify(period)}\n` +
-        `Summary: ${JSON.stringify(summary, null, 2)}`;
+        `Period: ${compactJson(period, 1000)}\n` +
+        `Summary: ${compactJson(summary, 6500)}`;
 
-      const answer = await openAiText({ model, apiKey, system, user, maxTokens: 420 });
+      const { apiKey, model } = await getOpenAiConfig();
+      const ai = await openAiText({ model, apiKey, system, user, maxTokens: 280 });
+      const answer = ai.text;
 
       await logActivity(prisma, {
         businessId,
         actorUserId: sub,
         eventType: "AI_EXPLAIN_REPORT" as ActivityEventType,
-        payloadJson: { reportTitle, scope: "report", model },
+        payloadJson: { reportTitle, scope: "report", model, openaiUsage: ai.usage },
         scopeAccountId: null,
       });
 
@@ -417,7 +437,7 @@ export async function handler(event: any) {
     // /v1/ai/suggest-reconcile-bank
     if (path.endsWith("/v1/ai/suggest-reconcile-bank")) {
       const bankTransaction = body.bankTransaction ?? null;
-      const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 12) : [];
+      const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 8) : [];
 
       const bankTxnId = String(bankTransaction?.id ?? "").trim();
       if (!bankTxnId) return json(400, { ok: false, error: "Missing bankTransaction.id" });
@@ -427,14 +447,14 @@ export async function handler(event: any) {
         id: bankTxnId,
         posted_date: String(bankTransaction?.posted_date ?? "").slice(0, 10),
         amount_cents: Number(bankTransaction?.amount_cents ?? 0),
-        name: String(bankTransaction?.name ?? ""),
+        name: clampText(bankTransaction?.name, 160),
       };
 
       const shapedCandidates = candidates.map((it: any) => ({
         entryId: String(it?.entryId ?? "").trim(),
         date: String(it?.date ?? "").slice(0, 10),
         amount_cents: Number(it?.amount_cents ?? 0),
-        payee: String(it?.payee ?? ""),
+        payee: clampText(it?.payee, 160),
         amount_delta_cents: Number(it?.amount_delta_cents ?? 0),
         date_delta_days: Number(it?.date_delta_days ?? 0),
         text_similarity: Number(it?.text_similarity ?? 0),
@@ -456,15 +476,16 @@ export async function handler(event: any) {
         `Bank transaction:\n${JSON.stringify(shapedBank, null, 2)}\n\n` +
         `Candidate entries:\n${JSON.stringify(shapedCandidates, null, 2)}`;
 
-      const raw = await openAiText({ model, apiKey, system, user, maxTokens: 420 });
-      const parsed = parseJsonModelOutput(raw);
+      const { apiKey, model } = await getOpenAiConfig();
+      const ai = await openAiText({ model, apiKey, system, user, maxTokens: 260 });
+      const parsed = parseJsonModelOutput(ai.text);
       const suggestions = normalizeReconcileSuggestions({ raw: parsed, allowedIds, idKey: "entryId" });
 
       await logActivity(prisma, {
         businessId,
         actorUserId: sub,
         eventType: "AI_CHAT" as ActivityEventType,
-        payloadJson: { scope: "suggest-reconcile-bank", bankTxnId, count: shapedCandidates.length, model },
+        payloadJson: { scope: "suggest-reconcile-bank", bankTxnId, count: shapedCandidates.length, model, openaiUsage: ai.usage },
         scopeAccountId: null,
       });
 
@@ -474,7 +495,7 @@ export async function handler(event: any) {
     // /v1/ai/suggest-reconcile-entry
     if (path.endsWith("/v1/ai/suggest-reconcile-entry")) {
       const entry = body.entry ?? null;
-      const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 12) : [];
+      const candidates = Array.isArray(body.candidates) ? body.candidates.slice(0, 8) : [];
 
       const entryId = String(entry?.id ?? "").trim();
       if (!entryId) return json(400, { ok: false, error: "Missing entry.id" });
@@ -484,14 +505,14 @@ export async function handler(event: any) {
         id: entryId,
         date: String(entry?.date ?? "").slice(0, 10),
         amount_cents: Number(entry?.amount_cents ?? 0),
-        payee: String(entry?.payee ?? ""),
+        payee: clampText(entry?.payee, 160),
       };
 
       const shapedCandidates = candidates.map((it: any) => ({
         bankTransactionId: String(it?.bankTransactionId ?? "").trim(),
         posted_date: String(it?.posted_date ?? "").slice(0, 10),
         amount_cents: Number(it?.amount_cents ?? 0),
-        name: String(it?.name ?? ""),
+        name: clampText(it?.name, 160),
         amount_delta_cents: Number(it?.amount_delta_cents ?? 0),
         date_delta_days: Number(it?.date_delta_days ?? 0),
         text_similarity: Number(it?.text_similarity ?? 0),
@@ -513,15 +534,16 @@ export async function handler(event: any) {
         `Entry:\n${JSON.stringify(shapedEntry, null, 2)}\n\n` +
         `Candidate bank transactions:\n${JSON.stringify(shapedCandidates, null, 2)}`;
 
-      const raw = await openAiText({ model, apiKey, system, user, maxTokens: 420 });
-      const parsed = parseJsonModelOutput(raw);
+      const { apiKey, model } = await getOpenAiConfig();
+      const ai = await openAiText({ model, apiKey, system, user, maxTokens: 260 });
+      const parsed = parseJsonModelOutput(ai.text);
       const suggestions = normalizeReconcileSuggestions({ raw: parsed, allowedIds, idKey: "bankTransactionId" });
 
       await logActivity(prisma, {
         businessId,
         actorUserId: sub,
         eventType: "AI_CHAT" as ActivityEventType,
-        payloadJson: { scope: "suggest-reconcile-entry", entryId, count: shapedCandidates.length, model },
+        payloadJson: { scope: "suggest-reconcile-entry", entryId, count: shapedCandidates.length, model, openaiUsage: ai.usage },
         scopeAccountId: null,
       });
 
@@ -530,7 +552,7 @@ export async function handler(event: any) {
 
     // /v1/ai/chat (F4: aggregates-only; no raw ledger dump)
     if (path.endsWith("/v1/ai/chat")) {
-      const question = String(body.question ?? "").trim();
+      const question = clampText(body.question, 800);
       if (!question) return json(400, { ok: false, error: "Missing question" });
 
       const aggregates = body.aggregates ?? null;
@@ -542,15 +564,17 @@ export async function handler(event: any) {
 
       const user =
         `Question: ${question}\n\n` +
-        `Aggregates:\n${JSON.stringify(aggregates, null, 2)}`;
+        `Aggregates:\n${compactJson(aggregates, 7000)}`;
 
-      const answer = await openAiText({ model, apiKey, system, user, maxTokens: 600 });
+      const { apiKey, model } = await getOpenAiConfig();
+      const ai = await openAiText({ model, apiKey, system, user, maxTokens: 350 });
+      const answer = ai.text;
 
       await logActivity(prisma, {
         businessId,
         actorUserId: sub,
         eventType: "AI_CHAT" as ActivityEventType,
-        payloadJson: { scope: "chat-aggregates", model },
+        payloadJson: { scope: "chat-aggregates", model, openaiUsage: ai.usage },
         scopeAccountId: null,
       });
 

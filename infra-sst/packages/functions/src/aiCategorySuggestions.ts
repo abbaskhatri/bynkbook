@@ -122,6 +122,17 @@ function amountToBigInt(v: any): bigint {
 let cachedApiKey: string | null = null;
 let cachedModel: string | null = null;
 
+function intEnv(name: string, fallback: number, min: number, max: number) {
+  const n = Number(process.env[name]);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function clampText(value: any, maxChars: number) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 14)).trim()}... [trimmed]`;
+}
+
 async function getSecretString(secretId: string) {
   const region = process.env.AWS_REGION || "us-east-1";
   const sm = new SecretsManagerClient({ region });
@@ -621,19 +632,22 @@ async function runAiFallback(args: {
   categories: CandidateCategory[];
   limitPerItem: number;
 }) {
-  if (!args.items.length) return {} as Record<string, Suggestion[]>;
+  const maxRows = intEnv("AI_CATEGORY_FALLBACK_MAX_ROWS", 12, 0, 40);
+  const limitedItems = args.items.slice(0, maxRows);
+  if (!limitedItems.length) return {} as Record<string, Suggestion[]>;
 
   const cacheKey = JSON.stringify({
     businessId: args.businessId,
     learningVersion: getCategoryLearningVersion(args.businessId),
     limitPerItem: args.limitPerItem,
     categories: args.categories.map((c) => [c.id, c.name]),
-    items: args.items.map((x) => ({
+    maxRows,
+    items: limitedItems.map((x) => ({
       id: x.id,
-      merchant_normalized: x.merchant_normalized,
+      merchant_normalized: clampText(x.merchant_normalized, 120),
       direction: x.direction,
-      payee_or_name: x.payee_or_name,
-      memo: x.memo,
+      payee_or_name: clampText(x.payee_or_name, 160),
+      memo: clampText(x.memo, 220),
       amount_cents: x.amount_cents,
       topDeterministic: x.topDeterministic.map((s) => [s.category_id, s.confidence]),
     })),
@@ -675,12 +689,12 @@ async function runAiFallback(args: {
         ],
       },
       categories: args.categories,
-      items: args.items.map((item) => ({
+      items: limitedItems.map((item) => ({
         id: item.id,
-        merchant_normalized: item.merchant_normalized,
+        merchant_normalized: clampText(item.merchant_normalized, 120),
         direction: item.direction,
-        payee_or_name: item.payee_or_name,
-        memo: item.memo,
+        payee_or_name: clampText(item.payee_or_name, 160),
+        memo: clampText(item.memo, 220),
         amount_cents: item.amount_cents,
         deterministic_candidates: item.topDeterministic.map((s) => ({
           category_id: s.category_id,
@@ -699,7 +713,7 @@ async function runAiFallback(args: {
     apiKey,
     system,
     user,
-    maxTokens: Math.min(2600, 900 + args.items.length * 70),
+    maxTokens: Math.min(1200, 500 + limitedItems.length * 45),
   });
 
   const parsed: any = parseJsonModelOutput(raw);
@@ -890,7 +904,7 @@ export async function computeCategorySuggestionsForItems(args: {
 
     if (
       args.includeAiFallback !== false &&
-      aiEligible.length < 40 &&
+      aiEligible.length < intEnv("AI_CATEGORY_FALLBACK_MAX_ROWS", 12, 0, 40) &&
       shouldRunAiFallback({
         deterministic,
         memorySuggestions,
@@ -937,7 +951,7 @@ export async function computeCategorySuggestionsForItems(args: {
     meta: {
       version: "catSug_v2",
       source: "CATEGORY_INTELLIGENCE_ENGINE",
-      aiBatchCap: 40,
+      aiBatchCap: intEnv("AI_CATEGORY_FALLBACK_MAX_ROWS", 12, 0, 40),
       aiRequestedRows: aiEligible.length,
     },
   };

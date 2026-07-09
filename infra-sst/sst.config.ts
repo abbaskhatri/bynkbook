@@ -557,14 +557,30 @@ const vendorsHandler = {
 } satisfies ApiHandler;
 
 // ---------- Phase F: AI (heuristics-only) + Insights + Search ----------
+const stagePrefix = resourcePrefix;
+
 const aiCategorySuggestionsHandler = {
   ...bizHandler,
   handler: "packages/functions/src/aiCategorySuggestions.handler",
+  environment: {
+    ...bizHandler.environment,
+    OPENAI_API_KEY_SECRET_ID: `${stagePrefix}/openai/api_key`,
+    OPENAI_MODEL_SECRET_ID: `${stagePrefix}/openai/model`,
+    AI_CATEGORY_FALLBACK_MAX_ROWS: optionalEnv("BYNKBOOK_AI_CATEGORY_FALLBACK_MAX_ROWS", "12"),
+  },
+  permissions: [
+    ...(bizHandler as any).permissions,
+    {
+      actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+      resources: [
+        secretArnFor(`${stagePrefix}/openai/api_key`),
+        secretArnFor(`${stagePrefix}/openai/model`),
+      ],
+    },
+  ],
 } satisfies ApiHandler;
 
 // ---------- AI (Bundle E) ----------
-const stagePrefix = resourcePrefix;
-
 const aiHandler = {
   ...bizHandler,
   handler: "packages/functions/src/ai.handler",
@@ -576,7 +592,8 @@ const aiHandler = {
     OPENAI_MODEL_SECRET_ID: `${stagePrefix}/openai/model`,
 
     // Usage limits (per business, daily)
-    AI_DAILY_LIMIT: $app.stage === "prod" ? "1000" : "500",
+    AI_DAILY_LIMIT: optionalEnv("BYNKBOOK_AI_DAILY_LIMIT", $app.stage === "prod" ? "100" : "25"),
+    AI_CATEGORY_FALLBACK_MAX_ROWS: optionalEnv("BYNKBOOK_AI_CATEGORY_FALLBACK_MAX_ROWS", "12"),
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -861,6 +878,8 @@ const issuesBulkPreviewHandler = {
     ...(issuesScanHandler as any).environment,
     OPENAI_API_KEY_SECRET_ID: `${stagePrefix}/openai/api_key`,
     OPENAI_MODEL_SECRET_ID: `${stagePrefix}/openai/model`,
+    OPENAI_DUPLICATE_REVIEW_MAX_ITEMS: optionalEnv("BYNKBOOK_OPENAI_DUPLICATE_REVIEW_MAX_ITEMS", "12"),
+    OPENAI_DUPLICATE_REVIEW_MAX_OUTPUT_TOKENS: optionalEnv("BYNKBOOK_OPENAI_DUPLICATE_REVIEW_MAX_OUTPUT_TOKENS", "1000"),
   },
   permissions: [
     ...(issuesScanHandler as any).permissions,

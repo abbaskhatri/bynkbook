@@ -243,7 +243,9 @@ function parseResults(rawText: string, items: DuplicateEvidenceItem[]) {
 export async function reviewDuplicateEvidenceWithAI(
   items: DuplicateEvidenceItem[]
 ): Promise<DuplicateReviewResult[]> {
-  const limitedItems = (items ?? []).slice(0, 30);
+  const maxItems = Number(process.env.OPENAI_DUPLICATE_REVIEW_MAX_ITEMS ?? "12");
+  const maxOutputTokens = Number(process.env.OPENAI_DUPLICATE_REVIEW_MAX_OUTPUT_TOKENS ?? "1000");
+  const limitedItems = (items ?? []).slice(0, Number.isFinite(maxItems) ? Math.max(1, Math.min(30, Math.floor(maxItems))) : 12);
   if (!limitedItems.length) return [];
 
   try {
@@ -253,7 +255,9 @@ export async function reviewDuplicateEvidenceWithAI(
     const response = await client.responses.create({
       model,
       temperature: 0.1,
-      max_output_tokens: 3000,
+      max_output_tokens: Number.isFinite(maxOutputTokens)
+        ? Math.max(400, Math.min(3000, Math.floor(maxOutputTokens)))
+        : 1000,
       input: [
         {
           role: "system",

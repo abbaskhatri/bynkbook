@@ -1,6 +1,6 @@
 # Bynkbook Production Bridge Current State
 
-Last verified: 2026-06-27
+Last verified: 2026-07-09
 
 ## Executive Warning
 
@@ -25,11 +25,12 @@ No secrets are printed in this document. Secret names, resource IDs, hostnames, 
 
 ### Production API
 
-- Production API ID: `actwy6st05`
-- Production API name: `ledrigo-prod-ledrigodevsstapiApi-bdsbmssr`
+- Production API ID: `cpjh7t19u1`
+- Production API name: `ledrigo-prod-ledrigoprodsstapiApi-urafsnth`
 - Production API stage: `$default`
-- Production API URL: `https://actwy6st05.execute-api.us-east-1.amazonaws.com`
-- Plaid webhook URL: `https://actwy6st05.execute-api.us-east-1.amazonaws.com/v1/plaid/webhook`
+- Production API URL: `https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com`
+- Plaid webhook URL: `https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/plaid/webhook`
+- Legacy Plaid webhook compatibility URL: `https://actwy6st05.execute-api.us-east-1.amazonaws.com/v1/plaid/webhook`
 - `api.bynkbook.com`: currently unused. It has no active API Gateway mapping in the verified bridge state and must not be created as incidental cleanup.
 
 ### Plaid
@@ -98,9 +99,10 @@ Do not switch production auth to the stale prod-named Cognito pool as cleanup.
 
 - `https://app.bynkbook.com`
 - Amplify app `bynkbook` (`d2idm6n6qepkf3`), branch `main`
-- API Gateway HTTP API `actwy6st05`
-- Prod API URL `https://actwy6st05.execute-api.us-east-1.amazonaws.com`
-- Prod Lambda/API deployment using `ledrigo-prod-*` function names
+- API Gateway HTTP API `cpjh7t19u1`
+- Prod API URL `https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com`
+- Legacy Plaid webhook compatibility route on API `actwy6st05`
+- Prod API Gateway names use `ledrigo-prod-*`; generated prod route Lambda names use `ledrig-prod-*`
 - Plaid production environment configuration
 
 ### Prod-Named Bridge Secrets
@@ -139,7 +141,7 @@ These are dev-named but live production dependencies. Names alone are misleading
 - Any DB secret or CA bundle secret with `ledrigo-prod/rds/*`.
 - Any S3 object data under `ledrigo-dev-uploads-116846786465-us-east-1`.
 - Any auth change involving Cognito pool/client/domain replacement.
-- Any DNS or API Gateway mapping involving `app.bynkbook.com`, `bynkbook.com`, `api.bynkbook.com`, or `actwy6st05`.
+- Any DNS or API Gateway mapping involving `app.bynkbook.com`, `bynkbook.com`, `api.bynkbook.com`, `cpjh7t19u1`, or the legacy webhook API `actwy6st05`.
 
 ## Do-Not-Touch List
 
