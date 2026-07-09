@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentUser } from "aws-amplify/auth";
@@ -43,7 +44,6 @@ import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
-import GlobalSearch from "@/components/app/global-search";
 import BrandLogo from "@/components/app/BrandLogo";
 import {
   expireSessionIfNeeded,
@@ -72,6 +72,20 @@ const AUTH_ROUTE_PREFIXES = [
   "/privacy",
   "/terms",
 ] as const;
+
+function GlobalSearchFallback() {
+  return (
+    <div
+      className="h-8 w-full rounded-md border border-bb-input-border bg-bb-input-bg shadow-sm sm:w-[320px]"
+      aria-hidden="true"
+    />
+  );
+}
+
+const GlobalSearch = dynamic(() => import("@/components/app/global-search"), {
+  ssr: false,
+  loading: () => <GlobalSearchFallback />,
+});
 
 function isAuthPathname(pathname: string): boolean {
   return AUTH_ROUTE_PREFIXES.some((p) => pathname.startsWith(p));
@@ -299,6 +313,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   function openMobileNav() {
     setActivityOpen(false);
     setUserMenuOpen(false);
+    setGlobalSearchReady(true);
     setMobileNavOpen(true);
   }
 
@@ -387,6 +402,35 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }, [bizIdFromUrl, businessesQ.data]);
 
   const businessId = showChrome ? business?.id ?? bizIdFromUrl ?? "" : "";
+  const [globalSearchReady, setGlobalSearchReady] = useState(false);
+
+  useEffect(() => {
+    if (!showChrome || !businessId) {
+      setGlobalSearchReady(false);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+
+    const markReady = () => {
+      if (!cancelled) setGlobalSearchReady(true);
+    };
+
+    const w = window as any;
+    if (typeof w.requestIdleCallback === "function") {
+      idleId = w.requestIdleCallback(markReady, { timeout: 1800 });
+    } else {
+      timeoutId = setTimeout(markReady, 800);
+    }
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (idleId != null && typeof w.cancelIdleCallback === "function") w.cancelIdleCallback(idleId);
+    };
+  }, [showChrome, businessId]);
 
   const accountsQ = useAccounts(showChrome ? businessId || null : null);
 
@@ -652,6 +696,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                     >
                       <Link
                         href={link}
+                        prefetch={false}
                         className="relative flex items-center justify-center w-full"
                         onClick={onNavigate}
                       >
@@ -692,6 +737,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   >
                     <Link
                       href={link}
+                      prefetch={false}
                       className="flex w-full items-center gap-2 transition-colors duration-200"
                       onClick={onNavigate}
                     >
@@ -879,10 +925,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           <div className="flex shrink-0 items-center gap-2">
             {businessId ? (
               <div className="hidden md:block">
-                <GlobalSearch
-                  businessId={businessId}
-                  accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
-                />
+                {globalSearchReady ? (
+                  <GlobalSearch
+                    businessId={businessId}
+                    accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
+                  />
+                ) : (
+                  <GlobalSearchFallback />
+                )}
               </div>
             ) : null}
 
@@ -1101,6 +1151,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             <Link
               key={item.path}
               href={href(item.path, item.needsAccountId)}
+              prefetch={false}
               className={[
                 "relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md text-[10px] font-semibold leading-none",
                 active ? "bg-bb-nav-active-bg text-bb-nav-active-fg shadow-sm" : "text-foreground/60 hover:bg-bb-surface-soft hover:text-foreground",
@@ -1156,10 +1207,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
             {businessId ? (
               <div className="px-3 pt-3">
-                <GlobalSearch
-                  businessId={businessId}
-                  accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
-                />
+                {globalSearchReady ? (
+                  <GlobalSearch
+                    businessId={businessId}
+                    accountId={accountIdFromUrl && accountIdFromUrl !== "all" ? accountIdFromUrl : undefined}
+                  />
+                ) : (
+                  <GlobalSearchFallback />
+                )}
               </div>
             ) : null}
 

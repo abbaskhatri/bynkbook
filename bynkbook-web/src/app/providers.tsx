@@ -1,10 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { configureAmplify } from "@/lib/auth/amplify";
 import { ThemeProvider } from "@/lib/theme";
-import { PerfOverlay } from "@/components/app/perf-overlay";
+
+const PerfOverlay = dynamic(
+  () => import("@/components/app/perf-overlay").then((mod) => mod.PerfOverlay),
+  { ssr: false }
+);
 
 // Configure immediately so auth checks never race.
 configureAmplify();
@@ -36,7 +41,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         {children}
-        <PerfOverlay />
+        {process.env.NODE_ENV !== "production" ? <PerfOverlay /> : null}
       </QueryClientProvider>
     </ThemeProvider>
   );

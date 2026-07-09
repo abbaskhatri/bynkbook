@@ -466,7 +466,7 @@ export default function ReconcilePageClient() {
   // Phase 2 Performance: cap initial rows rendered to keep tab switches instant-fast
   const PAGE_CHUNK = 200;
   const ENTRIES_API_LIMIT = 200;
-  const ENTRIES_BACKGROUND_MAX_PAGE_COUNT = 500;
+  const ENTRIES_BACKGROUND_MAX_PAGE_COUNT = 8;
   const BANK_TRANSACTION_PAGE_LIMIT = 500;
 
   const [expectedVisibleN, setExpectedVisibleN] = useState(PAGE_CHUNK);
@@ -571,6 +571,7 @@ export default function ReconcilePageClient() {
 
     let cancelled = false;
     const cursor = entriesNextCursor;
+    const backgroundDelayMs = Math.min(1800, 650 + entriesBackgroundPageCount * 250);
     const timer = window.setTimeout(() => {
       (async () => {
         setEntriesBackgroundLoading(true);
@@ -615,7 +616,7 @@ export default function ReconcilePageClient() {
           if (!cancelled) setEntriesBackgroundLoading(false);
         }
       })();
-    }, 150);
+    }, backgroundDelayMs);
 
     return () => {
       cancelled = true;
