@@ -26,6 +26,7 @@ export async function handler(event: any) {
   const endDate = (body?.endDate ?? "").toString().trim(); // optional
   const institution = body?.institution ?? undefined;
   const mask = (body?.mask ?? "").toString().trim() || undefined;
+  const additionalAccounts = Array.isArray(body?.additionalAccounts) ? body.additionalAccounts : [];
 
   const name = (body?.name ?? "").toString().trim();
   const type = (body?.type ?? "").toString().trim(); // CHECKING/SAVINGS/CREDIT_CARD/CASH/OTHER
@@ -73,6 +74,8 @@ export async function handler(event: any) {
     institution,
     plaidAccountId,
     mask,
+    allowOpeningAdjustment: true,
+    additionalAccounts,
   } as any);
 
   if ((ex as any)?.statusCode && (ex as any).statusCode >= 400) {
@@ -81,8 +84,33 @@ export async function handler(event: any) {
     return ex as any;
   }
 
+  const exBody = (() => {
+    try {
+      return JSON.parse((ex as any)?.body ?? "{}");
+    } catch {
+      return {};
+    }
+  })();
+
   // Sync transactions + compute opening balance from chosen effectiveStartDate
   const sync = await syncTransactions({ businessId, accountId, userId: sub } as any);
+  const additionalSyncs = [];
+  for (const created of Array.isArray(exBody?.additionalAccounts) ? exBody.additionalAccounts : []) {
+    try {
+      const extraSync = await syncTransactions({ businessId, accountId: created.accountId, userId: sub } as any);
+      additionalSyncs.push({ accountId: created.accountId, ok: true, sync: extraSync });
+    } catch (error: any) {
+      additionalSyncs.push({ accountId: created.accountId, ok: false, error: error?.message ?? "Sync failed" });
+    }
+  }
 
-  return json(200, { ok: true, accountId, synced: true, exchange: true, sync });
+  return json(200, {
+    ok: true,
+    accountId,
+    synced: true,
+    exchange: true,
+    sync,
+    additionalAccounts: exBody?.additionalAccounts ?? [],
+    additionalSyncs,
+  });
 }

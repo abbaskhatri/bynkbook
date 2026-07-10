@@ -41,8 +41,14 @@ async function loadSyncTransactions(options: {
         accounts: [{ account_id: "plaid-acct-1", balances: { current: 100 } }],
       },
     })),
+    accountsGet: vi.fn(async () => ({
+      data: {
+        accounts: [{ account_id: "plaid-acct-1", mask: "1234" }],
+      },
+    })),
     linkTokenCreate: vi.fn(async () => ({ data: { link_token: "link-token" } })),
     itemPublicTokenExchange: vi.fn(async () => ({ data: { access_token: "access-token-new", item_id: "item-new" } })),
+    itemRemove: vi.fn(async () => ({ data: {} })),
     transactionsSync: vi.fn(async () => ({
       data: {
         added: [],
@@ -62,10 +68,13 @@ async function loadSyncTransactions(options: {
     },
     account: {
       findFirst: vi.fn(async () => ({ id: "acct-1" })),
+      create: vi.fn(async () => ({})),
       update: vi.fn(async () => ({})),
     },
     bankConnection: {
       findFirst: vi.fn(async () => ({ ...baseConn, ...options.conn })),
+      findMany: vi.fn(async () => []),
+      create: vi.fn(async () => ({})),
       upsert: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
@@ -250,6 +259,134 @@ describe("syncTransactions", () => {
           opening_adjustment_created_at: expect.any(Date),
         }),
       })
+    );
+  });
+
+  test("exchange verifies the selected Plaid account belongs to the exchanged Item before storing a token", async () => {
+    const { mod, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [{ account_id: "different-plaid-acct", mask: "9999" }],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(400);
+    expect(body).toMatchObject({
+      ok: false,
+      code: "PLAID_ACCOUNT_SELECTION_MISMATCH",
+    });
+    expect(plaid.itemPublicTokenExchange).toHaveBeenCalledWith({ public_token: "public-token" });
+    expect(plaid.accountsGet).toHaveBeenCalledWith({ access_token: "access-token-new" });
+    expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-new" });
+    expect(prisma.bankConnection.upsert).not.toHaveBeenCalled();
+  });
+
+  test("new Plaid-created accounts can opt into Plaid-derived opening adjustment", async () => {
+    const { mod, prisma } = await loadSyncTransactions({});
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+      effectiveStartDate: "2026-01-01",
+      allowOpeningAdjustment: true,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(prisma.bankConnection.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          opening_policy: "AUTO",
+          opening_adjustment_created_at: null,
+        }),
+        update: expect.objectContaining({
+          opening_policy: "AUTO",
+          opening_adjustment_created_at: null,
+        }),
+      })
+    );
+  });
+
+  test("exchange can create additional one-to-one accounts from the same Plaid item", async () => {
+    const { mod, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              { account_id: "plaid-acct-1", mask: "1234", type: "depository", subtype: "checking" },
+              { account_id: "plaid-acct-2", mask: "5678", type: "depository", subtype: "savings" },
+            ],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+      effectiveStartDate: "2026-01-01",
+      additionalAccounts: [
+        {
+          plaidAccountId: "plaid-acct-2",
+          name: "Savings",
+          type: "SAVINGS",
+          mask: "5678",
+          effectiveStartDate: "2026-01-01",
+        },
+      ],
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.additionalAccounts).toHaveLength(1);
+    expect(body.additionalAccounts[0]).toMatchObject({
+      plaidAccountId: "plaid-acct-2",
+      name: "Savings",
+      type: "SAVINGS",
+      last4: "5678",
+    });
+    expect(plaid.itemPublicTokenExchange).toHaveBeenCalledTimes(1);
+    expect(plaid.accountsGet).toHaveBeenCalledTimes(1);
+    expect(prisma.account.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          business_id: "biz-1",
+          name: "Savings",
+          type: "SAVINGS",
+          opening_balance_cents: 0n,
+          institution_name: null,
+          last4: "5678",
+        }),
+      }),
+    );
+    expect(prisma.bankConnection.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          business_id: "biz-1",
+          plaid_item_id: "item-new",
+          plaid_account_id: "plaid-acct-2",
+          access_token_ciphertext: "ciphertext",
+          opening_policy: "AUTO",
+          opening_adjustment_created_at: null,
+        }),
+      }),
     );
   });
 
@@ -529,6 +666,44 @@ describe("syncTransactions", () => {
     expect(finalConnectionUpdate.data.sync_cursor).toBe("item:item-cursor-next");
   });
 
+  test("marks missing Plaid account as reconnect-required when item-level sync also returns NO_ACCOUNTS", async () => {
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          const error: any = new Error("No accounts available");
+          error.response = {
+            data: {
+              error_code: "NO_ACCOUNTS",
+              error_message: "No accounts available",
+            },
+          };
+          throw error;
+        }),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", requestRefresh: true });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(502);
+    expect(body).toEqual({
+      ok: false,
+      error: "Plaid sync failed",
+      errorCode: "NO_ACCOUNTS",
+      status: "PLAID_ACCOUNT_MISSING",
+      message: "The selected bank account is no longer available from Plaid. Reconnect the bank feed and choose the account again.",
+      reconnectRequired: true,
+    });
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const failureUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(failureUpdate.data).toMatchObject({
+      status: "PLAID_ACCOUNT_MISSING",
+      error_code: "NO_ACCOUNTS",
+    });
+    expect(failureUpdate.data).not.toHaveProperty("has_new_transactions");
+  });
+
   test("persists sanitized Plaid failure details without clearing has_new_transactions or storing secrets", async () => {
     const { syncTransactions, prisma } = await loadSyncTransactions({
       plaid: {
@@ -667,6 +842,44 @@ describe("syncTransactions", () => {
       needsAttention: false,
       errorMessage: null,
       status: "ERROR",
+      plaidAccountLive: true,
+    });
+  });
+
+  test("status actively marks the connection when the stored Plaid account is missing", async () => {
+    const { mod, prisma } = await loadSyncTransactions({
+      conn: {
+        status: "CONNECTED",
+        plaid_mask: "1234",
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [{ account_id: "other-plaid-acct", mask: "9999" }],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.getStatus({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      connected: false,
+      status: "PLAID_ACCOUNT_MISSING",
+      needsAttention: true,
+      errorMessage: "Reconnect required — Selected Plaid account unavailable",
+      plaidAccountLive: false,
+      plaidHealthErrorCode: "PLAID_ACCOUNT_MISSING",
+    });
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const healthUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(healthUpdate.data).toMatchObject({
+      status: "PLAID_ACCOUNT_MISSING",
+      error_code: "PLAID_ACCOUNT_MISSING",
     });
   });
 });

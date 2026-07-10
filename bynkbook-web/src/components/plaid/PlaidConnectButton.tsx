@@ -2,7 +2,14 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Landmark } from "lucide-react";
-import { plaidExchange, plaidLinkToken, plaidReconnectLinkToken, plaidSync } from "@/lib/api/plaid";
+import {
+  plaidApplyOpening,
+  plaidExchange,
+  plaidLinkToken,
+  plaidPreviewOpening,
+  plaidReconnectLinkToken,
+  plaidSync,
+} from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
 
 function TinySpinner() {
@@ -82,12 +89,61 @@ type PlaidAccountMeta = {
   subtype?: string;
 };
 
+type OpeningPreview = {
+  ok?: boolean;
+  balanceAvailable?: boolean;
+  currency?: string | null;
+  effectiveStartDate?: string;
+  currentBalanceCents?: string;
+  sumPostedTxnsCents?: string;
+  suggestedOpeningCents?: string;
+  conflict?: {
+    hasRealEntries?: boolean;
+    hasManualOpeningNonZero?: boolean;
+    hasMatchesOrClearing?: boolean;
+    hasExistingBankTxns?: boolean;
+    openingEntriesCount?: number;
+  };
+  error?: string;
+  errorCode?: string;
+};
+
+type OpeningReviewState = {
+  effectiveStartDate: string;
+  account?: PlaidAccountMeta;
+  institution?: { name?: string; institution_id?: string };
+  preview?: OpeningPreview;
+  previewError?: string;
+  syncResult?: any;
+};
+
+const money = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
+function formatCents(raw?: string | number | null) {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n)) return money.format(0);
+  return money.format(n / 100);
+}
+
+function accountTypeFromPlaid(account?: PlaidAccountMeta, fallback = "CHECKING") {
+  const raw = `${account?.subtype ?? ""} ${account?.type ?? ""}`.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw.includes("credit")) return "CREDIT_CARD";
+  if (raw.includes("saving")) return "SAVINGS";
+  if (raw.includes("checking") || raw.includes("depository")) return "CHECKING";
+  return "OTHER";
+}
+
 export function PlaidConnectButton(props: Props) {
   const {
     businessId,
     accountId,
     businessName,
     accountName,
+    effectiveStartDate,
     disabledClassName,
     buttonClassName,
     disabled,
@@ -109,11 +165,17 @@ export function PlaidConnectButton(props: Props) {
   const [pendingInstitution, setPendingInstitution] = useState<any>(null);
   const [pendingAccounts, setPendingAccounts] = useState<PlaidAccountMeta[]>([]);
   const [selectedPlaidAccountId, setSelectedPlaidAccountId] = useState<string>("");
+  const [selectedAdditionalPlaidAccountIds, setSelectedAdditionalPlaidAccountIds] = useState<string[]>([]);
 
   // Initial sync progress
   const [openSyncing, setOpenSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState<{ newCount: number; pendingCount: number } | null>(null);
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null);
+
+  // Existing-ledger accounting decision after a successful Plaid connection.
+  const [openOpeningReview, setOpenOpeningReview] = useState(false);
+  const [openingReview, setOpeningReview] = useState<OpeningReviewState | null>(null);
+  const [openingBusy, setOpeningBusy] = useState(false);
 
   // Guard to prevent double-open on rapid clicks
   const openingRef = useRef(false);
@@ -126,6 +188,7 @@ export function PlaidConnectButton(props: Props) {
     setPendingInstitution(null);
     setPendingAccounts([]);
     setSelectedPlaidAccountId("");
+    setSelectedAdditionalPlaidAccountIds([]);
   }, []);
 
   const runInitialSync = useCallback(async (options?: { afterReconnect?: boolean }) => {
@@ -157,7 +220,8 @@ export function PlaidConnectButton(props: Props) {
     publicToken: string,
     plaidAccountId: string,
     account?: PlaidAccountMeta,
-    institution?: any
+    institution?: any,
+    additionalAccounts?: PlaidAccountMeta[]
   ) => {
     setBusy(true);
     setErrorMsg(null);
@@ -168,6 +232,14 @@ export function PlaidConnectButton(props: Props) {
         plaidAccountId,
         institution: institution ?? pendingInstitution ?? undefined,
         mask: account?.mask ?? undefined,
+        additionalAccounts: (additionalAccounts ?? []).map((extra) => ({
+          plaidAccountId: extra.id,
+          name: extra.name ?? (institution?.name ? `${institution.name} Account` : "Bank Account"),
+          type: accountTypeFromPlaid(extra),
+          subtype: extra.subtype,
+          mask: extra.mask,
+          effectiveStartDate,
+        })),
       });
 
       if (!res?.ok) throw new Error(res?.error ?? "Exchange failed");
@@ -176,13 +248,71 @@ export function PlaidConnectButton(props: Props) {
       resetPendingSelection();
 
       const syncRes = await runInitialSync();
-      onConnected(syncRes);
+      const createdAdditional = Array.isArray(res?.additionalAccounts) ? res.additionalAccounts : [];
+      for (const created of createdAdditional) {
+        if (!created?.accountId) continue;
+        try {
+          await plaidSync(businessId, String(created.accountId));
+        } catch {
+          // Additional accounts can be synced manually later; do not fail the primary connection.
+        }
+      }
+      const retainedStartDate = String(res?.effectiveStartDate ?? effectiveStartDate ?? "").slice(0, 10);
+      const reviewStartDate = retainedStartDate || new Date().toISOString().slice(0, 10);
+
+      try {
+        const preview: OpeningPreview = await plaidPreviewOpening(businessId, accountId, {
+          effectiveStartDate: reviewStartDate,
+        });
+        setOpeningReview({
+          effectiveStartDate: reviewStartDate,
+          account,
+          institution: institution ?? pendingInstitution ?? undefined,
+          preview,
+          syncResult: syncRes,
+        });
+      } catch (previewError: any) {
+        setOpeningReview({
+          effectiveStartDate: reviewStartDate,
+          account,
+          institution: institution ?? pendingInstitution ?? undefined,
+          previewError: previewError?.message ?? "Opening balance preview failed",
+          syncResult: syncRes,
+        });
+      }
+      setOpenOpeningReview(true);
     } catch (e: any) {
       setErrorMsg(e?.message ?? "Plaid connection failed");
     } finally {
       setBusy(false);
     }
-  }, [accountId, businessId, onConnected, pendingInstitution, resetPendingSelection, runInitialSync]);
+  }, [accountId, businessId, effectiveStartDate, pendingInstitution, resetPendingSelection, runInitialSync]);
+
+  const finishOpeningReview = useCallback(async (choice: "APPLY_PLAID" | "KEEP_MANUAL") => {
+    const review = openingReview;
+    if (!review) return;
+
+    setOpeningBusy(true);
+    setErrorMsg(null);
+    try {
+      const preview = review.preview;
+      if (preview?.balanceAvailable) {
+        await plaidApplyOpening(businessId, accountId, {
+          choice,
+          effectiveStartDate: review.effectiveStartDate,
+          suggestedOpeningCents: preview.suggestedOpeningCents ?? "0",
+        });
+      }
+
+      setOpenOpeningReview(false);
+      setOpeningReview(null);
+      onConnected(review.syncResult);
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Opening balance setup failed");
+    } finally {
+      setOpeningBusy(false);
+    }
+  }, [accountId, businessId, onConnected, openingReview]);
 
   const launchPlaid = useCallback(async () => {
     if (disabled) return;
@@ -255,6 +385,7 @@ export function PlaidConnectButton(props: Props) {
             setPendingInstitution(institution);
             setPendingAccounts(accounts);
             setSelectedPlaidAccountId(accounts[0]?.id ?? "");
+            setSelectedAdditionalPlaidAccountIds([]);
 
             setOpenSelect(true);
           } catch (e: any) {
@@ -413,13 +544,48 @@ export function PlaidConnectButton(props: Props) {
                     name="plaid-account"
                     className="h-4 w-4"
                     checked={selectedPlaidAccountId === a.id}
-                    onChange={() => setSelectedPlaidAccountId(a.id)}
+                    onChange={() => {
+                      setSelectedPlaidAccountId(a.id);
+                      setSelectedAdditionalPlaidAccountIds((cur) => cur.filter((id) => id !== a.id));
+                    }}
                   />
                   <span className="truncate">{label}</span>
                 </label>
               );
             })}
           </div>
+
+          {pendingAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
+            <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
+              <div className="text-xs font-semibold text-bb-text">Other consented accounts</div>
+              <div className="mt-1 text-[11px] text-bb-text-muted">
+                Optional: create separate BynkBook accounts for other bank accounts from this same Plaid connection.
+              </div>
+              <div className="mt-2 space-y-2">
+                {pendingAccounts
+                  .filter((a) => a.id !== selectedPlaidAccountId)
+                  .map((a) => {
+                    const label = `${a.name ?? "Account"}${a.mask ? ` • ****${a.mask}` : ""}${a.subtype ? ` • ${a.subtype}` : a.type ? ` • ${a.type}` : ""}`;
+                    const checked = selectedAdditionalPlaidAccountIds.includes(a.id);
+                    return (
+                      <label key={a.id} className="flex items-center gap-2 text-xs text-bb-text">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={checked}
+                          onChange={(e) => {
+                            setSelectedAdditionalPlaidAccountIds((cur) =>
+                              e.target.checked ? [...cur, a.id] : cur.filter((id) => id !== a.id),
+                            );
+                          }}
+                        />
+                        <span className="min-w-0 truncate">{label}</span>
+                      </label>
+                    );
+                  })}
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex items-center justify-between border-t border-bb-border pt-3">
             <button
@@ -439,7 +605,10 @@ export function PlaidConnectButton(props: Props) {
                 if (!pendingPublicToken || !selectedPlaidAccountId) return;
 
                 const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
-                await completeExistingAccountConnect(pendingPublicToken, selectedPlaidAccountId, selected);
+                const additional = pendingAccounts.filter(
+                  (x) => x.id !== selectedPlaidAccountId && selectedAdditionalPlaidAccountIds.includes(x.id),
+                );
+                await completeExistingAccountConnect(pendingPublicToken, selectedPlaidAccountId, selected, pendingInstitution, additional);
               }}
             >
               {busy ? "Connecting…" : "Connect"}
@@ -480,6 +649,110 @@ export function PlaidConnectButton(props: Props) {
             <div className="mt-3 rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
               Initial transaction sync failed: {syncErrorMsg}
             </div>
+          ) : null}
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={openOpeningReview}
+        onClose={() => {
+          if (!openingBusy) void finishOpeningReview("KEEP_MANUAL");
+        }}
+        title="Review opening balance"
+        size="md"
+      >
+        <div className="space-y-4">
+          {openingReview ? (
+            <>
+              <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-bb-text-muted">Institution</span>
+                  <span className="text-right font-semibold text-bb-text">
+                    {openingReview.institution?.name ?? "Connected bank"}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <span className="text-bb-text-muted">Bank account</span>
+                  <span className="text-right font-semibold text-bb-text">
+                    {openingReview.account?.name ?? "Selected account"}
+                    {openingReview.account?.mask ? ` • ****${openingReview.account.mask}` : ""}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <span className="text-bb-text-muted">Ledger starts</span>
+                  <span className="text-right font-semibold text-bb-text">{openingReview.effectiveStartDate}</span>
+                </div>
+              </div>
+
+              {openingReview.preview?.balanceAvailable ? (
+                <>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
+                      <div className="text-[11px] text-bb-text-muted">Bank balance now</div>
+                      <div className="mt-1 text-sm font-semibold text-bb-text">
+                        {formatCents(openingReview.preview.currentBalanceCents)}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-bb-border bg-bb-surface-card px-3 py-2">
+                      <div className="text-[11px] text-bb-text-muted">Synced activity</div>
+                      <div className="mt-1 text-sm font-semibold text-bb-text">
+                        {formatCents(openingReview.preview.sumPostedTxnsCents)}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2">
+                      <div className="text-[11px] text-primary">Suggested opening</div>
+                      <div className="mt-1 text-sm font-semibold text-primary">
+                        {formatCents(openingReview.preview.suggestedOpeningCents)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs text-bb-text-muted">
+                    Plaid can estimate the opening balance as current bank balance minus posted bank activity retained in BynkBook.
+                    For an existing ledger, keeping the current opening is safest unless the current ledger opening is missing or wrong.
+                  </div>
+
+                  {openingReview.preview.conflict?.hasRealEntries ||
+                  openingReview.preview.conflict?.hasManualOpeningNonZero ||
+                  openingReview.preview.conflict?.hasMatchesOrClearing ? (
+                    <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
+                      This account already has ledger activity. Applying the Plaid estimate will create or update the opening balance entry;
+                      keep the current ledger opening if the books were already reconciled.
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
+                      No conflicting ledger activity was found. Applying the Plaid estimate can add the opening balance entry for this connected account.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
+                  {openingReview.previewError ||
+                    openingReview.preview?.error ||
+                    "Plaid did not provide a usable balance, so BynkBook will keep the current ledger opening."}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t border-bb-border pt-3">
+                <button
+                  type="button"
+                  className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-surface-soft disabled:opacity-50"
+                  onClick={() => finishOpeningReview("KEEP_MANUAL")}
+                  disabled={openingBusy}
+                >
+                  {openingBusy ? "Saving…" : "Keep current opening"}
+                </button>
+
+                <button
+                  type="button"
+                  className="h-8 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50"
+                  onClick={() => finishOpeningReview("APPLY_PLAID")}
+                  disabled={openingBusy || !openingReview.preview?.balanceAvailable}
+                >
+                  {openingReview.preview?.conflict?.openingEntriesCount ? "Update opening entry" : "Add opening entry"}
+                </button>
+              </div>
+            </>
           ) : null}
         </div>
       </AppDialog>

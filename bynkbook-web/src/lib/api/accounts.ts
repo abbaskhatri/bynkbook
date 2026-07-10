@@ -13,6 +13,17 @@ export type Account = {
   archived_at: string | null;
   created_at?: string;
   updated_at?: string;
+  plaid_connection?: {
+    connected: boolean;
+    status: string | null;
+    institution_name: string | null;
+    last4: string | null;
+    last_sync_at: string | null;
+    has_new_transactions: boolean;
+    error_code: string | null;
+    error_message: string | null;
+    updated_at: string | null;
+  } | null;
 };
 
 export async function listAccounts(businessId: string): Promise<Account[]> {

@@ -42,6 +42,33 @@ async function loadHandler(role = "OWNER") {
       created_at: new Date("2026-01-01T00:00:00.000Z"),
       updated_at: new Date("2026-01-01T00:00:00.000Z"),
     },
+    {
+      id: "acct-c",
+      business_id: "biz-a",
+      name: "Savings",
+      type: "SAVINGS",
+      opening_balance_cents: 0n,
+      opening_balance_date: new Date("2026-01-01T00:00:00.000Z"),
+      archived_at: null,
+      created_at: new Date("2026-01-01T00:00:00.000Z"),
+      updated_at: new Date("2026-01-01T00:00:00.000Z"),
+    },
+  ];
+  const bankConnections = [
+    {
+      account_id: "acct-a",
+      status: "CONNECTED",
+      institution_name: "Example Bank",
+      plaid_mask: "1234",
+      last_sync_at: new Date("2026-01-04T00:00:00.000Z"),
+      has_new_transactions: true,
+      error_code: null,
+      error_message: null,
+      updated_at: new Date("2026-01-04T00:00:00.000Z"),
+      plaid_item_id: "item-secret",
+      plaid_account_id: "plaid-secret",
+      access_token_ciphertext: "ciphertext-secret",
+    },
   ];
 
   const zeroCount = vi.fn(async () => 0);
@@ -50,6 +77,9 @@ async function loadHandler(role = "OWNER") {
       findFirst: vi.fn(async (args: any) => (args?.where?.business_id === "biz-a" && args?.where?.user_id === "actor" ? { role } : null)),
     },
     account: {
+      findMany: vi.fn(async (args: any) =>
+        accounts.filter((account) => account.business_id === args?.where?.business_id),
+      ),
       findFirst: vi.fn(async (args: any) => {
         const row = accounts.find((account) => account.id === args?.where?.id && account.business_id === args?.where?.business_id);
         return row ? project(row, args?.select) : null;
@@ -77,6 +107,11 @@ async function loadHandler(role = "OWNER") {
     bankConnection: {
       count: zeroCount,
       deleteMany: vi.fn(async () => ({ count: 0 })),
+      findMany: vi.fn(async (args: any) =>
+        bankConnections
+          .filter((conn) => conn.account_id === "acct-a" && args?.where?.business_id === "biz-a")
+          .map((conn) => project(conn, args?.select)),
+      ),
     },
     upload: { count: zeroCount },
     reconcileSnapshot: { count: zeroCount },
@@ -98,6 +133,39 @@ afterEach(() => {
 });
 
 describe("account business scoping", () => {
+  test("lists accounts with safe Plaid connection summaries", async () => {
+    const { handler, prisma } = await loadHandler("OWNER");
+
+    const res = await handler(event("GET", "/v1/businesses/biz-a/accounts", "biz-a"));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.accounts).toHaveLength(2);
+    expect(body.accounts[0]).toMatchObject({
+      id: "acct-a",
+      plaid_connection: {
+        connected: true,
+        status: "CONNECTED",
+        institution_name: "Example Bank",
+        last4: "1234",
+        last_sync_at: "2026-01-04T00:00:00.000Z",
+        has_new_transactions: true,
+      },
+    });
+    expect(body.accounts[0].plaid_connection).not.toHaveProperty("plaid_item_id");
+    expect(body.accounts[0].plaid_connection).not.toHaveProperty("plaid_account_id");
+    expect(body.accounts[0].plaid_connection).not.toHaveProperty("access_token_ciphertext");
+    expect(body.accounts.find((account: any) => account.id === "acct-c")?.plaid_connection).toBeNull();
+    expect(prisma.bankConnection.findMany).toHaveBeenCalledWith({
+      where: { business_id: "biz-a" },
+      select: expect.not.objectContaining({
+        plaid_item_id: expect.anything(),
+        plaid_account_id: expect.anything(),
+        access_token_ciphertext: expect.anything(),
+      }),
+    });
+  });
+
   test("blocks a Business A user from patching a Business B account", async () => {
     const { handler, prisma } = await loadHandler("OWNER");
 

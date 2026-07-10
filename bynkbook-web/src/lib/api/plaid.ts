@@ -24,6 +24,14 @@ export async function plaidExchange(
     endDate?: string; // optional YYYY-MM-DD
     institution?: { name?: string; institution_id?: string };
     mask?: string;
+    additionalAccounts?: Array<{
+      plaidAccountId: string;
+      name: string;
+      type?: string;
+      subtype?: string;
+      mask?: string;
+      effectiveStartDate?: string;
+    }>;
   }
 ) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/exchange`, {
@@ -90,6 +98,14 @@ export async function plaidCreateAccount(businessId: string, body: {
   mask?: string;
   name: string;
   type: string;
+  additionalAccounts?: Array<{
+    plaidAccountId: string;
+    name: string;
+    type?: string;
+    subtype?: string;
+    mask?: string;
+    effectiveStartDate?: string;
+  }>;
 }) {
   return apiFetch(`/v1/businesses/${businessId}/plaid/create-account`, {
     method: "POST",

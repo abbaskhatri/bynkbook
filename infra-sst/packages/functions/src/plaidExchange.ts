@@ -23,6 +23,7 @@ export async function handler(event: any) {
   const plaidAccountId = (body?.plaidAccountId ?? "").toString().trim();
   const institution = body?.institution ?? undefined;
   const mask = (body?.mask ?? "").toString().trim() || undefined;
+  const additionalAccounts = Array.isArray(body?.additionalAccounts) ? body.additionalAccounts : [];
 
   if (!publicToken) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing public_token" }) };
   if (!plaidAccountId) return { statusCode: 400, headers: { "content-type": "application/json" }, body: JSON.stringify({ ok: false, error: "Missing plaidAccountId" }) };
@@ -37,5 +38,6 @@ export async function handler(event: any) {
     institution,
     plaidAccountId,
     mask,
+    additionalAccounts,
   } as any);
 }

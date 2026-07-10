@@ -39,6 +39,9 @@ function plaidWebhookUrl() {
 
 function reconnectStatusForPlaidFailure(code: string, message: string) {
   const text = `${code} ${message}`.toUpperCase();
+  if (text.includes("NO_ACCOUNTS") || text.includes("INVALID_ACCOUNT")) {
+    return "PLAID_ACCOUNT_MISSING";
+  }
   if (text.includes("WRONG PLAID ENVIRONMENT") || text.includes("INVALID_ACCESS_TOKEN")) {
     return "ENV_MISMATCH_RECONNECT_REQUIRED";
   }
@@ -56,6 +59,10 @@ function reconnectStatusForPlaidFailure(code: string, message: string) {
 
 function plaidSyncFailureUserMessage(status: string, code: string) {
   const text = `${status} ${code}`.toUpperCase();
+  if (text.includes("PLAID_ACCOUNT_MISSING") || text.includes("NO_ACCOUNTS") || text.includes("INVALID_ACCOUNT")) {
+    return "The selected bank account is no longer available from Plaid. Reconnect the bank feed and choose the account again.";
+  }
+
   if (
     text.includes("REAUTH_REQUIRED") ||
     text.includes("ITEM_LOGIN_REQUIRED") ||
@@ -76,6 +83,9 @@ function plaidSyncFailureUserMessage(status: string, code: string) {
 function canDeferPostReconnectSyncFailure(status: string, code: string) {
   const text = `${status} ${code}`.toUpperCase();
   if (
+    text.includes("PLAID_ACCOUNT_MISSING") ||
+    text.includes("NO_ACCOUNTS") ||
+    text.includes("INVALID_ACCOUNT") ||
     text.includes("REAUTH_REQUIRED") ||
     text.includes("ITEM_LOGIN_REQUIRED") ||
     text.includes("LOGIN_REQUIRED") ||
@@ -141,10 +151,68 @@ function isReconnectRequiredStatus(status: string) {
     s === "LOGIN_REQUIRED" ||
     s === "ITEM_LOGIN_REQUIRED" ||
     s === "ENV_MISMATCH_RECONNECT_REQUIRED" ||
+    s === "PLAID_ACCOUNT_MISSING" ||
     s === "DISCONNECTED" ||
     s === "INACTIVE" ||
     s === "EXPIRED"
   );
+}
+
+async function removePlaidItemBestEffort(plaid: any, accessToken: string) {
+  try {
+    await plaid.itemRemove?.({ access_token: accessToken });
+  } catch {
+    // Best-effort cleanup only. The access token is not stored if validation fails.
+  }
+}
+
+async function verifySelectedPlaidAccount(params: {
+  plaid: any;
+  accessToken: string;
+  plaidAccountId: string;
+}) {
+  const selectedAccountId = String(params.plaidAccountId ?? "").trim();
+  if (!selectedAccountId) return null;
+
+  const accountsRes = await params.plaid.accountsGet({ access_token: params.accessToken });
+  const accounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
+  return accounts.find((account: any) => String(account?.account_id ?? "") === selectedAccountId) ?? null;
+}
+
+function accountTypeFromPlaidValue(input?: { type?: string; subtype?: string }, fallback = "CHECKING") {
+  const raw = `${input?.subtype ?? ""} ${input?.type ?? ""}`.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw.includes("credit")) return "CREDIT_CARD";
+  if (raw.includes("saving")) return "SAVINGS";
+  if (raw.includes("checking") || raw.includes("depository")) return "CHECKING";
+  return "OTHER";
+}
+
+function normalizeAdditionalPlaidAccounts(rows: any[]) {
+  const seen = new Set<string>();
+  const out: Array<{
+    plaidAccountId: string;
+    name: string;
+    type: string;
+    subtype?: string;
+    mask?: string;
+    effectiveStartDate?: string;
+  }> = [];
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const plaidAccountId = String(row?.plaidAccountId ?? row?.id ?? "").trim();
+    if (!plaidAccountId || seen.has(plaidAccountId)) continue;
+    seen.add(plaidAccountId);
+
+    const name = String(row?.name ?? "Bank Account").trim().slice(0, 120) || "Bank Account";
+    const type = String(row?.type ?? accountTypeFromPlaidValue(row)).trim().toUpperCase();
+    const subtype = String(row?.subtype ?? "").trim() || undefined;
+    const mask = String(row?.mask ?? "").trim().slice(0, 8) || undefined;
+    const effectiveStartDate = String(row?.effectiveStartDate ?? "").trim() || undefined;
+    out.push({ plaidAccountId, name, type, subtype, mask, effectiveStartDate });
+  }
+
+  return out;
 }
 
 export async function recordPlaidConnectionFailure(params: {
@@ -433,8 +501,29 @@ export async function exchangePublicToken(params: {
   institution?: { name?: string; institution_id?: string };
   plaidAccountId: string;
   mask?: string; // last 4 digits (Plaid account mask)
+  allowOpeningAdjustment?: boolean;
+  additionalAccounts?: Array<{
+    plaidAccountId?: string;
+    id?: string;
+    name?: string;
+    type?: string;
+    subtype?: string;
+    mask?: string;
+    effectiveStartDate?: string;
+  }>;
 }) {
-  const { businessId, accountId, userId, publicToken, effectiveStartDate, institution, plaidAccountId, mask } = params;
+  const {
+    businessId,
+    accountId,
+    userId,
+    publicToken,
+    effectiveStartDate,
+    institution,
+    plaidAccountId,
+    mask,
+    allowOpeningAdjustment = false,
+    additionalAccounts,
+  } = params;
 
   const prisma = await getPrisma();
   const role = await requireMembership(prisma, businessId, userId);
@@ -451,7 +540,60 @@ export async function exchangePublicToken(params: {
 
   const accessToken = ex.data.access_token;
   const itemId = ex.data.item_id;
+  const accountsRes = await plaid.accountsGet({ access_token: accessToken });
+  const verifiedPlaidAccounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
+  const verifiedAccount =
+    verifiedPlaidAccounts.find((account: any) => String(account?.account_id ?? "") === plaidAccountId) ?? null;
+  if (!verifiedAccount) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    return json(400, {
+      ok: false,
+      error: "Selected Plaid account was not found on the exchanged Item",
+      code: "PLAID_ACCOUNT_SELECTION_MISMATCH",
+    });
+  }
+
+  const additional = normalizeAdditionalPlaidAccounts(additionalAccounts ?? [])
+    .filter((row) => row.plaidAccountId !== plaidAccountId);
+  const verifiedByPlaidId = new Map(
+    verifiedPlaidAccounts.map((account: any) => [String(account?.account_id ?? ""), account]),
+  );
+  const invalidAdditional = additional.find((row) => !verifiedByPlaidId.has(row.plaidAccountId));
+  if (invalidAdditional) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    return json(400, {
+      ok: false,
+      error: "One or more selected Plaid accounts were not found on the exchanged Item",
+      code: "PLAID_ACCOUNT_SELECTION_MISMATCH",
+    });
+  }
+
+  const selectedPlaidIds = additional.map((row) => row.plaidAccountId);
+  const duplicateConnections = selectedPlaidIds.length
+    ? await prisma.bankConnection.findMany({
+        where: {
+          business_id: businessId,
+          plaid_account_id: { in: selectedPlaidIds } as any,
+        },
+        select: { account_id: true, plaid_account_id: true },
+      })
+    : [];
+  const conflictingConnection = duplicateConnections.find(
+    (row: any) => String(row.account_id) !== String(accountId) || String(row.plaid_account_id) !== String(plaidAccountId),
+  );
+  if (conflictingConnection) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    return json(409, {
+      ok: false,
+      error: "One of the selected Plaid accounts is already connected to another BynkBook account",
+      code: "PLAID_ACCOUNT_ALREADY_CONNECTED",
+    });
+  }
+
+  const verifiedMask = verifiedAccount?.mask ? String(verifiedAccount.mask) : mask ?? null;
   const ciphertext = await encryptAccessToken(accessToken);
+  const openingAdjustmentCreatedAt = allowOpeningAdjustment ? null : new Date();
+  const openingPolicy = allowOpeningAdjustment ? "AUTO" : "MANUAL";
 
   // Upsert one connection per account
   await prisma.bankConnection.upsert({
@@ -465,12 +607,12 @@ export async function exchangePublicToken(params: {
       effective_start_date: start,
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
-      plaid_mask: mask ?? null,
+      plaid_mask: verifiedMask,
       status: "CONNECTED",
       sync_cursor: null,
       has_new_transactions: false,
-      opening_policy: "MANUAL",
-      opening_adjustment_created_at: new Date(),
+      opening_policy: openingPolicy,
+      opening_adjustment_created_at: openingAdjustmentCreatedAt,
     },
     update: {
       plaid_item_id: itemId,
@@ -479,19 +621,88 @@ export async function exchangePublicToken(params: {
       effective_start_date: start,
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
-      plaid_mask: mask ?? null,
+      plaid_mask: verifiedMask,
       status: "CONNECTED",
       sync_cursor: null,
       error_code: null,
       error_message: null,
       has_new_transactions: false,
-      opening_policy: "MANUAL",
-      opening_adjustment_created_at: new Date(),
+      opening_policy: openingPolicy,
+      opening_adjustment_created_at: openingAdjustmentCreatedAt,
       updated_at: new Date(),
     },
   });
 
-  return json(200, { ok: true, connected: true, effectiveStartDate: start.toISOString().slice(0, 10) });
+  const createdAdditionalAccounts: any[] = [];
+  for (const row of additional) {
+    const verified = verifiedByPlaidId.get(row.plaidAccountId) as any;
+    const extraStart = await derivePlaidEffectiveStartDate(
+      prisma,
+      businessId,
+      accountId,
+      row.effectiveStartDate ?? effectiveStartDate,
+    );
+    if (!extraStart) {
+      await removePlaidItemBestEffort(plaid, accessToken);
+      return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
+    }
+
+    const extraAccountId = (await import("node:crypto")).randomUUID();
+    const extraMask = verified?.mask ? String(verified.mask) : row.mask ?? null;
+    const extraType = accountTypeFromPlaidValue(
+      { type: verified?.type ?? row.type, subtype: verified?.subtype ?? row.subtype },
+      row.type || "CHECKING",
+    );
+
+    await prisma.$transaction([
+      prisma.account.create({
+        data: {
+          id: extraAccountId,
+          business_id: businessId,
+          name: row.name,
+          type: extraType,
+          opening_balance_cents: 0n,
+          opening_balance_date: extraStart,
+          institution_name: institution?.name ?? null,
+          last4: extraMask,
+        } as any,
+      }),
+      prisma.bankConnection.create({
+        data: {
+          business_id: businessId,
+          account_id: extraAccountId,
+          plaid_item_id: itemId,
+          plaid_account_id: row.plaidAccountId,
+          access_token_ciphertext: ciphertext,
+          effective_start_date: extraStart,
+          institution_name: institution?.name ?? null,
+          institution_id: institution?.institution_id ?? null,
+          plaid_mask: extraMask,
+          status: "CONNECTED",
+          sync_cursor: null,
+          has_new_transactions: false,
+          opening_policy: "AUTO",
+          opening_adjustment_created_at: null,
+        } as any,
+      }),
+    ]);
+
+    createdAdditionalAccounts.push({
+      accountId: extraAccountId,
+      plaidAccountId: row.plaidAccountId,
+      name: row.name,
+      type: extraType,
+      last4: extraMask,
+      effectiveStartDate: extraStart.toISOString().slice(0, 10),
+    });
+  }
+
+  return json(200, {
+    ok: true,
+    connected: true,
+    effectiveStartDate: start.toISOString().slice(0, 10),
+    additionalAccounts: createdAdditionalAccounts,
+  });
 }
 
 export async function getStatus(params: { businessId: string; accountId: string; userId: string }) {
@@ -525,42 +736,69 @@ export async function getStatus(params: { businessId: string; accountId: string;
       error: null,
     });
     
-  // TS guard: keep a non-null reference for the rest of this function (incl. nested helpers)
+  // TS guard: keep a non-null reference for the rest of this function (incl. nested helpers).
+  // Status is the app's active Plaid health probe: the local DB row is not enough
+  // to prove the selected Plaid account still exists on the Item.
   const connRow = conn;
+  let plaidAccountLive: boolean | null = null;
+  let plaidHealthErrorCode: string | null = null;
+  let plaidHealthErrorMessage: string | null = null;
 
-  // Backfill plaid_mask for legacy connections (best-effort).
-  // This keeps UI non-placeholder while avoiding new schemas on Account.
-  if (!conn.plaid_mask) {
-    try {
-      const plaid = await getPlaidClient();
-      const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
-      let mask: string | null = null;
+  try {
+    const plaid = await getPlaidClient();
+    const accessToken = await decryptAccessToken(connRow.access_token_ciphertext);
+    const accountsRes = await plaid.accountsGet({ access_token: accessToken });
+    const acct = accountsRes.data.accounts.find((a) => a.account_id === connRow.plaid_account_id);
 
-      try {
-        const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
-        const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-        mask = acct?.mask ? String(acct.mask) : null;
-      } catch { }
-
-      if (!mask) {
-        try {
-          const ar = await plaid.accountsGet({ access_token: accessToken });
-          const acct2 = ar.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-          mask = acct2?.mask ? String(acct2.mask) : null;
-        } catch { }
-      }
-
-      if (mask) {
+    if (acct) {
+      plaidAccountLive = true;
+      const mask = acct?.mask ? String(acct.mask) : null;
+      if (mask && mask !== connRow.plaid_mask) {
         await prisma.bankConnection.updateMany({
           where: { business_id: businessId, account_id: accountId },
           data: { plaid_mask: mask, updated_at: new Date() },
         });
-        // update in-memory for response
-        (conn as any).plaid_mask = mask;
+        (connRow as any).plaid_mask = mask;
       }
-    } catch {
-      // Never fail status just because backfill failed
+    } else {
+      plaidAccountLive = false;
+      plaidHealthErrorCode = "PLAID_ACCOUNT_MISSING";
+      plaidHealthErrorMessage = "The selected bank account is no longer available from Plaid.";
+      await prisma.bankConnection.updateMany({
+        where: { business_id: businessId, account_id: accountId },
+        data: {
+          status: "PLAID_ACCOUNT_MISSING",
+          error_code: plaidHealthErrorCode,
+          error_message: plaidHealthErrorMessage,
+          updated_at: new Date(),
+        },
+      });
+      (connRow as any).status = "PLAID_ACCOUNT_MISSING";
+      (connRow as any).error_code = plaidHealthErrorCode;
+      (connRow as any).error_message = plaidHealthErrorMessage;
     }
+  } catch (healthError: any) {
+    plaidHealthErrorCode = plaidErrorCode(healthError);
+    plaidHealthErrorMessage = plaidErrorMessage(healthError);
+    const healthStatus = reconnectStatusForPlaidFailure(plaidHealthErrorCode, plaidHealthErrorMessage);
+
+    if (isReconnectRequiredStatus(healthStatus)) {
+      await prisma.bankConnection.updateMany({
+        where: { business_id: businessId, account_id: accountId },
+        data: {
+          status: healthStatus,
+          error_code: plaidHealthErrorCode,
+          error_message: plaidHealthErrorMessage,
+          updated_at: new Date(),
+        },
+      });
+      (connRow as any).status = healthStatus;
+      (connRow as any).error_code = plaidHealthErrorCode;
+      (connRow as any).error_message = plaidHealthErrorMessage;
+      plaidAccountLive = false;
+    }
+    // Transient Plaid/API failures should not make the status endpoint fail or
+    // flip a healthy feed into a reconnect-required state.
   }
 
   const rawStatus = (connRow.status ?? "").toString();
@@ -574,6 +812,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
     "LOGIN_REQUIRED",
     "ITEM_LOGIN_REQUIRED",
     "ENV_MISMATCH_RECONNECT_REQUIRED",
+    "PLAID_ACCOUNT_MISSING",
     "INACTIVE",
     "EXPIRED",
   ]);
@@ -596,6 +835,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
     // Prefer status-based short copy (user-friendly), then fallback to error_code/message.
     if (statusNorm === "REAUTH_REQUIRED") return "Re-authentication required";
     if (statusNorm === "LOGIN_REQUIRED" || statusNorm === "ITEM_LOGIN_REQUIRED") return "Login required";
+    if (statusNorm === "PLAID_ACCOUNT_MISSING") return "Selected Plaid account unavailable";
     if (statusNorm === "DISCONNECTED") return "Connection disconnected";
     if (statusNorm === "SYNC_ERROR" || statusNorm === "ERROR") return "Bank sync issue";
 
@@ -641,6 +881,9 @@ export async function getStatus(params: { businessId: string; accountId: string;
     lastKnownBalanceCents: connRow.last_known_balance_cents?.toString?.() ?? null,
     lastKnownBalanceAt: connRow.last_known_balance_at ? connRow.last_known_balance_at.toISOString() : null,
     error: connRow.error_message ?? null,
+    plaidAccountLive,
+    plaidHealthErrorCode,
+    plaidHealthErrorMessage,
   });
 }
 

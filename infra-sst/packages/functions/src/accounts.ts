@@ -67,20 +67,56 @@ export async function handler(event: any) {
       where: { business_id: businessId },
       orderBy: { created_at: "desc" },
     });
+    const connections = await prisma.bankConnection.findMany({
+      where: { business_id: businessId },
+      select: {
+        account_id: true,
+        status: true,
+        institution_name: true,
+        plaid_mask: true,
+        last_sync_at: true,
+        has_new_transactions: true,
+        error_code: true,
+        error_message: true,
+        updated_at: true,
+      },
+    });
+    const connectionByAccountId = new Map(connections.map((conn: any) => [conn.account_id, conn]));
 
     return json(200, {
       ok: true,
-      accounts: rows.map((a: any) => ({
-        id: a.id,
-        business_id: a.business_id,
-        name: a.name,
-        type: a.type,
-        opening_balance_cents: a.opening_balance_cents?.toString?.() ?? String(a.opening_balance_cents),
-        opening_balance_date: serializeDateOnly(a.opening_balance_date),
-        archived_at: a.archived_at ? a.archived_at.toISOString() : null,
-        created_at: a.created_at?.toISOString?.() ?? a.created_at,
-        updated_at: a.updated_at?.toISOString?.() ?? a.updated_at,
-      })),
+      accounts: rows.map((a: any) => {
+        const conn: any = connectionByAccountId.get(a.id) ?? null;
+        const statusNorm = String(conn?.status ?? "").trim().toUpperCase();
+        const connected =
+          !!conn &&
+          (statusNorm === "CONNECTED" || statusNorm === "PENDING_SYNC" || statusNorm === "SYNC_ERROR" || statusNorm === "ERROR");
+
+        return {
+          id: a.id,
+          business_id: a.business_id,
+          name: a.name,
+          type: a.type,
+          opening_balance_cents: a.opening_balance_cents?.toString?.() ?? String(a.opening_balance_cents),
+          opening_balance_date: serializeDateOnly(a.opening_balance_date),
+          archived_at: a.archived_at ? a.archived_at.toISOString() : null,
+          created_at: a.created_at?.toISOString?.() ?? a.created_at,
+          updated_at: a.updated_at?.toISOString?.() ?? a.updated_at,
+          plaid_connection: conn
+            ? {
+              connected,
+              status: conn.status ?? null,
+              institution_name: conn.institution_name ?? null,
+              last4: conn.plaid_mask ?? null,
+              last_sync_at: conn.last_sync_at ? conn.last_sync_at.toISOString() : null,
+              has_new_transactions: !!conn.has_new_transactions,
+              error_code: conn.error_code ?? null,
+              error_message: conn.error_message ?? null,
+              updated_at: conn.updated_at ? conn.updated_at.toISOString() : null,
+            }
+            : null,
+        };
+      }),
     });
   }
 

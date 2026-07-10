@@ -143,6 +143,14 @@ const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+type PlaidAccountChoice = {
+  id: string;
+  name?: string;
+  mask?: string;
+  type?: string;
+  subtype?: string;
+};
+
 const themeOptions: Array<{
   value: ThemePreference;
   label: string;
@@ -162,6 +170,15 @@ function formatAccountType(t: AccountType) {
     case "OTHER": return "Other";
     default: return t;
   }
+}
+
+function accountTypeFromPlaid(input?: { type?: string; subtype?: string }, fallback: AccountType = "CHECKING"): AccountType {
+  const raw = `${input?.subtype ?? ""} ${input?.type ?? ""}`.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw.includes("credit")) return "CREDIT_CARD";
+  if (raw.includes("saving")) return "SAVINGS";
+  if (raw.includes("checking") || raw.includes("depository")) return "CHECKING";
+  return "OTHER";
 }
 
 function formatShortDate(input?: string | null) {
@@ -423,6 +440,8 @@ export default function SettingsPageClient() {
     public_token: string;
     institution?: { name?: string; institution_id?: string };
     plaidAccountId: string;
+    accounts?: PlaidAccountChoice[];
+    createAdditionalPlaidAccountIds?: string[];
     mask?: string;
     name: string;
     type: string;
@@ -2326,20 +2345,31 @@ export default function SettingsPageClient() {
                                     : undefined;
 
                                   const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
-                                  const first = accountsRaw[0];
+                                  const accounts: PlaidAccountChoice[] = accountsRaw
+                                    .map((a: any) => ({
+                                      id: String(a?.id ?? ""),
+                                      name: a?.name ? String(a.name) : undefined,
+                                      mask: a?.mask ? String(a.mask) : undefined,
+                                      type: a?.type ? String(a.type) : undefined,
+                                      subtype: a?.subtype ? String(a.subtype) : undefined,
+                                    }))
+                                    .filter((a: PlaidAccountChoice) => !!a.id);
+                                  const first = accounts[0];
                                   if (!first?.id) {
                                     setErr("Plaid returned no accounts");
                                     return;
                                   }
 
-                                  // Prefill draft from Plaid (user can edit on review)
+                                  // Prefill draft from Plaid; user confirms the exact account on review.
                                   setPlaidDraft({
                                     public_token,
                                     institution,
-                                    plaidAccountId: String(first.id),
-                                    mask: first.mask ? String(first.mask) : undefined,
-                                    name: first.name ? String(first.name) : (institution?.name ? `${institution.name} Account` : "Bank Account"),
-                                    type: String((first.subtype ?? first.type ?? "CHECKING")).toUpperCase(),
+                                    plaidAccountId: first.id,
+                                    accounts,
+                                    createAdditionalPlaidAccountIds: [],
+                                    mask: first.mask,
+                                    name: first.name ?? (institution?.name ? `${institution.name} Account` : "Bank Account"),
+                                    type: accountTypeFromPlaid(first),
                                     effectiveStartDate: openingDate,
                                   });
 
@@ -2393,6 +2423,19 @@ export default function SettingsPageClient() {
                               mask: plaidDraft.mask,
                               name: plaidDraft.name.trim(),
                               type: plaidDraft.type,
+                              additionalAccounts: (plaidDraft.accounts ?? [])
+                                .filter((account) =>
+                                  account.id !== plaidDraft.plaidAccountId &&
+                                  (plaidDraft.createAdditionalPlaidAccountIds ?? []).includes(account.id)
+                                )
+                                .map((account) => ({
+                                  plaidAccountId: account.id,
+                                  name: account.name ?? (plaidDraft.institution?.name ? `${plaidDraft.institution.name} Account` : "Bank Account"),
+                                  type: accountTypeFromPlaid(account),
+                                  subtype: account.subtype,
+                                  mask: account.mask,
+                                  effectiveStartDate: plaidDraft.effectiveStartDate,
+                                })),
                             };
 
                             const res: any = await plaidCreateAccount(selectedBusinessId, body);
@@ -2411,7 +2454,7 @@ export default function SettingsPageClient() {
                             setSaving(false);
                           }
                         }}
-                        disabled={saving || !plaidDraft?.name?.trim()}
+                        disabled={saving || !plaidDraft?.name?.trim() || !plaidDraft?.plaidAccountId}
                       >
                         {saving ? "Creating…" : "Create Account"}
                       </Button>
@@ -2420,6 +2463,88 @@ export default function SettingsPageClient() {
                 >
                   <div className="space-y-3">
                     {err ? <div className="text-sm text-bb-status-danger-fg">{err}</div> : null}
+
+                    {(plaidDraft?.accounts?.length ?? 0) > 0 ? (
+                      <div className="space-y-2">
+                        <Label>Bank account</Label>
+                        <div className="space-y-2">
+                          {(plaidDraft?.accounts ?? []).map((bankAccount) => {
+                            const label = `${bankAccount.name ?? "Account"}${bankAccount.mask ? ` • ****${bankAccount.mask}` : ""}${bankAccount.subtype ? ` • ${bankAccount.subtype}` : bankAccount.type ? ` • ${bankAccount.type}` : ""}`;
+                            return (
+                              <label
+                                key={bankAccount.id}
+                                className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
+                              >
+                                <input
+                                  type="radio"
+                                  name="new-plaid-account"
+                                  className="h-4 w-4"
+                                  checked={plaidDraft?.plaidAccountId === bankAccount.id}
+                                  onChange={() =>
+                                    setPlaidDraft((cur) =>
+                                      cur
+                                        ? {
+                                            ...cur,
+                                            plaidAccountId: bankAccount.id,
+                                            createAdditionalPlaidAccountIds: (cur.createAdditionalPlaidAccountIds ?? []).filter(
+                                              (id) => id !== bankAccount.id
+                                            ),
+                                            mask: bankAccount.mask,
+                                            name:
+                                              bankAccount.name ??
+                                              (cur.institution?.name ? `${cur.institution.name} Account` : cur.name),
+                                            type: accountTypeFromPlaid(bankAccount, cur.type as AccountType),
+                                          }
+                                        : cur
+                                    )
+                                  }
+                                />
+                                <span className="min-w-0 truncate">{label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {(plaidDraft?.accounts ?? []).some((account) => account.id !== plaidDraft?.plaidAccountId) ? (
+                      <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+                        <div className="text-xs font-semibold text-foreground">Other consented accounts</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                          Optional: create separate BynkBook accounts for the other bank accounts selected in Plaid.
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {(plaidDraft?.accounts ?? [])
+                            .filter((account) => account.id !== plaidDraft?.plaidAccountId)
+                            .map((account) => {
+                              const label = `${account.name ?? "Account"}${account.mask ? ` • ****${account.mask}` : ""}${account.subtype ? ` • ${account.subtype}` : account.type ? ` • ${account.type}` : ""}`;
+                              const checked = (plaidDraft?.createAdditionalPlaidAccountIds ?? []).includes(account.id);
+                              return (
+                                <label key={account.id} className="flex items-center gap-2 text-xs text-foreground">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4"
+                                    checked={checked}
+                                    onChange={(e) =>
+                                      setPlaidDraft((cur) => {
+                                        if (!cur) return cur;
+                                        const current = cur.createAdditionalPlaidAccountIds ?? [];
+                                        return {
+                                          ...cur,
+                                          createAdditionalPlaidAccountIds: e.target.checked
+                                            ? [...current, account.id]
+                                            : current.filter((id) => id !== account.id),
+                                        };
+                                      })
+                                    }
+                                  />
+                                  <span className="min-w-0 truncate">{label}</span>
+                                </label>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="space-y-1">
                       <Label>Name</Label>
