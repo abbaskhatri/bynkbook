@@ -296,6 +296,11 @@ const plaidStatusHandler = {
   handler: "packages/functions/src/plaidStatus.handler",
 } satisfies ApiHandler;
 
+const plaidRepairAccountHandler = {
+  ...plaidHandler,
+  handler: "packages/functions/src/plaidRepairAccount.handler",
+} satisfies ApiHandler;
+
 const plaidDisconnectHandler = {
   ...plaidHandler,
   handler: "packages/functions/src/plaidDisconnect.handler",
@@ -323,6 +328,12 @@ api.route(
 api.route(
   "GET /v1/businesses/{businessId}/accounts/{accountId}/plaid/status",
   plaidStatusHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/repair-account",
+  plaidRepairAccountHandler,
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
 

@@ -46,6 +46,21 @@ export async function plaidStatus(businessId: string, accountId: string) {
   });
 }
 
+export async function plaidRepairAccount(
+  businessId: string,
+  accountId: string,
+  body: {
+    plaidAccountId: string;
+    institution?: { name?: string; institution_id?: string };
+    mask?: string;
+  }
+) {
+  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/repair-account`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function plaidDisconnect(businessId: string, accountId: string) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/disconnect`, {
     method: "DELETE",

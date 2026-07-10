@@ -7,6 +7,7 @@ import {
   plaidExchange,
   plaidLinkToken,
   plaidPreviewOpening,
+  plaidRepairAccount,
   plaidReconnectLinkToken,
   plaidSync,
 } from "@/lib/api/plaid";
@@ -166,6 +167,7 @@ export function PlaidConnectButton(props: Props) {
   const [pendingAccounts, setPendingAccounts] = useState<PlaidAccountMeta[]>([]);
   const [selectedPlaidAccountId, setSelectedPlaidAccountId] = useState<string>("");
   const [selectedAdditionalPlaidAccountIds, setSelectedAdditionalPlaidAccountIds] = useState<string[]>([]);
+  const [pendingReconnectRepair, setPendingReconnectRepair] = useState(false);
 
   // Initial sync progress
   const [openSyncing, setOpenSyncing] = useState(false);
@@ -189,6 +191,7 @@ export function PlaidConnectButton(props: Props) {
     setPendingAccounts([]);
     setSelectedPlaidAccountId("");
     setSelectedAdditionalPlaidAccountIds([]);
+    setPendingReconnectRepair(false);
   }, []);
 
   const runInitialSync = useCallback(async (options?: { afterReconnect?: boolean }) => {
@@ -288,6 +291,34 @@ export function PlaidConnectButton(props: Props) {
     }
   }, [accountId, businessId, effectiveStartDate, pendingInstitution, resetPendingSelection, runInitialSync]);
 
+  const completeReconnectRepair = useCallback(async (
+    plaidAccountId: string,
+    account?: PlaidAccountMeta,
+    institution?: any
+  ) => {
+    setBusy(true);
+    setErrorMsg(null);
+
+    try {
+      const repaired = await plaidRepairAccount(businessId, accountId, {
+        plaidAccountId,
+        institution: institution ?? pendingInstitution ?? undefined,
+        mask: account?.mask ?? undefined,
+      });
+      if (!repaired?.ok) throw new Error(repaired?.error ?? "Bank account repair failed");
+
+      setOpenSelect(false);
+      resetPendingSelection();
+
+      const syncRes = await runInitialSync({ afterReconnect: true });
+      onConnected(syncRes);
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Plaid reconnection failed");
+    } finally {
+      setBusy(false);
+    }
+  }, [accountId, businessId, onConnected, pendingInstitution, resetPendingSelection, runInitialSync]);
+
   const finishOpeningReview = useCallback(async (choice: "APPLY_PLAID" | "KEEP_MANUAL") => {
     const review = openingReview;
     if (!review) return;
@@ -352,12 +383,6 @@ export function PlaidConnectButton(props: Props) {
         token: linkToken,
         onSuccess: async (public_token: string, metadata: any) => {
           try {
-            if (mode === "reconnect" || lt?.mode === "update") {
-              const syncRes = await runInitialSync({ afterReconnect: true });
-              onConnected(syncRes);
-              return;
-            }
-
             const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
             const accounts: PlaidAccountMeta[] = accountsRaw
               .map((a: any) => ({
@@ -372,6 +397,28 @@ export function PlaidConnectButton(props: Props) {
             const institution = metadata?.institution
               ? { name: metadata.institution.name, institution_id: metadata.institution.institution_id }
               : undefined;
+
+            if (mode === "reconnect" || lt?.mode === "update") {
+              if (accounts.length === 1) {
+                await completeReconnectRepair(accounts[0].id, accounts[0], institution);
+                return;
+              }
+
+              if (accounts.length > 1) {
+                setPendingPublicToken(null);
+                setPendingInstitution(institution);
+                setPendingAccounts(accounts);
+                setSelectedPlaidAccountId(accounts[0]?.id ?? "");
+                setSelectedAdditionalPlaidAccountIds([]);
+                setPendingReconnectRepair(true);
+                setOpenSelect(true);
+                return;
+              }
+
+              const syncRes = await runInitialSync({ afterReconnect: true });
+              onConnected(syncRes);
+              return;
+            }
 
             if (accounts.length === 0) throw new Error("Plaid returned no accounts");
 
@@ -414,7 +461,7 @@ export function PlaidConnectButton(props: Props) {
         openingRef.current = false;
       }
     }
-  }, [accountId, businessId, busy, completeExistingAccountConnect, disabled, mode, onConnected, runInitialSync]);
+  }, [accountId, businessId, busy, completeExistingAccountConnect, completeReconnectRepair, disabled, mode, onConnected, runInitialSync]);
 
   const requestPlaidLaunch = useCallback(() => {
     if (disabled) return;
@@ -526,12 +573,14 @@ export function PlaidConnectButton(props: Props) {
           setOpenSelect(false);
           resetPendingSelection();
         }}
-        title="Choose bank account"
+        title={pendingReconnectRepair ? "Repair bank account mapping" : "Choose bank account"}
         size="md"
       >
         <div className="space-y-4">
           <div className="text-xs text-bb-text-muted">
-            Select exactly one bank account to link to this BynkBook account.
+            {pendingReconnectRepair
+              ? "Plaid reconnected. Select the live bank account that belongs to this BynkBook account."
+              : "Select exactly one bank account to link to this BynkBook account."}
           </div>
 
           <div className="space-y-2">
@@ -555,7 +604,7 @@ export function PlaidConnectButton(props: Props) {
             })}
           </div>
 
-          {pendingAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
+          {!pendingReconnectRepair && pendingAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
             <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
               <div className="text-xs font-semibold text-bb-text">Other consented accounts</div>
               <div className="mt-1 text-[11px] text-bb-text-muted">
@@ -600,11 +649,16 @@ export function PlaidConnectButton(props: Props) {
             <button
               type="button"
               className="h-8 px-3 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-50"
-              disabled={busy || !pendingPublicToken || !selectedPlaidAccountId}
+              disabled={busy || (!pendingReconnectRepair && !pendingPublicToken) || !selectedPlaidAccountId}
               onClick={async () => {
-                if (!pendingPublicToken || !selectedPlaidAccountId) return;
+                if (!selectedPlaidAccountId) return;
 
                 const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
+                if (pendingReconnectRepair) {
+                  await completeReconnectRepair(selectedPlaidAccountId, selected, pendingInstitution);
+                  return;
+                }
+                if (!pendingPublicToken) return;
                 const additional = pendingAccounts.filter(
                   (x) => x.id !== selectedPlaidAccountId && selectedAdditionalPlaidAccountIds.includes(x.id),
                 );

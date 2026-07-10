@@ -333,6 +333,7 @@ export default function SettingsPageClient() {
   const [plaidByAccount, setPlaidByAccount] = useState<Record<string, PlaidCellState>>({});
   const [plaidLoading, setPlaidLoading] = useState<Record<string, boolean>>({});
   const [plaidChecked, setPlaidChecked] = useState<Record<string, boolean>>({});
+  const plaidStatusRequestedRef = useRef<Set<string>>(new Set());
 
   const institutionSuggestions = useMemo(() => {
     const set = new Set<string>();
@@ -961,8 +962,16 @@ export default function SettingsPageClient() {
     let cancelled = false;
 
     (async () => {
-      const toFetch = list.filter((a) => plaidByAccount[a.id] == null && !plaidLoading[a.id] && !plaidChecked[a.id]);
+      const toFetch = list.filter((a) => {
+        const connUpdated = String((a as any)?.plaid_connection?.updated_at ?? "");
+        const key = `${selectedBusinessId}:${a.id}:${connUpdated}`;
+        return !plaidStatusRequestedRef.current.has(key);
+      });
       if (toFetch.length === 0) return;
+      for (const a of toFetch) {
+        const connUpdated = String((a as any)?.plaid_connection?.updated_at ?? "");
+        plaidStatusRequestedRef.current.add(`${selectedBusinessId}:${a.id}:${connUpdated}`);
+      }
 
       setPlaidLoading((cur) => {
         const next = { ...cur };
@@ -1038,7 +1047,7 @@ export default function SettingsPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, selectedBusinessId, accountsQ.data, plaidByAccount, plaidLoading, plaidChecked]);
+  }, [activeTab, selectedBusinessId, accountsQ.data]);
 
   // Load categories when Bookkeeping tab is active
   useEffect(() => {

@@ -748,7 +748,30 @@ export async function getStatus(params: { businessId: string; accountId: string;
     const plaid = await getPlaidClient();
     const accessToken = await decryptAccessToken(connRow.access_token_ciphertext);
     const accountsRes = await plaid.accountsGet({ access_token: accessToken });
-    const acct = accountsRes.data.accounts.find((a) => a.account_id === connRow.plaid_account_id);
+    const accounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
+    let acct = accounts.find((a) => a.account_id === connRow.plaid_account_id);
+
+    if (!acct && accounts.length === 1) {
+      acct = accounts[0];
+      const repairedMask = acct?.mask ? String(acct.mask) : connRow.plaid_mask ?? null;
+      await prisma.bankConnection.updateMany({
+        where: { business_id: businessId, account_id: accountId },
+        data: {
+          plaid_account_id: String(acct.account_id),
+          plaid_mask: repairedMask,
+          status: "CONNECTED",
+          error_code: null,
+          error_message: null,
+          sync_cursor: null,
+          updated_at: new Date(),
+        },
+      });
+      (connRow as any).plaid_account_id = String(acct.account_id);
+      (connRow as any).plaid_mask = repairedMask;
+      (connRow as any).status = "CONNECTED";
+      (connRow as any).error_code = null;
+      (connRow as any).error_message = null;
+    }
 
     if (acct) {
       plaidAccountLive = true;
@@ -884,6 +907,93 @@ export async function getStatus(params: { businessId: string; accountId: string;
     plaidAccountLive,
     plaidHealthErrorCode,
     plaidHealthErrorMessage,
+  });
+}
+
+export async function repairPlaidAccountMapping(params: {
+  businessId: string;
+  accountId: string;
+  userId: string;
+  plaidAccountId: string;
+  institution?: { name?: string; institution_id?: string };
+  mask?: string;
+}) {
+  const { businessId, accountId, userId, plaidAccountId, institution, mask } = params;
+
+  const prisma = await getPrisma();
+  const role = await requireMembership(prisma, businessId, userId);
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
+
+  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
+  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+
+  const conn = await prisma.bankConnection.findFirst({
+    where: { business_id: businessId, account_id: accountId },
+  });
+  if (!conn) return json(400, { ok: false, error: "No bank connection to repair" });
+
+  const selectedPlaidAccountId = String(plaidAccountId ?? "").trim();
+  if (!selectedPlaidAccountId) return json(400, { ok: false, error: "Missing plaidAccountId" });
+
+  const duplicate = await prisma.bankConnection.findMany({
+    where: {
+      business_id: businessId,
+      plaid_account_id: selectedPlaidAccountId,
+    },
+    select: { account_id: true, plaid_account_id: true },
+  });
+  const conflict = duplicate.find((row: any) => String(row.account_id) !== String(accountId));
+  if (conflict) {
+    return json(409, {
+      ok: false,
+      error: "Selected Plaid account is already connected to another BynkBook account",
+      code: "PLAID_ACCOUNT_ALREADY_CONNECTED",
+    });
+  }
+
+  const plaid = await getPlaidClient();
+  const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+  const accountsRes = await plaid.accountsGet({ access_token: accessToken });
+  const accounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
+  const selected = accounts.find((account: any) => String(account?.account_id ?? "") === selectedPlaidAccountId);
+  if (!selected) {
+    return json(400, {
+      ok: false,
+      error: "Selected Plaid account was not found on the existing Item",
+      code: "PLAID_ACCOUNT_SELECTION_MISMATCH",
+      accounts: accounts.map((account: any) => ({
+        id: String(account?.account_id ?? ""),
+        name: account?.name ? String(account.name) : undefined,
+        mask: account?.mask ? String(account.mask) : undefined,
+        type: account?.type ? String(account.type) : undefined,
+        subtype: account?.subtype ? String(account.subtype) : undefined,
+      })).filter((account: any) => account.id),
+    });
+  }
+
+  const verifiedMask = selected?.mask ? String(selected.mask) : mask ?? null;
+  await prisma.bankConnection.updateMany({
+    where: { business_id: businessId, account_id: accountId },
+    data: {
+      plaid_account_id: selectedPlaidAccountId,
+      plaid_mask: verifiedMask,
+      institution_name: institution?.name ?? conn.institution_name ?? null,
+      institution_id: institution?.institution_id ?? conn.institution_id ?? null,
+      status: "CONNECTED",
+      error_code: null,
+      error_message: null,
+      sync_cursor: null,
+      has_new_transactions: true,
+      updated_at: new Date(),
+    },
+  });
+
+  return json(200, {
+    ok: true,
+    connected: true,
+    plaidAccountId: selectedPlaidAccountId,
+    last4: verifiedMask,
+    institutionName: institution?.name ?? conn.institution_name ?? null,
   });
 }
 
