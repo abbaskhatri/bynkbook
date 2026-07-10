@@ -78,6 +78,12 @@ async function loadSyncTransactions(options: {
       upsert: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
+    matchGroupBank: {
+      findMany: vi.fn(async () => []),
+    },
+    bankMatch: {
+      findMany: vi.fn(async () => []),
+    },
     bankTransaction: {
       findFirst: vi.fn(async () => null),
       deleteMany: vi.fn(async () => ({ count: 0 })),
@@ -101,6 +107,8 @@ async function loadSyncTransactions(options: {
     userBusinessRole: { ...defaultPrisma.userBusinessRole, ...(options.prisma?.userBusinessRole ?? {}) },
     account: { ...defaultPrisma.account, ...(options.prisma?.account ?? {}) },
     bankConnection: { ...defaultPrisma.bankConnection, ...(options.prisma?.bankConnection ?? {}) },
+    matchGroupBank: { ...defaultPrisma.matchGroupBank, ...(options.prisma?.matchGroupBank ?? {}) },
+    bankMatch: { ...defaultPrisma.bankMatch, ...(options.prisma?.bankMatch ?? {}) },
     bankTransaction: { ...defaultPrisma.bankTransaction, ...(options.prisma?.bankTransaction ?? {}) },
     entry: { ...defaultPrisma.entry, ...(options.prisma?.entry ?? {}) },
   };
@@ -544,6 +552,108 @@ describe("syncTransactions", () => {
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
     expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-new-after-history"]);
+  });
+
+  test("does not prune existing Plaid history before the reconnect effective date", async () => {
+    const start = new Date("2026-04-30T00:00:00Z");
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { effective_start_date: start, sync_cursor: null },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", afterReconnect: true });
+    expect(res.statusCode).toBe(200);
+
+    const pruneCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.data?.is_removed === true
+    );
+    expect(pruneCall).toBeUndefined();
+  });
+
+  test("does not resurrect soft-removed Plaid overlap rows during a reconnect full drain", async () => {
+    const existingHistoryThrough = new Date("2026-04-30T00:00:00Z");
+    const cleanedOverlap = makeTransaction({ transaction_id: "txn-cleaned-overlap", date: "2026-04-01" });
+    const newAfterHistory = makeTransaction({ transaction_id: "txn-new-after-history", date: "2026-05-01" });
+
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { effective_start_date: new Date("2026-04-01T00:00:00Z"), sync_cursor: null },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [cleanedOverlap, newAfterHistory],
+            modified: [],
+            removed: [],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findFirst: vi.fn(async (args: any) => {
+            if (args?.where?.plaid_transaction_id === "txn-cleaned-overlap") {
+              return { id: "removed-cleaned-row", is_removed: true };
+            }
+            if (args?.orderBy) return { posted_date: existingHistoryThrough };
+            return null;
+          }),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", afterReconnect: true });
+    const body = JSON.parse(res.body);
+    expect(res.statusCode).toBe(200);
+    expect(body.newCount).toBe(1);
+    expect(body.skippedHistoricalCount).toBe(1);
+
+    const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
+    expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-new-after-history"]);
+    const resurrectCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.plaid_transaction_id === "txn-cleaned-overlap"
+    );
+    expect(resurrectCall).toBeUndefined();
+  });
+
+  test("does not resurrect soft-removed Plaid rows during incremental duplicate updates", async () => {
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { sync_cursor: "account:plaid-acct-1:cursor-start" },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [],
+            modified: [makeTransaction({ transaction_id: "txn-cleaned-overlap", date: "2026-05-02" })],
+            removed: [],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          create: vi.fn(async () => {
+            throw new Error("duplicate");
+          }),
+          findFirst: vi.fn(async (args: any) => {
+            if (args?.where?.plaid_transaction_id === "txn-cleaned-overlap") {
+              return { id: "removed-cleaned-row", is_removed: true };
+            }
+            return null;
+          }),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.duplicateCount).toBe(0);
+    expect(body.skippedRemovedCount).toBe(1);
+
+    const resurrectCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.plaid_transaction_id === "txn-cleaned-overlap"
+    );
+    expect(resurrectCall).toBeUndefined();
   });
 
   test("preserves duplicate handling for mapped transactions and clears has_new_transactions after successful drain", async () => {

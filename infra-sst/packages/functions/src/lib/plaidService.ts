@@ -1130,21 +1130,6 @@ export async function syncTransactions(params: {
       }
     }
 
-    // Initial backfill deletion rule (only delete PLAID-sourced rows older than effectiveStartDate)
-    // Because Phase 4B has no CSV parsing, PLAID is the only source inserted here.
-    await prisma.bankTransaction.deleteMany({
-      where: {
-        business_id: businessId,
-        account_id: accountId,
-        posted_date: { lt: conn.effective_start_date },
-
-        // Critical: do NOT delete CSV-imported history.
-        // Only delete Plaid-sourced rows (source="PLAID" or null legacy Plaid rows) that have plaid_transaction_id.
-        plaid_transaction_id: { not: null },
-        OR: [{ source: "PLAID" }, { source: null }],
-      },
-    });
-
     const plaidAccountId = conn.plaid_account_id;
     const effectiveStartDate = conn.effective_start_date;
     let currentBalanceCents: bigint | null = null;
@@ -1198,6 +1183,8 @@ export async function syncTransactions(params: {
   let upgradedCount = 0;
   let duplicateCount = 0;
   let skippedHistoricalCount = 0;
+  let skippedRemovedCount = 0;
+  const retentionPrunedCount = 0;
   let historicalCutoffDate: Date | null = null;
 
   // pendingCount will be computed from DB at end (accurate), not guessed during loop
@@ -1319,9 +1306,9 @@ export async function syncTransactions(params: {
           plaid_transaction_id: t.transaction_id,
           plaid_account_id: plaidAccountId,
         },
-        select: { id: true },
+        select: { id: true, is_removed: true },
       });
-      if (!existingPlaidRow) {
+      if (!existingPlaidRow || existingPlaidRow.is_removed) {
         skippedHistoricalCount += 1;
         continue;
       }
@@ -1386,6 +1373,20 @@ export async function syncTransactions(params: {
       });
       newCount += 1;
     } catch {
+      const existingPlaidRow = await prisma.bankTransaction.findFirst({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          plaid_transaction_id: t.transaction_id,
+          plaid_account_id: plaidAccountId,
+        },
+        select: { id: true, is_removed: true },
+      });
+      if (existingPlaidRow?.is_removed) {
+        skippedRemovedCount += 1;
+        continue;
+      }
+
       duplicateCount += 1;
       await prisma.bankTransaction.updateMany({
         where: {
@@ -1596,6 +1597,8 @@ export async function syncTransactions(params: {
     upgradedCount,
     duplicateCount,
     skippedHistoricalCount,
+    skippedRemovedCount,
+    retentionPrunedCount,
     historicalCutoffDate: historicalCutoffDate ? historicalCutoffDate.toISOString().slice(0, 10) : null,
     pendingCount,
     lastSyncAt: now.toISOString(),
