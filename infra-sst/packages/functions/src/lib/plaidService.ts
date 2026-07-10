@@ -77,6 +77,22 @@ function plaidSyncFailureUserMessage(status: string, code: string) {
     return "This bank connection needs to be reconnected before transactions can sync.";
   }
 
+  if (text.includes("PRODUCT_NOT_READY")) {
+    return "Plaid is still preparing this bank's transaction data. No changes were applied; try Sync again shortly.";
+  }
+
+  if (text.includes("INSTITUTION_ERROR") || text.includes("INSTITUTION_NOT_RESPONDING")) {
+    return "Your bank is temporarily unavailable through Plaid. No changes were applied; try Sync again shortly.";
+  }
+
+  if (text.includes("RATE_LIMIT") || text.includes("INTERNAL_SERVER_ERROR") || text.includes("API_ERROR")) {
+    return "Plaid could not complete this check right now. No changes were applied; try Sync again shortly.";
+  }
+
+  if (text.includes("TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION")) {
+    return "Plaid updated the transaction stream while this check was running. No changes were applied; try Sync again.";
+  }
+
   return "Bank sync could not finish. Try again shortly; current transactions are unchanged.";
 }
 
@@ -139,6 +155,19 @@ function isPlaidMutationDuringPagination(error: any) {
   const code = plaidErrorCode(error).toUpperCase();
   const message = plaidErrorMessage(error).toUpperCase();
   return code.includes("TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION") || message.includes("MUTATION_DURING_PAGINATION");
+}
+
+function isRetryablePlaidSyncFailure(error: any) {
+  const text = `${plaidErrorCode(error)} ${plaidErrorMessage(error)}`.toUpperCase();
+  return (
+    text.includes("PRODUCT_NOT_READY") ||
+    text.includes("INSTITUTION_ERROR") ||
+    text.includes("INSTITUTION_NOT_RESPONDING") ||
+    text.includes("RATE_LIMIT") ||
+    text.includes("INTERNAL_SERVER_ERROR") ||
+    text.includes("API_ERROR") ||
+    text.includes("TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION")
+  );
 }
 
 function isAccountScopedSyncUnavailable(error: any) {
@@ -306,7 +335,6 @@ async function recordPlaidSyncFailure(params: {
       status,
       error_code: code,
       error_message: message,
-      ...(reconnectRequired ? {} : { has_new_transactions: true }),
       updated_at: new Date(),
     },
   });
@@ -1143,14 +1171,54 @@ export async function syncTransactions(params: {
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
 
   const recordSyncFailure = async (error: any) => {
-    const { code, status, reconnectRequired } = await recordPlaidSyncFailure({ prisma, businessId, accountId, error });
-    if (afterReconnect && canDeferPostReconnectSyncFailure(status, code)) {
+    const code = plaidErrorCode(error);
+    const message = plaidErrorMessage(error);
+    const classifiedStatus = reconnectStatusForPlaidFailure(code, message);
+    const reconnectRequired = isReconnectRequiredStatus(classifiedStatus);
+    const lastSuccessfulSyncAt = conn.last_sync_at ? new Date(conn.last_sync_at) : null;
+    const recentlySynced =
+      lastSuccessfulSyncAt != null &&
+      !Number.isNaN(lastSuccessfulSyncAt.getTime()) &&
+      Date.now() - lastSuccessfulSyncAt.getTime() <= 60_000;
+
+    console.error("Plaid transaction sync failed", {
+      businessId,
+      accountId,
+      errorCode: code,
+      errorMessage: message,
+      reconnectRequired,
+      recentlySynced,
+      updatesPending: Boolean(conn.has_new_transactions),
+    });
+
+    if (
+      !afterReconnect &&
+      !reconnectRequired &&
+      isRetryablePlaidSyncFailure(error) &&
+      recentlySynced &&
+      conn.status === "CONNECTED" &&
+      !conn.has_new_transactions
+    ) {
+      return json(200, {
+        ok: true,
+        syncDeferred: true,
+        newCount: 0,
+        upgradedCount: 0,
+        duplicateCount: 0,
+        pendingCount: 0,
+        lastSyncAt: lastSuccessfulSyncAt?.toISOString() ?? null,
+        message: "A bank sync completed moments ago. Plaid did not finish this repeated check, so no transaction changes were applied.",
+      });
+    }
+
+    const recorded = await recordPlaidSyncFailure({ prisma, businessId, accountId, error });
+    if (afterReconnect && canDeferPostReconnectSyncFailure(recorded.status, recorded.code)) {
       const now = new Date();
       await prisma.bankConnection.updateMany({
         where: { business_id: businessId, account_id: accountId },
         data: {
           status: "PENDING_SYNC",
-          error_code: code,
+          error_code: recorded.code,
           error_message: plaidErrorMessage(error),
           has_new_transactions: true,
           updated_at: now,
@@ -1169,10 +1237,11 @@ export async function syncTransactions(params: {
     return json(502, {
       ok: false,
       error: "Plaid sync failed",
-      errorCode: code,
-      status,
-      message: plaidSyncFailureUserMessage(status, code),
-      reconnectRequired,
+      errorCode: recorded.code,
+      status: recorded.status,
+      message: plaidSyncFailureUserMessage(recorded.status, recorded.code),
+      reconnectRequired: recorded.reconnectRequired,
+      ...(recorded.reconnectRequired ? {} : { updatesPending: Boolean(conn.has_new_transactions) }),
     });
   };
 
@@ -1219,7 +1288,6 @@ export async function syncTransactions(params: {
       console.warn("Plaid balance lookup skipped during transaction sync", {
         businessId,
         accountId,
-        plaidAccountId,
         errorCode: balanceErrorCode,
         errorMessage: balanceErrorMessage,
       });
