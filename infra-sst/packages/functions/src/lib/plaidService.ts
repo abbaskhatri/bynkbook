@@ -599,18 +599,18 @@ export async function exchangePublicToken(params: {
     });
   }
 
-  const selectedPlaidIds = additional.map((row) => row.plaidAccountId);
-  const duplicateConnections = selectedPlaidIds.length
-    ? await prisma.bankConnection.findMany({
-        where: {
-          business_id: businessId,
-          plaid_account_id: { in: selectedPlaidIds } as any,
-        },
-        select: { account_id: true, plaid_account_id: true },
-      })
-    : [];
+  const selectedPlaidIds = [plaidAccountId, ...additional.map((row) => row.plaidAccountId)];
+  const duplicateConnections = await prisma.bankConnection.findMany({
+    where: {
+      business_id: businessId,
+      plaid_account_id: { in: selectedPlaidIds } as any,
+    },
+    select: { account_id: true, plaid_account_id: true },
+  });
   const conflictingConnection = duplicateConnections.find(
-    (row: any) => String(row.account_id) !== String(accountId) || String(row.plaid_account_id) !== String(plaidAccountId),
+    (row: any) =>
+      String(row.plaid_account_id) !== String(plaidAccountId) ||
+      String(row.account_id) !== String(accountId),
   );
   if (conflictingConnection) {
     await removePlaidItemBestEffort(plaid, accessToken);
@@ -781,39 +781,29 @@ export async function getStatus(params: { businessId: string; accountId: string;
     const accessToken = await decryptAccessToken(connRow.access_token_ciphertext);
     const accountsRes = await plaid.accountsGet({ access_token: accessToken });
     const accounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
-    let acct = accounts.find((a) => a.account_id === connRow.plaid_account_id);
-
-    if (!acct && accounts.length === 1) {
-      acct = accounts[0];
-      const repairedMask = acct?.mask ? String(acct.mask) : connRow.plaid_mask ?? null;
-      await prisma.bankConnection.updateMany({
-        where: { business_id: businessId, account_id: accountId },
-        data: {
-          plaid_account_id: String(acct.account_id),
-          plaid_mask: repairedMask,
-          status: "CONNECTED",
-          error_code: null,
-          error_message: null,
-          sync_cursor: null,
-          updated_at: new Date(),
-        },
-      });
-      (connRow as any).plaid_account_id = String(acct.account_id);
-      (connRow as any).plaid_mask = repairedMask;
-      (connRow as any).status = "CONNECTED";
-      (connRow as any).error_code = null;
-      (connRow as any).error_message = null;
-    }
+    const acct = accounts.find((a) => a.account_id === connRow.plaid_account_id);
 
     if (acct) {
       plaidAccountLive = true;
       const mask = acct?.mask ? String(acct.mask) : null;
-      if (mask && mask !== connRow.plaid_mask) {
+      const staleReconnectState = isReconnectRequiredStatus(connRow.status);
+      if ((mask && mask !== connRow.plaid_mask) || staleReconnectState) {
         await prisma.bankConnection.updateMany({
           where: { business_id: businessId, account_id: accountId },
-          data: { plaid_mask: mask, updated_at: new Date() },
+          data: {
+            ...(mask ? { plaid_mask: mask } : {}),
+            ...(staleReconnectState
+              ? { status: "CONNECTED", error_code: null, error_message: null }
+              : {}),
+            updated_at: new Date(),
+          },
         });
-        (connRow as any).plaid_mask = mask;
+        if (mask) (connRow as any).plaid_mask = mask;
+        if (staleReconnectState) {
+          (connRow as any).status = "CONNECTED";
+          (connRow as any).error_code = null;
+          (connRow as any).error_message = null;
+        }
       }
     } else {
       plaidAccountLive = false;
@@ -1022,6 +1012,28 @@ export async function repairPlaidAccountMapping(params: {
     },
   });
 
+  // One Plaid Item can contain several separately mapped BynkBook accounts.
+  // A successful update-mode reconnect repairs the Item, so clear stale
+  // reconnect flags for every sibling whose exact Plaid account is still live.
+  // Never change a sibling's plaid_account_id or cursor here.
+  const livePlaidAccountIds = accounts
+    .map((account: any) => String(account?.account_id ?? "").trim())
+    .filter(Boolean);
+  const restored = await prisma.bankConnection.updateMany({
+    where: {
+      business_id: businessId,
+      plaid_item_id: conn.plaid_item_id,
+      plaid_account_id: { in: livePlaidAccountIds } as any,
+    },
+    data: {
+      status: "CONNECTED",
+      error_code: null,
+      error_message: null,
+      has_new_transactions: true,
+      updated_at: new Date(),
+    },
+  });
+
   return json(200, {
     ok: true,
     connected: true,
@@ -1029,6 +1041,7 @@ export async function repairPlaidAccountMapping(params: {
     effectiveStartDate: repairedStart ? repairedStart.toISOString().slice(0, 10) : null,
     last4: verifiedMask,
     institutionName: institution?.name ?? conn.institution_name ?? null,
+    restoredConnectionCount: Number(restored?.count ?? 0),
   });
 }
 
