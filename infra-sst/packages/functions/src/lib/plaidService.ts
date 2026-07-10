@@ -100,7 +100,10 @@ function canDeferPostReconnectSyncFailure(status: string, code: string) {
 }
 
 function accountCursorPrefix(plaidAccountId: string) {
-  return `account:${plaidAccountId}:`;
+  // v2 means the cursor came from Plaid's top-level account_id stream.
+  // Older `account:` cursors were produced while account_id was incorrectly
+  // nested under options and must be restarted once from null.
+  return `account-v2:${plaidAccountId}:`;
 }
 
 function itemCursorPrefix() {
@@ -141,7 +144,12 @@ function isPlaidMutationDuringPagination(error: any) {
 function isAccountScopedSyncUnavailable(error: any) {
   const code = plaidErrorCode(error).toUpperCase();
   const message = plaidErrorMessage(error).toUpperCase();
-  return code.includes("NO_ACCOUNTS") || code.includes("INVALID_ACCOUNT") || message.includes("NO ACCOUNTS");
+  return (
+    code.includes("NO_ACCOUNTS") ||
+    code.includes("INVALID_ACCOUNT") ||
+    message.includes("NO ACCOUNTS") ||
+    ((code.includes("INVALID_FIELD") || code.includes("INVALID_INPUT")) && message.includes("ACCOUNT_ID"))
+  );
 }
 
 function isReconnectRequiredStatus(status: string) {
@@ -213,6 +221,50 @@ function normalizeAdditionalPlaidAccounts(rows: any[]) {
   }
 
   return out;
+}
+
+function normalizePlaidTransactionName(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function dateOnlyKey(value: any) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+async function activeMatchedBankTransactionIdsForPlaidSync(
+  prisma: any,
+  businessId: string,
+  accountId: string,
+) {
+  const [groupBanks, legacyMatches] = await Promise.all([
+    prisma.matchGroupBank.findMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        matchGroup: { status: "ACTIVE" },
+      },
+      select: { bank_transaction_id: true },
+    }),
+    prisma.bankMatch.findMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        voided_at: null,
+      },
+      select: { bank_transaction_id: true },
+    }),
+  ]);
+
+  return Array.from(new Set(
+    [...groupBanks, ...legacyMatches]
+      .map((row: any) => String(row?.bank_transaction_id ?? "").trim())
+      .filter(Boolean),
+  ));
 }
 
 export async function recordPlaidConnectionFailure(params: {
@@ -1197,6 +1249,9 @@ export async function syncTransactions(params: {
   let duplicateCount = 0;
   let skippedHistoricalCount = 0;
   let skippedRemovedCount = 0;
+  let replacementUpgradeCount = 0;
+  let protectedMatchedRemovalCount = 0;
+  let restoredMatchedHistoryCount = 0;
   const retentionPrunedCount = 0;
   let historicalCutoffDate: Date | null = null;
 
@@ -1213,7 +1268,7 @@ export async function syncTransactions(params: {
           cursor: cursor ?? undefined,
           count: 500,
         };
-        if (cursorScope === "account") request.options = { account_id: plaidAccountId };
+        if (cursorScope === "account") request.account_id = plaidAccountId;
         return await plaid.transactionsSync(request);
       } catch (e: any) {
         if (isPlaidMutationDuringPagination(e)) throw e;
@@ -1284,6 +1339,34 @@ export async function syncTransactions(params: {
   const now = new Date();
   const fullDrainFromScratch = !drainStartCursor;
 
+  const removedPlaidTransactionIds = Array.from(new Set(
+    drainedRemoved
+      .map((row: any) => String(row?.transaction_id ?? "").trim())
+      .filter(Boolean),
+  ));
+  const removedExistingRows = removedPlaidTransactionIds.length > 0
+    ? await prisma.bankTransaction.findMany({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          plaid_account_id: plaidAccountId,
+          plaid_transaction_id: { in: removedPlaidTransactionIds } as any,
+        },
+        select: {
+          id: true,
+          plaid_transaction_id: true,
+          posted_date: true,
+          amount_cents: true,
+          name: true,
+          is_removed: true,
+        },
+      })
+    : [];
+  const removedExistingByPlaidId = new Map(
+    removedExistingRows.map((row: any) => [String(row?.plaid_transaction_id ?? ""), row]),
+  );
+  const consumedRemovedPlaidIds = new Set<string>();
+
   if (fullDrainFromScratch) {
     const latestExistingBankTransaction = await prisma.bankTransaction.findFirst({
       where: {
@@ -1310,22 +1393,6 @@ export async function syncTransactions(params: {
     const posted = t.date ? new Date(`${t.date}T00:00:00Z`) : null;
     if (!posted) continue;
     if (posted < effectiveStartDate) continue;
-
-    if (historicalCutoffDate && posted <= historicalCutoffDate) {
-      const existingPlaidRow = await prisma.bankTransaction.findFirst({
-        where: {
-          business_id: businessId,
-          account_id: accountId,
-          plaid_transaction_id: t.transaction_id,
-          plaid_account_id: plaidAccountId,
-        },
-        select: { id: true, is_removed: true },
-      });
-      if (!existingPlaidRow || existingPlaidRow.is_removed) {
-        skippedHistoricalCount += 1;
-        continue;
-      }
-    }
 
     // Plaid: amount is positive for outflows (debits). Our BankTransaction uses negative for outflows.
     const cents = -BigInt(Math.round(Number(t.amount) * 100));
@@ -1360,9 +1427,80 @@ export async function syncTransactions(params: {
           },
         });
         if (upgraded.count > 0) {
+          consumedRemovedPlaidIds.add(pendingId);
           upgradedCount += upgraded.count;
           continue;
         }
+      }
+    }
+
+    // Plaid can rotate a transaction_id by returning the old transaction in
+    // `removed` and the replacement in `added`. Preserve our durable bank row
+    // (and therefore its match links) when the economic identity is unambiguous.
+    const incomingName = normalizePlaidTransactionName(t.name ?? t.merchant_name ?? "Transaction");
+    const replacementCandidates = removedExistingRows.filter((row: any) => {
+      const oldPlaidId = String(row?.plaid_transaction_id ?? "");
+      if (!oldPlaidId || consumedRemovedPlaidIds.has(oldPlaidId)) return false;
+      if (oldPlaidId === String(t.transaction_id ?? "")) return false;
+      return (
+        BigInt(String(row?.amount_cents ?? 0)) === cents &&
+        dateOnlyKey(row?.posted_date) === dateOnlyKey(posted) &&
+        normalizePlaidTransactionName(row?.name) === incomingName
+      );
+    });
+
+    if (replacementCandidates.length === 1) {
+      const replacement = replacementCandidates[0];
+      const oldPlaidId = String(replacement.plaid_transaction_id);
+      try {
+        const upgraded = await prisma.bankTransaction.updateMany({
+          where: {
+            id: replacement.id,
+            business_id: businessId,
+            account_id: accountId,
+            plaid_transaction_id: oldPlaidId,
+          },
+          data: {
+            plaid_transaction_id: t.transaction_id,
+            posted_date: posted,
+            authorized_date: t.authorized_date ? new Date(`${t.authorized_date}T00:00:00Z`) : null,
+            amount_cents: cents,
+            name: (t.name ?? t.merchant_name ?? "Transaction").toString(),
+            is_pending: isPending,
+            iso_currency_code: t.iso_currency_code ?? null,
+            is_removed: false,
+            removed_at: null,
+            source: "PLAID",
+            plaid_account_id: plaidAccountId,
+            raw: t as any,
+            updated_at: now,
+          },
+        });
+        if (upgraded.count > 0) {
+          consumedRemovedPlaidIds.add(oldPlaidId);
+          upgradedCount += upgraded.count;
+          replacementUpgradeCount += upgraded.count;
+          continue;
+        }
+      } catch {
+        // If the replacement ID already exists, normal exact-ID dedupe below
+        // is authoritative; never guess which durable row should survive.
+      }
+    }
+
+    if (historicalCutoffDate && posted <= historicalCutoffDate) {
+      const existingPlaidRow = await prisma.bankTransaction.findFirst({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          plaid_transaction_id: t.transaction_id,
+          plaid_account_id: plaidAccountId,
+        },
+        select: { id: true, is_removed: true },
+      });
+      if (!existingPlaidRow || existingPlaidRow.is_removed) {
+        skippedHistoricalCount += 1;
+        continue;
       }
     }
 
@@ -1426,16 +1564,47 @@ export async function syncTransactions(params: {
     }
   }
 
+  const activeMatchedBankTransactionIds = await activeMatchedBankTransactionIdsForPlaidSync(
+    prisma,
+    businessId,
+    accountId,
+  );
+  const activeMatchedBankTransactionIdSet = new Set(activeMatchedBankTransactionIds);
+
   for (const removed of drainedRemoved) {
+    const removedPlaidId = String(removed?.transaction_id ?? "").trim();
+    if (!removedPlaidId || consumedRemovedPlaidIds.has(removedPlaidId)) continue;
+
+    const existingRemovedRow = removedExistingByPlaidId.get(removedPlaidId);
+    if (existingRemovedRow && activeMatchedBankTransactionIdSet.has(String(existingRemovedRow.id))) {
+      protectedMatchedRemovalCount += 1;
+      continue;
+    }
+
     await prisma.bankTransaction.updateMany({
       where: {
         business_id: businessId,
         account_id: accountId,
-        plaid_transaction_id: removed.transaction_id,
+        plaid_transaction_id: removedPlaidId,
         plaid_account_id: plaidAccountId,
       },
       data: { is_removed: true, removed_at: now, updated_at: now },
     });
+  }
+
+  // Repair rows hidden by older sync behavior. An active match is an accounting
+  // audit record and must remain visible even if Plaid later removes/rekeys it.
+  if (activeMatchedBankTransactionIds.length > 0) {
+    const restored = await prisma.bankTransaction.updateMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        id: { in: activeMatchedBankTransactionIds } as any,
+        is_removed: true,
+      },
+      data: { is_removed: false, removed_at: null, updated_at: now },
+    });
+    restoredMatchedHistoryCount = Number(restored?.count ?? 0);
   }
 
   // Accurate pending count after sync (not guesswork)
@@ -1611,6 +1780,9 @@ export async function syncTransactions(params: {
     duplicateCount,
     skippedHistoricalCount,
     skippedRemovedCount,
+    replacementUpgradeCount,
+    protectedMatchedRemovalCount,
+    restoredMatchedHistoryCount,
     retentionPrunedCount,
     historicalCutoffDate: historicalCutoffDate ? historicalCutoffDate.toISOString().slice(0, 10) : null,
     pendingCount,

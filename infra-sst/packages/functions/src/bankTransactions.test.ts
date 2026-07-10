@@ -385,6 +385,30 @@ describe("bank transactions list status and pagination", () => {
     expect(body.items.map((row: any) => row.id)).toEqual(["matched-group", "matched-legacy"]);
   });
 
+  test("status=matched keeps actively matched audit rows visible after an older Plaid removal", async () => {
+    const rows = [
+      tx("matched-removed", "2026-04-28", "2026-04-28T12:00:00.000Z", {
+        is_removed: true,
+        removed_at: new Date("2026-05-01T00:00:00.000Z"),
+      }),
+      tx("unmatched-removed", "2026-04-27", "2026-04-27T12:00:00.000Z", {
+        is_removed: true,
+        removed_at: new Date("2026-05-01T00:00:00.000Z"),
+      }),
+    ];
+    const { handler } = await loadHandler({
+      rows,
+      matchGroupBankIds: ["matched-removed"],
+    });
+
+    const matched = JSON.parse((await handler(event({ status: "matched", limit: "10" }))).body);
+    const unmatched = JSON.parse((await handler(event({ status: "unmatched", limit: "10" }))).body);
+
+    expect(matched.items.map((row: any) => row.id)).toEqual(["matched-removed"]);
+    expect(matched.totalCount).toBe(1);
+    expect(unmatched.items).toEqual([]);
+  });
+
   test("list exposes sanitized check_number without raw bank payload", async () => {
     const rows = [
       tx("check-row", "2026-04-28", "2026-04-28T12:00:00.000Z", {

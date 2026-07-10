@@ -231,6 +231,15 @@ async function loadHandlers(options: {
         const found = banks.find((row) => rowMatchesWhere(row, args?.where));
         return project(found, args?.select);
       }),
+      updateMany: vi.fn(async (args: any) => {
+        let count = 0;
+        for (const row of banks) {
+          if (!rowMatchesWhere(row, args?.where)) continue;
+          Object.assign(row, args?.data ?? {});
+          count++;
+        }
+        return { count };
+      }),
     },
     bankMatch: {
       updateMany: vi.fn(async (args: any) => {
@@ -377,11 +386,12 @@ describe("ledger entry delete match-group safety", () => {
   });
 
   test("guided unmatch-and-delete returns bank transaction to unmatched by voiding the active group", async () => {
+    const matchedBank: any = bank({ is_removed: true, removed_at: new Date("2026-04-21T00:00:00.000Z") });
     const { entriesHandler, groups } = await loadHandlers({
       groups: [group()],
       groupEntries: [groupEntry()],
       groupBanks: [groupBank()],
-      banks: [bank()],
+      banks: [matchedBank],
     });
 
     const res = await entriesHandler(unmatchAndDeleteEvent({}, { confirmUnmatchAndDelete: true }));
@@ -391,6 +401,8 @@ describe("ledger entry delete match-group safety", () => {
     expect(body.bank_transaction_unmatched).toBe(true);
     expect(groups[0].status).toBe("VOIDED");
     expect(groups[0].voided_at).toBeInstanceOf(Date);
+    expect(matchedBank.is_removed).toBe(false);
+    expect(matchedBank.removed_at).toBeNull();
   });
 
   test("closed period blocks guided unmatch-and-delete before void or delete", async () => {

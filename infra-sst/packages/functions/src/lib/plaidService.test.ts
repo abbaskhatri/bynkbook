@@ -86,6 +86,7 @@ async function loadSyncTransactions(options: {
     },
     bankTransaction: {
       findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
       deleteMany: vi.fn(async () => ({ count: 0 })),
       create: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -524,7 +525,7 @@ describe("syncTransactions", () => {
 
     expect((plaid.transactionsSync as any).mock.calls[0][0]).toMatchObject({
       cursor: undefined,
-      options: { account_id: "plaid-acct-1" },
+      account_id: "plaid-acct-1",
     });
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
@@ -540,6 +541,129 @@ describe("syncTransactions", () => {
       account_id: "acct-1",
       plaid_transaction_id: "txn-removed",
       plaid_account_id: "plaid-acct-1",
+    });
+  });
+
+  test("rekeys an unambiguous Plaid removed-and-added replacement without duplicating the durable bank row", async () => {
+    const replacement = makeTransaction({
+      transaction_id: "txn-new-id",
+      date: "2026-07-09",
+      amount: 573.36,
+      name: 'Zelle payment to Abigail Flo Emp for "Payroll"; Conf# cbhs5l8ja',
+    });
+    const oldRow = {
+      id: "bank-durable-1",
+      plaid_transaction_id: "txn-old-id",
+      posted_date: new Date("2026-07-09T00:00:00Z"),
+      amount_cents: -57336n,
+      name: 'Zelle payment to Abigail Flo Emp for "Payroll"; Conf# cbhs5l8ja',
+      is_removed: false,
+    };
+
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { sync_cursor: "account-v2:plaid-acct-1:cursor-start" },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [replacement],
+            modified: [],
+            removed: [{ transaction_id: "txn-old-id" }],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findMany: vi.fn(async () => [oldRow]),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      newCount: 0,
+      upgradedCount: 1,
+      replacementUpgradeCount: 1,
+    });
+    expect(prisma.bankTransaction.create).not.toHaveBeenCalled();
+
+    const rekeyCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.id === "bank-durable-1",
+    );
+    expect(rekeyCall?.[0]).toEqual(expect.objectContaining({
+      where: expect.objectContaining({
+        id: "bank-durable-1",
+        plaid_transaction_id: "txn-old-id",
+      }),
+      data: expect.objectContaining({
+        plaid_transaction_id: "txn-new-id",
+        is_removed: false,
+      }),
+    }));
+    const removalCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.plaid_transaction_id === "txn-old-id" && call[0]?.data?.is_removed === true,
+    );
+    expect(removalCall).toBeUndefined();
+  });
+
+  test("protects and restores actively matched bank history from Plaid removal events", async () => {
+    const oldRow = {
+      id: "bank-matched-1",
+      plaid_transaction_id: "txn-old-id",
+      posted_date: new Date("2026-07-09T00:00:00Z"),
+      amount_cents: -57336n,
+      name: "Payroll",
+      is_removed: true,
+    };
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { sync_cursor: "account-v2:plaid-acct-1:cursor-start" },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [],
+            modified: [],
+            removed: [{ transaction_id: "txn-old-id" }],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findMany: vi.fn(async () => [oldRow]),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+        matchGroupBank: {
+          findMany: vi.fn(async () => [{ bank_transaction_id: "bank-matched-1" }]),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      protectedMatchedRemovalCount: 1,
+      restoredMatchedHistoryCount: 1,
+    });
+    const destructiveRemoval = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.plaid_transaction_id === "txn-old-id" && call[0]?.data?.is_removed === true,
+    );
+    expect(destructiveRemoval).toBeUndefined();
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
+      where: {
+        business_id: "biz-1",
+        account_id: "acct-1",
+        id: { in: ["bank-matched-1"] },
+        is_removed: true,
+      },
+      data: expect.objectContaining({ is_removed: false, removed_at: null }),
     });
   });
 
@@ -645,7 +769,7 @@ describe("syncTransactions", () => {
 
   test("does not resurrect soft-removed Plaid rows during incremental duplicate updates", async () => {
     const { syncTransactions, prisma } = await loadSyncTransactions({
-      conn: { sync_cursor: "account:plaid-acct-1:cursor-start" },
+      conn: { sync_cursor: "account-v2:plaid-acct-1:cursor-start" },
       plaid: {
         transactionsSync: vi.fn(async () => ({
           data: {
@@ -719,7 +843,7 @@ describe("syncTransactions", () => {
     const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
     const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
     expect(finalConnectionUpdate.data).toMatchObject({
-      sync_cursor: "account:plaid-acct-1:cursor-next",
+      sync_cursor: "account-v2:plaid-acct-1:cursor-next",
       has_new_transactions: false,
       status: "CONNECTED",
       error_code: null,
@@ -727,9 +851,9 @@ describe("syncTransactions", () => {
     });
   });
 
-  test("resets legacy item cursor and saves account-scoped cursor", async () => {
+  test("resets the legacy incorrectly scoped account cursor and saves a v2 account cursor", async () => {
     const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
-      conn: { sync_cursor: "legacy-item-cursor" },
+      conn: { sync_cursor: "account:plaid-acct-1:legacy-item-cursor" },
       plaid: {
         transactionsSync: vi.fn(async () => ({
           data: {
@@ -750,18 +874,18 @@ describe("syncTransactions", () => {
 
     expect((plaid.transactionsSync as any).mock.calls[0][0]).toMatchObject({
       cursor: undefined,
-      options: { account_id: "plaid-acct-1" },
+      account_id: "plaid-acct-1",
     });
 
     const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
     const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
-    expect(finalConnectionUpdate.data.sync_cursor).toBe("account:plaid-acct-1:account-cursor-next");
+    expect(finalConnectionUpdate.data.sync_cursor).toBe("account-v2:plaid-acct-1:account-cursor-next");
   });
 
   test("restarts full sync pagination when Plaid mutates during pagination", async () => {
     let callN = 0;
     const { syncTransactions, plaid } = await loadSyncTransactions({
-      conn: { sync_cursor: "account:plaid-acct-1:cursor-start" },
+      conn: { sync_cursor: "account-v2:plaid-acct-1:cursor-start" },
       plaid: {
         transactionsSync: vi.fn(async () => {
           callN += 1;
@@ -805,9 +929,9 @@ describe("syncTransactions", () => {
     expect(body.drainRestartCount).toBe(1);
 
     const calls = (plaid.transactionsSync as any).mock.calls.map((call: any[]) => call[0]);
-    expect(calls[0]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
-    expect(calls[1]).toMatchObject({ cursor: "cursor-page-2", options: { account_id: "plaid-acct-1" } });
-    expect(calls[2]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
+    expect(calls[0]).toMatchObject({ cursor: "cursor-start", account_id: "plaid-acct-1" });
+    expect(calls[1]).toMatchObject({ cursor: "cursor-page-2", account_id: "plaid-acct-1" });
+    expect(calls[2]).toMatchObject({ cursor: "cursor-start", account_id: "plaid-acct-1" });
   });
 
   test("does not fail transaction sync when Plaid balance lookup returns NO_ACCOUNTS", async () => {
@@ -852,7 +976,7 @@ describe("syncTransactions", () => {
     const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
     const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
     expect(finalConnectionUpdate.data).toMatchObject({
-      sync_cursor: "account:plaid-acct-1:cursor-after-no-accounts",
+      sync_cursor: "account-v2:plaid-acct-1:cursor-after-no-accounts",
       has_new_transactions: false,
       status: "CONNECTED",
     });
@@ -906,7 +1030,7 @@ describe("syncTransactions", () => {
     });
 
     const calls = (plaid.transactionsSync as any).mock.calls.map((call: any[]) => call[0]);
-    expect(calls[0]).toMatchObject({ cursor: undefined, options: { account_id: "plaid-acct-1" } });
+    expect(calls[0]).toMatchObject({ cursor: undefined, account_id: "plaid-acct-1" });
     expect(calls[1]).toMatchObject({ cursor: undefined });
     expect(calls[1]).not.toHaveProperty("options");
 

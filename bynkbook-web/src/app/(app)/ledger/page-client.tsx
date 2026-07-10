@@ -5426,6 +5426,24 @@ export default function LedgerPageClient() {
                   return;
                 }
 
+                // Open the safe matched-delete flow directly. Waiting for a
+                // failed DELETE first produced a blocking error banner even
+                // though the user is allowed to confirm unmatch + delete.
+                if (matchedEntryIdSet.has(deleteDialog.id)) {
+                  setMatchedDeleteDialog({
+                    id: deleteDialog.id,
+                    matchGroupId: null,
+                    bankTransaction: null,
+                    confirmText: "",
+                    error: null,
+                  });
+                  setErr(null);
+                  setMutErr(null);
+                  setMutErrIsClosed(false);
+                  setDeleteDialog(null);
+                  return;
+                }
+
                 // SOFT delete: if this is a vendor payment row, use payment delete dialog instead
                 const row = rowModels.find((x) => x.id === deleteDialog.id);
                 const memo = String((rowModels.find((x) => x.id === deleteDialog.id) as any)?.memo ?? "");

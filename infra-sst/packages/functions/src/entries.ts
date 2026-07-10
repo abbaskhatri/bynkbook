@@ -786,6 +786,21 @@ export async function handler(event: any) {
           throw new Error("The match group is no longer active.");
         }
 
+        // The bank row must return to the unmatched queue after the entry is
+        // deleted, even if an earlier Plaid removal/rekey had hidden it.
+        await tx.bankTransaction.updateMany({
+          where: {
+            id: bankTransactionId,
+            business_id: biz,
+            account_id: acct,
+          },
+          data: {
+            is_removed: false,
+            removed_at: null,
+            updated_at: now,
+          },
+        });
+
         await tx.bankMatch.updateMany({
           where: {
             business_id: biz,

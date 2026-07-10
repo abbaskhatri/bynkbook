@@ -1719,6 +1719,10 @@ export async function handler(event: any) {
       if (matchedIds.length === 0) {
         return json(200, { ok: true, items: [], nextCursor: null, totalCount: 0 });
       }
+      // Active match history is an accounting audit record. Older Plaid sync
+      // behavior could mark the bank row removed when Plaid rotated an ID;
+      // keep that actively matched row visible until the match is voided.
+      delete whereBase.is_removed;
       whereBase.id = { in: matchedIds };
     } else {
       whereBase.id = { notIn: matchedIds };

@@ -4581,17 +4581,22 @@ const displayBankActiveList = useMemo(() => {
                           const newCount = Number(res?.newCount ?? 0);
                           const upgradedCount = Number(res?.upgradedCount ?? 0);
                           const skippedHistoricalCount = Number(res?.skippedHistoricalCount ?? 0);
+                          const replacementUpgradeCount = Number(res?.replacementUpgradeCount ?? 0);
+                          const postedUpgradeCount = Math.max(0, upgradedCount - replacementUpgradeCount);
+                          const restoredMatchedHistoryCount = Number(res?.restoredMatchedHistoryCount ?? 0);
                           const pendingCount = Number(res?.pendingCount ?? 0);
                           const refreshRequested = Boolean(res?.refreshRequested);
                           const refreshSucceeded = Boolean(res?.refreshSucceeded);
                           const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
 
                           const syncParts = [`Transactions refreshed: ${newCount} new`];
-                          if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
+                          if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
+                          if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
+                          if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
                           if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
                           if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
                           if (refreshRequested) {
-                            syncParts.push(refreshSucceeded ? "fresh check requested" : "fresh check unavailable");
+                            syncParts.push(refreshSucceeded ? "instant refresh requested" : "instant refresh unavailable");
                           }
 
                           setSyncMsg(syncParts.join(" • "));
@@ -4600,7 +4605,11 @@ const displayBankActiveList = useMemo(() => {
                           } else if (refreshSucceeded) {
                             setPendingMsg("No pending transactions available from Plaid yet.");
                           } else if (refreshErrorCode) {
-                            setPendingMsg("Plaid fresh check unavailable; showing latest synced data.");
+                            setPendingMsg(
+                              refreshErrorCode === "INVALID_PRODUCT" || refreshErrorCode === "PRODUCT_NOT_ENABLED"
+                                ? "Instant Plaid refresh is not enabled; showing Plaid's latest scheduled transaction data."
+                                : "Instant Plaid refresh is temporarily unavailable; showing the latest synced data."
+                            );
                           }
 
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
