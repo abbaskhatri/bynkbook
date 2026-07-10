@@ -62,7 +62,7 @@ async function loadSyncTransactions(options: {
     ...options.plaid,
   };
 
-  const prisma = {
+  const defaultPrisma = {
     userBusinessRole: {
       findFirst: vi.fn(async () => ({ role: "OWNER" })),
     },
@@ -93,7 +93,15 @@ async function loadSyncTransactions(options: {
       create: vi.fn(async () => ({})),
     },
     $transaction: vi.fn(async (ops: any[]) => Promise.all(ops)),
+  };
+  const prisma = {
+    ...defaultPrisma,
     ...options.prisma,
+    userBusinessRole: { ...defaultPrisma.userBusinessRole, ...(options.prisma?.userBusinessRole ?? {}) },
+    account: { ...defaultPrisma.account, ...(options.prisma?.account ?? {}) },
+    bankConnection: { ...defaultPrisma.bankConnection, ...(options.prisma?.bankConnection ?? {}) },
+    bankTransaction: { ...defaultPrisma.bankTransaction, ...(options.prisma?.bankTransaction ?? {}) },
+    entry: { ...defaultPrisma.entry, ...(options.prisma?.entry ?? {}) },
   };
 
   vi.doMock("./db", () => ({
@@ -431,6 +439,46 @@ describe("syncTransactions", () => {
       plaid_transaction_id: "txn-removed",
       plaid_account_id: "plaid-acct-1",
     });
+  });
+
+  test("skips Plaid historical overlap when a full drain starts after uploaded bank history already exists", async () => {
+    const existingHistoryThrough = new Date("2026-04-30T00:00:00Z");
+    const oldOverlap = makeTransaction({ transaction_id: "txn-old-overlap", date: "2026-04-01" });
+    const sameDayOverlap = makeTransaction({ transaction_id: "txn-same-day-overlap", date: "2026-04-30" });
+    const newAfterHistory = makeTransaction({ transaction_id: "txn-new-after-history", date: "2026-05-01" });
+
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { effective_start_date: new Date("2026-04-01T00:00:00Z"), sync_cursor: null },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [oldOverlap, sameDayOverlap, newAfterHistory],
+            modified: [],
+            removed: [],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findFirst: vi.fn(async (args: any) => {
+            if (args?.orderBy) return { posted_date: existingHistoryThrough };
+            return null;
+          }),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+    expect(res.statusCode).toBe(200);
+    expect(body.newCount).toBe(1);
+    expect(body.skippedHistoricalCount).toBe(2);
+    expect(body.historicalCutoffDate).toBe("2026-04-30");
+
+    const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
+    expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-new-after-history"]);
   });
 
   test("preserves duplicate handling for mapped transactions and clears has_new_transactions after successful drain", async () => {

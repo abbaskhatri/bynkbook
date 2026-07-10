@@ -44,6 +44,21 @@ function postCreateEntriesBatchEvent(body: Record<string, any> = {}, businessId 
   };
 }
 
+function postCleanupPlaidOverlapEvent(businessId = "biz-1", accountId = "acct-1") {
+  return {
+    pathParameters: { businessId, accountId },
+    queryStringParameters: {},
+    body: "{}",
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "actor" } } },
+      http: {
+        method: "POST",
+        path: `/v1/businesses/${businessId}/accounts/${accountId}/bank-transactions/cleanup-plaid-overlap`,
+      },
+    },
+  };
+}
+
 function project(row: any, select: any) {
   if (!select) return { ...row };
   return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, row[key]]));
@@ -238,6 +253,15 @@ async function loadHandler(options: {
 
         return filtered.map((row) => project(row, args?.select));
       }),
+      updateMany: vi.fn(async (args: any) => {
+        let count = 0;
+        for (const row of options.rows) {
+          if (!rowMatchesWhere(row, args?.where)) continue;
+          Object.assign(row, args?.data ?? {});
+          count += 1;
+        }
+        return { count };
+      }),
     },
     $transaction: vi.fn(async (arg: any) => {
       if (typeof arg === "function") return arg(prisma);
@@ -424,6 +448,50 @@ describe("bank transactions list status and pagination", () => {
           business_id: "biz-1",
           account_id: "acct-1",
           is_removed: false,
+        }),
+      })
+    );
+  });
+
+  test("cleanup-plaid-overlap soft-removes only unmatched Plaid rows through uploaded bank history", async () => {
+    const rows = [
+      tx("csv-latest", "2026-04-30", "2026-04-30T12:00:00.000Z", {
+        source: "CSV",
+        plaid_transaction_id: null,
+      }),
+      tx("plaid-old-unmatched", "2026-04-01", "2026-07-10T20:12:00.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-old-unmatched",
+      }),
+      tx("plaid-old-matched", "2026-04-02", "2026-07-10T20:12:01.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-old-matched",
+      }),
+      tx("plaid-new", "2026-05-01", "2026-07-10T20:12:02.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-new",
+      }),
+    ];
+    const { handler, prisma } = await loadHandler({
+      rows,
+      matchGroupBankIds: ["plaid-old-matched"],
+    });
+
+    const res = await handler(postCleanupPlaidOverlapEvent());
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.removedCount).toBe(1);
+    expect(body.throughDate).toBe("2026-04-30");
+    expect(rows.find((row) => row.id === "plaid-old-unmatched")?.is_removed).toBe(true);
+    expect(rows.find((row) => row.id === "plaid-old-matched")?.is_removed).toBe(false);
+    expect(rows.find((row) => row.id === "plaid-new")?.is_removed).toBe(false);
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          plaid_transaction_id: { not: null },
+          posted_date: { lte: new Date("2026-04-30T00:00:00.000Z") },
+          id: { notIn: ["plaid-old-matched"] },
         }),
       })
     );

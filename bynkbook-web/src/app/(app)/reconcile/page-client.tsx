@@ -38,7 +38,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
-import { listBankTransactions, createEntryFromBankTransaction, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
+import { listBankTransactions, createEntryFromBankTransaction, cleanupPlaidOverlap, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
 import {
   getChunkedMatchGroupPlacementSummary,
@@ -730,6 +730,7 @@ export default function ReconcilePageClient() {
   // Plaid status + sync UI
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [plaidSyncing, setPlaidSyncing] = useState(false);
+  const [plaidCleanupBusy, setPlaidCleanupBusy] = useState(false);
   const [plaid, setPlaid] = useState<PlaidStatusState | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
@@ -4579,6 +4580,7 @@ const displayBankActiveList = useMemo(() => {
                           const res = await plaidSync(selectedBusinessId, selectedAccountId, { refresh: true });
                           const newCount = Number(res?.newCount ?? 0);
                           const upgradedCount = Number(res?.upgradedCount ?? 0);
+                          const skippedHistoricalCount = Number(res?.skippedHistoricalCount ?? 0);
                           const pendingCount = Number(res?.pendingCount ?? 0);
                           const refreshRequested = Boolean(res?.refreshRequested);
                           const refreshSucceeded = Boolean(res?.refreshSucceeded);
@@ -4586,6 +4588,7 @@ const displayBankActiveList = useMemo(() => {
 
                           const syncParts = [`Transactions refreshed: ${newCount} new`];
                           if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
+                          if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
                           if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
                           if (refreshRequested) {
                             syncParts.push(refreshSucceeded ? "fresh check requested" : "fresh check unavailable");
@@ -4623,6 +4626,46 @@ const displayBankActiveList = useMemo(() => {
                       }}
                     >
                       <RefreshCw className="h-3.5 w-3.5" /> {plaidSyncing ? "Syncing…" : "Sync"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                      disabled={plaidSyncing || plaidCleanupBusy}
+                      onClick={async () => {
+                        if (!selectedBusinessId || !selectedAccountId) return;
+
+                        setPlaidCleanupBusy(true);
+                        setSyncMsg("Cleaning Plaid overlap...");
+                        setPendingMsg(null);
+
+                        try {
+                          const res = await cleanupPlaidOverlap({
+                            businessId: selectedBusinessId,
+                            accountId: selectedAccountId,
+                          });
+                          const removedCount = Number(res?.removedCount ?? 0);
+                          const throughDate = String(res?.throughDate ?? "").trim();
+                          setSyncMsg(
+                            removedCount > 0
+                              ? `Removed ${removedCount} duplicate Plaid rows${throughDate ? ` through ${throughDate}` : ""}`
+                              : (res?.message ?? "No duplicate Plaid overlap found")
+                          );
+
+                          await refreshTablesFully({
+                            preserveOnEmpty: true,
+                            skipLegacyMatches: true,
+                          });
+                          setBankCountRefreshSeq((n) => n + 1);
+                        } catch (e: any) {
+                          setSyncMsg(e?.message ?? "Unable to clean duplicate Plaid rows");
+                          setPendingMsg("No bank transactions were changed.");
+                        } finally {
+                          setPlaidCleanupBusy(false);
+                        }
+                      }}
+                    >
+                      <Wrench className="h-3.5 w-3.5" /> {plaidCleanupBusy ? "Cleaning..." : "Clean overlap"}
                     </button>
                   </>
                 )}
@@ -4678,9 +4721,11 @@ const displayBankActiveList = useMemo(() => {
                     } else if (syncResult) {
                       const newCount = Number(syncResult?.newCount ?? 0);
                       const upgradedCount = Number(syncResult?.upgradedCount ?? 0);
+                      const skippedHistoricalCount = Number(syncResult?.skippedHistoricalCount ?? 0);
                       const pendingCount = Number(syncResult?.pendingCount ?? 0);
                       const syncParts = [`Transactions refreshed: ${newCount} new`];
                       if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
+                      if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
                       if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
                       setSyncMsg(syncParts.join(" • "));
                       setPendingMsg(pendingCount > 0 ? "Pending shown read-only until posted." : null);

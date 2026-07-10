@@ -462,6 +462,11 @@ api.route(
   bankTxHandler,
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
+api.route(
+  "POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/cleanup-plaid-overlap",
+  bankTxHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
 
 // ---------- Matches (Phase 4D v1) ----------
 const matchesHandler = {

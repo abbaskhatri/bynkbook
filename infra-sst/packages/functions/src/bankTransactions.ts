@@ -731,6 +731,7 @@ export async function handler(event: any) {
 
   const isUnmatch = method === "POST" && bankTransactionId && rawPath.endsWith("/unmatch");
   const isCreateEntriesBatch = method === "POST" && rawPath.endsWith("/create-entries-batch");
+  const isCleanupPlaidOverlap = method === "POST" && rawPath.endsWith("/cleanup-plaid-overlap");
   const isCreateEntry = method === "POST" && bankTransactionId && rawPath.endsWith("/create-entry");
 
   // -------------------------
@@ -786,6 +787,110 @@ export async function handler(event: any) {
     });
 
     return json(200, { ok: true, voidedCount: updated.count });
+  }
+
+  // -------------------------------------------------------------------
+  // POST /bank-transactions/cleanup-plaid-overlap
+  // Soft-removes unmatched Plaid rows that overlap existing CSV/manual bank history.
+  // This repairs a first/full Plaid drain that imported rows already present from uploads.
+  // -------------------------------------------------------------------
+  if (isCleanupPlaidOverlap) {
+    try {
+      if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+      const az = await authorizeWrite(prisma, {
+        businessId: businessId,
+        scopeAccountId: accountId,
+        actorUserId: sub,
+        actorRole: role,
+        actionKey: "reconcile.bank.cleanupPlaidOverlap",
+        requiredLevel: "FULL",
+        endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/bank-transactions/cleanup-plaid-overlap",
+      });
+
+      if (!az.allowed) {
+        return json(403, {
+          ok: false,
+          error: "Policy denied",
+          code: "POLICY_DENIED",
+          actionKey: "reconcile.bank.cleanupPlaidOverlap",
+          requiredLevel: az.requiredLevel,
+          policyValue: az.policyValue,
+          policyKey: az.policyKey,
+        });
+      }
+
+      const latestNonPlaid = await prisma.bankTransaction.findFirst({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          is_removed: false,
+          OR: [
+            { plaid_transaction_id: null },
+            { source: { not: "PLAID" } },
+          ],
+        },
+        orderBy: [
+          { posted_date: "desc" as any },
+          { created_at: "desc" as any },
+          { id: "desc" as any },
+        ],
+        select: { posted_date: true },
+      });
+
+      if (!latestNonPlaid?.posted_date) {
+        return json(200, {
+          ok: true,
+          removedCount: 0,
+          throughDate: null,
+          message: "No uploaded/manual bank history found for this account.",
+        });
+      }
+
+      const activeMatchedIds = await activeMatchedBankTransactionIds(prisma, businessId, accountId);
+      const now = new Date();
+      const where: any = {
+        business_id: businessId,
+        account_id: accountId,
+        is_removed: false,
+        plaid_transaction_id: { not: null },
+        posted_date: { lte: latestNonPlaid.posted_date },
+      };
+      if (activeMatchedIds.length > 0) {
+        where.id = { notIn: activeMatchedIds };
+      }
+
+      const updated = await prisma.bankTransaction.updateMany({
+        where,
+        data: {
+          is_removed: true,
+          removed_at: now,
+          updated_at: now,
+        },
+      });
+
+      await logActivity(prisma, {
+        businessId: businessId,
+        actorUserId: sub,
+        scopeAccountId: accountId,
+        eventType: "BANK_TRANSACTION_PLAID_OVERLAP_CLEANED",
+        payloadJson: {
+          account_id: accountId,
+          removed_count: updated.count,
+          through_date: latestNonPlaid.posted_date.toISOString().slice(0, 10),
+          protected_matched_count: activeMatchedIds.length,
+        },
+      });
+
+      return json(200, {
+        ok: true,
+        removedCount: updated.count,
+        throughDate: latestNonPlaid.posted_date.toISOString().slice(0, 10),
+      });
+    } catch (e: any) {
+      const msg = String(e?.message ?? e ?? "Unknown error");
+      return json(500, { ok: false, code: "CLEANUP_FAILED", error: "Plaid overlap cleanup failed.", detail: msg });
+    }
   }
 
   // -------------------------------------------------------------------

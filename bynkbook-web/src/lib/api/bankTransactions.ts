@@ -74,3 +74,14 @@ export async function createEntryFromBankTransaction(args: {
     }
   );
 }
+
+export async function cleanupPlaidOverlap(args: {
+  businessId: string;
+  accountId: string;
+}): Promise<{ ok?: boolean; removedCount?: number; throughDate?: string | null; message?: string }> {
+  const { businessId, accountId } = args;
+  return apiFetch(
+    `/v1/businesses/${businessId}/accounts/${accountId}/bank-transactions/cleanup-plaid-overlap`,
+    { method: "POST", body: "{}" }
+  );
+}

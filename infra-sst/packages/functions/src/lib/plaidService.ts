@@ -1162,6 +1162,8 @@ export async function syncTransactions(params: {
   let newCount = 0;
   let upgradedCount = 0;
   let duplicateCount = 0;
+  let skippedHistoricalCount = 0;
+  let historicalCutoffDate: Date | null = null;
 
   // pendingCount will be computed from DB at end (accurate), not guessed during loop
   let pendingCount = 0;
@@ -1245,12 +1247,50 @@ export async function syncTransactions(params: {
   }
 
   const now = new Date();
+  const fullDrainFromScratch = !drainStartCursor;
+
+  if (fullDrainFromScratch) {
+    const latestExistingBankTransaction = await prisma.bankTransaction.findFirst({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        is_removed: false,
+      },
+      orderBy: [
+        { posted_date: "desc" as any },
+        { created_at: "desc" as any },
+        { id: "desc" as any },
+      ],
+      select: { posted_date: true },
+    });
+
+    const latestExistingDate = latestExistingBankTransaction?.posted_date ?? null;
+    if (latestExistingDate && latestExistingDate >= effectiveStartDate) {
+      historicalCutoffDate = latestExistingDate;
+    }
+  }
 
   for (const t of drainedUpserts) {
     // Retention: do not retain anything older than effectiveStartDate
     const posted = t.date ? new Date(`${t.date}T00:00:00Z`) : null;
     if (!posted) continue;
     if (posted < effectiveStartDate) continue;
+
+    if (historicalCutoffDate && posted <= historicalCutoffDate) {
+      const existingPlaidRow = await prisma.bankTransaction.findFirst({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          plaid_transaction_id: t.transaction_id,
+          plaid_account_id: plaidAccountId,
+        },
+        select: { id: true },
+      });
+      if (!existingPlaidRow) {
+        skippedHistoricalCount += 1;
+        continue;
+      }
+    }
 
     // Plaid: amount is positive for outflows (debits). Our BankTransaction uses negative for outflows.
     const cents = -BigInt(Math.round(Number(t.amount) * 100));
@@ -1520,6 +1560,8 @@ export async function syncTransactions(params: {
     newCount,
     upgradedCount,
     duplicateCount,
+    skippedHistoricalCount,
+    historicalCutoffDate: historicalCutoffDate ? historicalCutoffDate.toISOString().slice(0, 10) : null,
     pendingCount,
     lastSyncAt: now.toISOString(),
     refreshRequested,
