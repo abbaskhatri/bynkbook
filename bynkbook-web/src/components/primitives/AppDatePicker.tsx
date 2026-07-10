@@ -217,11 +217,15 @@ export function AppDatePicker({
             </button>
 
             {allowClear && value ? (
-              <AppTooltip content="Clear date" side="left">
+              <AppTooltip
+                content="Clear date"
+                side="left"
+                className="absolute right-1 top-1/2 -translate-y-1/2"
+              >
                 <button
                     type="button"
                     className={[
-                        "absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md",
+                        "h-6 w-6 rounded-md",
                         "inline-flex items-center justify-center",
                         "text-bb-text-muted hover:bg-bb-table-row-hover",
                         ringFocus,
