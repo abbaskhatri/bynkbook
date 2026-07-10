@@ -87,6 +87,7 @@ async function loadSyncTransactions(options: {
       aggregate: vi.fn(async () => ({ _sum: { amount_cents: 0n } })),
     },
     entry: {
+      findFirst: vi.fn(async () => null),
       findMany: vi.fn(async () => []),
       updateMany: vi.fn(async () => ({ count: 0 })),
       update: vi.fn(async () => ({})),
@@ -266,6 +267,70 @@ describe("syncTransactions", () => {
           opening_policy: "MANUAL",
           opening_adjustment_created_at: expect.any(Date),
         }),
+      })
+    );
+  });
+
+  test("existing-account exchange ignores a provided opening date when bank transactions already exist", async () => {
+    const latestPosted = new Date("2026-06-15T00:00:00.000Z");
+    const { mod, prisma } = await loadSyncTransactions({
+      prisma: {
+        bankTransaction: {
+          findFirst: vi.fn(async () => ({ posted_date: latestPosted })),
+        },
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+      effectiveStartDate: "2026-04-01",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.effectiveStartDate).toBe("2026-06-15");
+    expect(prisma.bankConnection.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ effective_start_date: latestPosted }),
+        update: expect.objectContaining({ effective_start_date: latestPosted }),
+      })
+    );
+  });
+
+  test("existing-account exchange with no bank transactions derives from ledger and opening context", async () => {
+    const opening = new Date("2026-04-01T00:00:00.000Z");
+    const earliestLedger = new Date("2026-04-10T00:00:00.000Z");
+    const { mod, prisma } = await loadSyncTransactions({
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({ id: "acct-1", opening_balance_date: opening })),
+        },
+        entry: {
+          findFirst: vi.fn(async () => ({ date: earliestLedger })),
+        },
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+      effectiveStartDate: "2026-07-01",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.effectiveStartDate).toBe("2026-04-01");
+    expect(prisma.bankConnection.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ effective_start_date: opening }),
+        update: expect.objectContaining({ effective_start_date: opening }),
       })
     );
   });

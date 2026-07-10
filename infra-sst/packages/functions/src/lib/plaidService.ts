@@ -457,12 +457,24 @@ export async function createLinkToken(params: {
   return json(200, { ok: true, link_token: res.data.link_token });
 }
 
-async function derivePlaidEffectiveStartDate(prisma: any, businessId: string, accountId: string, provided?: string) {
+type PlaidConnectionMode = "NEW_ACCOUNT" | "EXISTING_ACCOUNT";
+
+function parseDateOnly(raw: string) {
+  const start = new Date(`${raw}T00:00:00Z`);
+  return Number.isNaN(start.getTime()) ? null : start;
+}
+
+async function derivePlaidEffectiveStartDate(
+  prisma: any,
+  businessId: string,
+  accountId: string,
+  provided?: string,
+  mode: PlaidConnectionMode = "EXISTING_ACCOUNT",
+) {
   const raw = String(provided ?? "").trim();
-  if (raw) {
-    const start = new Date(`${raw}T00:00:00Z`);
-    if (Number.isNaN(start.getTime())) return null;
-    return start;
+  if (mode === "NEW_ACCOUNT") {
+    if (!raw) return null;
+    return parseDateOnly(raw);
   }
 
   const latestBankTxn = await prisma.bankTransaction.findFirst({
@@ -476,11 +488,28 @@ async function derivePlaidEffectiveStartDate(prisma: any, businessId: string, ac
   });
   if (latestBankTxn?.posted_date) return latestBankTxn.posted_date;
 
-  const account = await prisma.account.findFirst({
-    where: { id: accountId, business_id: businessId },
-    select: { opening_balance_date: true },
-  });
+  const [account, earliestEntry] = await Promise.all([
+    prisma.account.findFirst({
+      where: { id: accountId, business_id: businessId },
+      select: { opening_balance_date: true },
+    }),
+    prisma.entry.findFirst({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        deleted_at: null,
+      },
+      select: { date: true },
+      orderBy: [{ date: "asc" as any }, { created_at: "asc" as any }],
+    }),
+  ]);
+
+  if (earliestEntry?.date && account?.opening_balance_date) {
+    return earliestEntry.date < account.opening_balance_date ? earliestEntry.date : account.opening_balance_date;
+  }
+  if (earliestEntry?.date) return earliestEntry.date;
   if (account?.opening_balance_date) return account.opening_balance_date;
+  if (raw) return parseDateOnly(raw);
 
   return new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
 }
@@ -502,6 +531,7 @@ export async function exchangePublicToken(params: {
   plaidAccountId: string;
   mask?: string; // last 4 digits (Plaid account mask)
   allowOpeningAdjustment?: boolean;
+  connectionMode?: PlaidConnectionMode;
   additionalAccounts?: Array<{
     plaidAccountId?: string;
     id?: string;
@@ -522,6 +552,7 @@ export async function exchangePublicToken(params: {
     plaidAccountId,
     mask,
     allowOpeningAdjustment = false,
+    connectionMode = "EXISTING_ACCOUNT",
     additionalAccounts,
   } = params;
 
@@ -532,7 +563,7 @@ export async function exchangePublicToken(params: {
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
-  const start = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, effectiveStartDate);
+  const start = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, effectiveStartDate, connectionMode);
   if (!start) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
 
   const plaid = await getPlaidClient();
@@ -641,6 +672,7 @@ export async function exchangePublicToken(params: {
       businessId,
       accountId,
       row.effectiveStartDate ?? effectiveStartDate,
+      "NEW_ACCOUNT",
     );
     if (!extraStart) {
       await removePlaidItemBestEffort(plaid, accessToken);
@@ -972,11 +1004,13 @@ export async function repairPlaidAccountMapping(params: {
   }
 
   const verifiedMask = selected?.mask ? String(selected.mask) : mask ?? null;
+  const repairedStart = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, undefined, "EXISTING_ACCOUNT");
   await prisma.bankConnection.updateMany({
     where: { business_id: businessId, account_id: accountId },
     data: {
       plaid_account_id: selectedPlaidAccountId,
       plaid_mask: verifiedMask,
+      ...(repairedStart ? { effective_start_date: repairedStart } : {}),
       institution_name: institution?.name ?? conn.institution_name ?? null,
       institution_id: institution?.institution_id ?? conn.institution_id ?? null,
       status: "CONNECTED",
@@ -992,6 +1026,7 @@ export async function repairPlaidAccountMapping(params: {
     ok: true,
     connected: true,
     plaidAccountId: selectedPlaidAccountId,
+    effectiveStartDate: repairedStart ? repairedStart.toISOString().slice(0, 10) : null,
     last4: verifiedMask,
     institutionName: institution?.name ?? conn.institution_name ?? null,
   });

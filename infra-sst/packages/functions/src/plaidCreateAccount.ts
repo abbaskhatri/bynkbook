@@ -75,6 +75,7 @@ export async function handler(event: any) {
     plaidAccountId,
     mask,
     allowOpeningAdjustment: true,
+    connectionMode: "NEW_ACCOUNT",
     additionalAccounts,
   } as any);
 
