@@ -3,8 +3,9 @@
 ## Hard blockers
 
 1. **AWS profile missing.** The required `ledrigo-dev` profile is not configured, so account `116846786465` was not verified and no AWS CLI inspection was allowed.
-2. **GitHub authentication invalid.** `gh auth status` reports the saved token is invalid. Commit can be created locally, but push/PR requires re-authentication unless credentials are restored before publication.
-3. **No approved production test account/tenant.** Authenticated reads and all financial/admin workflows were intentionally not executed.
+2. **No approved production test account/tenant.** Authenticated reads and all financial/admin workflows were intentionally not executed.
+
+GitHub's app connector could not create the PR (403), and `gh auth status` reported an invalid default token; however, the branch push and CLI fallback successfully created draft PR #206, so publication is no longer blocked.
 
 ## Deployment unknowns
 
@@ -79,6 +80,5 @@
 - An approved synthetic test tenant and accounts for each role, with explicit allowed mutations.
 - Confirmation of canonical API/Plaid webhook targets.
 - Counsel-approved legal text or owner of that process.
-- Re-authenticated GitHub CLI session for publishing this audit PR.
 
 Until those inputs exist, do not convert UNKNOWN/NOT_TESTABLE statuses into claims of production correctness.
