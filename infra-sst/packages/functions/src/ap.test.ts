@@ -72,6 +72,23 @@ function unapplyAndDeleteEvent(body: any = {}) {
   };
 }
 
+function vendorStatementEvent() {
+  return {
+    queryStringParameters: {
+      from: "2026-04-01",
+      to: "2026-04-30",
+    },
+    pathParameters: { businessId, vendorId },
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "user-1" } } },
+      http: {
+        method: "GET",
+        path: `/v1/businesses/${businessId}/vendors/${vendorId}/ap/statement.csv`,
+      },
+    },
+  };
+}
+
 function applyPaymentEvent(body: any = {}) {
   return {
     body: JSON.stringify(body),
@@ -197,6 +214,60 @@ describe("AP vendors summary", () => {
     const values = prisma.$queryRaw.mock.calls[0].slice(1);
     expect(values).toContain(500);
     expect(values).toContainEqual(vendorIds);
+  });
+});
+
+describe("AP vendor statement", () => {
+  test("sums only active payment applications using the current schema column", async () => {
+    const prisma: any = {
+      userBusinessRole: {
+        findFirst: vi.fn(async () => ({ role: "OWNER" })),
+      },
+      vendor: {
+        findFirst: vi.fn(async () => ({ id: vendorId, business_id: businessId, name: "Test Vendor" })),
+      },
+      bill: {
+        findMany: vi.fn(async () => [
+          {
+            id: billId,
+            invoice_date: new Date("2026-04-01T00:00:00.000Z"),
+            due_date: new Date("2026-04-30T00:00:00.000Z"),
+            amount_cents: 1000n,
+            status: "PARTIAL",
+            memo: "Test bill",
+            upload_id: null,
+          },
+        ]),
+      },
+      billPaymentApplication: {
+        groupBy: vi.fn(async () => [
+          { bill_id: billId, _sum: { applied_amount_cents: 400n } },
+        ]),
+      },
+      $queryRaw: vi.fn(async () => [
+        {
+          id: entryId,
+          date: new Date("2026-04-15T00:00:00.000Z"),
+          payee: "Test Vendor",
+          memo: "Vendor payment",
+          amount_cents: -1000n,
+          applied_cents: 400n,
+        },
+      ]),
+    };
+    const handler = await loadApHandlerWithPrisma(prisma);
+
+    const res = await handler(vendorStatementEvent());
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers).toMatchObject({ "content-type": "text/csv; charset=utf-8" });
+    expect(res.body).toContain(`BILL,${billId},2026-04-01,2026-04-30,1000,400,600,PARTIAL`);
+    expect(res.body).toContain(`PAYMENT,${entryId},2026-04-15,1000,400,600`);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    const sql = Array.from(prisma.$queryRaw.mock.calls[0][0] as readonly string[]).join("?");
+    expect(sql).toContain("bpa.is_active = true");
+    expect(sql).not.toContain("bpa.reversed_at");
   });
 });
 
