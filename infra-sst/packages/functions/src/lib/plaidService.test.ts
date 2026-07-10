@@ -258,7 +258,7 @@ describe("syncTransactions", () => {
     const otherAdded = makeTransaction({ transaction_id: "txn-added-other", account_id: "plaid-acct-2" });
     const matchingModified = makeTransaction({ transaction_id: "txn-modified-mapped", amount: 5 });
 
-    const { syncTransactions, prisma } = await loadSyncTransactions({
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
       plaid: {
         transactionsSync: vi.fn(async () => ({
           data: {
@@ -274,6 +274,11 @@ describe("syncTransactions", () => {
 
     const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
     expect(res.statusCode).toBe(200);
+
+    expect((plaid.transactionsSync as any).mock.calls[0][0]).toMatchObject({
+      cursor: undefined,
+      options: { account_id: "plaid-acct-1" },
+    });
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
     const updateCalls = (prisma.bankTransaction.updateMany as any).mock.calls as any[][];
@@ -325,12 +330,95 @@ describe("syncTransactions", () => {
     const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
     const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
     expect(finalConnectionUpdate.data).toMatchObject({
-      sync_cursor: "cursor-next",
+      sync_cursor: "account:plaid-acct-1:cursor-next",
       has_new_transactions: false,
       status: "CONNECTED",
       error_code: null,
       error_message: null,
     });
+  });
+
+  test("resets legacy item cursor and saves account-scoped cursor", async () => {
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      conn: { sync_cursor: "legacy-item-cursor" },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [makeTransaction({ transaction_id: "txn-after-reset" })],
+            modified: [],
+            removed: [],
+            next_cursor: "account-cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+    expect(res.statusCode).toBe(200);
+    expect(body.cursorResetFromLegacyScope).toBe(true);
+
+    expect((plaid.transactionsSync as any).mock.calls[0][0]).toMatchObject({
+      cursor: undefined,
+      options: { account_id: "plaid-acct-1" },
+    });
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(finalConnectionUpdate.data.sync_cursor).toBe("account:plaid-acct-1:account-cursor-next");
+  });
+
+  test("restarts full sync pagination when Plaid mutates during pagination", async () => {
+    let callN = 0;
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      conn: { sync_cursor: "account:plaid-acct-1:cursor-start" },
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          callN += 1;
+          if (callN === 1) {
+            return {
+              data: {
+                added: [makeTransaction({ transaction_id: "txn-page-1" })],
+                modified: [],
+                removed: [],
+                next_cursor: "cursor-page-2",
+                has_more: true,
+              },
+            };
+          }
+          if (callN === 2) {
+            const error: any = new Error("mutation during pagination");
+            error.response = {
+              data: {
+                error_code: "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION",
+                error_message: "Transactions changed during pagination",
+              },
+            };
+            throw error;
+          }
+          return {
+            data: {
+              added: [makeTransaction({ transaction_id: `txn-restarted-${callN}` })],
+              modified: [],
+              removed: [],
+              next_cursor: "cursor-final",
+              has_more: false,
+            },
+          };
+        }),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+    expect(res.statusCode).toBe(200);
+    expect(body.drainRestartCount).toBe(1);
+
+    const calls = (plaid.transactionsSync as any).mock.calls.map((call: any[]) => call[0]);
+    expect(calls[0]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
+    expect(calls[1]).toMatchObject({ cursor: "cursor-page-2", options: { account_id: "plaid-acct-1" } });
+    expect(calls[2]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
   });
 
   test("persists sanitized Plaid failure details without clearing has_new_transactions or storing secrets", async () => {
