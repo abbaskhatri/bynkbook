@@ -730,6 +730,7 @@ export default function ReconcilePageClient() {
   // Plaid status + sync UI
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [plaidSyncing, setPlaidSyncing] = useState(false);
+  const plaidSyncRequestRef = useRef(false);
   const [plaidCleanupBusy, setPlaidCleanupBusy] = useState(false);
   const [plaid, setPlaid] = useState<PlaidStatusState | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -1413,6 +1414,24 @@ export default function ReconcilePageClient() {
     entriesQ.isFetching ||
     entriesBackgroundLoading ||
     matchGroupsLoading;
+
+  const entriesActivityLabel = plaidSyncing
+    ? "Syncing bank data…"
+    : entriesBackgroundLoading
+      ? "Loading older ledger entries…"
+      : entriesQ.isFetching
+        ? "Refreshing ledger entries…"
+        : matchGroupsLoading
+          ? "Loading match status…"
+          : "Refreshing reconciliation…";
+
+  const bankActivityLabel = plaidSyncing
+    ? "Syncing bank data…"
+    : bankTxLoading
+      ? "Loading bank transactions…"
+      : matchGroupsLoading
+        ? "Loading match status…"
+        : "Refreshing reconciliation…";
 
   // Create-entry confirmation dialog
   const [openCreateEntry, setOpenCreateEntry] = useState(false);
@@ -3046,8 +3065,12 @@ const displayBankActiveList = useMemo(() => {
     bankTab === "unmatched" && bankPendingUnmatchedCount > 0
       ? `${bankPendingUnmatchedCount} pending shown read-only until posted.`
       : null;
-  const entriesHistoryLoading = entriesBackgroundLoading || (entriesQ.isFetching && entriesLoadedCount > 0);
-  const entriesScopeCopy = `Ledger ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded${entriesHistoryLoading ? " • Loading older history" : ""} • Showing ${expectedTab === "expected" ? displayEntriesExpectedList.length : displayEntriesMatchedList.length} of ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
+  const entriesScopeActivity = entriesBackgroundLoading
+    ? " • Loading older history"
+    : entriesQ.isFetching && entriesLoadedCount > 0
+      ? " • Refreshing ledger"
+      : "";
+  const entriesScopeCopy = `Ledger ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded${entriesScopeActivity} • Showing ${expectedTab === "expected" ? displayEntriesExpectedList.length : displayEntriesMatchedList.length} of ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
       ? Math.max(0, activeBankLoadedRowsCount - (bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount))
@@ -4121,7 +4144,7 @@ const displayBankActiveList = useMemo(() => {
                 {entriesTruthSettling || entriesUpdating ? (
                   <span className="inline-flex items-center gap-1.5">
                     <TinySpinner />
-                    <span>{plaidSyncing ? "Syncing bank data…" : "Saving changes…"}</span>
+                    <span>{entriesActivityLabel}</span>
                   </span>
                 ) : "\u00A0"}
               </div>
@@ -4570,8 +4593,9 @@ const displayBankActiveList = useMemo(() => {
                       className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       disabled={plaidSyncing}
                       onClick={async () => {
-                        if (!selectedBusinessId || !selectedAccountId) return;
+                        if (!selectedBusinessId || !selectedAccountId || plaidSyncRequestRef.current) return;
 
+                        plaidSyncRequestRef.current = true;
                         setPlaidSyncing(true);
                         setSyncMsg("Checking bank for latest transactions...");
                         setPendingMsg(null);
@@ -4589,27 +4613,33 @@ const displayBankActiveList = useMemo(() => {
                           const refreshSucceeded = Boolean(res?.refreshSucceeded);
                           const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
 
-                          const syncParts = [`Transactions refreshed: ${newCount} new`];
-                          if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
-                          if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
-                          if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
-                          if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
-                          if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
-                          if (refreshRequested) {
-                            syncParts.push(refreshSucceeded ? "instant refresh requested" : "instant refresh unavailable");
-                          }
+                          if (res?.syncDeferred) {
+                            setSyncMsg(res?.message ?? "A bank sync completed moments ago; no transaction changes were applied.");
+                            setPendingMsg(null);
+                          } else {
 
-                          setSyncMsg(syncParts.join(" • "));
-                          if (pendingCount > 0) {
-                            setPendingMsg("Pending shown read-only until posted.");
-                          } else if (refreshSucceeded) {
-                            setPendingMsg("No pending transactions available from Plaid yet.");
-                          } else if (refreshErrorCode) {
-                            setPendingMsg(
-                              refreshErrorCode === "INVALID_PRODUCT" || refreshErrorCode === "PRODUCT_NOT_ENABLED"
-                                ? "Instant Plaid refresh is not enabled; showing Plaid's latest scheduled transaction data."
-                                : "Instant Plaid refresh is temporarily unavailable; showing the latest synced data."
-                            );
+                            const syncParts = [`Transactions refreshed: ${newCount} new`];
+                            if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
+                            if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
+                            if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
+                            if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
+                            if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
+                            if (refreshRequested) {
+                              syncParts.push(refreshSucceeded ? "instant refresh requested" : "instant refresh unavailable");
+                            }
+
+                            setSyncMsg(syncParts.join(" • "));
+                            if (pendingCount > 0) {
+                              setPendingMsg("Pending shown read-only until posted.");
+                            } else if (refreshSucceeded) {
+                              setPendingMsg("No pending transactions available from Plaid yet.");
+                            } else if (refreshErrorCode) {
+                              setPendingMsg(
+                                refreshErrorCode === "INVALID_PRODUCT" || refreshErrorCode === "PRODUCT_NOT_ENABLED"
+                                  ? "Instant Plaid refresh is not enabled; showing Plaid's latest scheduled transaction data."
+                                  : "Instant Plaid refresh is temporarily unavailable; showing the latest synced data."
+                              );
+                            }
                           }
 
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
@@ -4622,7 +4652,11 @@ const displayBankActiveList = useMemo(() => {
                           setBankCountRefreshSeq((n) => n + 1);
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Unable to refresh transactions");
-                          setPendingMsg("Keeping the current transaction list until sync succeeds.");
+                          setPendingMsg(
+                            e?.payload?.updatesPending
+                              ? "Plaid still reports bank activity; retry after a short wait."
+                              : "No transaction changes were applied."
+                          );
                           try {
                             const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                             setPlaid(st);
@@ -4630,6 +4664,7 @@ const displayBankActiveList = useMemo(() => {
                             // Keep the existing status if the follow-up status check also fails.
                           }
                         } finally {
+                          plaidSyncRequestRef.current = false;
                           setPlaidSyncing(false);
                         }
                       }}
@@ -4764,7 +4799,7 @@ const displayBankActiveList = useMemo(() => {
               {bankPanelShowStatusWhileRows ? (
                 <span className="text-[11px] text-bb-text-muted inline-flex items-center gap-1.5">
                   <TinySpinner />
-                  <span>{plaidSyncing ? "Syncing bank data…" : matchGroupsLoading ? "Loading placement…" : "Saving changes…"}</span>
+                  <span>{bankActivityLabel}</span>
                 </span>
               ) : null}
               <button

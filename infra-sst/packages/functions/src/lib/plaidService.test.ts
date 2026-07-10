@@ -1121,6 +1121,7 @@ describe("syncTransactions", () => {
   });
 
   test("manual sync generic failure keeps feed connected and retryable", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { syncTransactions, prisma } = await loadSyncTransactions({
       plaid: {
         transactionsSync: vi.fn(async () => {
@@ -1153,8 +1154,45 @@ describe("syncTransactions", () => {
     expect(failureUpdate.data).toMatchObject({
       status: "SYNC_ERROR",
       error_code: "INSTITUTION_ERROR",
-      has_new_transactions: true,
     });
+    expect(failureUpdate.data).not.toHaveProperty("has_new_transactions");
+    expect(body.updatesPending).toBe(true);
+    expect(consoleError.mock.calls[0]?.[1]).not.toHaveProperty("plaidAccountId");
+  });
+
+  test("a retryable repeated check after a recent successful sync stays successful", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: {
+        status: "CONNECTED",
+        has_new_transactions: false,
+        last_sync_at: new Date(Date.now() - 10_000),
+      },
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          const error: any = new Error("bank sync is temporarily unavailable");
+          error.response = {
+            data: {
+              error_code: "INSTITUTION_ERROR",
+              error_message: "The institution is temporarily unavailable",
+            },
+          };
+          throw error;
+        }),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", requestRefresh: true });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      syncDeferred: true,
+      newCount: 0,
+      message: "A bank sync completed moments ago. Plaid did not finish this repeated check, so no transaction changes were applied.",
+    });
+    expect(prisma.bankConnection.updateMany).not.toHaveBeenCalled();
   });
 
   test("defers generic transaction sync failure after reconnect without requiring another reconnect", async () => {
