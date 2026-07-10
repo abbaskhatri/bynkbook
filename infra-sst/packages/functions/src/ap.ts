@@ -3,6 +3,7 @@ import { logActivity } from "./lib/activityLog";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { randomUUID } from "node:crypto";
 import { authorizeWrite } from "./lib/authz";
+import { serializeDateOnly } from "./lib/dateOnly";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -733,7 +734,7 @@ export async function handler(event: any) {
         FROM bill_payment_application bpa
         JOIN payments p ON p.id = bpa.entry_id
         WHERE bpa.business_id = ${biz}::uuid
-          AND bpa.reversed_at IS NULL
+          AND bpa.is_active = true
         GROUP BY bpa.entry_id
       )
       SELECT p.id, p.date, p.payee, p.memo, p.amount_cents, COALESCE(a.applied_cents, 0)::bigint AS applied_cents
@@ -757,8 +758,8 @@ export async function handler(event: any) {
       lines.push([
         "BILL",
         b.id,
-        String(b.invoice_date ?? "").slice(0, 10),
-        String(b.due_date ?? "").slice(0, 10),
+        serializeDateOnly(b.invoice_date) ?? "",
+        serializeDateOnly(b.due_date) ?? "",
         String(amount),
         String(applied),
         String(outstanding < 0n ? 0n : outstanding),
@@ -779,7 +780,7 @@ export async function handler(event: any) {
       lines.push([
         "PAYMENT",
         p.id,
-        String(p.date ?? "").slice(0, 10),
+        serializeDateOnly(p.date) ?? "",
         String(amount),
         String(applied),
         String(unapplied < 0n ? 0n : unapplied),
