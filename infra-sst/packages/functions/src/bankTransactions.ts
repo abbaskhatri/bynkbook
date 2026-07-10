@@ -791,8 +791,8 @@ export async function handler(event: any) {
 
   // -------------------------------------------------------------------
   // POST /bank-transactions/cleanup-plaid-overlap
-  // Soft-removes unmatched Plaid rows that overlap existing CSV/manual bank history.
-  // This repairs a first/full Plaid drain that imported rows already present from uploads.
+  // Soft-removes unmatched Plaid rows that overlap existing matched, manual/uploaded, or ledger history.
+  // This repairs a first/full Plaid drain that imported rows already present in the account.
   // -------------------------------------------------------------------
   if (isCleanupPlaidOverlap) {
     try {
@@ -820,41 +820,81 @@ export async function handler(event: any) {
         });
       }
 
-      const latestNonPlaid = await prisma.bankTransaction.findFirst({
-        where: {
-          business_id: businessId,
-          account_id: accountId,
-          is_removed: false,
-          OR: [
-            { plaid_transaction_id: null },
-            { source: { not: "PLAID" } },
+      const activeMatchedIds = await activeMatchedBankTransactionIds(prisma, businessId, accountId);
+      const [latestNonPlaid, latestMatchedRows, latestLedgerEntry] = await Promise.all([
+        prisma.bankTransaction.findFirst({
+          where: {
+            business_id: businessId,
+            account_id: accountId,
+            is_removed: false,
+            OR: [
+              { plaid_transaction_id: null },
+              { source: { not: "PLAID" } },
+            ],
+          },
+          orderBy: [
+            { posted_date: "desc" as any },
+            { created_at: "desc" as any },
+            { id: "desc" as any },
           ],
-        },
-        orderBy: [
-          { posted_date: "desc" as any },
-          { created_at: "desc" as any },
-          { id: "desc" as any },
-        ],
-        select: { posted_date: true },
-      });
+          select: { posted_date: true },
+        }),
+        activeMatchedIds.length > 0
+          ? prisma.bankTransaction.findMany({
+              where: {
+                business_id: businessId,
+                account_id: accountId,
+                id: { in: activeMatchedIds } as any,
+                is_removed: false,
+              },
+              orderBy: [
+                { posted_date: "desc" as any },
+                { created_at: "desc" as any },
+                { id: "desc" as any },
+              ],
+              take: 1,
+              select: { posted_date: true },
+            })
+          : Promise.resolve([]),
+        prisma.entry.findFirst({
+          where: {
+            business_id: businessId,
+            account_id: accountId,
+            deleted_at: null,
+          },
+          orderBy: [
+            { date: "desc" as any },
+            { created_at: "desc" as any },
+            { id: "desc" as any },
+          ],
+          select: { date: true },
+        }),
+      ]);
 
-      if (!latestNonPlaid?.posted_date) {
+      const candidates = [
+        latestNonPlaid?.posted_date ? { date: latestNonPlaid.posted_date, source: "bank_history" } : null,
+        latestMatchedRows?.[0]?.posted_date ? { date: latestMatchedRows[0].posted_date, source: "matched_bank" } : null,
+        latestLedgerEntry?.date ? { date: latestLedgerEntry.date, source: "ledger_entries" } : null,
+      ].filter(Boolean) as Array<{ date: Date; source: string }>;
+      const cutoff = candidates.sort((a, b) => b.date.getTime() - a.date.getTime())[0] ?? null;
+
+      if (!cutoff) {
         return json(200, {
           ok: true,
           removedCount: 0,
           throughDate: null,
-          message: "No uploaded/manual bank history found for this account.",
+          historySources: [],
+          message: "No bank, matched, or ledger history found for this account.",
         });
       }
 
-      const activeMatchedIds = await activeMatchedBankTransactionIds(prisma, businessId, accountId);
       const now = new Date();
       const where: any = {
         business_id: businessId,
         account_id: accountId,
         is_removed: false,
         plaid_transaction_id: { not: null },
-        posted_date: { lte: latestNonPlaid.posted_date },
+        posted_date: { lte: cutoff.date },
       };
       if (activeMatchedIds.length > 0) {
         where.id = { notIn: activeMatchedIds };
@@ -877,7 +917,9 @@ export async function handler(event: any) {
         payloadJson: {
           account_id: accountId,
           removed_count: updated.count,
-          through_date: latestNonPlaid.posted_date.toISOString().slice(0, 10),
+          through_date: cutoff.date.toISOString().slice(0, 10),
+          through_source: cutoff.source,
+          history_sources: candidates.map((candidate) => candidate.source),
           protected_matched_count: activeMatchedIds.length,
         },
       });
@@ -885,7 +927,9 @@ export async function handler(event: any) {
       return json(200, {
         ok: true,
         removedCount: updated.count,
-        throughDate: latestNonPlaid.posted_date.toISOString().slice(0, 10),
+        throughDate: cutoff.date.toISOString().slice(0, 10),
+        throughSource: cutoff.source,
+        historySources: candidates.map((candidate) => candidate.source),
       });
     } catch (e: any) {
       const msg = String(e?.message ?? e ?? "Unknown error");

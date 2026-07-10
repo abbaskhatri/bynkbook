@@ -155,6 +155,26 @@ function rowMatchesWhere(row: any, where: any): boolean {
   return true;
 }
 
+function sortRowsByOrderBy(rows: any[], orderBy: any) {
+  const clauses = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  if (clauses.length === 0) return rows;
+
+  return [...rows].sort((a, b) => {
+    for (const clause of clauses) {
+      const [field, direction] = Object.entries(clause)[0] ?? [];
+      if (!field) continue;
+      const av = a[field];
+      const bv = b[field];
+      const aValue = av instanceof Date ? av.getTime() : av;
+      const bValue = bv instanceof Date ? bv.getTime() : bv;
+      if (aValue === bValue) continue;
+      const diff = aValue > bValue ? 1 : -1;
+      return direction === "desc" ? -diff : diff;
+    }
+    return 0;
+  });
+}
+
 async function loadHandler(options: {
   rows: any[];
   entries?: any[];
@@ -218,7 +238,10 @@ async function loadHandler(options: {
     },
     entry: {
       findFirst: vi.fn(async (args: any) => {
-        const found = entries.find((row) => rowMatchesWhere(row, args?.where));
+        const found = sortRowsByOrderBy(
+          entries.filter((row) => rowMatchesWhere(row, args?.where)),
+          args?.orderBy
+        )[0];
         return found ? project(found, args?.select) : null;
       }),
       findMany: vi.fn(async (args: any) => {
@@ -233,7 +256,10 @@ async function loadHandler(options: {
     },
     bankTransaction: {
       findFirst: vi.fn(async (args: any) => {
-        const found = options.rows.find((row) => rowMatchesWhere(row, args?.where));
+        const found = sortRowsByOrderBy(
+          options.rows.filter((row) => rowMatchesWhere(row, args?.where)),
+          args?.orderBy
+        )[0];
         return found ? project(found, args?.select) : null;
       }),
       count: vi.fn(async (args: any) =>
@@ -495,6 +521,68 @@ describe("bank transactions list status and pagination", () => {
         }),
       })
     );
+  });
+
+  test("cleanup-plaid-overlap uses matched bank history when no uploaded history exists", async () => {
+    const rows = [
+      tx("plaid-old-unmatched", "2026-04-01", "2026-07-10T20:12:00.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-old-unmatched",
+      }),
+      tx("plaid-old-matched", "2026-04-30", "2026-07-10T20:12:01.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-old-matched",
+      }),
+      tx("plaid-new", "2026-05-01", "2026-07-10T20:12:02.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-new",
+      }),
+    ];
+    const { handler } = await loadHandler({
+      rows,
+      matchGroupBankIds: ["plaid-old-matched"],
+    });
+
+    const res = await handler(postCleanupPlaidOverlapEvent());
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.removedCount).toBe(1);
+    expect(body.throughDate).toBe("2026-04-30");
+    expect(body.throughSource).toBe("matched_bank");
+    expect(body.historySources).toEqual(["matched_bank"]);
+    expect(rows.find((row) => row.id === "plaid-old-unmatched")?.is_removed).toBe(true);
+    expect(rows.find((row) => row.id === "plaid-old-matched")?.is_removed).toBe(false);
+    expect(rows.find((row) => row.id === "plaid-new")?.is_removed).toBe(false);
+  });
+
+  test("cleanup-plaid-overlap uses ledger history when no bank transaction history exists", async () => {
+    const rows = [
+      tx("plaid-old-unmatched", "2026-04-01", "2026-07-10T20:12:00.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-old-unmatched",
+      }),
+      tx("plaid-new", "2026-05-01", "2026-07-10T20:12:02.000Z", {
+        source: "PLAID",
+        plaid_transaction_id: "plaid-new",
+      }),
+    ];
+    const ledgerLatest = entry("ledger-latest", "2026-04-30", -100n);
+    const { handler } = await loadHandler({
+      rows,
+      entries: [ledgerLatest],
+    });
+
+    const res = await handler(postCleanupPlaidOverlapEvent());
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.removedCount).toBe(1);
+    expect(body.throughDate).toBe("2026-04-30");
+    expect(body.throughSource).toBe("ledger_entries");
+    expect(body.historySources).toEqual(["ledger_entries"]);
+    expect(rows.find((row) => row.id === "plaid-old-unmatched")?.is_removed).toBe(true);
+    expect(rows.find((row) => row.id === "plaid-new")?.is_removed).toBe(false);
   });
 });
 
