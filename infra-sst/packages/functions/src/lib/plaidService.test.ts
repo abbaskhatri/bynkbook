@@ -421,10 +421,118 @@ describe("syncTransactions", () => {
     expect(calls[2]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
   });
 
-  test("persists sanitized Plaid failure details without clearing has_new_transactions or storing secrets", async () => {
+  test("does not fail transaction sync when Plaid balance lookup returns NO_ACCOUNTS", async () => {
     const { syncTransactions, prisma } = await loadSyncTransactions({
       plaid: {
         accountsBalanceGet: vi.fn(async () => {
+          const error: any = new Error("No accounts available for balance");
+          error.response = {
+            data: {
+              error_code: "NO_ACCOUNTS",
+              error_message: "No accounts available",
+            },
+          };
+          throw error;
+        }),
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [makeTransaction({ transaction_id: "txn-without-balance" })],
+            modified: [],
+            removed: [],
+            next_cursor: "cursor-after-no-accounts",
+            has_more: false,
+          },
+        })),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", requestRefresh: true });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      newCount: 1,
+      balanceLookupSucceeded: false,
+      balanceErrorCode: "NO_ACCOUNTS",
+    });
+
+    const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
+    expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-without-balance"]);
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(finalConnectionUpdate.data).toMatchObject({
+      sync_cursor: "account:plaid-acct-1:cursor-after-no-accounts",
+      has_new_transactions: false,
+      status: "CONNECTED",
+    });
+    expect(finalConnectionUpdate.data).not.toHaveProperty("last_known_balance_cents");
+    expect(finalConnectionUpdate.data).not.toHaveProperty("last_known_balance_at");
+  });
+
+  test("falls back to item-level transaction sync when account-scoped sync returns NO_ACCOUNTS", async () => {
+    let callN = 0;
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          callN += 1;
+          if (callN === 1) {
+            const error: any = new Error("No accounts available");
+            error.response = {
+              data: {
+                error_code: "NO_ACCOUNTS",
+                error_message: "No accounts available",
+              },
+            };
+            throw error;
+          }
+
+          return {
+            data: {
+              added: [
+                makeTransaction({ transaction_id: "txn-fallback-mapped" }),
+                makeTransaction({ transaction_id: "txn-fallback-other", account_id: "plaid-acct-2" }),
+              ],
+              modified: [],
+              removed: [],
+              next_cursor: "item-cursor-next",
+              has_more: false,
+            },
+          };
+        }),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      newCount: 1,
+      cursorScope: "item",
+      accountScopedFallback: true,
+      accountScopedFallbackCode: "NO_ACCOUNTS",
+    });
+
+    const calls = (plaid.transactionsSync as any).mock.calls.map((call: any[]) => call[0]);
+    expect(calls[0]).toMatchObject({ cursor: undefined, options: { account_id: "plaid-acct-1" } });
+    expect(calls[1]).toMatchObject({ cursor: undefined });
+    expect(calls[1]).not.toHaveProperty("options");
+
+    const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
+    expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-fallback-mapped"]);
+
+    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
+    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    expect(finalConnectionUpdate.data.sync_cursor).toBe("item:item-cursor-next");
+  });
+
+  test("persists sanitized Plaid failure details without clearing has_new_transactions or storing secrets", async () => {
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => {
           const error: any = new Error("invalid access_token access-sandbox-secret123 for secret topsecret");
           error.response = {
             data: {

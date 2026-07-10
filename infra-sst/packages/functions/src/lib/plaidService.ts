@@ -93,28 +93,45 @@ function accountCursorPrefix(plaidAccountId: string) {
   return `account:${plaidAccountId}:`;
 }
 
+function itemCursorPrefix() {
+  return "item:";
+}
+
 function unpackAccountCursor(storedCursor: string | null | undefined, plaidAccountId: string) {
   const raw = String(storedCursor ?? "");
-  if (!raw) return { cursor: null, resetFromLegacyCursor: false };
+  if (!raw) return { cursor: null, scope: "account" as const, resetFromLegacyCursor: false };
 
   const prefix = accountCursorPrefix(plaidAccountId);
   if (raw.startsWith(prefix)) {
     const cursor = raw.slice(prefix.length);
-    return { cursor: cursor || null, resetFromLegacyCursor: false };
+    return { cursor: cursor || null, scope: "account" as const, resetFromLegacyCursor: false };
   }
 
-  return { cursor: null, resetFromLegacyCursor: true };
+  const itemPrefix = itemCursorPrefix();
+  if (raw.startsWith(itemPrefix)) {
+    const cursor = raw.slice(itemPrefix.length);
+    return { cursor: cursor || null, scope: "item" as const, resetFromLegacyCursor: false };
+  }
+
+  return { cursor: null, scope: "account" as const, resetFromLegacyCursor: true };
 }
 
-function packAccountCursor(plaidAccountId: string, cursor: string | null | undefined) {
+function packSyncCursor(plaidAccountId: string, scope: "account" | "item", cursor: string | null | undefined) {
   const raw = String(cursor ?? "");
-  return raw ? `${accountCursorPrefix(plaidAccountId)}${raw}` : null;
+  if (!raw) return null;
+  return scope === "account" ? `${accountCursorPrefix(plaidAccountId)}${raw}` : `${itemCursorPrefix()}${raw}`;
 }
 
 function isPlaidMutationDuringPagination(error: any) {
   const code = plaidErrorCode(error).toUpperCase();
   const message = plaidErrorMessage(error).toUpperCase();
   return code.includes("TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION") || message.includes("MUTATION_DURING_PAGINATION");
+}
+
+function isAccountScopedSyncUnavailable(error: any) {
+  const code = plaidErrorCode(error).toUpperCase();
+  const message = plaidErrorMessage(error).toUpperCase();
+  return code.includes("NO_ACCOUNTS") || code.includes("INVALID_ACCOUNT") || message.includes("NO ACCOUNTS");
 }
 
 function isReconnectRequiredStatus(status: string) {
@@ -725,13 +742,6 @@ export async function syncTransactions(params: {
       }
     }
 
-    // Fetch current balance (backend-provided; stored for UI)
-    // Note: this returns all accounts on the item, we select the mapped one.
-    const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
-    const acct = balRes.data.accounts.find((a) => a.account_id === conn.plaid_account_id);
-    const currentBalance = acct?.balances?.current ?? null;
-    const currentBalanceCents = currentBalance == null ? null : BigInt(Math.round(currentBalance * 100));
-
     // Initial backfill deletion rule (only delete PLAID-sourced rows older than effectiveStartDate)
     // Because Phase 4B has no CSV parsing, PLAID is the only source inserted here.
     await prisma.bankTransaction.deleteMany({
@@ -749,10 +759,41 @@ export async function syncTransactions(params: {
 
     const plaidAccountId = conn.plaid_account_id;
     const effectiveStartDate = conn.effective_start_date;
+    let currentBalanceCents: bigint | null = null;
+    let balanceLookupSucceeded = false;
+    let balanceErrorCode: string | null = null;
+    let balanceErrorMessage: string | null = null;
+
+    // Balance is helpful UI metadata, but it must never block transaction sync.
+    // Plaid can return NO_ACCOUNTS for balance/account lookups while transaction
+    // sync is still the authoritative source for new bank rows.
+    try {
+      const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
+      const acct = balRes.data.accounts.find((a) => a.account_id === plaidAccountId);
+      const currentBalance = acct?.balances?.current ?? null;
+      if (currentBalance != null) {
+        currentBalanceCents = BigInt(Math.round(currentBalance * 100));
+        balanceLookupSucceeded = true;
+      }
+    } catch (balanceError: any) {
+      balanceErrorCode = plaidErrorCode(balanceError);
+      balanceErrorMessage = plaidErrorMessage(balanceError);
+      console.warn("Plaid balance lookup skipped during transaction sync", {
+        businessId,
+        accountId,
+        plaidAccountId,
+        errorCode: balanceErrorCode,
+        errorMessage: balanceErrorMessage,
+      });
+    }
+
     const initialCursorInfo = unpackAccountCursor(conn.sync_cursor ?? null, plaidAccountId);
-    const drainStartCursor = initialCursorInfo.cursor;
+    let cursorScope: "account" | "item" = initialCursorInfo.scope;
+    let drainStartCursor = initialCursorInfo.cursor;
     let cursor = drainStartCursor;
     let hasMore = true;
+    let accountScopedFallback = false;
+    let accountScopedFallbackCode: string | null = null;
 
   // Drain safety (production hardening)
   const MAX_PAGES = 20;          // safety cap
@@ -777,14 +818,16 @@ export async function syncTransactions(params: {
   async function syncPage() {
     for (let attempt = 0; attempt < RETRY_MAX; attempt++) {
       try {
-        return await plaid.transactionsSync({
+        const request: any = {
           access_token: accessToken,
           cursor: cursor ?? undefined,
           count: 500,
-          options: { account_id: plaidAccountId },
-        });
+        };
+        if (cursorScope === "account") request.options = { account_id: plaidAccountId };
+        return await plaid.transactionsSync(request);
       } catch (e: any) {
         if (isPlaidMutationDuringPagination(e)) throw e;
+        if (cursorScope === "account" && isAccountScopedSyncUnavailable(e)) throw e;
         // light backoff for transient errors / rate limiting
         const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt);
         if (attempt < RETRY_MAX - 1) await sleep(backoff);
@@ -831,6 +874,14 @@ export async function syncTransactions(params: {
       drainedRemoved = candidateRemoved;
       break;
     } catch (error) {
+      if (cursorScope === "account" && isAccountScopedSyncUnavailable(error)) {
+        accountScopedFallback = true;
+        accountScopedFallbackCode = plaidErrorCode(error);
+        cursorScope = "item";
+        drainStartCursor = null;
+        cursor = null;
+        continue;
+      }
       if (isPlaidMutationDuringPagination(error) && drainRestartCount < MAX_DRAIN_RESTARTS) {
         drainRestartCount += 1;
         await sleep(BACKOFF_BASE_MS * Math.pow(2, drainRestartCount));
@@ -1091,19 +1142,24 @@ export async function syncTransactions(params: {
     });
   }
 
+  const connectionUpdateData: any = {
+    sync_cursor: packSyncCursor(plaidAccountId, cursorScope, cursor),
+    last_sync_at: now,
+    has_new_transactions: false,
+    status: "CONNECTED",
+    error_code: null,
+    error_message: null,
+    updated_at: now,
+  };
+
+  if (balanceLookupSucceeded) {
+    connectionUpdateData.last_known_balance_cents = currentBalanceCents;
+    connectionUpdateData.last_known_balance_at = now;
+  }
+
   await prisma.bankConnection.updateMany({
     where: { business_id: businessId, account_id: accountId },
-    data: {
-      sync_cursor: packAccountCursor(plaidAccountId, cursor),
-      last_sync_at: now,
-      has_new_transactions: false,
-      last_known_balance_cents: currentBalanceCents,
-      last_known_balance_at: currentBalanceCents == null ? null : now,
-      status: "CONNECTED",
-      error_code: null,
-      error_message: null,
-      updated_at: now,
-    },
+    data: connectionUpdateData,
   });
 
   return json(200, {
@@ -1117,6 +1173,9 @@ export async function syncTransactions(params: {
     refreshSucceeded,
     refreshErrorCode,
     refreshErrorMessage,
+    balanceLookupSucceeded,
+    balanceErrorCode,
+    balanceErrorMessage,
 
     // Progress metadata (useful for UI)
     pages: pageN,
@@ -1124,6 +1183,9 @@ export async function syncTransactions(params: {
     capped: pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL,
     hasMore: hasMore,
     drainRestartCount,
+    cursorScope,
+    accountScopedFallback,
+    accountScopedFallbackCode,
     cursorResetFromLegacyScope: initialCursorInfo.resetFromLegacyCursor,
   });
   } catch (error) {

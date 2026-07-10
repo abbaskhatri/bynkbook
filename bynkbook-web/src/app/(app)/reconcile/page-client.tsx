@@ -4511,15 +4511,15 @@ const displayBankActiveList = useMemo(() => {
 
         {/* Bank Transactions */}
         <div className="bb-spreadsheet-shell flex flex-col min-h-0 overflow-hidden rounded-lg">
-          <div className="px-3 py-1.5">
-            <div className="flex items-center justify-between gap-2 min-w-0">
-              <div className="min-w-0 flex items-center gap-2">
-                <div className="flex flex-wrap items-center gap-2">
+          <div className="px-4 py-3">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   <div className="text-sm font-semibold text-bb-text">Bank transactions</div>
                   <StatusChip label="Source: Bank" tone="info" />
                   {connectedPill}
                 </div>
-                <div className="hidden xl:block text-[11px] text-bb-text-muted min-w-0 truncate whitespace-nowrap">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-bb-text-muted">
                   {plaidHasConnection ? (
                     <>
                       {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
@@ -4535,9 +4535,9 @@ const displayBankActiveList = useMemo(() => {
                         </span>
                       ) : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {syncMsg ? <span className="truncate">{syncMsg}</span> : null}
+                      {syncMsg ? <span>{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {pendingMsg ? <span className="text-bb-status-warning-fg truncate">{pendingMsg}</span> : null}
+                      {pendingMsg ? <span className="text-bb-status-warning-fg">{pendingMsg}</span> : null}
                     </>
                   ) : (
                     "Imported from bank or CSV"
@@ -4545,7 +4545,7 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
+              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                 {!plaidHealthyConnected ? (
                   <button
                     type="button"
@@ -4603,9 +4603,11 @@ const displayBankActiveList = useMemo(() => {
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
 
-                          settleReconcileInBackground("bank sync", () => {
-                            setBankCountRefreshSeq((n) => n + 1);
+                          await refreshTablesFully({
+                            preserveOnEmpty: true,
+                            skipLegacyMatches: true,
                           });
+                          setBankCountRefreshSeq((n) => n + 1);
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Unable to refresh transactions");
                           setPendingMsg("Keeping the current transaction list until sync succeeds.");
