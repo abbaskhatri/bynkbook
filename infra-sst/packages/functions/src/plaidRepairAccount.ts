@@ -27,5 +27,6 @@ export async function handler(event: any) {
     plaidAccountId,
     institution: body?.institution ?? undefined,
     mask: (body?.mask ?? "").toString().trim() || undefined,
+    additionalAccounts: Array.isArray(body?.additionalAccounts) ? body.additionalAccounts : undefined,
   });
 }

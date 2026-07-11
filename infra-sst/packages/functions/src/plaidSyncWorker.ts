@@ -24,6 +24,9 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         if (statusCode >= 400 || result?.ok === false) {
           throw new Error(result?.error ?? result?.message ?? `Plaid sync failed with ${statusCode}`);
         }
+        if (result?.syncInProgress) {
+          throw new Error("Plaid sync lease is currently held; retry this queue message");
+        }
         if (!result?.drainIncomplete && !result?.hasMore) {
           complete = true;
           break;

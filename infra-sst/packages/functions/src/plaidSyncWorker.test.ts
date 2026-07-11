@@ -46,4 +46,17 @@ describe("Plaid sync worker", () => {
 
     expect(result.batchItemFailures).toEqual([{ itemIdentifier: "m-fail" }]);
   });
+
+  test("retries a queue message when another caller owns the account sync lease", async () => {
+    const syncTransactions = vi.fn().mockResolvedValue({
+      statusCode: 202,
+      body: JSON.stringify({ ok: true, syncInProgress: true }),
+    });
+    vi.doMock("./lib/plaidService", () => ({ syncTransactions }));
+
+    const { handler } = await import("./plaidSyncWorker");
+    const result = await handler(sqsEvent([{ id: "m-lease", body: { businessId: "biz-1", accountId: "acct-1" } }]));
+
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "m-lease" }]);
+  });
 });

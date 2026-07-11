@@ -1,0 +1,345 @@
+[
+  {
+    "viewport": {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    },
+    "finalUrl": "https://app.bynkbook.com/reconcile?businessId=a05b0683-1216-4459-820a-6da84e57e929&accountId=086435cc-290f-4c6d-a4b9-317590cf19d7",
+    "title": "Reconcile",
+    "checkpoints": [
+      {
+        "elapsedMs": 6781,
+        "skeletons": 14,
+        "loadingText": 0
+      },
+      {
+        "elapsedMs": 14818,
+        "skeletons": 2,
+        "loadingText": 2
+      },
+      {
+        "elapsedMs": 34832,
+        "skeletons": 0,
+        "loadingText": 2
+      }
+    ],
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "documentWidth": 390,
+      "horizontalPageOverflow": false,
+      "commandSurface": {
+        "left": 12,
+        "right": 378,
+        "width": 366
+      },
+      "flaggedControls": []
+    },
+    "failedResponses": [],
+    "responses": [
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses",
+        "elapsedMs": 7959
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts",
+        "elapsedMs": 8156
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/attention-summary",
+        "elapsedMs": 8158
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/bank-transactions?status=unmatched&limit=1",
+        "elapsedMs": 11084
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/role-policies",
+        "elapsedMs": 11085
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/plaid/status",
+        "elapsedMs": 11293
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/team",
+        "elapsedMs": 11384
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/bank-transactions?status=unmatched&limit=500",
+        "elapsedMs": 11405
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/entries?limit=200",
+        "elapsedMs": 12005
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/entries?limit=200&cursor=eyJkYXRlIjoiMjAyNi0wMy0wM1QwMDowMDowMC4wMDBaIiwiY3JlYXRlZF9hdCI6IjIwMjYtMDUtMDdUMTY6MzQ6NTcuNTQyWiIsImlkIjoiMjM5MjA1M2ItN2NhYi00NjZjLTg2YWEtMjQ1YmZjMmRmZjAxIn0",
+        "elapsedMs": 13341
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/match-groups/placement-summary",
+        "elapsedMs": 15281
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/match-groups/placement-summary",
+        "elapsedMs": 17358
+      }
+    ],
+    "consoleErrors": [],
+    "screenshot": "C:\\Users\\abbas\\Bynkbook-app\\output\\playwright\\re-audit-2026-07-11\\reconcile-mobile.png"
+  },
+  {
+    "viewport": {
+      "name": "tablet",
+      "width": 768,
+      "height": 1024
+    },
+    "finalUrl": "https://app.bynkbook.com/reconcile?businessId=a05b0683-1216-4459-820a-6da84e57e929&accountId=086435cc-290f-4c6d-a4b9-317590cf19d7",
+    "title": "Reconcile",
+    "checkpoints": [
+      {
+        "elapsedMs": 2128,
+        "skeletons": 2,
+        "loadingText": 1
+      },
+      {
+        "elapsedMs": 10152,
+        "skeletons": 0,
+        "loadingText": 2
+      },
+      {
+        "elapsedMs": 30170,
+        "skeletons": 0,
+        "loadingText": 2
+      }
+    ],
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "documentWidth": 949,
+      "horizontalPageOverflow": true,
+      "commandSurface": {
+        "left": 244,
+        "right": 748,
+        "width": 504
+      },
+      "flaggedControls": [
+        {
+          "text": "Search entries, bank txns, payees…",
+          "left": 549,
+          "right": 869,
+          "top": 12,
+          "width": 320,
+          "clipped": false,
+          "outsideViewport": true
+        },
+        {
+          "text": "Recent activity",
+          "left": 877,
+          "right": 909,
+          "top": 12,
+          "width": 32,
+          "clipped": false,
+          "outsideViewport": true
+        },
+        {
+          "text": "Account menu",
+          "left": 917,
+          "right": 949,
+          "top": 12,
+          "width": 32,
+          "clipped": false,
+          "outsideViewport": true
+        }
+      ]
+    },
+    "failedResponses": [],
+    "responses": [
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts",
+        "elapsedMs": 593
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses",
+        "elapsedMs": 670
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/attention-summary",
+        "elapsedMs": 766
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/role-policies",
+        "elapsedMs": 1067
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/plaid/status",
+        "elapsedMs": 1067
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/team",
+        "elapsedMs": 1068
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/bank-transactions?status=unmatched&limit=1",
+        "elapsedMs": 1184
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/bank-transactions?status=unmatched&limit=500",
+        "elapsedMs": 1188
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/entries?limit=200",
+        "elapsedMs": 1681
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/match-groups/placement-summary",
+        "elapsedMs": 2271
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/match-groups/placement-summary",
+        "elapsedMs": 2414
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/entries?limit=200&cursor=eyJkYXRlIjoiMjAyNi0wMy0wM1QwMDowMDowMC4wMDBaIiwiY3JlYXRlZF9hdCI6IjIwMjYtMDUtMDdUMTY6MzQ6NTcuNTQyWiIsImlkIjoiMjM5MjA1M2ItN2NhYi00NjZjLTg2YWEtMjQ1YmZjMmRmZjAxIn0",
+        "elapsedMs": 2812
+      }
+    ],
+    "consoleErrors": [],
+    "screenshot": "C:\\Users\\abbas\\Bynkbook-app\\output\\playwright\\re-audit-2026-07-11\\reconcile-tablet.png"
+  },
+  {
+    "viewport": {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    "finalUrl": "https://app.bynkbook.com/reconcile?businessId=a05b0683-1216-4459-820a-6da84e57e929&accountId=086435cc-290f-4c6d-a4b9-317590cf19d7",
+    "title": "Reconcile",
+    "checkpoints": [
+      {
+        "elapsedMs": 2284,
+        "skeletons": 2,
+        "loadingText": 1
+      },
+      {
+        "elapsedMs": 10309,
+        "skeletons": 0,
+        "loadingText": 2
+      },
+      {
+        "elapsedMs": 30327,
+        "skeletons": 0,
+        "loadingText": 2
+      }
+    ],
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "documentWidth": 1440,
+      "horizontalPageOverflow": false,
+      "commandSurface": {
+        "left": 244,
+        "right": 1420,
+        "width": 1176
+      },
+      "flaggedControls": []
+    },
+    "failedResponses": [],
+    "responses": [
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts",
+        "elapsedMs": 862
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses",
+        "elapsedMs": 1114
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/attention-summary",
+        "elapsedMs": 1114
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/role-policies",
+        "elapsedMs": 1468
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/plaid/status",
+        "elapsedMs": 1480
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/team",
+        "elapsedMs": 1493
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/bank-transactions?status=unmatched&limit=1",
+        "elapsedMs": 1582
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/bank-transactions?status=unmatched&limit=500",
+        "elapsedMs": 1745
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/entries?limit=200",
+        "elapsedMs": 1779
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/match-groups/placement-summary",
+        "elapsedMs": 2578
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/match-groups/placement-summary",
+        "elapsedMs": 2578
+      },
+      {
+        "status": 200,
+        "url": "https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/businesses/[id]/accounts/[id]/entries?limit=200&cursor=eyJkYXRlIjoiMjAyNi0wMy0wM1QwMDowMDowMC4wMDBaIiwiY3JlYXRlZF9hdCI6IjIwMjYtMDUtMDdUMTY6MzQ6NTcuNTQyWiIsImlkIjoiMjM5MjA1M2ItN2NhYi00NjZjLTg2YWEtMjQ1YmZjMmRmZjAxIn0",
+        "elapsedMs": 3056
+      }
+    ],
+    "consoleErrors": [],
+    "screenshot": "C:\\Users\\abbas\\Bynkbook-app\\output\\playwright\\re-audit-2026-07-11\\reconcile-desktop.png"
+  }
+]

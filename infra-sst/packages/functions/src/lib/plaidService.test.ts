@@ -28,6 +28,16 @@ function makeTransaction(overrides: Record<string, any>) {
   };
 }
 
+function bankConnectionUpdateCalls(prisma: any) {
+  return ((prisma.bankConnection.updateMany as any).mock.calls as any[][]).map((call) => call[0]);
+}
+
+function latestBankConnectionUpdate(prisma: any, predicate: (args: any) => boolean) {
+  const found = bankConnectionUpdateCalls(prisma).filter(predicate).at(-1);
+  expect(found).toBeTruthy();
+  return found;
+}
+
 async function loadSyncTransactions(options: {
   conn?: Record<string, any>;
   plaid?: Record<string, any>;
@@ -216,6 +226,7 @@ describe("createLinkToken", () => {
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         access_token: "access-token-redacted",
+        update: { account_selection_enabled: true },
       })
     );
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
@@ -304,6 +315,19 @@ describe("Plaid disconnect lifecycle", () => {
 });
 
 describe("syncTransactions", () => {
+  test("returns a coalesced success while another drain owns the account lease", async () => {
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      prisma: {
+        bankConnection: { updateMany: vi.fn(async () => ({ count: 0 })) },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    expect(res.statusCode).toBe(202);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, syncInProgress: true });
+    expect(plaid.transactionsSync).not.toHaveBeenCalled();
+  });
+
   test("preserves the update flag and resumable cursor when the page cap is reached", async () => {
     let page = 0;
     const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
@@ -329,7 +353,11 @@ describe("syncTransactions", () => {
     expect(response.statusCode).toBe(200);
     expect(body).toMatchObject({ capped: true, hasMore: true, drainIncomplete: true, pages: 20 });
     expect(plaid.transactionsSync).toHaveBeenCalledTimes(20);
-    expect(prisma.bankConnection.updateMany).toHaveBeenLastCalledWith({
+    const cappedUpdate = latestBankConnectionUpdate(
+      prisma,
+      (args) => args?.data?.has_new_transactions === true && "sync_cursor" in (args?.data ?? {}),
+    );
+    expect(cappedUpdate).toMatchObject({
       where: { business_id: "biz-1", account_id: "acct-1" },
       data: expect.objectContaining({ has_new_transactions: true }),
     });
@@ -663,7 +691,7 @@ describe("syncTransactions", () => {
 
     expect((plaid.transactionsSync as any).mock.calls[0][0]).toMatchObject({
       cursor: undefined,
-      account_id: "plaid-acct-1",
+      options: { account_id: "plaid-acct-1" },
     });
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
@@ -982,8 +1010,7 @@ describe("syncTransactions", () => {
     expect(res.statusCode).toBe(200);
     expect(body.duplicateCount).toBe(1);
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    const finalConnectionUpdate = latestBankConnectionUpdate(prisma, (args) => "sync_cursor" in (args?.data ?? {}));
     expect(finalConnectionUpdate.data).toMatchObject({
       sync_cursor: "account-v2:plaid-acct-1:cursor-next",
       has_new_transactions: false,
@@ -1016,11 +1043,10 @@ describe("syncTransactions", () => {
 
     expect((plaid.transactionsSync as any).mock.calls[0][0]).toMatchObject({
       cursor: undefined,
-      account_id: "plaid-acct-1",
+      options: { account_id: "plaid-acct-1" },
     });
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    const finalConnectionUpdate = latestBankConnectionUpdate(prisma, (args) => "sync_cursor" in (args?.data ?? {}));
     expect(finalConnectionUpdate.data.sync_cursor).toBe("account-v2:plaid-acct-1:account-cursor-next");
   });
 
@@ -1071,9 +1097,9 @@ describe("syncTransactions", () => {
     expect(body.drainRestartCount).toBe(1);
 
     const calls = (plaid.transactionsSync as any).mock.calls.map((call: any[]) => call[0]);
-    expect(calls[0]).toMatchObject({ cursor: "cursor-start", account_id: "plaid-acct-1" });
-    expect(calls[1]).toMatchObject({ cursor: "cursor-page-2", account_id: "plaid-acct-1" });
-    expect(calls[2]).toMatchObject({ cursor: "cursor-start", account_id: "plaid-acct-1" });
+    expect(calls[0]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
+    expect(calls[1]).toMatchObject({ cursor: "cursor-page-2", options: { account_id: "plaid-acct-1" } });
+    expect(calls[2]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
   });
 
   test("does not fail transaction sync when Plaid balance lookup returns NO_ACCOUNTS", async () => {
@@ -1115,8 +1141,7 @@ describe("syncTransactions", () => {
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
     expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-without-balance"]);
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    const finalConnectionUpdate = latestBankConnectionUpdate(prisma, (args) => "sync_cursor" in (args?.data ?? {}));
     expect(finalConnectionUpdate.data).toMatchObject({
       sync_cursor: "account-v2:plaid-acct-1:cursor-after-no-accounts",
       has_new_transactions: false,
@@ -1172,15 +1197,14 @@ describe("syncTransactions", () => {
     });
 
     const calls = (plaid.transactionsSync as any).mock.calls.map((call: any[]) => call[0]);
-    expect(calls[0]).toMatchObject({ cursor: undefined, account_id: "plaid-acct-1" });
+    expect(calls[0]).toMatchObject({ cursor: undefined, options: { account_id: "plaid-acct-1" } });
     expect(calls[1]).toMatchObject({ cursor: undefined });
     expect(calls[1]).not.toHaveProperty("options");
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
     expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-fallback-mapped"]);
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const finalConnectionUpdate = connectionUpdateCalls.at(-1)![0];
+    const finalConnectionUpdate = latestBankConnectionUpdate(prisma, (args) => "sync_cursor" in (args?.data ?? {}));
     expect(finalConnectionUpdate.data.sync_cursor).toBe("item:item-cursor-next");
   });
 
@@ -1213,8 +1237,7 @@ describe("syncTransactions", () => {
       reconnectRequired: true,
     });
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const failureUpdate = connectionUpdateCalls.at(-1)![0];
+    const failureUpdate = latestBankConnectionUpdate(prisma, (args) => args?.data?.status === "PLAID_ACCOUNT_MISSING");
     expect(failureUpdate.data).toMatchObject({
       status: "PLAID_ACCOUNT_MISSING",
       error_code: "NO_ACCOUNTS",
@@ -1250,8 +1273,7 @@ describe("syncTransactions", () => {
       reconnectRequired: true,
     });
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const failureUpdate = connectionUpdateCalls.at(-1)![0];
+    const failureUpdate = latestBankConnectionUpdate(prisma, (args) => args?.data?.status === "ENV_MISMATCH_RECONNECT_REQUIRED");
     expect(failureUpdate.data).toMatchObject({
       status: "ENV_MISMATCH_RECONNECT_REQUIRED",
       error_code: "INVALID_ACCESS_TOKEN",
@@ -1291,8 +1313,7 @@ describe("syncTransactions", () => {
       reconnectRequired: false,
     });
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const failureUpdate = connectionUpdateCalls.at(-1)![0];
+    const failureUpdate = latestBankConnectionUpdate(prisma, (args) => args?.data?.status === "SYNC_ERROR");
     expect(failureUpdate.data).toMatchObject({
       status: "SYNC_ERROR",
       error_code: "INSTITUTION_ERROR",
@@ -1334,7 +1355,7 @@ describe("syncTransactions", () => {
       newCount: 0,
       message: "A bank sync completed moments ago. Plaid did not finish this repeated check, so no transaction changes were applied.",
     });
-    expect(prisma.bankConnection.updateMany).not.toHaveBeenCalled();
+    expect(bankConnectionUpdateCalls(prisma).filter((args) => args?.data?.status || args?.data?.error_code)).toEqual([]);
   });
 
   test("defers generic transaction sync failure after reconnect without requiring another reconnect", async () => {
@@ -1369,8 +1390,7 @@ describe("syncTransactions", () => {
       message: "Bank reconnected. Transactions are still being prepared by the bank and will sync shortly.",
     });
 
-    const connectionUpdateCalls = (prisma.bankConnection.updateMany as any).mock.calls as any[][];
-    const pendingUpdate = connectionUpdateCalls.at(-1)![0];
+    const pendingUpdate = latestBankConnectionUpdate(prisma, (args) => args?.data?.status === "PENDING_SYNC");
     expect(pendingUpdate.data).toMatchObject({
       status: "PENDING_SYNC",
       error_code: "PRODUCT_NOT_READY",
@@ -1638,6 +1658,55 @@ describe("syncTransactions", () => {
     expect(siblingRestore.data).not.toHaveProperty("plaid_account_id");
     expect(siblingRestore.data).not.toHaveProperty("sync_cursor");
   });
+
+  test("repairPlaidAccountMapping atomically creates newly shared sibling accounts", async () => {
+    const { mod, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              { account_id: "plaid-acct-1", mask: "1234", type: "depository", subtype: "checking" },
+              { account_id: "plaid-acct-new", mask: "2468", type: "depository", subtype: "savings" },
+            ],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.repairPlaidAccountMapping({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      plaidAccountId: "plaid-acct-1",
+      additionalAccounts: [{
+        plaidAccountId: "plaid-acct-new",
+        name: "Bank Savings 2468",
+        effectiveStartDate: "2026-01-01",
+      }],
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.additionalAccounts).toHaveLength(1);
+    expect(body.additionalAccounts[0]).toMatchObject({
+      plaidAccountId: "plaid-acct-new",
+      name: "Bank Savings 2468",
+      type: "SAVINGS",
+      last4: "2468",
+    });
+    expect(prisma.account.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ name: "Bank Savings 2468", type: "SAVINGS", last4: "2468" }),
+    });
+    expect(prisma.bankConnection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        plaid_item_id: "item-1",
+        plaid_account_id: "plaid-acct-new",
+        access_token_ciphertext: "ciphertext",
+        has_new_transactions: true,
+      }),
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("handleWebhook", () => {
@@ -1680,6 +1749,23 @@ describe("handleWebhook", () => {
       where: { plaid_item_id: "item-1" },
       data: expect.objectContaining({ has_new_transactions: true }),
     });
+  });
+
+  test("non-sync transaction webhooks do not create false update availability", async () => {
+    const enqueueSync = vi.fn(async () => undefined);
+    const { mod, prisma } = await loadSyncTransactions({});
+    const body = {
+      item_id: "item-1",
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "RECURRING_TRANSACTIONS_UPDATE",
+    };
+    const rawBody = JSON.stringify(body);
+    const res = await mod.handleWebhook({ body, rawBody, headers: signedPlaidHeaders(rawBody), enqueueSync });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ ignored: true });
+    expect(prisma.bankConnection.updateMany).not.toHaveBeenCalled();
+    expect(enqueueSync).not.toHaveBeenCalled();
   });
 
   test("ITEM ERROR webhook marks reconnect-required and stores sanitized error fields", async () => {
@@ -1735,6 +1821,44 @@ describe("handleWebhook", () => {
       status: "REAUTH_REQUIRED",
       error_code: "PENDING_EXPIRATION",
     });
+    expect(update.data).not.toHaveProperty("has_new_transactions");
+  });
+
+  test("PENDING_DISCONNECT proactively marks US and Canada Items for update mode", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ITEM",
+      webhook_code: "PENDING_DISCONNECT",
+      item_id: "item-1",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const update = (prisma.bankConnection.updateMany as any).mock.calls[0][0];
+    expect(update.data).toMatchObject({ status: "REAUTH_REQUIRED", error_code: "PENDING_DISCONNECT" });
+  });
+
+  test("LOGIN_REPAIRED clears stale reconnect state without changing transaction flags", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ITEM",
+      webhook_code: "LOGIN_REPAIRED",
+      item_id: "item-1",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const update = (prisma.bankConnection.updateMany as any).mock.calls[0][0];
+    expect(update.data).toMatchObject({ status: "CONNECTED", error_code: null, error_message: null });
+    expect(update.data).not.toHaveProperty("has_new_transactions");
+  });
+
+  test("NEW_ACCOUNTS_AVAILABLE records account discovery without claiming transaction updates", async () => {
+    const { res, prisma } = await callVerifiedWebhook({
+      webhook_type: "ITEM",
+      webhook_code: "NEW_ACCOUNTS_AVAILABLE",
+      item_id: "item-1",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const update = (prisma.bankConnection.updateMany as any).mock.calls[0][0];
+    expect(update.data).toMatchObject({ new_accounts_available: true });
     expect(update.data).not.toHaveProperty("has_new_transactions");
   });
 

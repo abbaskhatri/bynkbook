@@ -7,7 +7,7 @@
 - Plaid webhooks enqueue sync work in `PlaidSyncQueue` and failed jobs move to `PlaidSyncDeadLetterQueue` after five receives.
 - `PlaidSyncBacklogAgeAlarm` enters alarm state when the oldest queued job is over five minutes old for two consecutive one-minute periods.
 - `PlaidSyncDeadLettersAlarm` enters alarm state when any message is visible in the dead-letter queue.
-- Set `BYNKBOOK_ALARM_TOPIC_ARN` to an approved SNS topic ARN to attach notification delivery to both alarms. The alarms still exist without the variable, but have no outbound notification action.
+- Both alarms always have an SNS action. Set `BYNKBOOK_ALARM_TOPIC_ARN` to use an approved shared topic; otherwise SST creates the stage-scoped `*-plaid-operations-alarms` topic and returns its ARN as `plaidAlarmTopicArn`.
 
 ## Triage order
 
@@ -29,4 +29,4 @@
 
 ## Required production setup
 
-Before deployment, operations must supply and test an SNS topic through `BYNKBOOK_ALARM_TOPIC_ARN`, confirm subscriptions, and perform a controlled non-customer alarm-delivery test. The repository cannot choose notification recipients on behalf of the business.
+After the first deployment that creates a managed topic, operations must add approved recipients to the returned `plaidAlarmTopicArn`, confirm subscriptions, and perform a controlled non-customer alarm-delivery test. The repository deliberately does not invent notification recipients. Environments with an existing approved topic should continue setting `BYNKBOOK_ALARM_TOPIC_ARN`.

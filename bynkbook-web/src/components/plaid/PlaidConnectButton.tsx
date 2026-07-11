@@ -294,7 +294,8 @@ export function PlaidConnectButton(props: Props) {
   const completeReconnectRepair = useCallback(async (
     plaidAccountId: string,
     account?: PlaidAccountMeta,
-    institution?: any
+    institution?: any,
+    additionalAccounts?: PlaidAccountMeta[],
   ) => {
     setBusy(true);
     setErrorMsg(null);
@@ -304,6 +305,14 @@ export function PlaidConnectButton(props: Props) {
         plaidAccountId,
         institution: institution ?? pendingInstitution ?? undefined,
         mask: account?.mask ?? undefined,
+        additionalAccounts: (additionalAccounts ?? []).map((extra) => ({
+          plaidAccountId: extra.id,
+          name: extra.name ?? (institution?.name ? `${institution.name} Account` : "Bank Account"),
+          type: accountTypeFromPlaid(extra),
+          subtype: extra.subtype,
+          mask: extra.mask,
+          effectiveStartDate,
+        })),
       });
       if (!repaired?.ok) throw new Error(repaired?.error ?? "Bank account repair failed");
 
@@ -311,13 +320,21 @@ export function PlaidConnectButton(props: Props) {
       resetPendingSelection();
 
       const syncRes = await runInitialSync({ afterReconnect: true });
+      for (const created of Array.isArray(repaired?.additionalAccounts) ? repaired.additionalAccounts : []) {
+        if (!created?.accountId) continue;
+        try {
+          await plaidSync(businessId, String(created.accountId));
+        } catch {
+          // The new account remains connected and can be retried from Reconcile.
+        }
+      }
       onConnected(syncRes);
     } catch (e: any) {
       setErrorMsg(e?.message ?? "Plaid reconnection failed");
     } finally {
       setBusy(false);
     }
-  }, [accountId, businessId, onConnected, pendingInstitution, resetPendingSelection, runInitialSync]);
+  }, [accountId, businessId, effectiveStartDate, onConnected, pendingInstitution, resetPendingSelection, runInitialSync]);
 
   const finishOpeningReview = useCallback(async (choice: "APPLY_PLAID" | "KEEP_MANUAL") => {
     const review = openingReview;
@@ -604,9 +621,11 @@ export function PlaidConnectButton(props: Props) {
             })}
           </div>
 
-          {!pendingReconnectRepair && pendingAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
+          {pendingAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
             <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
-              <div className="text-xs font-semibold text-bb-text">Other consented accounts</div>
+              <div className="text-xs font-semibold text-bb-text">
+                {pendingReconnectRepair ? "Other newly shared accounts" : "Other consented accounts"}
+              </div>
               <div className="mt-1 text-[11px] text-bb-text-muted">
                 Optional: create separate BynkBook accounts for other bank accounts from this same Plaid connection.
               </div>
@@ -655,7 +674,10 @@ export function PlaidConnectButton(props: Props) {
 
                 const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
                 if (pendingReconnectRepair) {
-                  await completeReconnectRepair(selectedPlaidAccountId, selected, pendingInstitution);
+                  const additional = pendingAccounts.filter(
+                    (x) => x.id !== selectedPlaidAccountId && selectedAdditionalPlaidAccountIds.includes(x.id),
+                  );
+                  await completeReconnectRepair(selectedPlaidAccountId, selected, pendingInstitution, additional);
                   return;
                 }
                 if (!pendingPublicToken) return;

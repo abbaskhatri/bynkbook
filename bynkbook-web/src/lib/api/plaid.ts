@@ -53,6 +53,14 @@ export async function plaidRepairAccount(
     plaidAccountId: string;
     institution?: { name?: string; institution_id?: string };
     mask?: string;
+    additionalAccounts?: Array<{
+      plaidAccountId: string;
+      name: string;
+      type?: string;
+      subtype?: string;
+      mask?: string;
+      effectiveStartDate?: string;
+    }>;
   }
 ) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/repair-account`, {
@@ -97,6 +105,7 @@ export async function plaidSync(businessId: string, accountId: string, options?:
       totals[key] += Number(result?.[key] ?? 0);
     }
 
+    if (result?.syncInProgress) break;
     if (!result?.drainIncomplete && !result?.hasMore) break;
   }
 
