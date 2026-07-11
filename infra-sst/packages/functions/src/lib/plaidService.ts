@@ -225,6 +225,64 @@ function accountTypeFromPlaidValue(input?: { type?: string; subtype?: string }, 
   return "OTHER";
 }
 
+function plaidCurrencyCode(account: any) {
+  const value = account?.balances?.iso_currency_code ?? account?.balances?.unofficial_currency_code ?? null;
+  return value ? String(value).trim().toUpperCase() : null;
+}
+
+function plaidAccountIdentityMismatch(params: {
+  localAccount: any;
+  existingConnection?: any;
+  selectedPlaidAccount: any;
+}) {
+  const { localAccount, existingConnection, selectedPlaidAccount } = params;
+  const localType = String(localAccount?.type ?? "").trim().toUpperCase();
+  const selectedType = accountTypeFromPlaidValue({
+    type: selectedPlaidAccount?.type,
+    subtype: selectedPlaidAccount?.subtype,
+  }, "OTHER");
+  if (localType && localType !== "OTHER" && selectedType !== localType) {
+    return `Plaid account type ${selectedType} does not match local account type ${localType}`;
+  }
+
+  const selectedCurrency = plaidCurrencyCode(selectedPlaidAccount);
+  const expectedCurrency = String(
+    existingConnection?.plaid_currency_code ?? localAccount?.currency_code ?? "",
+  ).trim().toUpperCase();
+  if (expectedCurrency && selectedCurrency && expectedCurrency !== selectedCurrency) {
+    return `Plaid account currency ${selectedCurrency} does not match local account currency ${expectedCurrency}`;
+  }
+
+  const storedPlaidType = String(existingConnection?.plaid_type ?? "").trim().toLowerCase();
+  const selectedPlaidType = String(selectedPlaidAccount?.type ?? "").trim().toLowerCase();
+  if (storedPlaidType && selectedPlaidType && storedPlaidType !== selectedPlaidType) {
+    return "Selected Plaid account product type does not match the original connection";
+  }
+
+  const changingPlaidAccount =
+    existingConnection?.plaid_account_id &&
+    String(existingConnection.plaid_account_id) !== String(selectedPlaidAccount?.account_id ?? "");
+  const storedMask = String(existingConnection?.plaid_mask ?? "").trim();
+  const selectedMask = String(selectedPlaidAccount?.mask ?? "").trim();
+  if (changingPlaidAccount && storedMask && selectedMask && storedMask !== selectedMask) {
+    return "Selected Plaid account mask does not match the original connection";
+  }
+
+  return null;
+}
+
+/**
+ * Convert Plaid's product-facing current balance into Bynkbook's signed
+ * accounting balance. Plaid reports credit balances as a positive amount
+ * owed; Bynkbook represents liabilities as negative balances.
+ */
+export function normalizePlaidCurrentBalanceCents(current: unknown, accountType: unknown) {
+  const numeric = Number(current);
+  if (!Number.isFinite(numeric)) throw new Error("Invalid Plaid current balance");
+  const cents = BigInt(Math.round(numeric * 100));
+  return String(accountType ?? "").trim().toUpperCase() === "CREDIT_CARD" ? -cents : cents;
+}
+
 function normalizeAdditionalPlaidAccounts(rows: any[]) {
   const seen = new Set<string>();
   const out: Array<{
@@ -445,6 +503,20 @@ export async function requireMembership(prisma: any, businessId: string, userId:
   return row?.role ?? null;
 }
 
+export type PlaidCapability = "MANAGE" | "SYNC";
+
+export async function requirePlaidCapability(
+  prisma: any,
+  businessId: string,
+  userId: string,
+  capability: PlaidCapability,
+) {
+  const role = String(await requireMembership(prisma, businessId, userId) ?? "").trim().toUpperCase();
+  if (!role) return null;
+  if (capability === "MANAGE") return role === "OWNER" || role === "ADMIN" ? role : null;
+  return ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(role) ? role : null;
+}
+
 export async function requireAccountInBusiness(prisma: any, businessId: string, accountId: string) {
   const acct = await prisma.account.findFirst({
     where: { id: accountId, business_id: businessId },
@@ -464,7 +536,7 @@ export async function createLinkTokenBusiness(params: {
   const { businessId, userId } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const plaid = await getPlaidClient();
@@ -495,11 +567,14 @@ export async function createLinkToken(params: {
   const { businessId, accountId, userId, mode = "connect" } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const plaid = await getPlaidClient();
 
@@ -637,11 +712,14 @@ export async function exchangePublicToken(params: {
   } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const start = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, effectiveStartDate, connectionMode);
   if (!start) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
@@ -661,6 +739,19 @@ export async function exchangePublicToken(params: {
       ok: false,
       error: "Selected Plaid account was not found on the exchanged Item",
       code: "PLAID_ACCOUNT_SELECTION_MISMATCH",
+    });
+  }
+
+  const primaryIdentityMismatch = plaidAccountIdentityMismatch({
+    localAccount,
+    selectedPlaidAccount: verifiedAccount,
+  });
+  if (primaryIdentityMismatch) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    return json(409, {
+      ok: false,
+      error: primaryIdentityMismatch,
+      code: "PLAID_ACCOUNT_IDENTITY_MISMATCH",
     });
   }
 
@@ -719,6 +810,9 @@ export async function exchangePublicToken(params: {
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
       plaid_mask: verifiedMask,
+      plaid_type: verifiedAccount?.type ? String(verifiedAccount.type) : null,
+      plaid_subtype: verifiedAccount?.subtype ? String(verifiedAccount.subtype) : null,
+      plaid_currency_code: plaidCurrencyCode(verifiedAccount),
       status: "CONNECTED",
       sync_cursor: null,
       has_new_transactions: false,
@@ -733,6 +827,9 @@ export async function exchangePublicToken(params: {
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
       plaid_mask: verifiedMask,
+      plaid_type: verifiedAccount?.type ? String(verifiedAccount.type) : null,
+      plaid_subtype: verifiedAccount?.subtype ? String(verifiedAccount.subtype) : null,
+      plaid_currency_code: plaidCurrencyCode(verifiedAccount),
       status: "CONNECTED",
       sync_cursor: null,
       error_code: null,
@@ -777,6 +874,7 @@ export async function exchangePublicToken(params: {
           opening_balance_date: extraStart,
           institution_name: institution?.name ?? null,
           last4: extraMask,
+          currency_code: plaidCurrencyCode(verified),
         } as any,
       }),
       prisma.bankConnection.create({
@@ -790,6 +888,9 @@ export async function exchangePublicToken(params: {
           institution_name: institution?.name ?? null,
           institution_id: institution?.institution_id ?? null,
           plaid_mask: extraMask,
+          plaid_type: verified?.type ? String(verified.type) : null,
+          plaid_subtype: verified?.subtype ? String(verified.subtype) : null,
+          plaid_currency_code: plaidCurrencyCode(verified),
           status: "CONNECTED",
           sync_cursor: null,
           has_new_transactions: false,
@@ -824,8 +925,11 @@ export async function getStatus(params: { businessId: string; accountId: string;
   const role = await requireMembership(prisma, businessId, userId);
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
@@ -1023,11 +1127,14 @@ export async function repairPlaidAccountMapping(params: {
   const { businessId, accountId, userId, plaidAccountId, institution, mask } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
@@ -1073,6 +1180,19 @@ export async function repairPlaidAccountMapping(params: {
     });
   }
 
+  const identityMismatch = plaidAccountIdentityMismatch({
+    localAccount,
+    existingConnection: conn,
+    selectedPlaidAccount: selected,
+  });
+  if (identityMismatch) {
+    return json(409, {
+      ok: false,
+      error: identityMismatch,
+      code: "PLAID_ACCOUNT_IDENTITY_MISMATCH",
+    });
+  }
+
   const verifiedMask = selected?.mask ? String(selected.mask) : mask ?? null;
   const repairedStart = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, undefined, "EXISTING_ACCOUNT");
   await prisma.bankConnection.updateMany({
@@ -1080,6 +1200,9 @@ export async function repairPlaidAccountMapping(params: {
     data: {
       plaid_account_id: selectedPlaidAccountId,
       plaid_mask: verifiedMask,
+      plaid_type: selected?.type ? String(selected.type) : conn.plaid_type ?? null,
+      plaid_subtype: selected?.subtype ? String(selected.subtype) : conn.plaid_subtype ?? null,
+      plaid_currency_code: plaidCurrencyCode(selected) ?? conn.plaid_currency_code ?? null,
       ...(repairedStart ? { effective_start_date: repairedStart } : {}),
       institution_name: institution?.name ?? conn.institution_name ?? null,
       institution_id: institution?.institution_id ?? conn.institution_id ?? null,
@@ -1129,20 +1252,70 @@ export async function disconnectBankConnection(params: { businessId: string; acc
   const { businessId, accountId, userId } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
-  // Idempotent disconnect:
-  // Remove ONLY the bank connection mapping/cursor/token for this account.
-  // Do NOT delete bank transaction history (BankTransaction is NOT FK-linked to BankConnection).
-  await prisma.bankConnection.deleteMany({
-    where: { business_id: businessId, account_id: accountId },
-  });
+  try {
+    const result = await removeBankConnectionWithItemLifecycle(prisma, businessId, accountId);
+    return json(200, { ok: true, disconnected: true, ...result });
+  } catch (error: any) {
+    return json(502, {
+      ok: false,
+      error: "Plaid could not confirm the disconnect; the local connection was preserved",
+      detail: plaidErrorMessage(error),
+    });
+  }
+}
 
-  return json(200, { ok: true, disconnected: true });
+export async function removeBankConnectionWithItemLifecycle(
+  prisma: any,
+  businessId: string,
+  accountId: string,
+) {
+  return prisma.$transaction(async (tx: any) => {
+    let conn = await tx.bankConnection.findFirst({
+      where: { business_id: businessId, account_id: accountId },
+    });
+    if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
+
+    // Serialize lifecycle changes for every local mapping that shares an Item.
+    if (typeof tx.$queryRawUnsafe === "function") {
+      await tx.$queryRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `plaid-item:${businessId}:${conn.plaid_item_id}`,
+      );
+      conn = await tx.bankConnection.findFirst({
+        where: { business_id: businessId, account_id: accountId },
+      });
+      if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
+    }
+
+    const itemConnections = await tx.bankConnection.count({
+      where: { business_id: businessId, plaid_item_id: conn.plaid_item_id },
+    });
+    const removingFinalMapping = itemConnections <= 1;
+
+    if (removingFinalMapping) {
+      const plaid = await getPlaidClient();
+      const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+      // This is deliberately not best-effort: retain the local encrypted token
+      // and mapping if Plaid does not confirm revocation, so the operation can
+      // be retried and consent state never becomes unmanageable.
+      await plaid.itemRemove({ access_token: accessToken });
+    }
+
+    await tx.bankConnection.deleteMany({
+      where: { business_id: businessId, account_id: accountId },
+    });
+
+    return {
+      itemRemoved: removingFinalMapping,
+      remainingItemConnections: Math.max(0, itemConnections - 1),
+    };
+  }, { timeout: 15_000 });
 }
 
 /**
@@ -1159,7 +1332,7 @@ export async function syncTransactions(params: {
   const { businessId, accountId, userId, requestRefresh, afterReconnect } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "SYNC");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
@@ -1169,6 +1342,12 @@ export async function syncTransactions(params: {
     where: { business_id: businessId, account_id: accountId },
   });
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
+
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { type: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const recordSyncFailure = async (error: any) => {
     const code = plaidErrorCode(error);
@@ -1279,7 +1458,7 @@ export async function syncTransactions(params: {
       const acct = balRes.data.accounts.find((a) => a.account_id === plaidAccountId);
       const currentBalance = acct?.balances?.current ?? null;
       if (currentBalance != null) {
-        currentBalanceCents = BigInt(Math.round(currentBalance * 100));
+        currentBalanceCents = normalizePlaidCurrentBalanceCents(currentBalance, localAccount.type);
         balanceLookupSucceeded = true;
       }
     } catch (balanceError: any) {
@@ -1777,7 +1956,7 @@ export async function syncTransactions(params: {
           prisma.account.update({
             where: { id: accountId },
             data: {
-              opening_balance_cents: abs,
+              opening_balance_cents: signed,
               opening_balance_date: effectiveStartDate,
               updated_at: now,
             } as any,
@@ -1806,7 +1985,7 @@ export async function syncTransactions(params: {
           prisma.account.update({
             where: { id: accountId },
             data: {
-              opening_balance_cents: abs,
+              opening_balance_cents: signed,
               opening_balance_date: effectiveStartDate,
               updated_at: now,
             } as any,

@@ -1,4 +1,4 @@
-import { getClaims, recordPlaidConnectionFailure } from "./lib/plaidService";
+import { getClaims, normalizePlaidCurrentBalanceCents, recordPlaidConnectionFailure } from "./lib/plaidService";
 import { getPrisma } from "./lib/db";
 import { decryptAccessToken } from "./lib/plaidCrypto";
 import { getPlaidClient } from "./lib/plaidClient";
@@ -38,6 +38,11 @@ export async function handler(event: any) {
 
   const conn = await prisma.bankConnection.findFirst({ where: { business_id: businessId, account_id: accountId } });
   if (!conn) return json(400, { ok: false, error: "No bank connection" });
+  const account = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { type: true },
+  });
+  if (!account) return json(404, { ok: false, error: "Account not found in business" });
 
   // Conflict signals
   const [entriesCount, matchesCount, bankTxCount] = await prisma.$transaction([
@@ -78,7 +83,7 @@ export async function handler(event: any) {
     });
   }
 
-  const currentBalanceCents = BigInt(Math.round(Number(current) * 100));
+  const currentBalanceCents = normalizePlaidCurrentBalanceCents(current, account.type);
 
   // Sum posted txns in retained window (non-pending, not removed, >= effectiveStartDate)
   const start = new Date(`${effectiveStartDate}T00:00:00Z`);

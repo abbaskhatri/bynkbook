@@ -338,6 +338,9 @@ model BankConnection {
   institution_name String?
   institution_id   String?
   plaid_mask       String? @db.VarChar(8)
+  plaid_type       String?
+  plaid_subtype    String?
+  plaid_currency_code String? @db.VarChar(3)
   status           String  @default("CONNECTED")
   error_code       String?
   error_message    String?

@@ -1,5 +1,5 @@
 import { getPrisma } from "./lib/db";
-import { exchangePublicToken, syncTransactions, getClaims } from "./lib/plaidService";
+import { exchangePublicToken, syncTransactions, getClaims, requirePlaidCapability } from "./lib/plaidService";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -39,12 +39,8 @@ export async function handler(event: any) {
 
   const prisma = await getPrisma();
 
-  // Ensure membership (reuse existing table)
-  const mem = await prisma.userBusinessRole.findFirst({
-    where: { business_id: businessId, user_id: sub },
-    select: { role: true },
-  });
-  if (!mem) return json(403, { ok: false, error: "Forbidden" });
+  const role = await requirePlaidCapability(prisma, businessId, sub, "MANAGE");
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const startIso = new Date(`${effectiveStartDate}T00:00:00Z`);
   if (Number.isNaN(startIso.getTime())) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });

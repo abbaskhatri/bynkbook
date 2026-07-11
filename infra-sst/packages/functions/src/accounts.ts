@@ -1,6 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { parseDateOnlyToUtcDate, serializeDateOnly } from "./lib/dateOnly";
 import { randomUUID } from "node:crypto";
+import { removeBankConnectionWithItemLifecycle } from "./lib/plaidService";
 
 const ACCOUNT_TYPES = ["CHECKING", "SAVINGS", "CREDIT_CARD", "CASH", "OTHER"] as const;
 
@@ -256,12 +257,21 @@ export async function handler(event: any) {
     const existing = await findAccountInBusiness(prisma, businessId, accountId);
     if (!existing) return json(404, { ok: false, error: "Account not found" });
 
-    const now = new Date();
+    try {
+      await removeBankConnectionWithItemLifecycle(prisma, businessId, accountId);
+    } catch (error: any) {
+      return json(502, {
+        ok: false,
+        error: "Plaid could not confirm the disconnect; the account was not archived",
+        detail: String(error?.response?.data?.error_message ?? error?.message ?? "Plaid disconnect failed"),
+      });
+    }
 
-    const [updateResult] = await prisma.$transaction([
-      prisma.account.updateMany({ where: { id: accountId, business_id: businessId }, data: { archived_at: now } }),
-      prisma.bankConnection.deleteMany({ where: { business_id: businessId, account_id: accountId } }),
-    ]);
+    const now = new Date();
+    const updateResult = await prisma.account.updateMany({
+      where: { id: accountId, business_id: businessId },
+      data: { archived_at: now },
+    });
 
     if ((updateResult?.count ?? 0) === 0) {
       return json(404, { ok: false, error: "Account not found" });

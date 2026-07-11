@@ -1,4 +1,4 @@
-import { getClaims } from "./lib/plaidService";
+import { getClaims, requirePlaidCapability } from "./lib/plaidService";
 import { getPrisma } from "./lib/db";
 import { syncTransactions } from "./lib/plaidService";
 
@@ -22,30 +22,55 @@ export async function handler(event: any) {
   const confirm = !!body?.confirmPrune;
 
   if (!effectiveStartDate) return json(400, { ok: false, error: "Missing effectiveStartDate" });
+  const start = new Date(`${effectiveStartDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime())) return json(400, { ok: false, error: "Invalid effectiveStartDate" });
 
   const prisma = await getPrisma();
-  const mem = await prisma.userBusinessRole.findFirst({ where: { business_id: businessId, user_id: sub }, select: { role: true } });
-  if (!mem) return json(403, { ok: false, error: "Forbidden" });
+  const role = await requirePlaidCapability(prisma, businessId, sub, "MANAGE");
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const [matchesCount, bankTxCount] = await prisma.$transaction([
-    prisma.bankMatch.count({ where: { business_id: businessId, account_id: accountId } }),
-    prisma.bankTransaction.count({ where: { business_id: businessId, account_id: accountId, is_removed: false } }),
+  const [legacyActiveMatchesCount, activeMatchGroupsCount, bankTxCount] = await prisma.$transaction([
+    prisma.bankMatch.count({ where: { business_id: businessId, account_id: accountId, voided_at: null } }),
+    prisma.matchGroup.count({ where: { business_id: businessId, account_id: accountId, status: "ACTIVE", voided_at: null } }),
+    prisma.bankTransaction.count({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        posted_date: { lt: start },
+        is_removed: false,
+        plaid_transaction_id: { not: null },
+        OR: [{ source: "PLAID" }, { source: null }],
+      },
+    }),
   ]);
 
-  if ((matchesCount > 0 || bankTxCount > 0) && !confirm) {
+  // Never prune around an active reconciliation. The previous implementation
+  // checked only legacy BankMatch rows and could orphan MatchGroupBank links.
+  if (legacyActiveMatchesCount > 0 || activeMatchGroupsCount > 0) {
     return json(409, {
       ok: false,
-      error: "Changing opening date may prune history and affect matches. Confirm required.",
-      matchesCount,
+      error: "Revert active matches before changing the opening date.",
+      legacyActiveMatchesCount,
+      activeMatchGroupsCount,
       bankTxCount,
     });
   }
 
-  const start = new Date(`${effectiveStartDate}T00:00:00Z`);
-  if (Number.isNaN(start.getTime())) return json(400, { ok: false, error: "Invalid effectiveStartDate" });
+  if (bankTxCount > 0 && !confirm) {
+    return json(409, {
+      ok: false,
+      error: "Changing the opening date will hide older Plaid history. Confirm required.",
+      legacyActiveMatchesCount,
+      activeMatchGroupsCount,
+      bankTxCount,
+    });
+  }
 
-  // Update connection start date + prune Plaid txns older than it (only Plaid txns)
-  await prisma.$transaction([
+  const now = new Date();
+  // Preserve the immutable bank audit trail. Older Plaid rows are soft-removed
+  // instead of hard-deleted, so historical IDs and any voided match history
+  // remain inspectable and cannot become orphaned.
+  const [, pruned] = await prisma.$transaction([
     prisma.bankConnection.updateMany({
       where: { business_id: businessId, account_id: accountId },
       data: {
@@ -53,10 +78,10 @@ export async function handler(event: any) {
         sync_cursor: null,
         has_new_transactions: false,
         opening_adjustment_created_at: null,
-        updated_at: new Date(),
+        updated_at: now,
       } as any,
     }),
-    prisma.bankTransaction.deleteMany({
+    prisma.bankTransaction.updateMany({
       where: {
         business_id: businessId,
         account_id: accountId,
@@ -64,11 +89,12 @@ export async function handler(event: any) {
         plaid_transaction_id: { not: null },
         OR: [{ source: "PLAID" }, { source: null }],
       },
+      data: { is_removed: true, removed_at: now, updated_at: now },
     }),
   ]);
 
   // Re-sync (retained window) – opening application will be prompted via normal connect flow,
   // or user can explicitly Apply Plaid suggested later.
   const sync = await syncTransactions({ businessId, accountId, userId: sub } as any);
-  return json(200, { ok: true, changed: true, sync });
+  return json(200, { ok: true, changed: true, prunedCount: Number(pruned?.count ?? 0), sync });
 }

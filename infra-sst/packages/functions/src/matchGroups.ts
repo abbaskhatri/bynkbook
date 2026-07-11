@@ -618,6 +618,21 @@ async function createGroupTx(tx: any, args: {
   if (!bankIds.length) throw new Error("Missing bankTransactionIds");
   if (!entryIds.length) throw new Error("Missing entryIds");
 
+  // Serialize every claim for the selected sources inside PostgreSQL. The
+  // locks are transaction-scoped and acquired in stable order, so concurrent
+  // match requests cannot both pass the active-membership checks below.
+  // Keeping the invariant in the database transaction also protects batch
+  // and single-create callers without relying on frontend timing.
+  if (typeof tx.$queryRawUnsafe === "function") {
+    const claimKeys = [
+      ...bankIds.map((id) => `match-bank:${businessId}:${accountId}:${id}`),
+      ...entryIds.map((id) => `match-entry:${businessId}:${accountId}:${id}`),
+    ].sort();
+    for (const key of claimKeys) {
+      await tx.$queryRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", key);
+    }
+  }
+
   // Load bank txns (scoped)
   const banks = await tx.bankTransaction.findMany({
     where: {

@@ -173,6 +173,18 @@ async function callVerifiedWebhook(body: any) {
 }
 
 describe("createLinkToken", () => {
+  test("denies bank-connection management to a member role", async () => {
+    const { mod, plaid } = await loadSyncTransactions({
+      prisma: {
+        userBusinessRole: { findFirst: vi.fn(async () => ({ role: "MEMBER" })) },
+      },
+    });
+
+    const res = await mod.createLinkToken({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    expect(res.statusCode).toBe(403);
+    expect(plaid.linkTokenCreate).not.toHaveBeenCalled();
+  });
+
   test("includes configured webhook URL for existing-account link tokens", async () => {
     process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
     const { mod, plaid } = await loadSyncTransactions({});
@@ -227,6 +239,67 @@ describe("createLinkToken", () => {
         transactions: { days_requested: 730 },
       })
     );
+  });
+});
+
+describe("Plaid balance semantics", () => {
+  test("normalizes credit-card amount owed to a negative accounting balance", async () => {
+    const { mod } = await loadSyncTransactions({});
+    expect(mod.normalizePlaidCurrentBalanceCents(125.67, "CREDIT_CARD")).toBe(-12567n);
+    expect(mod.normalizePlaidCurrentBalanceCents(125.67, "CHECKING")).toBe(12567n);
+  });
+});
+
+describe("Plaid disconnect lifecycle", () => {
+  test("removes the Plaid Item before deleting the final local mapping", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      bankConnection: {
+        findFirst: vi.fn(async () => ({ ...baseConn })),
+        count: vi.fn(async () => 1),
+        deleteMany,
+      },
+      $queryRawUnsafe: vi.fn(async () => []),
+    };
+    const { mod, plaid } = await loadSyncTransactions({
+      prisma: { $transaction: vi.fn(async (callback: any) => callback(tx)) },
+    });
+
+    const response = await mod.disconnectBankConnection({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({ itemRemoved: true, remainingItemConnections: 0 });
+    expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-redacted" });
+    expect(deleteMany).toHaveBeenCalledOnce();
+  });
+
+  test("preserves the final local mapping when Plaid revocation fails", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      bankConnection: {
+        findFirst: vi.fn(async () => ({ ...baseConn })),
+        count: vi.fn(async () => 1),
+        deleteMany,
+      },
+      $queryRawUnsafe: vi.fn(async () => []),
+    };
+    const { mod } = await loadSyncTransactions({
+      plaid: { itemRemove: vi.fn(async () => { throw new Error("institution unavailable"); }) },
+      prisma: { $transaction: vi.fn(async (callback: any) => callback(tx)) },
+    });
+
+    const response = await mod.disconnectBankConnection({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -371,6 +444,40 @@ describe("syncTransactions", () => {
     });
     expect(plaid.itemPublicTokenExchange).toHaveBeenCalledWith({ public_token: "public-token" });
     expect(plaid.accountsGet).toHaveBeenCalledWith({ access_token: "access-token-new" });
+    expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-new" });
+    expect(prisma.bankConnection.upsert).not.toHaveBeenCalled();
+  });
+
+  test("exchange rejects a Plaid account whose accounting type conflicts with the local account", async () => {
+    const { mod, plaid, prisma } = await loadSyncTransactions({
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })) },
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [{
+              account_id: "plaid-acct-1",
+              mask: "1234",
+              type: "credit",
+              subtype: "credit card",
+              balances: { iso_currency_code: "USD" },
+            }],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("PLAID_ACCOUNT_IDENTITY_MISMATCH");
     expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-new" });
     expect(prisma.bankConnection.upsert).not.toHaveBeenCalled();
   });
@@ -1407,6 +1514,39 @@ describe("syncTransactions", () => {
         has_new_transactions: true,
       }),
     });
+  });
+
+  test("repairPlaidAccountMapping refuses a different account mask instead of mixing ledger history", async () => {
+    const { mod, prisma } = await loadSyncTransactions({
+      conn: { plaid_mask: "1234" },
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })) },
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [{
+              account_id: "replacement-plaid-acct",
+              mask: "7777",
+              type: "depository",
+              subtype: "checking",
+              balances: { iso_currency_code: "USD" },
+            }],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.repairPlaidAccountMapping({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      plaidAccountId: "replacement-plaid-acct",
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("PLAID_ACCOUNT_IDENTITY_MISMATCH");
+    expect(prisma.bankConnection.updateMany).not.toHaveBeenCalled();
   });
 
   test("repairPlaidAccountMapping restores live sibling mappings on the same Item without remapping them", async () => {
