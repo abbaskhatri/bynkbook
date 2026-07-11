@@ -39,6 +39,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
+import { waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
 import { safeCsvCell } from "@/lib/csv";
 import { listBankTransactions, createEntryFromBankTransaction, cleanupPlaidOverlap, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
@@ -729,12 +730,28 @@ export default function ReconcilePageClient() {
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [plaidSyncing, setPlaidSyncing] = useState(false);
   const plaidSyncRequestRef = useRef(false);
+  const plaidSyncMonitorAbortRef = useRef<AbortController | null>(null);
+  const plaidSyncMonitorSeqRef = useRef(0);
   const [plaidCleanupBusy, setPlaidCleanupBusy] = useState(false);
   const [plaid, setPlaid] = useState<PlaidStatusState | null>(null);
   const [plaidStatusError, setPlaidStatusError] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
   const [pendingMsgTone, setPendingMsgTone] = useState<"muted" | "warning">("warning");
+
+  useEffect(() => {
+    plaidSyncMonitorSeqRef.current += 1;
+    plaidSyncMonitorAbortRef.current?.abort();
+    plaidSyncMonitorAbortRef.current = null;
+    plaidSyncRequestRef.current = false;
+    setPlaidSyncing(false);
+
+    return () => {
+      plaidSyncMonitorSeqRef.current += 1;
+      plaidSyncMonitorAbortRef.current?.abort();
+      plaidSyncMonitorAbortRef.current = null;
+    };
+  }, [selectedBusinessId, selectedAccountId]);
 
   // Dialogs
   const [openUpload, setOpenUpload] = useState(false);
@@ -1394,6 +1411,111 @@ export default function ReconcilePageClient() {
         await afterRefresh?.();
       } catch (e: any) {
         applyMutationError(e, `Can't refresh ${reason}`);
+      }
+    })();
+  }
+
+  function applyCompletedPlaidSyncMessage(res: any) {
+    if (res?.syncDeferred) {
+      setSyncMsg(res?.message ?? "A bank sync completed moments ago; no transaction changes were applied.");
+      setPendingMsg(null);
+      return;
+    }
+
+    const newCount = Number(res?.newCount ?? 0);
+    const upgradedCount = Number(res?.upgradedCount ?? 0);
+    const skippedHistoricalCount = Number(res?.skippedHistoricalCount ?? 0);
+    const replacementUpgradeCount = Number(res?.replacementUpgradeCount ?? 0);
+    const accountReplayMergedCount = Number(res?.accountReplayMergedCount ?? 0);
+    const postedUpgradeCount = Math.max(0, upgradedCount - replacementUpgradeCount);
+    const restoredMatchedHistoryCount = Number(res?.restoredMatchedHistoryCount ?? 0);
+    const pendingCount = Number(res?.pendingCount ?? 0);
+    const refreshRequested = Boolean(res?.refreshRequested);
+    const refreshSucceeded = Boolean(res?.refreshSucceeded);
+    const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
+
+    const syncParts = [`Transactions refreshed: ${newCount} new`];
+    if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
+    if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
+    if (accountReplayMergedCount > 0) syncParts.push(`${accountReplayMergedCount} reconnect replay merged`);
+    if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
+    if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
+    if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
+    if (refreshRequested) {
+      syncParts.push(refreshSucceeded ? "on-demand refresh requested" : "scheduled Plaid data checked");
+    }
+
+    setSyncMsg(syncParts.join(" • "));
+    if (pendingCount > 0) {
+      setPendingMsgTone("warning");
+      setPendingMsg("Pending shown read-only until posted.");
+    } else if (refreshSucceeded) {
+      setPendingMsgTone("muted");
+      setPendingMsg("Plaid is checking the bank now. Any changes will appear after the refresh webhook arrives.");
+    } else if (refreshErrorCode && refreshErrorCode !== "INVALID_PRODUCT" && refreshErrorCode !== "PRODUCT_NOT_ENABLED") {
+      setPendingMsgTone("warning");
+      setPendingMsg("Instant Plaid refresh is temporarily unavailable; showing the latest synced data.");
+    } else {
+      setPendingMsg(null);
+    }
+  }
+
+  function monitorActivePlaidSync(
+    businessId: string,
+    accountId: string,
+    sequence: number,
+  ) {
+    plaidSyncMonitorAbortRef.current?.abort();
+    const controller = new AbortController();
+    plaidSyncMonitorAbortRef.current = controller;
+
+    void (async () => {
+      const outcome = await waitForPlaidSyncCompletion({
+        sync: () => plaidSync(businessId, accountId),
+        signal: controller.signal,
+        maxAttempts: 45,
+        onWaiting: (res) => {
+          if (plaidSyncMonitorSeqRef.current !== sequence) return;
+          setSyncMsg(res?.message ?? "A bank sync is already running for this account.");
+          setPendingMsgTone("muted");
+          setPendingMsg("Waiting for the active sync to finish; results will update automatically.");
+        },
+      });
+
+      if (plaidSyncMonitorSeqRef.current !== sequence || outcome.kind === "cancelled") return;
+
+      try {
+        if (outcome.kind === "timed_out") {
+          setSyncMsg("The bank sync is taking longer than expected.");
+          setPendingMsgTone("warning");
+          setPendingMsg("Automatic monitoring stopped after several minutes. You can safely try Sync again.");
+          return;
+        }
+        if (outcome.kind === "error") {
+          setSyncMsg((outcome.error as any)?.message ?? "Unable to confirm the bank sync result");
+          setPendingMsgTone("warning");
+          setPendingMsg("Automatic monitoring stopped. You can safely try Sync again.");
+          return;
+        }
+
+        applyCompletedPlaidSyncMessage(outcome.result);
+        try {
+          setPlaid(await plaidStatus(businessId, accountId));
+        } catch {
+          // The completed transaction refresh remains valid if status refresh is temporarily unavailable.
+        }
+        await refreshTablesFullyRef.current({
+          preserveOnEmpty: true,
+          skipLegacyMatches: true,
+          silent: true,
+        });
+        setBankCountRefreshSeq((n) => n + 1);
+      } finally {
+        if (plaidSyncMonitorSeqRef.current === sequence) {
+          plaidSyncRequestRef.current = false;
+          setPlaidSyncing(false);
+          plaidSyncMonitorAbortRef.current = null;
+        }
       }
     })();
   }
@@ -4631,66 +4753,36 @@ const displayBankActiveList = useMemo(() => {
                         setPlaidSyncing(true);
                         setSyncMsg("Checking bank for latest transactions...");
                         setPendingMsg(null);
+                        let monitoringActiveSync = false;
 
                         try {
                           const res = await plaidSync(selectedBusinessId, selectedAccountId, { refresh: true });
-                          const newCount = Number(res?.newCount ?? 0);
-                          const upgradedCount = Number(res?.upgradedCount ?? 0);
-                          const skippedHistoricalCount = Number(res?.skippedHistoricalCount ?? 0);
-                          const replacementUpgradeCount = Number(res?.replacementUpgradeCount ?? 0);
-                          const accountReplayMergedCount = Number(res?.accountReplayMergedCount ?? 0);
-                          const postedUpgradeCount = Math.max(0, upgradedCount - replacementUpgradeCount);
-                          const restoredMatchedHistoryCount = Number(res?.restoredMatchedHistoryCount ?? 0);
-                          const pendingCount = Number(res?.pendingCount ?? 0);
-                          const refreshRequested = Boolean(res?.refreshRequested);
-                          const refreshSucceeded = Boolean(res?.refreshSucceeded);
-                          const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
 
                           if (res?.syncInProgress) {
+                            monitoringActiveSync = true;
                             setSyncMsg(res?.message ?? "A bank sync is already running for this account.");
                             setPendingMsgTone("muted");
-                            setPendingMsg("BynkBook will show the results when the active sync finishes.");
-                          } else if (res?.syncDeferred) {
-                            setSyncMsg(res?.message ?? "A bank sync completed moments ago; no transaction changes were applied.");
-                            setPendingMsg(null);
+                            setPendingMsg("Waiting for the active sync to finish; results will update automatically.");
+                            const monitorSequence = ++plaidSyncMonitorSeqRef.current;
+                            monitorActivePlaidSync(
+                              selectedBusinessId,
+                              selectedAccountId,
+                              monitorSequence,
+                            );
                           } else {
-
-                            const syncParts = [`Transactions refreshed: ${newCount} new`];
-                            if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
-                            if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
-                            if (accountReplayMergedCount > 0) syncParts.push(`${accountReplayMergedCount} reconnect replay merged`);
-                            if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
-                            if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
-                            if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
-                            if (refreshRequested) {
-                              syncParts.push(refreshSucceeded ? "on-demand refresh requested" : "scheduled Plaid data checked");
-                            }
-
-                            setSyncMsg(syncParts.join(" • "));
-                            if (pendingCount > 0) {
-                              setPendingMsgTone("warning");
-                              setPendingMsg("Pending shown read-only until posted.");
-                            } else if (refreshSucceeded) {
-                              setPendingMsgTone("muted");
-                              setPendingMsg("Plaid is checking the bank now. Any changes will appear after the refresh webhook arrives.");
-                            } else if (refreshErrorCode) {
-                              setPendingMsgTone("warning");
-                              setPendingMsg(
-                                refreshErrorCode === "INVALID_PRODUCT" || refreshErrorCode === "PRODUCT_NOT_ENABLED"
-                                  ? null
-                                  : "Instant Plaid refresh is temporarily unavailable; showing the latest synced data."
-                              );
-                            }
+                            applyCompletedPlaidSyncMessage(res);
                           }
 
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
                           setPlaid(st);
 
-                          await refreshTablesFully({
-                            preserveOnEmpty: true,
-                            skipLegacyMatches: true,
-                          });
-                          setBankCountRefreshSeq((n) => n + 1);
+                          if (!monitoringActiveSync) {
+                            await refreshTablesFully({
+                              preserveOnEmpty: true,
+                              skipLegacyMatches: true,
+                            });
+                            setBankCountRefreshSeq((n) => n + 1);
+                          }
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Unable to refresh transactions");
                           setPendingMsgTone("warning");
@@ -4706,8 +4798,10 @@ const displayBankActiveList = useMemo(() => {
                             // Keep the existing status if the follow-up status check also fails.
                           }
                         } finally {
-                          plaidSyncRequestRef.current = false;
-                          setPlaidSyncing(false);
+                          if (!monitoringActiveSync) {
+                            plaidSyncRequestRef.current = false;
+                            setPlaidSyncing(false);
+                          }
                         }
                       }}
                     >
