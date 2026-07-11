@@ -183,6 +183,7 @@ async function loadHandler(options: {
   activeGroupIds?: string[];
   bankTransactionsInActiveGroups?: string[];
   closedPeriodOk?: boolean;
+  categorySuggestionsById?: Record<string, any[]>;
 }) {
   vi.resetModules();
 
@@ -320,6 +321,12 @@ async function loadHandler(options: {
   }));
   vi.doMock("./lib/categoryMemoryWriteback", () => ({
     writeCategoryMemoryFeedback: vi.fn(async () => undefined),
+  }));
+  vi.doMock("./aiCategorySuggestions", () => ({
+    computeCategorySuggestionsForItems: vi.fn(async () => ({
+      suggestionsById: options.categorySuggestionsById ?? {},
+      meta: { version: "test" },
+    })),
   }));
 
   const mod = await import("./bankTransactions");
@@ -743,6 +750,67 @@ describe("bank transaction create-entry duplicate preflight", () => {
     expect(prisma.matchGroup.create).toHaveBeenCalledTimes(1);
   });
 
+  test("auto-applies an exact accepted-history suggestion when create-entry has no category override", async () => {
+    const rows = [tx("bank-payroll", "2026-07-09", "2026-07-09T12:00:00.000Z", {
+      name: "Zelle payment to Abigail Flo Emp for Payroll",
+      amount_cents: -57336n,
+    })];
+    const { handler, prisma } = await loadHandler({
+      rows,
+      categorySuggestionsById: {
+        "bank-payroll": [{
+          category_id: "cat-payroll",
+          category_name: "Payroll expenses",
+          confidence: 96,
+          confidence_tier: "SAFE_DETERMINISTIC",
+          source: "HEURISTIC",
+          reason: "Exact merchant match in account history",
+          merchant_normalized: "zelle abigail payroll",
+        }],
+      },
+    });
+
+    const res = await handler(postCreateEntryEvent("bank-payroll", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.category_id).toBe("cat-payroll");
+    expect(body.category_auto_applied).toBe(true);
+    expect(prisma.entry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ category_id: "cat-payroll" }),
+    }));
+  });
+
+  test("does not auto-apply an AI-only bank category suggestion", async () => {
+    const rows = [tx("bank-ambiguous", "2026-07-09", "2026-07-09T12:00:00.000Z", {
+      name: "AMAZON MKTPLACE PMTS",
+      amount_cents: -8341n,
+    })];
+    const { handler, prisma } = await loadHandler({
+      rows,
+      categorySuggestionsById: {
+        "bank-ambiguous": [{
+          category_id: "cat-supplies",
+          category_name: "Supplies",
+          confidence: 98,
+          confidence_tier: "SAFE_DETERMINISTIC",
+          source: "AI",
+          reason: "AI guess",
+          merchant_normalized: "amazon marketplace",
+        }],
+      },
+    });
+
+    const res = await handler(postCreateEntryEvent("bank-ambiguous", { autoMatch: true }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.category_auto_applied).toBe(false);
+    expect(prisma.entry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ category_id: null }),
+    }));
+  });
+
   test("create-entry-and-match rejects a bank transaction that becomes matched before transaction create", async () => {
     const rows = [tx("bank-stale-match", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "Hardware Store", amount_cents: -4500n })];
     const { handler, prisma } = await loadHandler({
@@ -837,6 +905,42 @@ describe("bank transaction create-entry duplicate preflight", () => {
       }),
     ]);
     expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("bulk create reuses trusted vendor categories instead of creating uncategorized rows", async () => {
+    const rows = [tx("bank-fee", "2026-07-05", "2026-07-05T12:00:00.000Z", {
+      name: "Bank of America monthly service fee",
+      amount_cents: -1500n,
+    })];
+    const { handler, prisma } = await loadHandler({
+      rows,
+      categorySuggestionsById: {
+        "bank-fee": [{
+          category_id: "cat-bank-fees",
+          category_name: "Bank fees",
+          confidence: 95,
+          confidence_tier: "SAFE_DETERMINISTIC",
+          source: "VENDOR_DEFAULT",
+          reason: "Vendor default category",
+          merchant_normalized: "bank america service fee",
+        }],
+      },
+    });
+
+    const res = await handler(postCreateEntriesBatchEvent({
+      items: [{ bank_transaction_id: "bank-fee", autoMatch: true }],
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.results[0]).toEqual(expect.objectContaining({
+      status: "CREATED",
+      category_id: "cat-bank-fees",
+      category_auto_applied: true,
+    }));
+    expect(prisma.entry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ category_id: "cat-bank-fees" }),
+    }));
   });
 
   test("bulk create ignores possible duplicate override flags", async () => {

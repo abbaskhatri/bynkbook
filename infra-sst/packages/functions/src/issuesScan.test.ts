@@ -259,6 +259,67 @@ describe("issues scan duplicate detection", () => {
     expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["manual-1", "matched-1"]);
   });
 
+  test("flags exact matched bank replays even when the duplicate bank rows have different ids", async () => {
+    const bankName = 'Zelle payment to Abigail Flo Emp for "Payroll"; Conf# cbhs5l8ja';
+    const rows = [
+      entry("replay-a", "2026-07-09", -57336n, {
+        payee: bankName,
+        memo: "Bank-created row",
+        method: "ZELLE",
+        sourceBankTransactionId: "bank-replay-a",
+      }),
+      entry("replay-b", "2026-07-09", -57336n, {
+        payee: bankName,
+        memo: "Bank-created row",
+        method: "ZELLE",
+        sourceBankTransactionId: "bank-replay-b",
+      }),
+    ];
+
+    const { handler, prisma } = await loadHandler({
+      entries: rows,
+      matchedEntryIds: ["replay-a", "replay-b"],
+      sourceBankRows: [
+        { id: "bank-replay-a", posted_date: new Date("2026-07-09T00:00:00.000Z"), name: bankName, amount_cents: -57336n, is_removed: false },
+        { id: "bank-replay-b", posted_date: new Date("2026-07-09T00:00:00.000Z"), name: bankName, amount_cents: -57336n, is_removed: false },
+      ],
+    });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+
+    const issues = createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE");
+    expect(issues.map((row: any) => row.entry_id).sort()).toEqual(["replay-a", "replay-b"]);
+  });
+
+  test("does not flag distinct matched bank events with different full descriptions", async () => {
+    const rows = [
+      entry("zelle-a", "2026-07-09", -57336n, {
+        payee: "Zelle payment to Abigail Flo Emp; Conf# first123",
+        method: "ZELLE",
+        sourceBankTransactionId: "bank-zelle-a",
+      }),
+      entry("zelle-b", "2026-07-09", -57336n, {
+        payee: "Zelle payment to Abigail Flo Emp; Conf# second456",
+        method: "ZELLE",
+        sourceBankTransactionId: "bank-zelle-b",
+      }),
+    ];
+
+    const { handler, prisma } = await loadHandler({
+      entries: rows,
+      matchedEntryIds: ["zelle-a", "zelle-b"],
+      sourceBankRows: [
+        { id: "bank-zelle-a", posted_date: new Date("2026-07-09T00:00:00.000Z"), name: rows[0].payee, amount_cents: -57336n, is_removed: false },
+        { id: "bank-zelle-b", posted_date: new Date("2026-07-09T00:00:00.000Z"), name: rows[1].payee, amount_cents: -57336n, is_removed: false },
+      ],
+    });
+
+    const res = await handler(scanEvent({ includeMissingCategory: false }));
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma).filter((row: any) => row.issue_type === "DUPLICATE")).toEqual([]);
+  });
+
   test("flags ordinary near duplicate unity ez llc and unity rows", async () => {
     const rows = [
       entry("unity-ez", "2026-04-26", -48000n, { payee: "unity ez llc", method: "ACH" }),

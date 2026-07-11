@@ -3,6 +3,7 @@ import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
+import { computeCategorySuggestionsForItems, type CategorySuggestion } from "./aiCategorySuggestions";
 import { randomUUID } from "node:crypto";
 
 // Reuse the same auth-claims helper pattern used elsewhere
@@ -79,6 +80,64 @@ const PENDING_BANK_TRANSACTION_MESSAGE =
   "Pending bank transactions can be reviewed once they post.";
 const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
 const CREATE_ENTRY_GENERIC_BANK_DUPLICATE_WINDOW_DAYS = 7;
+
+function trustedBankEntryCategory(suggestion: CategorySuggestion | null | undefined) {
+  if (!suggestion?.category_id) return false;
+
+  const source = String(suggestion.source ?? "").trim().toUpperCase();
+  const tier = String(suggestion.confidence_tier ?? "").trim().toUpperCase();
+  const confidence = Number(suggestion.confidence ?? 0);
+  const reason = String(suggestion.reason ?? "").trim().toLowerCase();
+  const isExactAcceptedHistory =
+    source === "HEURISTIC" &&
+    (reason.includes("exact merchant match in account history") || reason.includes("vendor-linked account history"));
+
+  // A repeated user-approved merchant/category memory or an explicit vendor default
+  // is safe to reuse for a newly-created bank entry. Risky keyword/AI guesses remain
+  // suggestions and are never silently applied here.
+  return (
+    (source === "MEMORY" || source === "VENDOR_DEFAULT" || isExactAcceptedHistory) &&
+    tier === "SAFE_DETERMINISTIC" &&
+    Number.isFinite(confidence) &&
+    confidence >= 95
+  );
+}
+
+async function inferTrustedBankEntryCategory(args: {
+  prisma: any;
+  businessId: string;
+  accountId: string;
+  bankTransactionId: string;
+  payee: string;
+  memo: string;
+  amountCents: bigint;
+}) {
+  try {
+    const computed = await computeCategorySuggestionsForItems({
+      prisma: args.prisma,
+      businessId: args.businessId,
+      accountId: args.accountId,
+      includeAiFallback: false,
+      limitPerItem: 3,
+      items: [
+        {
+          kind: "BANK_TXN",
+          id: args.bankTransactionId,
+          payee_or_name: args.payee,
+          memo: args.memo,
+          amount_cents: args.amountCents,
+        },
+      ],
+    });
+
+    const top = computed.suggestionsById[args.bankTransactionId]?.[0] ?? null;
+    return trustedBankEntryCategory(top) ? top : null;
+  } catch {
+    // Category inference must never block ledger creation. The uncategorized row
+    // remains available for Category Review if intelligence data is unavailable.
+    return null;
+  }
+}
 const ALLOWED_BANK_ENTRY_METHODS = new Set([
   "CASH",
   "CARD",
@@ -1092,7 +1151,18 @@ export async function handler(event: any) {
 
           const inferredMethod = inferMethodFromBankTransaction(bankTxn);
           const methodFinal = resolveBankEntryMethod(methodOverride, inferredMethod);
-          const categoryIdFinal = categoryIdOverride || null;
+          const inferredCategory = categoryIdOverride
+            ? null
+            : await inferTrustedBankEntryCategory({
+                prisma,
+                businessId,
+                accountId,
+                bankTransactionId: bankId,
+                payee: (bankTxn.name ?? "").toString().trim() || "Bank transaction",
+                memo: memoOverride || (bankTxn.name ?? "").toString(),
+                amountCents: entryAmountCents,
+              });
+          const categoryIdFinal = categoryIdOverride || inferredCategory?.category_id || null;
 
           const now = new Date();
 
@@ -1278,6 +1348,8 @@ export async function handler(event: any) {
             entry_id: createdEntryId,
             match_group_id: createdMatchGroupId,
             auto_matched: !!createdMatchGroupId,
+            category_id: categoryIdFinal,
+            category_auto_applied: !categoryIdOverride && !!inferredCategory,
           });
         } catch (e: any) {
           const code = String(e?.code ?? "BATCH_CREATE_FAILED");
@@ -1444,7 +1516,19 @@ export async function handler(event: any) {
 
       const inferredMethod = inferMethodFromBankTransaction(bankTxn);
       const methodFinal = resolveBankEntryMethod(methodOverride, inferredMethod);
-      const categoryIdFinal = categoryIdOverride || null;
+      const inferredCategory = categoryIdOverride
+        ? null
+        : await inferTrustedBankEntryCategory({
+            prisma,
+            businessId,
+            accountId,
+            bankTransactionId,
+            payee: (bankTxn.name ?? "").toString().trim() || "Bank transaction",
+            memo: memoOverride || (bankTxn.name ?? "").toString(),
+            amountCents: entryAmountCents,
+          });
+      const categoryIdFinal = categoryIdOverride || inferredCategory?.category_id || null;
+      const effectiveSuggestedCategoryId = suggestedCategoryId || inferredCategory?.category_id || "";
 
       const now = new Date();
       const entryId = randomUUID();
@@ -1637,7 +1721,7 @@ export async function handler(event: any) {
             type: entryType,
           },
           selected_category_id: categoryIdFinal,
-          suggested_category_id: suggestedCategoryId || null,
+          suggested_category_id: effectiveSuggestedCategoryId || null,
         });
       }
 
@@ -1665,6 +1749,9 @@ export async function handler(event: any) {
         match_group_id: result.createdMatchGroupId,
         auto_matched: !!result.createdMatchGroupId,
         duplicate_warning_overridden: allowPossibleDuplicate && possibleDuplicateCandidates.length > 0,
+        category_id: categoryIdFinal,
+        category_auto_applied: !categoryIdOverride && !!inferredCategory,
+        category_suggestion_source: inferredCategory?.source ?? null,
       });
     } catch (e: any) {
       const code = String(e?.code ?? "");
