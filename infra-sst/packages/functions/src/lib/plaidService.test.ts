@@ -710,6 +710,127 @@ describe("syncTransactions", () => {
     });
   });
 
+  test("rekeys exact transaction payloads replayed under a new Plaid account identity", async () => {
+    const replayed = makeTransaction({
+      transaction_id: "txn-new-item-id",
+      account_id: "plaid-acct-new",
+      name: 'Zelle payment for "Payroll"; Conf# exact123',
+      amount: 487.54,
+      date: "2026-07-09",
+    });
+    const legacyRaw = {
+      ...replayed,
+      transaction_id: "txn-old-item-id",
+      account_id: "plaid-acct-old",
+    };
+    const legacyRow = {
+      id: "bank-durable-row",
+      plaid_transaction_id: "txn-old-item-id",
+      plaid_account_id: "plaid-acct-old",
+      is_removed: false,
+      raw: legacyRaw,
+      created_at: new Date("2026-07-10T20:12:07Z"),
+      updated_at: new Date("2026-07-10T20:12:07Z"),
+    };
+
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: {
+        plaid_account_id: "plaid-acct-new",
+        effective_start_date: new Date("2026-07-09T00:00:00Z"),
+        sync_cursor: null,
+      },
+      plaid: {
+        accountsBalanceGet: vi.fn(async () => ({
+          data: { accounts: [{ account_id: "plaid-acct-new", balances: { current: 100 } }] },
+        })),
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [replayed],
+            modified: [],
+            removed: [],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.plaid_account_id?.not === "plaid-acct-new" ? [legacyRow] : [],
+          ),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ newCount: 0, accountReplayMergedCount: 1 });
+    expect(prisma.bankTransaction.create).not.toHaveBeenCalled();
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "bank-durable-row",
+        business_id: "biz-1",
+        account_id: "acct-1",
+        plaid_transaction_id: "txn-old-item-id",
+        plaid_account_id: "plaid-acct-old",
+      },
+      data: expect.objectContaining({
+        plaid_transaction_id: "txn-new-item-id",
+        plaid_account_id: "plaid-acct-new",
+        is_removed: false,
+        raw: replayed,
+      }),
+    });
+  });
+
+  test("keeps exact replayed rows removed after a Plaid identity rollover", async () => {
+    const replayed = makeTransaction({
+      transaction_id: "txn-new-item-id",
+      account_id: "plaid-acct-new",
+    });
+    const legacyRow = {
+      id: "bank-cleaned-row",
+      plaid_transaction_id: "txn-old-item-id",
+      plaid_account_id: "plaid-acct-old",
+      is_removed: true,
+      raw: { ...replayed, transaction_id: "txn-old-item-id", account_id: "plaid-acct-old" },
+      created_at: new Date("2026-07-10T20:12:07Z"),
+      updated_at: new Date("2026-07-10T20:57:07Z"),
+    };
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { plaid_account_id: "plaid-acct-new", sync_cursor: null },
+      plaid: {
+        accountsBalanceGet: vi.fn(async () => ({
+          data: { accounts: [{ account_id: "plaid-acct-new", balances: { current: 100 } }] },
+        })),
+        transactionsSync: vi.fn(async () => ({
+          data: { added: [replayed], modified: [], removed: [], next_cursor: "cursor-next", has_more: false },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.plaid_account_id?.not === "plaid-acct-new" ? [legacyRow] : [],
+          ),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ newCount: 0, skippedRemovedCount: 1, accountReplayMergedCount: 0 });
+    const replayUpdate = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.id === "bank-cleaned-row",
+    );
+    expect(replayUpdate).toBeDefined();
+    expect(replayUpdate![0].data).not.toHaveProperty("is_removed");
+    expect(prisma.bankTransaction.create).not.toHaveBeenCalled();
+  });
+
   test("keeps remove-and-add transactions as distinct source facts instead of guessing identity", async () => {
     const replacement = makeTransaction({
       transaction_id: "txn-new-id",
