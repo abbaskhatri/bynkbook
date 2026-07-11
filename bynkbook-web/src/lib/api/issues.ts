@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api/client";
+export { ISSUES_PAGE_TYPES, isIssuesPageIssueType, type IssuesPageIssueType } from "./issueTypes";
 
 export type EntryIssueRow = {
   id: string;
@@ -89,14 +90,6 @@ export type BulkApplyIssuesResponse = {
   skipped_by_reason: Record<string, number>;
   summary_lines: string[];
 };
-
-export const ISSUES_PAGE_TYPES = ["DUPLICATE", "STALE_CHECK"] as const;
-export type IssuesPageIssueType = (typeof ISSUES_PAGE_TYPES)[number];
-
-export function isIssuesPageIssueType(issueType: unknown): issueType is IssuesPageIssueType {
-  const t = String(issueType ?? "").toUpperCase();
-  return t === "DUPLICATE" || t === "STALE_CHECK";
-}
 
 export type ListAccountIssuesResponse = {
   ok: true;

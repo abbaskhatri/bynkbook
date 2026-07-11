@@ -1879,14 +1879,16 @@ export default function LedgerPageClient() {
         }
       );
 
-      // Targeted refresh: only issues queries for this account (no storms)
-      void qc.invalidateQueries({
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
+        qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
+        qc.invalidateQueries({ queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId), exact: false }),
+        qc.invalidateQueries({ queryKey: ["categoryReviewEntries", selectedBusinessId, selectedAccountId], exact: false }),
+      ]);
+      await qc.refetchQueries({
         queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
         exact: false,
-      });
-      void qc.invalidateQueries({
-        queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"),
-        exact: false,
+        type: "active",
       });
 
       // Persist last scan timestamp (UI-only)
@@ -1899,6 +1901,11 @@ export default function LedgerPageClient() {
         }
       }
       setLastScanAt(nowIso);
+      window.dispatchEvent(
+        new CustomEvent("bynkbook:issues-scanned", {
+          detail: { businessId: selectedBusinessId, accountId: selectedAccountId, scannedAt: nowIso },
+        })
+      );
 
       // No success toast/message (keep UI quiet)
     } catch (e: any) {
