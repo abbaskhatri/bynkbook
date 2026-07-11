@@ -667,6 +667,99 @@ describe("syncTransactions", () => {
     );
   });
 
+  test("exchange reuses an existing sibling ledger when the bank shares it on the new Item", async () => {
+    const existingSibling = {
+      account_id: "acct-existing-sibling",
+      plaid_item_id: "item-old-sibling",
+      plaid_account_id: "plaid-acct-old-sibling",
+      plaid_mask: "1751",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
+      plaid_currency_code: "USD",
+      institution_id: "ins_1",
+      institution_name: "Bank of America",
+      effective_start_date: new Date("2026-01-01T00:00:00Z"),
+      account: {
+        id: "acct-existing-sibling",
+        name: "Frisco",
+        type: "CHECKING",
+        currency_code: "USD",
+      },
+    };
+    const { mod, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              {
+                account_id: "plaid-acct-1",
+                mask: "0358",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+              {
+                account_id: "plaid-acct-new-sibling",
+                mask: "1751",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+            ],
+          },
+        })),
+      },
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })),
+        },
+        bankConnection: {
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.account_id?.not === "acct-1" ? [existingSibling] : []
+          ),
+        },
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+      effectiveStartDate: "2026-01-01",
+      institution: { name: "Bank of America", institution_id: "ins_1" },
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.repairedExistingAccounts).toEqual([
+      expect.objectContaining({
+        accountId: "acct-existing-sibling",
+        accountName: "Frisco",
+        plaidAccountId: "plaid-acct-new-sibling",
+        last4: "1751",
+      }),
+    ]);
+    expect(prisma.account.create).not.toHaveBeenCalled();
+    expect(prisma.bankConnection.updateMany).toHaveBeenCalledWith({
+      where: {
+        business_id: "biz-1",
+        account_id: "acct-existing-sibling",
+        plaid_account_id: "plaid-acct-old-sibling",
+      },
+      data: expect.objectContaining({
+        plaid_item_id: "item-new",
+        plaid_account_id: "plaid-acct-new-sibling",
+        access_token_ciphertext: "ciphertext",
+        status: "CONNECTED",
+        error_code: null,
+        error_message: null,
+        sync_cursor: null,
+      }),
+    });
+  });
+
   test("only upserts transactions for the mapped Plaid account and safely scopes removals", async () => {
     const matchingAdded = makeTransaction({ transaction_id: "txn-added-mapped" });
     const otherAdded = makeTransaction({ transaction_id: "txn-added-other", account_id: "plaid-acct-2" });
@@ -1688,6 +1781,105 @@ describe("syncTransactions", () => {
         error_message: null,
         sync_cursor: null,
         has_new_transactions: true,
+      }),
+    });
+  });
+
+  test("repair consolidates an exact sibling ledger from a separate Item", async () => {
+    const existingSibling = {
+      account_id: "acct-existing-sibling",
+      plaid_item_id: "item-old-sibling",
+      plaid_account_id: "plaid-acct-old-sibling",
+      plaid_mask: "1751",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
+      plaid_currency_code: "USD",
+      institution_id: "ins_1",
+      institution_name: "Bank of America",
+      effective_start_date: new Date("2026-01-01T00:00:00Z"),
+      account: {
+        id: "acct-existing-sibling",
+        name: "Frisco",
+        type: "CHECKING",
+        currency_code: "USD",
+      },
+    };
+    const { mod, prisma } = await loadSyncTransactions({
+      conn: {
+        institution_id: "ins_1",
+        institution_name: "Bank of America",
+        plaid_mask: "3290",
+        plaid_type: "depository",
+        plaid_subtype: "checking",
+        plaid_currency_code: "USD",
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              {
+                account_id: "plaid-acct-1",
+                mask: "3290",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+              {
+                account_id: "plaid-acct-new-sibling",
+                mask: "1751",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+            ],
+          },
+        })),
+      },
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })),
+        },
+        bankConnection: {
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.account_id?.not === "acct-1" ? [existingSibling] : []
+          ),
+        },
+      },
+    });
+
+    const res = await mod.repairPlaidAccountMapping({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      plaidAccountId: "plaid-acct-1",
+      institution: { name: "Bank of America", institution_id: "ins_1" },
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.repairedExistingAccounts).toEqual([
+      expect.objectContaining({
+        accountId: "acct-existing-sibling",
+        accountName: "Frisco",
+        plaidAccountId: "plaid-acct-new-sibling",
+        last4: "1751",
+      }),
+    ]);
+    expect(prisma.account.create).not.toHaveBeenCalled();
+    expect(prisma.bankConnection.updateMany).toHaveBeenCalledWith({
+      where: {
+        business_id: "biz-1",
+        account_id: "acct-existing-sibling",
+        plaid_account_id: "plaid-acct-old-sibling",
+      },
+      data: expect.objectContaining({
+        plaid_item_id: "item-1",
+        plaid_account_id: "plaid-acct-new-sibling",
+        access_token_ciphertext: "ciphertext",
+        status: "CONNECTED",
+        error_code: null,
+        error_message: null,
+        sync_cursor: null,
       }),
     });
   });

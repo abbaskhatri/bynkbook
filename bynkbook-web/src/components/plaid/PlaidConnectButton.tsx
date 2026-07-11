@@ -251,11 +251,14 @@ export function PlaidConnectButton(props: Props) {
       resetPendingSelection();
 
       const syncRes = await runInitialSync();
-      const createdAdditional = Array.isArray(res?.additionalAccounts) ? res.additionalAccounts : [];
-      for (const created of createdAdditional) {
-        if (!created?.accountId) continue;
+      const connectedSiblingAccounts = [
+        ...(Array.isArray(res?.repairedExistingAccounts) ? res.repairedExistingAccounts : []),
+        ...(Array.isArray(res?.additionalAccounts) ? res.additionalAccounts : []),
+      ];
+      for (const connectedSibling of connectedSiblingAccounts) {
+        if (!connectedSibling?.accountId) continue;
         try {
-          await plaidSync(businessId, String(created.accountId));
+          await plaidSync(businessId, String(connectedSibling.accountId));
         } catch {
           // Additional accounts can be synced manually later; do not fail the primary connection.
         }
@@ -320,12 +323,16 @@ export function PlaidConnectButton(props: Props) {
       resetPendingSelection();
 
       const syncRes = await runInitialSync({ afterReconnect: true });
-      for (const created of Array.isArray(repaired?.additionalAccounts) ? repaired.additionalAccounts : []) {
-        if (!created?.accountId) continue;
+      const connectedSiblingAccounts = [
+        ...(Array.isArray(repaired?.repairedExistingAccounts) ? repaired.repairedExistingAccounts : []),
+        ...(Array.isArray(repaired?.additionalAccounts) ? repaired.additionalAccounts : []),
+      ];
+      for (const connectedSibling of connectedSiblingAccounts) {
+        if (!connectedSibling?.accountId) continue;
         try {
-          await plaidSync(businessId, String(created.accountId));
+          await plaidSync(businessId, String(connectedSibling.accountId));
         } catch {
-          // The new account remains connected and can be retried from Reconcile.
+          // The sibling remains connected and can be retried from Reconcile.
         }
       }
       onConnected(syncRes);
@@ -426,7 +433,10 @@ export function PlaidConnectButton(props: Props) {
                 setPendingInstitution(institution);
                 setPendingAccounts(accounts);
                 setSelectedPlaidAccountId(accounts[0]?.id ?? "");
-                setSelectedAdditionalPlaidAccountIds([]);
+                // Plaid Account Select revokes access to de-selected accounts.
+                // Preserve every account the user kept selected in Link; the
+                // backend reuses exact existing local accounts by bank/mask.
+                setSelectedAdditionalPlaidAccountIds(accounts.slice(1).map((account) => account.id));
                 setPendingReconnectRepair(true);
                 setOpenSelect(true);
                 return;
@@ -484,13 +494,9 @@ export function PlaidConnectButton(props: Props) {
     if (disabled) return;
     if (busy) return;
     setErrorMsg(null);
-    if (mode === "reconnect") {
-      void launchPlaid();
-      return;
-    }
     setConfirmed(false);
     setOpenConfirm(true);
-  }, [busy, disabled, launchPlaid, mode]);
+  }, [busy, disabled]);
 
   return (
     <div className="flex flex-col items-start">
@@ -514,7 +520,9 @@ export function PlaidConnectButton(props: Props) {
       >
         <div className="space-y-4">
           <div className="text-xs text-bb-text leading-relaxed break-words">
-            This connects a live bank via Plaid for the selected BynkBook scope.
+            {mode === "reconnect"
+              ? "This repairs the bank authorization for the selected BynkBook account."
+              : "This connects a live bank via Plaid for the selected BynkBook scope."}
           </div>
 
           <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
@@ -528,14 +536,21 @@ export function PlaidConnectButton(props: Props) {
             </div>
           </div>
 
-          <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
-            Bank-level encryption - Read-only access - No password stored
-          </div>
+          {mode === "reconnect" ? (
+            <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
+              In Plaid, keep every bank account already used in BynkBook selected. De-selecting an account revokes that account&apos;s feed. BynkBook will reuse matching existing accounts instead of creating duplicates.
+            </div>
+          ) : (
+            <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
+              Bank-level encryption - Read-only access - No password stored
+            </div>
+          )}
 
           <div className="text-xs text-bb-text">
             Before continuing:
             <ul className="list-disc ml-5 mt-1 text-bb-text-muted">
-              <li>This will connect a bank feed for this account.</li>
+              <li>{mode === "reconnect" ? "This will repair the shared bank authorization." : "This will connect a bank feed for this account."}</li>
+              {mode === "reconnect" ? <li>Keep all existing BynkBook bank accounts selected inside Plaid.</li> : null}
               <li>This does not delete existing entries.</li>
               <li>This may import bank transactions after connection.</li>
             </ul>
@@ -549,7 +564,9 @@ export function PlaidConnectButton(props: Props) {
               onChange={(e) => setConfirmed(e.target.checked)}
             />
             <span className="min-w-0 break-words">
-              I understand this will open Plaid to connect a live bank feed for this account.
+              {mode === "reconnect"
+                ? "I understand I must keep all existing BynkBook bank accounts selected in Plaid."
+                : "I understand this will open Plaid to connect a live bank feed for this account."}
             </span>
           </label>
 
@@ -576,7 +593,7 @@ export function PlaidConnectButton(props: Props) {
                   <TinySpinner /> Connecting…
                 </>
               ) : (
-                "Continue"
+                mode === "reconnect" ? "Continue to reconnect" : "Continue"
               )}
             </button>
           </div>
@@ -612,7 +629,13 @@ export function PlaidConnectButton(props: Props) {
                     checked={selectedPlaidAccountId === a.id}
                     onChange={() => {
                       setSelectedPlaidAccountId(a.id);
-                      setSelectedAdditionalPlaidAccountIds((cur) => cur.filter((id) => id !== a.id));
+                      if (pendingReconnectRepair) {
+                        setSelectedAdditionalPlaidAccountIds(
+                          pendingAccounts.filter((account) => account.id !== a.id).map((account) => account.id),
+                        );
+                      } else {
+                        setSelectedAdditionalPlaidAccountIds((cur) => cur.filter((id) => id !== a.id));
+                      }
                     }}
                   />
                   <span className="truncate">{label}</span>
@@ -627,7 +650,9 @@ export function PlaidConnectButton(props: Props) {
                 {pendingReconnectRepair ? "Other newly shared accounts" : "Other consented accounts"}
               </div>
               <div className="mt-1 text-[11px] text-bb-text-muted">
-                Optional: create separate BynkBook accounts for other bank accounts from this same Plaid connection.
+                {pendingReconnectRepair
+                  ? "Keep these selected. Matching BynkBook accounts are repaired onto this shared Plaid connection; only unmatched accounts can create a new BynkBook account."
+                  : "Optional: create separate BynkBook accounts for other bank accounts from this same Plaid connection."}
               </div>
               <div className="mt-2 space-y-2">
                 {pendingAccounts
