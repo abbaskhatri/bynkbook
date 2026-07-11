@@ -425,8 +425,11 @@ export async function handler(event: any) {
   // Rules:
   // - Survivor amount NEVER changes
   // - Duplicate is soft-deleted (deleted_at set)
-  // - Block if either entry is reconciled (ACTIVE MatchGroup), has active AP applications,
-  //   or differs in sourceBankTransactionId/sourceUploadId/transfer_id
+  // - Preserve an active match on the survivor
+  // - Permit an exact one-to-one matched bank replay by voiding only the
+  //   duplicate match and hiding only the duplicate bank row
+  // - Block ambiguous matches, active AP applications, transfers, and
+  //   genuinely different source transactions
   // - Log MERGE_ENTRY activity event
   // -------------------------
   const isMergeEntry =
@@ -511,10 +514,53 @@ export async function handler(event: any) {
       });
     }
 
-    const bothHaveSourceLinkage = survivorHasSourceLinkage && duplicateHasSourceLinkage;
-    const sameSourceLinkage = sUpload === dUpload && sBank === dBank;
+    if (!survivorHasSourceLinkage && duplicateHasSourceLinkage) {
+      survivorEntryId = duplicate_entry_id;
+      duplicateEntryId = ent;
+    }
 
-    if (bothHaveSourceLinkage && !sameSourceLinkage) {
+    const effectiveSurvivor = survivorEntryId === ent ? survivor : dup;
+    const effectiveDuplicate = duplicateEntryId === ent ? survivor : dup;
+    const survivorBankId = effectiveSurvivor.sourceBankTransactionId ?? null;
+    const duplicateBankId = effectiveDuplicate.sourceBankTransactionId ?? null;
+    const survivorUploadId = effectiveSurvivor.sourceUploadId ?? null;
+    const duplicateUploadId = effectiveDuplicate.sourceUploadId ?? null;
+
+    const bothHaveSourceLinkage = hasSourceLinkage(effectiveSurvivor) && hasSourceLinkage(effectiveDuplicate);
+    const sameSourceLinkage =
+      survivorUploadId === duplicateUploadId && survivorBankId === duplicateBankId;
+
+    let exactBankReplay = false;
+    if (bothHaveSourceLinkage && !sameSourceLinkage && survivorBankId && duplicateBankId) {
+      const bankRows = await prisma.bankTransaction.findMany({
+        where: {
+          id: { in: [survivorBankId, duplicateBankId] },
+          business_id: biz,
+          account_id: acct,
+        },
+        select: {
+          id: true,
+          posted_date: true,
+          amount_cents: true,
+          name: true,
+          iso_currency_code: true,
+        },
+      });
+      const survivorBank = bankRows.find((row: any) => String(row.id) === String(survivorBankId));
+      const duplicateBank = bankRows.find((row: any) => String(row.id) === String(duplicateBankId));
+      const normalizeBankName = (value: any) => String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+      const sameCurrency =
+        !survivorBank?.iso_currency_code ||
+        !duplicateBank?.iso_currency_code ||
+        String(survivorBank.iso_currency_code) === String(duplicateBank.iso_currency_code);
+      exactBankReplay = !!survivorBank && !!duplicateBank
+        && normalizeToYmd(survivorBank.posted_date) === normalizeToYmd(duplicateBank.posted_date)
+        && String(survivorBank.amount_cents) === String(duplicateBank.amount_cents)
+        && normalizeBankName(survivorBank.name) === normalizeBankName(duplicateBank.name)
+        && sameCurrency;
+    }
+
+    if (bothHaveSourceLinkage && !sameSourceLinkage && !exactBankReplay) {
       return json(409, {
         ok: false,
         code: "MERGE_BLOCKED",
@@ -523,29 +569,60 @@ export async function handler(event: any) {
       });
     }
 
-    if (!survivorHasSourceLinkage && duplicateHasSourceLinkage) {
-      survivorEntryId = duplicate_entry_id;
-      duplicateEntryId = ent;
-    }
-
-    // Block if either entry is reconciled (ACTIVE MatchGroupEntry)
-    const activeMgCount = await prisma.matchGroupEntry.count({
+    const activeMatchLinks = await prisma.matchGroupEntry.findMany({
       where: {
         business_id: biz,
         account_id: acct,
         entry_id: { in: [survivorEntryId, duplicateEntryId] },
-        matchGroup: { status: "ACTIVE" },
+        matchGroup: { status: "ACTIVE", voided_at: null },
       },
+      select: { entry_id: true, match_group_id: true },
     });
 
-    if (activeMgCount > 0) {
-      return json(409, {
-        ok: false,
-        code: "MERGE_BLOCKED",
-        error: "Entry is reconciled; merge blocked.",
-        reason: "RECONCILED",
-      });
+    const duplicateMatchLinks = activeMatchLinks.filter(
+      (row: any) => String(row.entry_id) === String(duplicateEntryId),
+    );
+    let duplicateMatchGroupId: string | null = null;
+    let duplicateMatchedBankId: string | null = null;
+
+    if (duplicateMatchLinks.length > 0) {
+      if (!exactBankReplay || duplicateMatchLinks.length !== 1 || !duplicateBankId) {
+        return json(409, {
+          ok: false,
+          code: "MERGE_BLOCKED",
+          error: "The duplicate entry has an active reconciliation that cannot be merged safely.",
+          reason: "RECONCILED",
+        });
+      }
+
+      duplicateMatchGroupId = String(duplicateMatchLinks[0].match_group_id);
+      const [groupEntries, groupBanks] = await Promise.all([
+        prisma.matchGroupEntry.findMany({
+          where: { business_id: biz, account_id: acct, match_group_id: duplicateMatchGroupId },
+          select: { entry_id: true },
+        }),
+        prisma.matchGroupBank.findMany({
+          where: { business_id: biz, account_id: acct, match_group_id: duplicateMatchGroupId },
+          select: { bank_transaction_id: true },
+        }),
+      ]);
+      duplicateMatchedBankId = String(groupBanks[0]?.bank_transaction_id ?? "").trim() || null;
+      const simpleDuplicateMatch =
+        groupEntries.length === 1
+        && String(groupEntries[0]?.entry_id ?? "") === String(duplicateEntryId)
+        && groupBanks.length === 1
+        && duplicateMatchedBankId === String(duplicateBankId);
+      if (!simpleDuplicateMatch) {
+        return json(409, {
+          ok: false,
+          code: "MERGE_BLOCKED",
+          error: "The duplicate entry belongs to a multi-row or mismatched reconciliation.",
+          reason: "RECONCILED",
+        });
+      }
     }
+
+    const duplicateBankToRemoveId = exactBankReplay ? duplicateBankId : null;
 
     // Block if either entry has active AP applications
     const activeApps = await prisma.billPaymentApplication.count({
@@ -569,6 +646,55 @@ export async function handler(event: any) {
     // Transaction: record merge + soft delete duplicate + activity log
     const mergeId = randomUUID();
     await prisma.$transaction(async (tx: any) => {
+      const now = new Date();
+
+      if (duplicateMatchGroupId) {
+        const voided = await tx.matchGroup.updateMany({
+          where: {
+            id: duplicateMatchGroupId,
+            business_id: biz,
+            account_id: acct,
+            status: "ACTIVE",
+            voided_at: null,
+          },
+          data: {
+            status: "VOIDED",
+            voided_at: now,
+            voided_by_user_id: sub,
+            void_reason: reason ?? "Duplicate bank replay merged",
+          },
+        });
+        if (Number(voided?.count ?? 0) !== 1) {
+          throw new Error("The duplicate reconciliation changed before the merge completed.");
+        }
+
+      }
+
+      await tx.bankMatch.updateMany({
+        where: { business_id: biz, entry_id: duplicateEntryId, voided_at: null },
+        data: { voided_at: now, voided_by_user_id: sub },
+      });
+
+      if (duplicateBankToRemoveId) {
+        const removedBank = await tx.bankTransaction.updateMany({
+          where: {
+            id: duplicateBankToRemoveId,
+            business_id: biz,
+            account_id: acct,
+          },
+          data: {
+            is_removed: true,
+            removed_at: now,
+            source_removed_at: now,
+            source_removal_code: "DUPLICATE_ENTRY_MERGE",
+            updated_at: now,
+          },
+        });
+        if (Number(removedBank?.count ?? 0) !== 1) {
+          throw new Error("The duplicate bank transaction changed before the merge completed.");
+        }
+      }
+
       await tx.entryMerge.create({
         data: {
           id: mergeId,
@@ -582,10 +708,13 @@ export async function handler(event: any) {
       });
 
       // Soft-delete ONLY the duplicate. Survivor remains unchanged.
-      await tx.entry.updateMany({
+      const deleted = await tx.entry.updateMany({
         where: { id: duplicateEntryId, business_id: biz, account_id: acct, deleted_at: null },
-        data: { deleted_at: new Date(), updated_at: new Date() },
+        data: { deleted_at: now, updated_at: now },
       });
+      if (Number(deleted?.count ?? 0) !== 1) {
+        throw new Error("The duplicate entry changed before the merge completed.");
+      }
 
       // Resolve duplicate issues for both entries (so Issues UI clears immediately)
       await tx.entryIssue.updateMany({
@@ -596,7 +725,7 @@ export async function handler(event: any) {
           issue_type: "DUPLICATE",
           status: "OPEN",
         },
-        data: { status: "RESOLVED", resolved_at: new Date(), updated_at: new Date() },
+        data: { status: "RESOLVED", resolved_at: now, updated_at: now },
       });
 
       await logActivity(tx, {
@@ -609,6 +738,8 @@ export async function handler(event: any) {
           survivor_entry_id: survivorEntryId,
           merged_entry_id: duplicateEntryId,
           reason,
+          duplicate_match_group_id: duplicateMatchGroupId,
+          duplicate_bank_transaction_id: duplicateBankToRemoveId,
         },
       });
     });
@@ -618,6 +749,8 @@ export async function handler(event: any) {
       merge_id: mergeId,
       survivor_entry_id: survivorEntryId,
       deleted_entry_id: duplicateEntryId,
+      voided_match_group_id: duplicateMatchGroupId,
+      removed_bank_transaction_id: duplicateBankToRemoveId,
     });
   }
 

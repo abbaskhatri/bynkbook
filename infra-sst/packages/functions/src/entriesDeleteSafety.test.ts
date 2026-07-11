@@ -33,6 +33,25 @@ function unmatchAndDeleteEvent(overrides: Record<string, any> = {}, body: Record
   };
 }
 
+function mergeEvent(
+  survivorEntryId = entryId,
+  duplicateEntryId = "entry-2",
+  body: Record<string, any> = {},
+) {
+  return {
+    routeKey: "POST /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}/merge",
+    pathParameters: { businessId, accountId, entryId: survivorEntryId },
+    requestContext: {
+      authorizer: { jwt: { claims: { sub: "actor" } } },
+      http: {
+        method: "POST",
+        path: `/v1/businesses/${businessId}/accounts/${accountId}/entries/${survivorEntryId}/merge`,
+      },
+    },
+    body: JSON.stringify({ duplicate_entry_id: duplicateEntryId, ...body }),
+  };
+}
+
 function hardDeleteEvent(overrides: Record<string, any> = {}) {
   const event = deleteEvent(overrides);
   event.requestContext.http.path += "/hard";
@@ -158,6 +177,12 @@ async function loadHandlers(options: {
     billPaymentApplication: {
       count: vi.fn(async () => 0),
     },
+    entryMerge: {
+      create: vi.fn(async (args: any) => args?.data ?? {}),
+    },
+    entryIssue: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     entry: {
       findFirst: vi.fn(async (args: any) => {
         const found = entries.find((row) => rowMatchesWhere(row, args?.where));
@@ -231,6 +256,11 @@ async function loadHandlers(options: {
         const found = banks.find((row) => rowMatchesWhere(row, args?.where));
         return project(found, args?.select);
       }),
+      findMany: vi.fn(async (args: any) =>
+        banks
+          .filter((row) => rowMatchesWhere(row, args?.where))
+          .map((row) => project(row, args?.select))
+      ),
       updateMany: vi.fn(async (args: any) => {
         let count = 0;
         for (const row of banks) {
@@ -556,5 +586,88 @@ describe("ledger entry delete match-group safety", () => {
     expect(body.hard_deleted).toBe(true);
     expect(prisma.entry.deleteMany).toHaveBeenCalled();
     expect(entries).toHaveLength(0);
+  });
+});
+
+describe("duplicate merge match-group safety", () => {
+  test("keeps an actively matched bank survivor while deleting an unlinked duplicate", async () => {
+    const matched = entry({
+      id: "entry-1",
+      sourceBankTransactionId: "bank-1",
+      sourceUploadId: null,
+    });
+    const manualDuplicate = entry({
+      id: "entry-2",
+      sourceBankTransactionId: null,
+      sourceUploadId: null,
+    });
+    const { entriesHandler, entries, groups } = await loadHandlers({
+      entries: [matched, manualDuplicate],
+      groups: [group({ id: "mg-1" })],
+      groupEntries: [groupEntry({ match_group_id: "mg-1", entry_id: "entry-1" })],
+      groupBanks: [groupBank({ match_group_id: "mg-1", bank_transaction_id: "bank-1" })],
+      banks: [bank({ id: "bank-1" })],
+    });
+
+    const res = await entriesHandler(mergeEvent("entry-1", "entry-2"));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.survivor_entry_id).toBe("entry-1");
+    expect(body.deleted_entry_id).toBe("entry-2");
+    expect(entries.find((row) => row.id === "entry-2")?.deleted_at).toBeInstanceOf(Date);
+    expect(groups[0].status).toBe("ACTIVE");
+  });
+
+  test("merges an exact one-to-one matched bank replay and removes only the duplicate side", async () => {
+    const first = entry({ id: "entry-1", sourceBankTransactionId: "bank-1", sourceUploadId: null });
+    const replay = entry({ id: "entry-2", sourceBankTransactionId: "bank-2", sourceUploadId: null });
+    const firstBank: any = bank({ id: "bank-1", name: "GREENLIGHT DES:CR CD DEP", amount_cents: 177753n });
+    const replayBank: any = bank({ id: "bank-2", name: "  greenlight   des:cr cd dep ", amount_cents: 177753n });
+    const { entriesHandler, entries, groups } = await loadHandlers({
+      entries: [first, replay],
+      groups: [group({ id: "mg-1" }), group({ id: "mg-2" })],
+      groupEntries: [
+        groupEntry({ match_group_id: "mg-1", entry_id: "entry-1" }),
+        groupEntry({ match_group_id: "mg-2", entry_id: "entry-2" }),
+      ],
+      groupBanks: [
+        groupBank({ match_group_id: "mg-1", bank_transaction_id: "bank-1" }),
+        groupBank({ match_group_id: "mg-2", bank_transaction_id: "bank-2" }),
+      ],
+      banks: [firstBank, replayBank],
+    });
+
+    const res = await entriesHandler(mergeEvent("entry-1", "entry-2", { reason: "duplicate-issue-merge" }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.voided_match_group_id).toBe("mg-2");
+    expect(body.removed_bank_transaction_id).toBe("bank-2");
+    expect(groups.find((row) => row.id === "mg-1")?.status).toBe("ACTIVE");
+    expect(groups.find((row) => row.id === "mg-2")?.status).toBe("VOIDED");
+    expect(firstBank.is_removed).not.toBe(true);
+    expect(replayBank.is_removed).toBe(true);
+    expect(replayBank.source_removal_code).toBe("DUPLICATE_ENTRY_MERGE");
+    expect(entries.find((row) => row.id === "entry-2")?.deleted_at).toBeInstanceOf(Date);
+  });
+
+  test("still blocks different bank events even when date and amount match", async () => {
+    const first = entry({ id: "entry-1", sourceBankTransactionId: "bank-1", sourceUploadId: null });
+    const second = entry({ id: "entry-2", sourceBankTransactionId: "bank-2", sourceUploadId: null });
+    const { entriesHandler, entries } = await loadHandlers({
+      entries: [first, second],
+      banks: [
+        bank({ id: "bank-1", name: "Zelle Conf# first", amount_cents: -44044n }),
+        bank({ id: "bank-2", name: "Zelle Conf# second", amount_cents: -44044n }),
+      ],
+    });
+
+    const res = await entriesHandler(mergeEvent("entry-1", "entry-2"));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.reason).toBe("SOURCE_MISMATCH");
+    expect(entries.every((row) => row.deleted_at === null)).toBe(true);
   });
 });
