@@ -510,6 +510,28 @@ export async function handler(event: any) {
     if (id) bankById.set(id, bank);
   }
 
+  function bankEventFingerprint(bankId: string) {
+    const bank = bankById.get(bankId);
+    if (!bank) return "";
+
+    const ymd = dateToYmd(bank.posted_date);
+    const amount = String(bank.amount_cents ?? "");
+    const description = normalizePayee(String(bank.name ?? ""));
+    if (!ymd || !amount || !description) return "";
+    return `${ymd}|${amount}|${description}`;
+  }
+
+  function linkedBankEvidenceOverlaps(aIds: string[], bIds: string[]) {
+    const bIdSet = new Set(bIds);
+    if (aIds.some((id) => bIdSet.has(id))) return true;
+
+    // Plaid replays or an earlier sync bug can produce different local bank IDs for
+    // the same posted event. An exact bank date/amount/full-description fingerprint
+    // is therefore duplicate evidence even when the local IDs differ.
+    const bFingerprints = new Set(bIds.map(bankEventFingerprint).filter(Boolean));
+    return aIds.map(bankEventFingerprint).filter(Boolean).some((fingerprint) => bFingerprints.has(fingerprint));
+  }
+
   function entryBankDescriptions(entry: any) {
     const out: string[] = [];
 
@@ -711,11 +733,11 @@ export async function handler(event: any) {
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         if (items[j].day - items[i].day > windowDays) break;
-        // If both entries are linked to bank transactions (via sourceBankTransactionId or match groups)
-        // and none of those bank transactions overlap, they are provably different real-world events.
+        // Distinct bank IDs normally prove distinct events, except when their exact
+        // posted date, signed amount, and full bank description also match. That is
+        // the replay shape produced by duplicate imports and must remain detectable.
         if (items[i].linkedBankIds.length > 0 && items[j].linkedBankIds.length > 0) {
-          const jIds = new Set(items[j].linkedBankIds);
-          if (!items[i].linkedBankIds.some(id => jIds.has(id))) continue;
+          if (!linkedBankEvidenceOverlaps(items[i].linkedBankIds, items[j].linkedBankIds)) continue;
         }
         // Different labeled reference numbers (REF:, TRACE:, ID:, etc.) mean different transactions
         if (items[i].ref && items[j].ref && items[i].ref !== items[j].ref) continue;
@@ -838,11 +860,10 @@ export async function handler(event: any) {
       // Exact duplicate groups keep their original group_key, copy, and LEGIT_DUP suppression.
       if (a.exactKey && b.exactKey && a.exactKey === b.exactKey) continue;
 
-      // If both entries are linked to bank transactions (via sourceBankTransactionId or match groups)
-      // and none of those bank transactions overlap, they are provably different real-world events.
+      // Preserve exact replay evidence even when duplicate bank rows have different
+      // local IDs; otherwise matched duplicates disappear from the issue scan.
       if (a.linkedBankIds.length > 0 && b.linkedBankIds.length > 0) {
-        const bIds = new Set(b.linkedBankIds);
-        if (!a.linkedBankIds.some(id => bIds.has(id))) continue;
+        if (!linkedBankEvidenceOverlaps(a.linkedBankIds, b.linkedBankIds)) continue;
       }
       // Different labeled reference numbers mean different transactions
       if (a.ref && b.ref && a.ref !== b.ref) continue;
