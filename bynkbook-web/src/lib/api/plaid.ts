@@ -1,9 +1,13 @@
 import { apiFetch } from "@/lib/api/client";
 
-export async function plaidLinkToken(businessId: string, accountId: string) {
+export async function plaidLinkToken(
+  businessId: string,
+  accountId: string,
+  options?: { listOptions?: boolean; sourceAccountId?: string },
+) {
   return apiFetch(
     `/v1/businesses/${businessId}/accounts/${accountId}/plaid/link-token`,
-    { method: "POST", body: "{}" }
+    { method: "POST", body: JSON.stringify(options ?? {}) }
   );
 }
 
@@ -51,6 +55,7 @@ export async function plaidRepairAccount(
   accountId: string,
   body: {
     plaidAccountId: string;
+    sourceAccountId?: string;
     institution?: { name?: string; institution_id?: string };
     mask?: string;
     additionalAccounts?: Array<{
