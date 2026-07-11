@@ -110,9 +110,10 @@ export function TotalsFooter(props: {
   }, [autoLoadMore, loadMoreText, canLoadMore, isLoadingMore, onLoadMore]);
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 text-xs text-bb-text-muted">
-      {/* Left: rows + paging */}
-      <div className="flex min-w-0 items-center gap-2">
+    <div className="grid gap-3 px-3 py-3 text-xs text-bb-text-muted sm:px-4">
+      {/* Pagination and loading controls get their own row so totals never
+          collapse underneath them or touch the card edge. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
         <span>Rows:</span>
 
         <Select
@@ -143,7 +144,7 @@ export function TotalsFooter(props: {
           <ChevronLeft className="h-4 w-4" />
         </Button>
 
-        <div className="min-w-[116px] text-center text-xs">
+        <div className="min-w-[116px] text-center text-xs whitespace-nowrap">
           {pageLabel ?? <>Page {page} of {totalPages}</>}
         </div>
 
@@ -158,8 +159,8 @@ export function TotalsFooter(props: {
         </Button>
 
         {paginationNote ? (
-          <div className="flex min-w-0 max-w-[420px] items-center gap-2 text-[11px] text-bb-text-muted">
-            <span className="truncate" title={typeof paginationNote === "string" ? paginationNote : undefined}>
+          <div className="flex min-w-[220px] flex-1 flex-wrap items-center gap-2 text-[11px] text-bb-text-muted lg:flex-nowrap">
+            <span className="min-w-0" title={typeof paginationNote === "string" ? paginationNote : undefined}>
               {paginationNote}
             </span>
             {paginationActionLabel && onPaginationAction ? (
@@ -188,8 +189,8 @@ export function TotalsFooter(props: {
         ) : null}
       </div>
 
-      {/* Right: totals */}
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right text-xs tabular-nums">
+      {/* Totals stay on a distinct, padded row and wrap as complete values. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-bb-border/70 pt-2 text-left text-xs tabular-nums lg:justify-end lg:text-right">
         {totalsScopeLabel ? (
           <div className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-semibold text-bb-text">
@@ -206,22 +207,22 @@ export function TotalsFooter(props: {
           </div>
         ) : null}
 
-        <div>
+        <div className="whitespace-nowrap">
           <span className="mr-1">Income:</span>
           <span className="font-semibold text-bb-text">{incomeText}</span>
         </div>
 
-        <div>
+        <div className="whitespace-nowrap">
           <span className="mr-1">Expense:</span>
           <span className="font-semibold text-bb-amount-negative">{expenseText}</span>
         </div>
 
-        <div>
+        <div className="whitespace-nowrap">
           <span className="mr-1">Net:</span>
           <span className="font-semibold">{netText}</span>
         </div>
 
-        <div>
+        <div className="whitespace-nowrap">
           <span className="mr-1">{balanceLabel ?? "Balance"}:</span>
           <span className="font-semibold">{balanceText}</span>
         </div>

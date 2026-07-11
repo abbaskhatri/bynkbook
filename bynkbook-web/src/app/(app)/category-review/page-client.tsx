@@ -1655,6 +1655,7 @@ export default function CategoryReviewPageClient() {
   }
 
   const loadedCount = visibleRows.length;
+  const queueCount = Number.isFinite(totalCount) ? totalCount : loadedCount;
   const resultNoun = applied.onlyUncategorized ? "uncategorized entries" : "entries";
   const filtersActive = !!applied.from || !!applied.to || !!applied.search.trim() || !applied.onlyUncategorized;
   const countStatus = Number.isFinite(totalCount)
@@ -1718,7 +1719,7 @@ export default function CategoryReviewPageClient() {
 
         <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" aria-label="Category review status">
           <span className="inline-flex h-7 items-center rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-2.5 text-xs font-semibold text-bb-status-warning-fg">
-            {loadedCount} {applied.onlyUncategorized ? "Uncategorized" : "Loaded"}
+            {queueCount} {applied.onlyUncategorized ? "Uncategorized" : "Matching"}
           </span>
           <span className="inline-flex h-7 items-center rounded-md border border-bb-status-success-border bg-bb-status-success-bg px-2.5 text-xs font-semibold text-bb-status-success-fg">
             {autoFixButtonReadyCount} Safe
@@ -1836,7 +1837,7 @@ export default function CategoryReviewPageClient() {
             <CardTitle className="inline-flex items-center gap-2">
               Review queue
               <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-semibold text-primary border border-primary/20">
-                {loadedCount}
+                {queueCount}
               </span>
               {sugUpdating ? <span className="text-[11px] text-muted-foreground">Updating…</span> : null}
             </CardTitle>

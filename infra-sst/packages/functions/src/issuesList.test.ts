@@ -612,6 +612,11 @@ describe("issues list", () => {
 
     const body = JSON.parse(res.body);
     expect(body.issues.map((row: any) => row.id).sort()).toEqual(["issue-1", "issue-2", "issue-3"]);
+    expect(body.summary).toEqual({
+      totalCount: 3,
+      countsByType: { DUPLICATE: 2, STALE_CHECK: 1 },
+      duplicateGroupCount: 1,
+    });
     expect(prisma.entryIssue.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         business_id: "biz-1",
@@ -619,6 +624,29 @@ describe("issues list", () => {
         status: "OPEN",
       }),
     }));
+  });
+
+  test("summary excludes deleted entries and singleton duplicate groups", async () => {
+    const { handler } = await loadHandler({
+      issues: [
+        ...defaultIssues(),
+        issue({ id: "issue-singleton", entry_id: "entry-4", issue_type: "DUPLICATE", group_key: "dup-single" }),
+        issue({ id: "issue-deleted", entry_id: "entry-deleted", issue_type: "STALE_CHECK" }),
+      ],
+      entries: [
+        ...defaultEntries(),
+        entry({ id: "entry-4" }),
+        entry({ id: "entry-deleted", deleted_at: new Date("2026-04-20T00:00:00.000Z") }),
+      ],
+    });
+
+    const res = await handler(event("OPEN"));
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).summary).toEqual({
+      totalCount: 3,
+      countsByType: { DUPLICATE: 2, STALE_CHECK: 1 },
+      duplicateGroupCount: 1,
+    });
   });
 
   test("status filtering is preserved with entryIds", async () => {

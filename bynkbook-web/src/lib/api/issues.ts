@@ -96,6 +96,11 @@ export type ListAccountIssuesResponse = {
   issues: EntryIssueRow[];
   hasMore?: boolean;
   nextCursor?: string | null;
+  summary?: {
+    totalCount: number;
+    countsByType: Record<string, number>;
+    duplicateGroupCount: number;
+  };
 };
 
 const DEFAULT_ENTRY_ID_CHUNK_SIZE = 50;

@@ -63,6 +63,56 @@ async function requireAccountInBusiness(prisma: any, businessId: string, account
   return !!acct;
 }
 
+async function getIssueSummary(prisma: any, businessId: string, accountId: string, status: string) {
+  const where: any = { business_id: businessId, account_id: accountId };
+  if (status !== "ALL") where.status = status;
+
+  const issueRows = await prisma.entryIssue.findMany({
+    where,
+    select: { entry_id: true, issue_type: true, group_key: true },
+  });
+  const entryIds = Array.from(new Set(issueRows.map((row: any) => String(row.entry_id ?? "")).filter(Boolean)));
+  const activeEntries = entryIds.length
+    ? await prisma.entry.findMany({
+        where: {
+          business_id: businessId,
+          account_id: accountId,
+          id: { in: entryIds },
+          deleted_at: null,
+        },
+        select: { id: true },
+      })
+    : [];
+  const activeEntryIds = new Set(activeEntries.map((row: any) => String(row.id)));
+  const activeIssues = issueRows.filter((row: any) => activeEntryIds.has(String(row.entry_id)));
+
+  const duplicateRowsByGroup = new Map<string, number>();
+  for (const row of activeIssues) {
+    if (String(row.issue_type).toUpperCase() !== "DUPLICATE") continue;
+    const groupKey = String(row.group_key ?? "").trim();
+    if (!groupKey) continue;
+    duplicateRowsByGroup.set(groupKey, (duplicateRowsByGroup.get(groupKey) ?? 0) + 1);
+  }
+  const validDuplicateGroups = new Set(
+    Array.from(duplicateRowsByGroup.entries())
+      .filter(([, count]) => count >= 2)
+      .map(([groupKey]) => groupKey)
+  );
+
+  const countsByType: Record<string, number> = {};
+  for (const row of activeIssues) {
+    const issueType = String(row.issue_type ?? "").toUpperCase();
+    if (issueType === "DUPLICATE" && !validDuplicateGroups.has(String(row.group_key ?? "").trim())) continue;
+    countsByType[issueType] = (countsByType[issueType] ?? 0) + 1;
+  }
+
+  return {
+    totalCount: Object.values(countsByType).reduce((sum, count) => sum + count, 0),
+    countsByType,
+    duplicateGroupCount: validDuplicateGroups.size,
+  };
+}
+
 const ENTRY_IDS_LIMIT = 200;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -238,6 +288,8 @@ export async function handler(event: any) {
 
   const where: any = { business_id: biz, account_id: acct };
   if (status !== "ALL") where.status = status;
+
+  const summary = requestedEntryIds ? null : await getIssueSummary(prisma, biz, acct, status);
 
   let rows: any[];
   let hasMore = false;
@@ -452,5 +504,6 @@ export async function handler(event: any) {
     issues: withEntrySnapshots,
     hasMore,
     nextCursor,
+    ...(summary ? { summary } : {}),
   });
 }
