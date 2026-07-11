@@ -1,0 +1,31 @@
+{
+  "auditDate": "2026-07-11",
+  "revision": "62328bf85fe7cf4884ed8a0a7a21fe5e81fbff3c",
+  "summary": {
+    "newOrReconfirmedFindings": 13,
+    "carriedOpenFindings": 5,
+    "high": 5,
+    "medium": 11,
+    "low": 2
+  },
+  "findings": [
+    {"id":"BYNK-REAUDIT-PLAID-001","severity":"High","confidence":"Confirmed production","title":"Plaid transactions sync account filter uses an incompatible request shape"},
+    {"id":"BYNK-REAUDIT-PLAID-002","severity":"High","confidence":"Confirmed code","title":"All transaction webhooks create update availability and sync work"},
+    {"id":"BYNK-REAUDIT-PLAID-003","severity":"High","confidence":"Confirmed code","title":"Pending disconnect and login repaired lifecycle webhooks are ignored"},
+    {"id":"BYNK-REAUDIT-PLAID-004","severity":"Medium","confidence":"Confirmed code","title":"Unavailable Plaid status is displayed as not connected"},
+    {"id":"BYNK-REAUDIT-PLAID-005","severity":"Medium","confidence":"Confirmed design risk","title":"Per-account cursor drain has no distributed concurrency lock"},
+    {"id":"BYNK-REAUDIT-PLAID-006","severity":"Medium","confidence":"Confirmed code","title":"Post-Link account additions are not implemented"},
+    {"id":"BYNK-REAUDIT-PLAID-007","severity":"Medium","confidence":"Verification gap","title":"No post-deployment signed webhook has exercised the new queue worker"},
+    {"id":"BYNK-REAUDIT-OPS-001","severity":"Medium","confidence":"Confirmed AWS","title":"Plaid alarms have no operator notification actions"},
+    {"id":"BYNK-REAUDIT-RECON-001","severity":"High","confidence":"Confirmed production","title":"Background entry pagination self-cancels and leaves permanent loading"},
+    {"id":"BYNK-REAUDIT-RECON-002","severity":"Medium","confidence":"Confirmed code","title":"History fetch failure renders an endless skeleton"},
+    {"id":"BYNK-REAUDIT-RECON-003","severity":"Medium","confidence":"Confirmed production","title":"Placement summary is recomputed repeatedly during background hydration"},
+    {"id":"BYNK-REAUDIT-UI-001","severity":"Medium","confidence":"Confirmed production","title":"Tablet shell overflows and pushes topbar actions off-screen"},
+    {"id":"BYNK-REAUDIT-TEST-001","severity":"Medium","confidence":"Confirmed test gap","title":"Plaid mocks assert a production-incompatible request contract"},
+    {"id":"BYNK-CARRIED-LEGAL-001","severity":"High","confidence":"Carried verified","title":"Final legal copy remains unapproved"},
+    {"id":"BYNK-CARRIED-INFRA-001","severity":"Medium","confidence":"Carried verified","title":"Live dev-named dependencies require migration"},
+    {"id":"BYNK-CARRIED-DATA-001","severity":"Medium","confidence":"Carried verified","title":"Historical BankMatch migration remains pending"},
+    {"id":"BYNK-CARRIED-ARCH-001","severity":"Low","confidence":"Confirmed code","title":"Core authenticated pages remain monolithic"},
+    {"id":"BYNK-CARRIED-UX-001","severity":"Low","confidence":"Carried verified","title":"Overlay and visual-pattern consolidation remains partial"}
+  ]
+}
