@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useId } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { ringFocus } from "./tokens";
 
@@ -41,31 +41,6 @@ export function AppDialog({
   disableOverlayClose = false,
   bodyClassName,
 }: AppDialogProps) {
-  const titleId = useId();
-  const descriptionId = useId();
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const t = window.setTimeout(() => {
-      containerRef.current?.focus();
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [open]);
-
-  React.useEffect(() => {
-    if (!open || !onClose) return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   const widthClass = dialogWidthBySize[size] ?? dialogWidthBySize.md;
   const toneClass =
     tone === "danger"
@@ -74,28 +49,25 @@ export function AppDialog({
         ? "border-bb-status-warning-border"
         : "border-bb-border";
 
-  const handleOverlayClick = () => {
-    if (!onClose || disableOverlayClose) return;
-    onClose();
-  };
-
   return (
-    <div className="fixed inset-0 z-50 overflow-x-hidden">
-      <div
-        className="absolute inset-0 bg-bb-overlay backdrop-blur-[2px] transition-opacity duration-200"
-        onClick={handleOverlayClick}
-        aria-hidden="true"
-      />
-
-      <div className="absolute inset-0 flex items-end justify-center overflow-x-hidden p-0 sm:items-center sm:p-4">
-        <div
-          ref={containerRef}
-          tabIndex={-1}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={title ? titleId : undefined}
-          aria-describedby={description ? descriptionId : undefined}
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose?.();
+      }}
+    >
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bb-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden p-0 sm:items-center sm:p-4">
+          <DialogPrimitive.Content
+          onEscapeKeyDown={(event) => {
+            if (!onClose) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (disableOverlayClose || !onClose) event.preventDefault();
+          }}
           className={[
+            "pointer-events-auto",
             "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-lg sm:rounded-lg border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.48)]",
             "max-h-[calc(100dvh-0.75rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
             "transition-all duration-200 ease-out",
@@ -106,14 +78,14 @@ export function AppDialog({
         >
           <div className="shrink-0 border-b border-bb-border-muted bg-bb-surface-card px-5 py-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div id={titleId} className="text-base sm:text-sm font-semibold text-bb-text leading-6">
+              <DialogPrimitive.Title className="text-base sm:text-sm font-semibold text-bb-text leading-6">
                 {title}
-              </div>
+              </DialogPrimitive.Title>
               {description ? (
-                <div id={descriptionId} className="mt-1 max-w-prose text-xs leading-5 text-bb-text-muted">
+                <DialogPrimitive.Description className="mt-1 max-w-prose text-xs leading-5 text-bb-text-muted">
                   {description}
-                </div>
-              ) : null}
+                </DialogPrimitive.Description>
+              ) : <DialogPrimitive.Description className="sr-only">Dialog</DialogPrimitive.Description>}
             </div>
 
             {onClose ? (
@@ -148,9 +120,10 @@ export function AppDialog({
               {footer}
             </div>
           ) : null}
+          </DialogPrimitive.Content>
         </div>
-      </div>
-    </div>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 

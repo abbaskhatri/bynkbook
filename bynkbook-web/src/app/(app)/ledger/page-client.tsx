@@ -110,6 +110,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { FilterBar } from "@/components/primitives/FilterBar";
+import { LazyAppDialog as AppDialog } from "@/components/primitives/LazyAppDialog";
 import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
 import { StatusChip } from "@/components/primitives/StatusChip";
@@ -156,16 +157,6 @@ const UploadPanel = dynamic(
   () => import("@/components/uploads/UploadPanel").then((mod) => mod.UploadPanel),
   { loading: () => null }
 );
-
-const DynamicAppDialog = dynamic(
-  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
-  { loading: () => null }
-);
-
-function AppDialog(props: any) {
-  if (!props.open) return null;
-  return <DynamicAppDialog {...props} />;
-}
 
 const DynamicFixIssueDialog = dynamic(
   () => import("@/components/ledger/fix-issue-dialog").then((mod) => mod.FixIssueDialog),
@@ -3223,7 +3214,7 @@ export default function LedgerPageClient() {
                   Clear
                 </Button>
 
-                {bulkMsg ? <div className="text-xs text-bb-text-muted whitespace-nowrap">{bulkMsg}</div> : null}
+                {bulkMsg ? <div role="status" aria-live="polite" className="text-xs text-bb-text-muted whitespace-nowrap">{bulkMsg}</div> : null}
               </div>
             ) : null}
 

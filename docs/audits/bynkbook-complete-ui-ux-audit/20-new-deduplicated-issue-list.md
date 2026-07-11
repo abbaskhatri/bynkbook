@@ -1,5 +1,7 @@
 # New Deduplicated Issue List
 
+Implementation status is tracked in [`../../remediation/bynkbook-ui-ux-remediation-status.md`](../../remediation/bynkbook-ui-ux-remediation-status.md).
+
 ## Combined status
 
 This list carries the seven unresolved/partial items from the prior 37-finding register and adds 20 actionable UI/UX findings plus two verification/design limitations. The legal and monolith items overlap prior findings and are deduplicated below.

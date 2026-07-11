@@ -1,11 +1,6 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { canonicalMobileRedirectTarget, type MobileRedirectParams } from "@/lib/mobile/canonicalRedirect";
 
-import MobileReviewPageClient from "./page-client";
-
-export default function MobileReviewPage() {
-  return (
-    <Suspense fallback={null}>
-      <MobileReviewPageClient />
-    </Suspense>
-  );
+export default async function MobileReviewPage({ searchParams }: { searchParams: Promise<MobileRedirectParams> }) {
+  redirect(canonicalMobileRedirectTarget("/category-review", await searchParams));
 }

@@ -25,13 +25,13 @@ export default function TermsPage() {
           <CardContent className="p-0">
             <div className="border-b border-slate-200 px-6 py-6 sm:px-8">
               <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-700">
-                Terms
+                Draft service terms
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
-                Terms of Service
+                Terms of Service (Draft)
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-                This page provides the high-level terms framework for using BynkBook. Replace this placeholder with final business-approved legal text before public launch.
+                This pre-release page provides a high-level usage framework. It is not a substitute for final business-approved legal terms.
               </p>
             </div>
 

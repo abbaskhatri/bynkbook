@@ -1375,7 +1375,7 @@ export default function DashboardPageClient() {
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {[
           {
-            label: "Cash Balance",
+            label: "Ledger Cash Balance",
             value: cashKpi.text,
             isNeg: cashKpi.isNeg,
             sub: `As of ${range.to}`,
@@ -1492,7 +1492,7 @@ export default function DashboardPageClient() {
                   <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
                     <Landmark className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Account Balances</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Ledger Account Balances</CardTitle>
                 </div>
 
                 <div className="text-[11px] text-muted-foreground leading-none">As of {range.to}</div>

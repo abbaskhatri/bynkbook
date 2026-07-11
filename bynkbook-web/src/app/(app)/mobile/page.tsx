@@ -1,11 +1,6 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { canonicalMobileRedirectTarget, type MobileRedirectParams } from "@/lib/mobile/canonicalRedirect";
 
-import MobilePageClient from "./page-client";
-
-export default function MobilePage() {
-  return (
-    <Suspense fallback={null}>
-      <MobilePageClient />
-    </Suspense>
-  );
+export default async function MobilePage({ searchParams }: { searchParams: Promise<MobileRedirectParams> }) {
+  redirect(canonicalMobileRedirectTarget("/dashboard", await searchParams));
 }

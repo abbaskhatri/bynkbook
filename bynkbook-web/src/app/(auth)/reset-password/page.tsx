@@ -133,11 +133,28 @@ function ResetPasswordInner() {
                 </div>
 
                 <div className="px-6 py-6 sm:px-7">
-                  <div className="space-y-4">
+                  <form
+                    className="space-y-4"
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      setBusy(true);
+                      setErr(null);
+                      try {
+                        await confirmResetPassword({ username: email, confirmationCode: code, newPassword });
+                        router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
+                      } catch (e: any) {
+                        setErr(e?.message ?? "Failed to reset password");
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
                     <div className="space-y-2">
                       <Label htmlFor="code">Verification code</Label>
                       <Input
                         id="code"
+                        name="code"
+                        required
                         value={code}
                         onChange={(e) => setCode(e.target.value)}
                         autoComplete="one-time-code"
@@ -150,7 +167,9 @@ function ResetPasswordInner() {
                       <Label htmlFor="newPassword">New password</Label>
                       <Input
                         id="newPassword"
+                        name="newPassword"
                         type="password"
+                        required
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         autoComplete="new-password"
@@ -160,30 +179,15 @@ function ResetPasswordInner() {
                     </div>
 
                     {err ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
+                      <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                         {err}
                       </div>
                     ) : null}
 
                     <Button
+                      type="submit"
                       className="h-11 w-full rounded-xl"
                       disabled={busy || !email.trim() || !code.trim() || !newPassword.trim()}
-                      onClick={async () => {
-                        setBusy(true);
-                        setErr(null);
-                        try {
-                          await confirmResetPassword({
-                            username: email,
-                            confirmationCode: code,
-                            newPassword,
-                          });
-                          router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
-                        } catch (e: any) {
-                          setErr(e?.message ?? "Failed to reset password");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
                     >
                       <span>{busy ? "Updating…" : "Update password"}</span>
                       {!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
@@ -203,7 +207,7 @@ function ResetPasswordInner() {
                         Back to reset request
                       </button>
                     </div>
-                  </div>
+                  </form>
                 </div>
               </CardContent>
             </Card>

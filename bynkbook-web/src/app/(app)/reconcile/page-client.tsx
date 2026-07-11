@@ -21,6 +21,7 @@ import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { StatusChip } from "@/components/primitives/StatusChip";
+import { LazyAppDialog as AppDialog } from "@/components/primitives/LazyAppDialog";
 import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { inputH7 } from "@/components/primitives/tokens";
@@ -157,16 +158,6 @@ const UploadsList = dynamic(
   () => import("@/components/uploads/UploadsList").then((mod) => mod.UploadsList),
   { loading: () => <div className="p-3 text-xs text-bb-text-muted">Loading history...</div> }
 );
-
-const DynamicAppDialog = dynamic(
-  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
-  { loading: () => null }
-);
-
-function AppDialog(props: any) {
-  if (!props.open) return null;
-  return <DynamicAppDialog {...props} />;
-}
 
 const AutoReconcileDialog = dynamic(
   () => import("@/components/reconcile/auto-reconcile-dialog").then((mod) => mod.AutoReconcileDialog),
@@ -3341,12 +3332,12 @@ const displayBankActiveList = useMemo(() => {
         </span>
         {plaidHasConnection ? (
           <span className="text-bb-text-muted">
-            Balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
+            Bank balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
           </span>
         ) : null}
         {plaidHasConnection && transactionSyncText ? (
           <span className="text-bb-text-muted">
-            Sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
+            Last bank sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
           </span>
         ) : null}
       </div>
@@ -4552,9 +4543,9 @@ const displayBankActiveList = useMemo(() => {
                         </span>
                       ) : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {syncMsg ? <span>{syncMsg}</span> : null}
+                      {syncMsg ? <span role="status" aria-live="polite">{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {pendingMsg ? <span className="text-bb-status-warning-fg">{pendingMsg}</span> : null}
+                      {pendingMsg ? <span role="status" aria-live="polite" className="text-bb-status-warning-fg">{pendingMsg}</span> : null}
                     </>
                   ) : (
                     "Imported from bank or CSV"

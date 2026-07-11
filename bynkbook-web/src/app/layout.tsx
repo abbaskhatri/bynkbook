@@ -41,7 +41,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <a
+          href="#main-content"
+          className="fixed left-3 top-3 z-[200] -translate-y-20 rounded-md bg-bb-surface-elevated px-4 py-3 font-semibold text-bb-text shadow-lg transition-transform focus:translate-y-0"
+        >
+          Skip to main content
+        </a>
+        <div id="main-content" tabIndex={-1}>
+          <Providers>{children}</Providers>
+        </div>
       </body>
     </html>
   );

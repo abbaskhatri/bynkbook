@@ -131,11 +131,28 @@ function ConfirmSignupInner() {
                 </div>
 
                 <div className="px-6 py-6 sm:px-7">
-                  <div className="space-y-4">
+                  <form
+                    className="space-y-4"
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      setBusy(true);
+                      setErr(null);
+                      try {
+                        await confirmSignUp({ username: email, confirmationCode: code });
+                        router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
+                      } catch (e: any) {
+                        setErr(e?.message ?? "Confirmation failed");
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
                     <div className="space-y-2">
                       <Label htmlFor="code">Confirmation code</Label>
                       <Input
                         id="code"
+                        name="code"
+                        required
                         value={code}
                         onChange={(e) => setCode(e.target.value)}
                         autoComplete="one-time-code"
@@ -145,26 +162,15 @@ function ConfirmSignupInner() {
                     </div>
 
                     {err ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
+                      <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                         {err}
                       </div>
                     ) : null}
 
                     <Button
+                      type="submit"
                       className="h-11 w-full rounded-xl"
                       disabled={busy || !email.trim() || !code.trim()}
-                      onClick={async () => {
-                        setBusy(true);
-                        setErr(null);
-                        try {
-                          await confirmSignUp({ username: email, confirmationCode: code });
-                          router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
-                        } catch (e: any) {
-                          setErr(e?.message ?? "Confirmation failed");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
                     >
                       <span>{busy ? "Confirming…" : "Confirm email"}</span>
                       {!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
@@ -184,7 +190,7 @@ function ConfirmSignupInner() {
                         Back to create account
                       </button>
                     </div>
-                  </div>
+                  </form>
                 </div>
               </CardContent>
             </Card>

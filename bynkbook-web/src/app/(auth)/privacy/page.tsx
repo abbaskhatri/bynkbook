@@ -25,13 +25,13 @@ export default function PrivacyPage() {
           <CardContent className="p-0">
             <div className="border-b border-slate-200 px-6 py-6 sm:px-8">
               <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-700">
-                Privacy
+                Draft privacy notice
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
-                Privacy Policy
+                Privacy Notice (Draft)
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-                This page explains the high-level privacy approach for BynkBook, including account data, business-scoped information, and operational use of the product.
+                This pre-release notice explains BynkBook’s current high-level privacy approach. It is not a substitute for final business-approved legal terms.
               </p>
             </div>
 

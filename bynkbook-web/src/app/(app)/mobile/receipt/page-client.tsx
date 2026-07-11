@@ -121,7 +121,7 @@ export default function MobileReceiptPageClient() {
     };
   }, []);
 
-  const reviewHref = hrefWithMobileContext({ path: "/mobile/review", businessId, accountId });
+  const reviewHref = hrefWithMobileContext({ path: "/category-review", businessId, accountId });
   const ledgerHref = hrefWithMobileContext({ path: "/ledger", businessId, accountId });
 
   const imageCount = selectedFiles.filter((item) => item.file.type.startsWith("image/")).length;

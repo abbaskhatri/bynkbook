@@ -134,7 +134,7 @@ export default function Home() {
             <div className="max-w-xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-100">
                 <span className="h-2 w-2 rounded-full bg-emerald-300" />
-                Launch-ready bookkeeping controls
+                Private beta bookkeeping workspace
               </div>
 
               <h1 className="mt-6 max-w-xl text-5xl font-semibold leading-[0.98] text-white sm:text-6xl lg:text-7xl">
@@ -171,9 +171,9 @@ export default function Home() {
               </div>
 
               <div className="mt-10 grid max-w-lg gap-3 sm:grid-cols-3">
-                <HeroStat label="Reconcile focus" value="3x" note="fewer clicks" />
-                <HeroStat label="Session control" value="12h" note="max age" />
-                <HeroStat label="Audit trail" value="100%" note="scoped activity" />
+                <HeroStat label="Reconcile" value="Visible" note="match state" />
+                <HeroStat label="Sessions" value="Controlled" note="access policy" />
+                <HeroStat label="Activity" value="Scoped" note="business records" />
               </div>
             </div>
           </div>
@@ -184,7 +184,7 @@ export default function Home() {
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-center">
           <div>
             <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-700">
-              Why customers trust it
+              Why teams choose it
             </div>
             <h2 className="mt-5 max-w-xl text-3xl font-semibold leading-tight tracking-tight text-slate-950 sm:text-4xl">
               Designed around the moments where bookkeeping usually gets messy.
@@ -269,7 +269,7 @@ export default function Home() {
         <div className="mx-auto grid max-w-7xl gap-8 rounded-lg border border-slate-200 bg-slate-50 p-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <div className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold tracking-wide text-emerald-700">
-              Ready for real books
+              Built for real workflows
             </div>
             <h2 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
               Make the first impression match the product.
