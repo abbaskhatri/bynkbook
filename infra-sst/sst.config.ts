@@ -92,6 +92,14 @@ export default $config({
     const vpcSecurityGroups = csvEnv("BYNKBOOK_VPC_SECURITY_GROUP_IDS", ["sg-0fe7b2ad87e2b2bb8"]);
     const vpcPrivateSubnets = csvEnv("BYNKBOOK_VPC_PRIVATE_SUBNET_IDS", ["subnet-016a9caf338ab17e3", "subnet-04ff62b426b19d70b"]);
 
+    const plaidSyncDeadLetterQueue = new sst.aws.Queue("PlaidSyncDeadLetterQueue", {
+      visibilityTimeout: "5 minutes",
+    });
+    const plaidSyncQueue = new sst.aws.Queue("PlaidSyncQueue", {
+      visibilityTimeout: "6 minutes",
+      dlq: { queue: plaidSyncDeadLetterQueue.arn, retry: 5 },
+    });
+
     const api = new sst.aws.ApiGatewayV2(optionalEnv("BYNKBOOK_API_NAME", `${resourcePrefix}-sst-api`), {
       cors: {
         allowHeaders: ["authorization", "content-type"],
@@ -312,6 +320,16 @@ const plaidSyncHandler = {
   timeout: "45 seconds",
 } satisfies ApiHandler;
 
+plaidSyncQueue.subscribe(
+  {
+    ...plaidHandler,
+    handler: "packages/functions/src/plaidSyncWorker.handler",
+    timeout: "5 minutes",
+    memory: "1024 MB",
+  },
+  { batch: { size: 5, partialResponses: true } },
+);
+
 // Protected Plaid routes (Cognito)
 api.route(
   "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/link-token",
@@ -418,6 +436,7 @@ const plaidWebhookHandler = {
     PLAID_SECRET_SECRET_ID: plaidSecretSecretId,
     PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
     PLAID_WEBHOOK_URL: plaidWebhookUrl,
+    PLAID_SYNC_QUEUE_URL: plaidSyncQueue.url,
   },
   permissions: [
     ...(bizHandler as any).permissions,
@@ -432,6 +451,10 @@ const plaidWebhookHandler = {
     {
       actions: ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
       resources: [sharedKmsKeyArn],
+    },
+    {
+      actions: ["sqs:SendMessage"],
+      resources: [plaidSyncQueue.arn],
     },
   ],
 } satisfies ApiHandler;

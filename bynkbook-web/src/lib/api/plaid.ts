@@ -68,10 +68,46 @@ export async function plaidDisconnect(businessId: string, accountId: string) {
 }
 
 export async function plaidSync(businessId: string, accountId: string, options?: { refresh?: boolean; afterReconnect?: boolean }) {
-  return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
-    method: "POST",
-    body: JSON.stringify({ refresh: options?.refresh === true, afterReconnect: options?.afterReconnect === true }),
-  });
+  const totals = {
+    newCount: 0,
+    upgradedCount: 0,
+    duplicateCount: 0,
+    skippedHistoricalCount: 0,
+    skippedRemovedCount: 0,
+    replacementUpgradeCount: 0,
+    protectedMatchedRemovalCount: 0,
+    restoredMatchedHistoryCount: 0,
+    retentionPrunedCount: 0,
+    pages: 0,
+    totalSeen: 0,
+  };
+  let result: any = null;
+  const maxContinuationCalls = 10;
+
+  for (let pass = 0; pass < maxContinuationCalls; pass += 1) {
+    result = await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
+      method: "POST",
+      body: JSON.stringify({
+        refresh: pass === 0 && options?.refresh === true,
+        afterReconnect: pass === 0 && options?.afterReconnect === true,
+      }),
+    });
+
+    for (const key of Object.keys(totals) as Array<keyof typeof totals>) {
+      totals[key] += Number(result?.[key] ?? 0);
+    }
+
+    if (!result?.drainIncomplete && !result?.hasMore) break;
+  }
+
+  const drainIncomplete = Boolean(result?.drainIncomplete || result?.hasMore);
+  return {
+    ...result,
+    ...totals,
+    capped: drainIncomplete,
+    hasMore: drainIncomplete,
+    drainIncomplete,
+  };
 }
 
 export async function plaidPreviewOpening(

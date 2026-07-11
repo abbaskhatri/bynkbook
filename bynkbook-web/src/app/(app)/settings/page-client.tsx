@@ -2451,6 +2451,13 @@ export default function SettingsPageClient() {
                             if (!res?.ok) throw new Error(res?.error ?? "Create failed");
 
                             qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                            if (!res?.setupComplete) {
+                              setPlaidDraft(null);
+                              setErr(
+                                "The account was created and connected, but its first transaction sync is still pending. Close this dialog, open Reconcile, and use Sync to finish loading the bank history."
+                              );
+                              return;
+                            }
                             setPlaidReviewOpen(false);
                             setOpen(false);
 

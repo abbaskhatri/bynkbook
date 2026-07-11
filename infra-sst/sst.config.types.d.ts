@@ -20,6 +20,14 @@ declare global {
         addAuthorizer(args: unknown): { id: string };
         route(route: string, handler: unknown, args?: unknown): unknown;
       };
+      Queue: new (
+        name: string,
+        args?: any,
+      ) => {
+        arn: any;
+        url: any;
+        subscribe(subscriber: any, args?: any, options?: any): unknown;
+      };
     };
   };
 }

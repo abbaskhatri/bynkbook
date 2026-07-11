@@ -5,6 +5,13 @@ function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 
+function serviceResponseStatus(response: any) {
+  const statusCode = Number(response?.statusCode ?? 500);
+  let body: any = {};
+  try { body = JSON.parse(response?.body ?? "{}"); } catch { body = {}; }
+  return { statusCode, body, ok: statusCode < 400 && body?.ok !== false };
+}
+
 export async function handler(event: any) {
   const claims = getClaims(event);
   const sub = claims.sub as string | undefined;
@@ -91,22 +98,35 @@ export async function handler(event: any) {
 
   // Sync transactions + compute opening balance from chosen effectiveStartDate
   const sync = await syncTransactions({ businessId, accountId, userId: sub } as any);
+  const primarySync = serviceResponseStatus(sync);
   const additionalSyncs = [];
   for (const created of Array.isArray(exBody?.additionalAccounts) ? exBody.additionalAccounts : []) {
     try {
       const extraSync = await syncTransactions({ businessId, accountId: created.accountId, userId: sub } as any);
-      additionalSyncs.push({ accountId: created.accountId, ok: true, sync: extraSync });
+      const parsed = serviceResponseStatus(extraSync);
+      additionalSyncs.push({
+        accountId: created.accountId,
+        ok: parsed.ok,
+        statusCode: parsed.statusCode,
+        sync: parsed.body,
+      });
     } catch (error: any) {
       additionalSyncs.push({ accountId: created.accountId, ok: false, error: error?.message ?? "Sync failed" });
     }
   }
 
-  return json(200, {
+  const allAdditionalSynced = additionalSyncs.every((result) => result.ok);
+  const setupComplete = primarySync.ok && allAdditionalSynced;
+
+  return json(setupComplete ? 200 : 202, {
     ok: true,
     accountId,
-    synced: true,
+    synced: primarySync.ok,
+    setupComplete,
+    setupStatus: setupComplete ? "COMPLETE" : "PENDING_SYNC",
     exchange: true,
-    sync,
+    sync: primarySync.body,
+    syncStatusCode: primarySync.statusCode,
     additionalAccounts: exBody?.additionalAccounts ?? [],
     additionalSyncs,
   });

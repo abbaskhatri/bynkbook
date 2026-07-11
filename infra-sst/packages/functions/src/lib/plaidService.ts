@@ -310,19 +310,6 @@ function normalizeAdditionalPlaidAccounts(rows: any[]) {
   return out;
 }
 
-function normalizePlaidTransactionName(value: any) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function dateOnlyKey(value: any) {
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
-}
-
 async function activeMatchedBankTransactionIdsForPlaidSync(
   prisma: any,
   businessId: string,
@@ -404,6 +391,7 @@ type PlaidWebhookRequest = {
   body: any;
   rawBody: string;
   headers: Record<string, string | string[] | undefined>;
+  enqueueSync?: (target: { businessId: string; accountId: string; itemId: string }) => Promise<void>;
 };
 
 const plaidWebhookKeyCache = new Map<string, any>();
@@ -797,8 +785,10 @@ export async function exchangePublicToken(params: {
   const openingAdjustmentCreatedAt = allowOpeningAdjustment ? null : new Date();
   const openingPolicy = allowOpeningAdjustment ? "AUTO" : "MANUAL";
 
-  // Upsert one connection per account
-  await prisma.bankConnection.upsert({
+  // Build all writes before executing them so a multi-account connection is
+  // committed atomically instead of one sibling at a time.
+  const databaseWrites: any[] = [];
+  databaseWrites.push(prisma.bankConnection.upsert({
     where: { business_id_account_id: { business_id: businessId, account_id: accountId } },
     create: {
       business_id: businessId,
@@ -839,7 +829,7 @@ export async function exchangePublicToken(params: {
       opening_adjustment_created_at: openingAdjustmentCreatedAt,
       updated_at: new Date(),
     },
-  });
+  }));
 
   const createdAdditionalAccounts: any[] = [];
   for (const row of additional) {
@@ -863,7 +853,7 @@ export async function exchangePublicToken(params: {
       row.type || "CHECKING",
     );
 
-    await prisma.$transaction([
+    databaseWrites.push(
       prisma.account.create({
         data: {
           id: extraAccountId,
@@ -898,7 +888,7 @@ export async function exchangePublicToken(params: {
           opening_adjustment_created_at: null,
         } as any,
       }),
-    ]);
+    );
 
     createdAdditionalAccounts.push({
       accountId: extraAccountId,
@@ -908,6 +898,13 @@ export async function exchangePublicToken(params: {
       last4: extraMask,
       effectiveStartDate: extraStart.toISOString().slice(0, 10),
     });
+  }
+
+  try {
+    await prisma.$transaction(databaseWrites);
+  } catch (error) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    throw error;
   }
 
   return json(200, {
@@ -1328,12 +1325,15 @@ export async function syncTransactions(params: {
   userId: string;
   requestRefresh?: boolean;
   afterReconnect?: boolean;
+  system?: boolean;
 }) {
-  const { businessId, accountId, userId, requestRefresh, afterReconnect } = params;
+  const { businessId, accountId, userId, requestRefresh, afterReconnect, system = false } = params;
 
   const prisma = await getPrisma();
-  const role = await requirePlaidCapability(prisma, businessId, userId, "SYNC");
-  if (!role) return json(403, { ok: false, error: "Forbidden" });
+  if (!system) {
+    const role = await requirePlaidCapability(prisma, businessId, userId, "SYNC");
+    if (!role) return json(403, { ok: false, error: "Forbidden" });
+  }
 
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
@@ -1555,7 +1555,6 @@ export async function syncTransactions(params: {
         // Count seen for safety caps
         const pageSeen = (data.added?.length ?? 0) + (data.modified?.length ?? 0) + (data.removed?.length ?? 0);
         totalSeen += pageSeen;
-        if (totalSeen >= MAX_TOTAL) hasMore = false;
 
         // Plaid is already account-filtered. Keep this guard for legacy or unexpected responses.
         candidateUpserts.push(...[...data.added, ...data.modified].filter((t) => t.account_id === plaidAccountId));
@@ -1584,8 +1583,6 @@ export async function syncTransactions(params: {
   }
 
   const now = new Date();
-  const fullDrainFromScratch = !drainStartCursor;
-
   const removedPlaidTransactionIds = Array.from(new Set(
     drainedRemoved
       .map((row: any) => String(row?.transaction_id ?? "").trim())
@@ -1613,27 +1610,6 @@ export async function syncTransactions(params: {
     removedExistingRows.map((row: any) => [String(row?.plaid_transaction_id ?? ""), row]),
   );
   const consumedRemovedPlaidIds = new Set<string>();
-
-  if (fullDrainFromScratch) {
-    const latestExistingBankTransaction = await prisma.bankTransaction.findFirst({
-      where: {
-        business_id: businessId,
-        account_id: accountId,
-        is_removed: false,
-      },
-      orderBy: [
-        { posted_date: "desc" as any },
-        { created_at: "desc" as any },
-        { id: "desc" as any },
-      ],
-      select: { posted_date: true },
-    });
-
-    const latestExistingDate = latestExistingBankTransaction?.posted_date ?? null;
-    if (latestExistingDate && latestExistingDate >= effectiveStartDate) {
-      historicalCutoffDate = latestExistingDate;
-    }
-  }
 
   for (const t of drainedUpserts) {
     // Retention: do not retain anything older than effectiveStartDate
@@ -1681,74 +1657,22 @@ export async function syncTransactions(params: {
       }
     }
 
-    // Plaid can rotate a transaction_id by returning the old transaction in
-    // `removed` and the replacement in `added`. Preserve our durable bank row
-    // (and therefore its match links) when the economic identity is unambiguous.
-    const incomingName = normalizePlaidTransactionName(t.name ?? t.merchant_name ?? "Transaction");
-    const replacementCandidates = removedExistingRows.filter((row: any) => {
-      const oldPlaidId = String(row?.plaid_transaction_id ?? "");
-      if (!oldPlaidId || consumedRemovedPlaidIds.has(oldPlaidId)) return false;
-      if (oldPlaidId === String(t.transaction_id ?? "")) return false;
-      return (
-        BigInt(String(row?.amount_cents ?? 0)) === cents &&
-        dateOnlyKey(row?.posted_date) === dateOnlyKey(posted) &&
-        normalizePlaidTransactionName(row?.name) === incomingName
-      );
+    // A prior explicit overlap cleanup is authoritative. Do not resurrect an
+    // exact Plaid ID that a user/system already soft-removed. Unlike the old
+    // date-wide cutoff, this exact-ID check does not hide unrelated historical
+    // transactions merely because newer CSV/manual history exists.
+    const existingIncomingRow = await prisma.bankTransaction.findFirst({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        plaid_transaction_id: t.transaction_id,
+        plaid_account_id: plaidAccountId,
+      },
+      select: { id: true, is_removed: true },
     });
-
-    if (replacementCandidates.length === 1) {
-      const replacement = replacementCandidates[0];
-      const oldPlaidId = String(replacement.plaid_transaction_id);
-      try {
-        const upgraded = await prisma.bankTransaction.updateMany({
-          where: {
-            id: replacement.id,
-            business_id: businessId,
-            account_id: accountId,
-            plaid_transaction_id: oldPlaidId,
-          },
-          data: {
-            plaid_transaction_id: t.transaction_id,
-            posted_date: posted,
-            authorized_date: t.authorized_date ? new Date(`${t.authorized_date}T00:00:00Z`) : null,
-            amount_cents: cents,
-            name: (t.name ?? t.merchant_name ?? "Transaction").toString(),
-            is_pending: isPending,
-            iso_currency_code: t.iso_currency_code ?? null,
-            is_removed: false,
-            removed_at: null,
-            source: "PLAID",
-            plaid_account_id: plaidAccountId,
-            raw: t as any,
-            updated_at: now,
-          },
-        });
-        if (upgraded.count > 0) {
-          consumedRemovedPlaidIds.add(oldPlaidId);
-          upgradedCount += upgraded.count;
-          replacementUpgradeCount += upgraded.count;
-          continue;
-        }
-      } catch {
-        // If the replacement ID already exists, normal exact-ID dedupe below
-        // is authoritative; never guess which durable row should survive.
-      }
-    }
-
-    if (historicalCutoffDate && posted <= historicalCutoffDate) {
-      const existingPlaidRow = await prisma.bankTransaction.findFirst({
-        where: {
-          business_id: businessId,
-          account_id: accountId,
-          plaid_transaction_id: t.transaction_id,
-          plaid_account_id: plaidAccountId,
-        },
-        select: { id: true, is_removed: true },
-      });
-      if (!existingPlaidRow || existingPlaidRow.is_removed) {
-        skippedHistoricalCount += 1;
-        continue;
-      }
+    if (existingIncomingRow?.is_removed) {
+      skippedRemovedCount += 1;
+      continue;
     }
 
     try {
@@ -2000,10 +1924,11 @@ export async function syncTransactions(params: {
     });
   }
 
+  const drainIncomplete = hasMore && (pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL);
   const connectionUpdateData: any = {
     sync_cursor: packSyncCursor(plaidAccountId, cursorScope, cursor),
     last_sync_at: now,
-    has_new_transactions: false,
+    has_new_transactions: drainIncomplete,
     status: "CONNECTED",
     error_code: null,
     error_message: null,
@@ -2045,8 +1970,9 @@ export async function syncTransactions(params: {
     // Progress metadata (useful for UI)
     pages: pageN,
     totalSeen,
-    capped: pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL,
+    capped: drainIncomplete,
     hasMore: hasMore,
+    drainIncomplete,
     drainRestartCount,
     cursorScope,
     accountScopedFallback,
@@ -2079,6 +2005,18 @@ export async function handleWebhook(request: PlaidWebhookRequest) {
       where: { plaid_item_id: itemId },
       data: { has_new_transactions: true, updated_at: new Date() },
     });
+
+    if (request.enqueueSync) {
+      const targets = await prisma.bankConnection.findMany({
+        where: { plaid_item_id: itemId },
+        select: { business_id: true, account_id: true },
+      });
+      await Promise.all(targets.map((target: any) => request.enqueueSync!({
+        businessId: String(target.business_id),
+        accountId: String(target.account_id),
+        itemId,
+      })));
+    }
 
     return json(200, { ok: true, webhookType, webhookCode });
   }
