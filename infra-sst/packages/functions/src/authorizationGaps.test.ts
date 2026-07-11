@@ -343,4 +343,36 @@ describe("P1 authorization gaps", () => {
       }),
     );
   });
+
+  test("legacy ENFORCE_ONLY mode enforces every configured action without wave bypass", async () => {
+    vi.resetModules();
+    vi.doUnmock("./lib/authz");
+    vi.doMock("./lib/activityLog", () => ({ logActivity: vi.fn(async () => undefined) }));
+
+    const prisma = {
+      business: {
+        findFirst: vi.fn(async () => ({ authz_mode: "ENFORCE_ONLY", authz_enforce_wave: 0 })),
+      },
+      businessRolePolicy: {
+        findFirst: vi.fn(async () => ({ policy_json: { bank_connections: "NONE" } })),
+      },
+    };
+
+    const { authorizeWrite } = await import("./lib/authz");
+    const res = await authorizeWrite(prisma, {
+      businessId: "biz-1",
+      actorUserId: "actor",
+      actorRole: "OWNER",
+      actionKey: "bank_connections.manage",
+      requiredLevel: "FULL",
+      endpointForLog: "PLAID_MANAGE",
+    });
+
+    expect(res).toMatchObject({
+      allowed: false,
+      enforced: true,
+      code: "POLICY_DENIED",
+      policyKey: "bank_connections",
+    });
+  });
 });

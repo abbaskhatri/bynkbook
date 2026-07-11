@@ -3,6 +3,7 @@ import { Products, CountryCode } from "plaid";
 import { getPlaidClient } from "./plaidClient";
 import { encryptAccessToken, decryptAccessToken } from "./plaidCrypto";
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
+import { authorizeWrite } from "./authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -501,8 +502,21 @@ export async function requirePlaidCapability(
 ) {
   const role = String(await requireMembership(prisma, businessId, userId) ?? "").trim().toUpperCase();
   if (!role) return null;
-  if (capability === "MANAGE") return role === "OWNER" || role === "ADMIN" ? role : null;
-  return ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(role) ? role : null;
+  const roleAllowed = capability === "MANAGE"
+    ? role === "OWNER" || role === "ADMIN"
+    : ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(role);
+  if (!roleAllowed) return null;
+
+  const actionKey = capability === "MANAGE" ? "bank_connections.manage" : "bank_connections.sync";
+  const az = await authorizeWrite(prisma, {
+    businessId,
+    actorUserId: userId,
+    actorRole: role,
+    actionKey,
+    requiredLevel: "FULL",
+    endpointForLog: `PLAID_${capability}`,
+  });
+  return az.allowed ? role : null;
 }
 
 export async function requireAccountInBusiness(prisma: any, businessId: string, accountId: string) {

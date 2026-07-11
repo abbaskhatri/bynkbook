@@ -99,9 +99,47 @@ export default $config({
       visibilityTimeout: "6 minutes",
       dlq: { queue: plaidSyncDeadLetterQueue.arn, retry: 5 },
     });
+    const alarmTopicArn = process.env.BYNKBOOK_ALARM_TOPIC_ARN?.trim();
+    const alarmActions = alarmTopicArn ? [alarmTopicArn] : [];
+
+    new aws.cloudwatch.MetricAlarm("PlaidSyncDeadLettersAlarm", {
+      alarmDescription: "Plaid transaction sync messages reached the dead-letter queue.",
+      namespace: "AWS/SQS",
+      metricName: "ApproximateNumberOfMessagesVisible",
+      dimensions: { QueueName: plaidSyncDeadLetterQueue.name },
+      statistic: "Maximum",
+      period: 60,
+      evaluationPeriods: 1,
+      threshold: 0,
+      comparisonOperator: "GreaterThanThreshold",
+      treatMissingData: "notBreaching",
+      alarmActions,
+    });
+
+    new aws.cloudwatch.MetricAlarm("PlaidSyncBacklogAgeAlarm", {
+      alarmDescription: "The oldest queued Plaid sync job has waited more than five minutes.",
+      namespace: "AWS/SQS",
+      metricName: "ApproximateAgeOfOldestMessage",
+      dimensions: { QueueName: plaidSyncQueue.name },
+      statistic: "Maximum",
+      period: 60,
+      evaluationPeriods: 2,
+      threshold: 300,
+      comparisonOperator: "GreaterThanThreshold",
+      treatMissingData: "notBreaching",
+      alarmActions,
+    });
 
     const api = new sst.aws.ApiGatewayV2(optionalEnv("BYNKBOOK_API_NAME", `${resourcePrefix}-sst-api`), {
       accessLog: { retention: "3 months" },
+      transform: {
+        stage: {
+          defaultRouteSettings: {
+            throttlingBurstLimit: Number(optionalEnv("BYNKBOOK_API_BURST_LIMIT", isProd ? "200" : "100")),
+            throttlingRateLimit: Number(optionalEnv("BYNKBOOK_API_RATE_LIMIT", isProd ? "100" : "50")),
+          },
+        },
+      },
       cors: {
         allowHeaders: ["authorization", "content-type"],
         allowMethods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
@@ -498,13 +536,9 @@ const matchesHandler = {
   handler: "packages/functions/src/matches.handler",
 } satisfies ApiHandler;
 
-// Create match
-api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/matches", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-
-// Batch create matches (best-effort; per-item results)
-api.route("POST /v1/businesses/{businessId}/accounts/{accountId}/matches/batch", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
-
-// List active matches (Phase 4D v1)
+// Legacy BankMatch is read-only for historical compatibility. New matching
+// writes use MatchGroup exclusively, preventing two accounting models from
+// continuing to accumulate in parallel.
 api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/matches", matchesHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Match Groups (CPA-clean; full match only) ----------

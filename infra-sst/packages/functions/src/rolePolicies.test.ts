@@ -27,6 +27,12 @@ async function loadHandler(args?: {
       findFirst: vi.fn(async () => (actorRole ? { role: actorRole } : null)),
     },
     businessRolePolicy: {
+      findMany: vi.fn(async () => existingPolicy ? [{
+        role: "ADMIN",
+        policy_json: existingPolicy,
+        updated_at: new Date("2026-01-01T00:00:00.000Z"),
+        updated_by_user_id: "owner",
+      }] : []),
       findFirst: vi.fn(async () =>
         existingPolicy
           ? {
@@ -83,6 +89,26 @@ afterEach(() => {
 });
 
 describe("role policy update guards", () => {
+  test("GET returns effective defaults for every role and reports enforcement active", async () => {
+    const { handler } = await loadHandler({ existingPolicy: { reports: "FULL" } });
+
+    const res = await handler(event("GET", "/v1/businesses/biz-1/role-policies", ""));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.notEnforcedYet).toBe(false);
+    expect(body.items).toHaveLength(5);
+    expect(body.items.find((item: any) => item.role === "ADMIN").policy_json).toMatchObject({
+      reports: "FULL",
+      ledger: "FULL",
+      bank_connections: "FULL",
+    });
+    expect(body.items.find((item: any) => item.role === "MEMBER").policy_json).toMatchObject({
+      ledger: "VIEW",
+      bank_connections: "NONE",
+    });
+  });
+
   test("partial update merges into backend defaults without converting missing keys to NONE", async () => {
     const { handler, prisma } = await loadHandler();
 

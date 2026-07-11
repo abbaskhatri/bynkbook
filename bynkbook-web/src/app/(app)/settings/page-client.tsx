@@ -1671,16 +1671,16 @@ export default function SettingsPageClient() {
                 </div>
               </>
             ) : (
-              // Roles & Permissions (still store-only UI, but NOT placeholder buttons)
+              // Roles & Permissions
               <div className="space-y-3">
                 <div className="rounded-xl border border-border bg-card p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-medium text-foreground">Roles & Permissions</div>
-                      <div className="text-[11px] text-muted-foreground">Policies are saved and used by supported UI surfaces; allowlists still remain a fallback.</div>
+                      <div className="text-[11px] text-muted-foreground">Policies are enforced by supported backend operations after the role allowlist check.</div>
                     </div>
                     <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
-                      Store-only
+                      Enforced
                     </span>
                   </div>
 
@@ -1727,7 +1727,7 @@ export default function SettingsPageClient() {
                           {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => {
                             const row = polRows.find((x) => String(x.role).toUpperCase() === r);
                             const value = String((row?.policy_json as any)?.[key] ?? "NONE").toUpperCase();
-                            const label2 = value === "FULL" ? "Full" : value === "VIEW" ? "View" : "None";
+                            const label2 = value === "FULL" ? "Can change" : value === "VIEW" ? "View only" : "No changes";
                             const cls =
                               value === "FULL"
                                 ? "bg-primary/10 text-primary border-primary/20"
@@ -1791,9 +1791,9 @@ export default function SettingsPageClient() {
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="NONE">None</SelectItem>
-                                      <SelectItem value="VIEW">View</SelectItem>
-                                      <SelectItem value="FULL">Full</SelectItem>
+                                      <SelectItem value="NONE">No changes</SelectItem>
+                                      <SelectItem value="VIEW">View only</SelectItem>
+                                      <SelectItem value="FULL">Can change</SelectItem>
                                     </SelectContent>
                                   </Select>
                                 ) : (
@@ -1810,7 +1810,7 @@ export default function SettingsPageClient() {
                   </Table>
 
                   <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border">
-                    Policies are active on supported screens. Where a screen does not yet enforce policy directly, allowlists remain the fallback source of truth.
+                    Backend policy checks enforce these values for supported operations. Static role allowlists remain an additional upper bound.
                   </div>
                 </div>
               </div>

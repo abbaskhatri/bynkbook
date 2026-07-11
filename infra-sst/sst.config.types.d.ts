@@ -25,9 +25,16 @@ declare global {
         args?: any,
       ) => {
         arn: any;
+        name: any;
         url: any;
         subscribe(subscriber: any, args?: any, options?: any): unknown;
       };
+    };
+  };
+
+  const aws: {
+    cloudwatch: {
+      MetricAlarm: new (name: string, args: Record<string, unknown>) => unknown;
     };
   };
 }

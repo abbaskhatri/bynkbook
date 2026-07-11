@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { parseDateOnlyToUtcDate, serializeDateOnly } from "./lib/dateOnly";
 import { randomUUID } from "node:crypto";
 import { removeBankConnectionWithItemLifecycle } from "./lib/plaidService";
+import { authorizeWrite } from "./lib/authz";
 
 const ACCOUNT_TYPES = ["CHECKING", "SAVINGS", "CREDIT_CARD", "CASH", "OTHER"] as const;
 
@@ -44,6 +45,22 @@ async function findAccountInBusiness(prisma: any, businessId: string, accountId:
     where: { id: accountId, business_id: businessId },
     select,
   });
+}
+
+async function requireAccountPolicy(
+  prisma: any,
+  args: { businessId: string; accountId?: string; userId: string; role: string; endpoint: string },
+) {
+  const az = await authorizeWrite(prisma, {
+    businessId: args.businessId,
+    scopeAccountId: args.accountId || null,
+    actorUserId: args.userId,
+    actorRole: args.role,
+    actionKey: "bank_connections.manage",
+    requiredLevel: "FULL",
+    endpointForLog: args.endpoint,
+  });
+  return az.allowed;
 }
 
 export async function handler(event: any) {
@@ -130,6 +147,9 @@ export async function handler(event: any) {
     const r = String(role ?? "").toUpperCase();
     const canWrite = r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
     if (!canWrite) return json(403, { ok: false, error: "Forbidden (requires write role)" });
+    if (!await requireAccountPolicy(prisma, { businessId, accountId, userId: sub, role, endpoint: "PATCH /accounts/{accountId}" })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     let body: any = {};
     try {
@@ -253,6 +273,9 @@ export async function handler(event: any) {
   if (method === "POST" && (event?.requestContext?.http?.path ?? "").toString().endsWith("/archive")) {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+    if (!await requireAccountPolicy(prisma, { businessId, accountId, userId: sub, role, endpoint: "POST /accounts/{accountId}/archive" })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     const existing = await findAccountInBusiness(prisma, businessId, accountId);
     if (!existing) return json(404, { ok: false, error: "Account not found" });
@@ -284,6 +307,9 @@ export async function handler(event: any) {
   if (method === "POST" && (event?.requestContext?.http?.path ?? "").toString().endsWith("/unarchive")) {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+    if (!await requireAccountPolicy(prisma, { businessId, accountId, userId: sub, role, endpoint: "POST /accounts/{accountId}/unarchive" })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     const existing = await findAccountInBusiness(prisma, businessId, accountId);
     if (!existing) return json(404, { ok: false, error: "Account not found" });
@@ -339,6 +365,9 @@ export async function handler(event: any) {
   if (method === "DELETE") {
     if (!accountId) return json(400, { ok: false, error: "Missing accountId" });
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+    if (!await requireAccountPolicy(prisma, { businessId, accountId, userId: sub, role, endpoint: "DELETE /accounts/{accountId}" })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     const existing = await findAccountInBusiness(prisma, businessId, accountId);
     if (!existing) return json(404, { ok: false, error: "Account not found" });
@@ -381,6 +410,9 @@ export async function handler(event: any) {
   // POST /v1/businesses/{businessId}/accounts
   if (method === "POST") {
     if (!canManageAccounts(role)) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+    if (!await requireAccountPolicy(prisma, { businessId, userId: sub, role, endpoint: "POST /accounts" })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     let body: any = {};
     try {

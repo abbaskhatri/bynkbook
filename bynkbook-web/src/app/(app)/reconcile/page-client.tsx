@@ -4922,6 +4922,7 @@ const displayBankActiveList = useMemo(() => {
 
                       const isMatched = isBankTxnFullyMatched(t);
                       const isPendingBankTxn = Boolean(t?.is_pending);
+                      const wasRemovedAtSource = Boolean(t?.source_removed_at);
                       const isRowPending = !!pendingById[txnId] || !!createEntryBusyByBankId[txnId];
                       const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
                       const rowBusyReason = matchedOrPendingCreateEntryMessage;
@@ -5014,6 +5015,12 @@ const displayBankActiveList = useMemo(() => {
                               {isPendingBankTxn ? (
                                 <span className="shrink-0">
                                   <StatusChip label="Pending" tone="warning" />
+                                </span>
+                              ) : null}
+
+                              {wasRemovedAtSource ? (
+                                <span className="shrink-0" title="Plaid removed this source transaction after it was reconciled. The accounting history is preserved for auditability.">
+                                  <StatusChip label="Removed by bank" tone="warning" />
                                 </span>
                               ) : null}
 

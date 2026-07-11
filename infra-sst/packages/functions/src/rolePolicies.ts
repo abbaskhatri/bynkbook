@@ -127,8 +127,18 @@ export async function handler(event: any) {
       orderBy: [{ role: "asc" }],
     });
 
-    // Store-only: return saved rows; UI will fill defaults for missing roles
-    return json(200, { ok: true, items: rows, notEnforcedYet: true });
+    const byRole = new Map(rows.map((row: any) => [String(row.role).toUpperCase(), row]));
+    const items = ROLE_POLICY_ROLES.map((role) => {
+      const stored: any = byRole.get(role);
+      return {
+        role,
+        policy_json: mergePolicy(role, stored?.policy_json, {}),
+        updated_at: stored?.updated_at ?? null,
+        updated_by_user_id: stored?.updated_by_user_id ?? null,
+      };
+    });
+
+    return json(200, { ok: true, items, notEnforcedYet: false });
   }
 
   // PUT /v1/businesses/{businessId}/role-policies/{role} (OWNER-only edit/save)
@@ -212,7 +222,7 @@ export async function handler(event: any) {
       payloadJson: { role: targetRole, changed_keys_count: changedKeysCount },
     });
 
-    return json(200, { ok: true, item: saved, notEnforcedYet: true });
+    return json(200, { ok: true, item: saved, notEnforcedYet: false });
   }
 
   return json(404, { ok: false, error: "Not found" });
