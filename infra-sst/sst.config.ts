@@ -99,8 +99,16 @@ export default $config({
       visibilityTimeout: "6 minutes",
       dlq: { queue: plaidSyncDeadLetterQueue.arn, retry: 5 },
     });
-    const alarmTopicArn = process.env.BYNKBOOK_ALARM_TOPIC_ARN?.trim();
-    const alarmActions = alarmTopicArn ? [alarmTopicArn] : [];
+    const configuredAlarmTopicArn = process.env.BYNKBOOK_ALARM_TOPIC_ARN?.trim();
+    const managedAlarmTopic = configuredAlarmTopicArn
+      ? null
+      : new aws.sns.Topic("PlaidOperationsAlarmTopic", {
+          name: `${resourcePrefix}-plaid-operations-alarms`,
+          displayName: "BynkBook Plaid operations alarms",
+          tags: { Application: "BynkBook", Stage: $app.stage, ManagedBy: "SST" },
+        });
+    const alarmTopicArn = configuredAlarmTopicArn || managedAlarmTopic!.arn;
+    const alarmActions = [alarmTopicArn];
 
     new aws.cloudwatch.MetricAlarm("PlaidSyncDeadLettersAlarm", {
       alarmDescription: "Plaid transaction sync messages reached the dead-letter queue.",
@@ -1030,6 +1038,6 @@ api.route(
 
     api.route("GET /v1/businesses/{businessId}/accounts/{accountId}/ledger-summary", ledgerSummaryHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
-    return { apiUrl: api.url };
+    return { apiUrl: api.url, plaidAlarmTopicArn: alarmTopicArn };
   },
 });

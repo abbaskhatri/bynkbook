@@ -36,5 +36,11 @@ declare global {
     cloudwatch: {
       MetricAlarm: new (name: string, args: Record<string, unknown>) => unknown;
     };
+    sns: {
+      Topic: new (
+        name: string,
+        args: Record<string, unknown>,
+      ) => { arn: any };
+    };
   };
 }

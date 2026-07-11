@@ -132,6 +132,7 @@ type PlaidStatusState = {
   needsAttention?: boolean;
   errorMessage?: string | null;
   hasNewTransactions?: boolean;
+  newAccountsAvailable?: boolean;
   lastKnownBalanceCents?: string | null;
   lastKnownBalanceAt?: string | null;
 };
@@ -543,6 +544,7 @@ export default function ReconcilePageClient() {
   const [entriesHasMore, setEntriesHasMore] = useState(false);
   const [entriesBackgroundPageCount, setEntriesBackgroundPageCount] = useState(0);
   const [entriesBackgroundLoading, setEntriesBackgroundLoading] = useState(false);
+  const entriesBackgroundLoadingRef = useRef(false);
 
   useEffect(() => {
     setEntriesHydratedScopeKey("");
@@ -550,6 +552,8 @@ export default function ReconcilePageClient() {
     setEntriesNextCursor(null);
     setEntriesHasMore(false);
     setEntriesBackgroundPageCount(0);
+    entriesBackgroundLoadingRef.current = false;
+    setEntriesBackgroundLoading(false);
     setExpectedVisibleN(PAGE_CHUNK);
     setMatchedVisibleN(PAGE_CHUNK);
   }, [bankScopeKey]);
@@ -570,7 +574,7 @@ export default function ReconcilePageClient() {
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
     if (!bankScopeKey || entriesHydratedScopeKey !== bankScopeKey) return;
-    if (entriesBackgroundLoading || !entriesHasMore || !entriesNextCursor) return;
+    if (entriesBackgroundLoadingRef.current || !entriesHasMore || !entriesNextCursor) return;
     if (entriesBackgroundPageCount >= ENTRIES_BACKGROUND_MAX_PAGE_COUNT - 1) return;
 
     let cancelled = false;
@@ -578,6 +582,7 @@ export default function ReconcilePageClient() {
     const backgroundDelayMs = Math.min(1800, 650 + entriesBackgroundPageCount * 250);
     const timer = window.setTimeout(() => {
       (async () => {
+        entriesBackgroundLoadingRef.current = true;
         setEntriesBackgroundLoading(true);
         try {
           const res = await listEntriesPage({
@@ -617,7 +622,8 @@ export default function ReconcilePageClient() {
           setEntriesHasMore(!!res.meta.hasMore && !!nextCursor);
           setEntriesBackgroundPageCount((count) => count + 1);
         } finally {
-          if (!cancelled) setEntriesBackgroundLoading(false);
+          entriesBackgroundLoadingRef.current = false;
+          setEntriesBackgroundLoading(false);
         }
       })();
     }, backgroundDelayMs);
@@ -631,7 +637,6 @@ export default function ReconcilePageClient() {
     selectedAccountId,
     bankScopeKey,
     entriesHydratedScopeKey,
-    entriesBackgroundLoading,
     entriesHasMore,
     entriesNextCursor,
     entriesBackgroundPageCount,
@@ -688,6 +693,7 @@ export default function ReconcilePageClient() {
   const [matchGroupsLoading, setMatchGroupsLoading] = useState(false);
   const [allMatchGroups, setAllMatchGroups] = useState<any[]>([]);
   const [allMatchGroupsLoading, setAllMatchGroupsLoading] = useState(false);
+  const [allMatchGroupsError, setAllMatchGroupsError] = useState<string | null>(null);
   const [allMatchGroupsLoadedScope, setAllMatchGroupsLoadedScope] = useState("");
   const allMatchGroupsInFlightRef = useRef<Promise<any[]> | null>(null);
   const allMatchGroupsRequestSeqRef = useRef(0);
@@ -725,6 +731,7 @@ export default function ReconcilePageClient() {
   const plaidSyncRequestRef = useRef(false);
   const [plaidCleanupBusy, setPlaidCleanupBusy] = useState(false);
   const [plaid, setPlaid] = useState<PlaidStatusState | null>(null);
+  const [plaidStatusError, setPlaidStatusError] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
 
@@ -885,11 +892,12 @@ export default function ReconcilePageClient() {
     let cancelled = false;
     (async () => {
       setPlaidLoading(true);
+      setPlaidStatusError(null);
       try {
         const res = await plaidStatus(selectedBusinessId, selectedAccountId);
         if (!cancelled) setPlaid(res);
-      } catch {
-        if (!cancelled) setPlaid(null);
+      } catch (error: any) {
+        if (!cancelled) setPlaidStatusError(error?.message ?? "Bank connection status is temporarily unavailable");
       } finally {
         if (!cancelled) setPlaidLoading(false);
       }
@@ -1062,6 +1070,7 @@ export default function ReconcilePageClient() {
       const requestSeq = ++allMatchGroupsRequestSeqRef.current;
       const run = (async () => {
         setAllMatchGroupsLoading(true);
+        setAllMatchGroupsError(null);
         try {
           const mg: any = await listMatchGroups({
             businessId: selectedBusinessId,
@@ -1072,9 +1081,10 @@ export default function ReconcilePageClient() {
           setAllMatchGroups(items);
           setAllMatchGroupsLoadedScope(scopeKey);
           return items;
-        } catch {
+        } catch (error: any) {
           setAllMatchGroups([]);
-          setAllMatchGroupsLoadedScope("");
+          setAllMatchGroupsLoadedScope(scopeKey);
+          setAllMatchGroupsError(error?.message ?? "Unable to load reconciliation history");
           return [];
         } finally {
           setAllMatchGroupsLoading(false);
@@ -1590,6 +1600,7 @@ export default function ReconcilePageClient() {
     setMatchGroups([]);
     setAllMatchGroups([]);
     setAllMatchGroupsLoadedScope("");
+    setAllMatchGroupsError(null);
     setBankLoadedScopeByStatus({ unmatched: "", matched: "" });
     setBankLoadingByStatus({ unmatched: false, matched: false });
     setBankNextCursorByStatus({ all: null, unmatched: null, matched: null });
@@ -1734,7 +1745,10 @@ export default function ReconcilePageClient() {
 
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
-    if (bankTxLoading || entriesInitialLoading) return;
+    const entriesBackgroundHydrating =
+      entriesBackgroundLoading ||
+      (entriesHasMore && entriesBackgroundPageCount < ENTRIES_BACKGROUND_MAX_PAGE_COUNT - 1);
+    if (bankTxLoading || entriesInitialLoading || entriesBackgroundHydrating) return;
 
     const requestSeq = ++placementSummaryRequestSeqRef.current;
     const bankTransactionIds = bankTxSorted.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean);
@@ -1775,6 +1789,9 @@ export default function ReconcilePageClient() {
     selectedAccountId,
     bankTxLoading,
     entriesInitialLoading,
+    entriesBackgroundLoading,
+    entriesHasMore,
+    entriesBackgroundPageCount,
     bankTxSorted,
     allEntriesSorted,
     from,
@@ -3283,6 +3300,8 @@ const displayBankActiveList = useMemo(() => {
     return bal !== null ? formatUsdFromCents(bal) : "—";
   }, [plaid?.lastKnownBalanceCents]);
   const plaidNeedsAttention = !!plaid?.needsAttention;
+  const plaidStatusUnavailable = !!plaidStatusError && !plaid;
+  const plaidNewAccountsAvailable = !!plaid?.newAccountsAvailable;
   const plaidHealthyConnected = !!plaid?.connected && !plaidNeedsAttention;
   const plaidHasConnection = plaidHealthyConnected || plaidNeedsAttention || !!plaid?.institutionName;
   const transactionSyncText = plaid?.lastSyncAt ? new Date(plaid.lastSyncAt).toLocaleString() : "";
@@ -3373,7 +3392,15 @@ const displayBankActiveList = useMemo(() => {
           : "bg-bb-surface-card text-bb-text-muted border-bb-border"
         }`}
     >
-      {plaidLoading ? "Loading…" : plaidNeedsAttention ? "Needs attention" : plaidHealthyConnected ? "Connected" : "Not connected"}
+      {plaidLoading
+        ? "Loading…"
+        : plaidStatusUnavailable
+          ? "Status unavailable"
+          : plaidNeedsAttention
+            ? "Needs attention"
+            : plaidHealthyConnected
+              ? "Connected"
+              : "Not connected"}
     </span>
   );
 
@@ -4542,6 +4569,12 @@ const displayBankActiveList = useMemo(() => {
                           Updates available
                         </span>
                       ) : null}
+                      {plaidNewAccountsAvailable ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {plaidNewAccountsAvailable ? (
+                        <span className="text-bb-status-warning-fg">New bank accounts available</span>
+                      ) : null}
+                      {plaidStatusError ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {plaidStatusError ? <span className="text-bb-status-warning-fg">{plaidStatusError}</span> : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
                       {syncMsg ? <span role="status" aria-live="polite">{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
@@ -4597,7 +4630,10 @@ const displayBankActiveList = useMemo(() => {
                           const refreshSucceeded = Boolean(res?.refreshSucceeded);
                           const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
 
-                          if (res?.syncDeferred) {
+                          if (res?.syncInProgress) {
+                            setSyncMsg(res?.message ?? "A bank sync is already running for this account.");
+                            setPendingMsg("BynkBook will show the results when the active sync finishes.");
+                          } else if (res?.syncDeferred) {
                             setSyncMsg(res?.message ?? "A bank sync completed moments ago; no transaction changes were applied.");
                             setPendingMsg(null);
                           } else {
@@ -4695,6 +4731,25 @@ const displayBankActiveList = useMemo(() => {
                     >
                       <Wrench className="h-3.5 w-3.5" /> {plaidCleanupBusy ? "Cleaning..." : "Clean overlap"}
                     </button>
+                    {plaidNewAccountsAvailable ? (
+                      <PlaidConnectButton
+                        businessId={selectedBusinessId ?? ""}
+                        accountId={selectedAccountId ?? ""}
+                        businessName={selectedBusinessName}
+                        accountName={selectedAccountName}
+                        effectiveStartDate={selectedAccountOpeningDate}
+                        mode="reconnect"
+                        disabled={plaidSyncing || !selectedBusinessId || !selectedAccountId}
+                        disabledClassName={disabledBtn}
+                        buttonClassName="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                        label="Review bank accounts"
+                        onConnected={async () => {
+                          const st = await plaidStatus(selectedBusinessId!, selectedAccountId!);
+                          setPlaid(st);
+                          setPlaidStatusError(null);
+                        }}
+                      />
+                    ) : null}
                   </>
                 )}
               </div>
@@ -4706,10 +4761,16 @@ const displayBankActiveList = useMemo(() => {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <div className="text-xs font-semibold text-bb-text">
-                    {plaidNeedsAttention ? "Reconnect bank feed" : "Bank connection settings"}
+                    {plaidStatusUnavailable
+                      ? "Bank connection status unavailable"
+                      : plaidNeedsAttention
+                        ? "Reconnect bank feed"
+                        : "Bank connection settings"}
                   </div>
                   <div className="mt-1 text-[11px] text-bb-text-muted">
-                    {plaidNeedsAttention
+                    {plaidStatusUnavailable
+                      ? "BynkBook could not verify the bank connection. Retry before connecting or disconnecting anything."
+                      : plaidNeedsAttention
                       ? "Reconnect through Plaid to refresh transactions for this account."
                       : "Connect a live bank feed via Plaid only for the selected business and account."}
                   </div>
@@ -4728,7 +4789,26 @@ const displayBankActiveList = useMemo(() => {
                   ) : null}
                 </div>
 
-                <PlaidConnectButton
+                {plaidStatusUnavailable ? (
+                  <button
+                    type="button"
+                    className="h-8 px-3 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
+                    onClick={async () => {
+                      if (!selectedBusinessId || !selectedAccountId) return;
+                      setPlaidLoading(true);
+                      setPlaidStatusError(null);
+                      try {
+                        setPlaid(await plaidStatus(selectedBusinessId, selectedAccountId));
+                      } catch (error: any) {
+                        setPlaidStatusError(error?.message ?? "Bank connection status is temporarily unavailable");
+                      } finally {
+                        setPlaidLoading(false);
+                      }
+                    }}
+                  >
+                    Retry status
+                  </button>
+                ) : <PlaidConnectButton
                   businessId={selectedBusinessId ?? ""}
                   accountId={selectedAccountId ?? ""}
                   businessName={selectedBusinessName}
@@ -4773,7 +4853,7 @@ const displayBankActiveList = useMemo(() => {
                       setPlaidLoading(false);
                     }
                   }}
-                />
+                />}
               </div>
             </div>
           ) : null}
@@ -6756,6 +6836,17 @@ const displayBankActiveList = useMemo(() => {
                   Reconciliation history loads when opened.
                 </div>
                 <Skeleton className="h-24 w-full" />
+              </div>
+            ) : allMatchGroupsError ? (
+              <div className="p-3 text-xs text-bb-status-danger-fg">
+                <div>{allMatchGroupsError}</div>
+                <button
+                  type="button"
+                  className="mt-2 h-7 rounded-md border border-bb-border bg-bb-surface-card px-3 text-xs text-bb-text hover:bg-bb-table-row-hover"
+                  onClick={() => void loadAllMatchGroups({ force: true })}
+                >
+                  Retry history
+                </button>
               </div>
             ) : reconAuditVisible.length === 0 ? (
               <EmptyState label="No reconciliation history in this period" />

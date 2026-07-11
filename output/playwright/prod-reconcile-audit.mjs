@@ -5,7 +5,8 @@ import { createRequire } from "node:module";
 const root = "C:/Users/abbas/Bynkbook-app";
 const require = createRequire(`${root}/bynkbook-web/package.json`);
 const { chromium } = require("playwright");
-const base = "https://app.bynkbook.com";
+const authOrigin = "https://app.bynkbook.com";
+const base = process.env.AUDIT_BASE || authOrigin;
 const sourceStorage = `${root}/bynkbook-web/auth/bynkbook-qa-auth.json`;
 const outDir = `${root}/output/playwright/re-audit-2026-07-11`;
 const businessId = "a05b0683-1216-4459-820a-6da84e57e929";
@@ -15,7 +16,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 async function refreshedStorageState() {
   const state = JSON.parse(fs.readFileSync(sourceStorage, "utf8"));
-  const origin = state.origins.find((row) => row.origin === base);
+  const origin = state.origins.find((row) => row.origin === authOrigin);
   const items = origin?.localStorage ?? [];
   const refreshToken = items.find((row) => row.name.endsWith(".refreshToken"))?.value;
   if (!refreshToken) throw new Error("QA storage has no refresh token");
@@ -57,6 +58,12 @@ async function refreshedStorageState() {
     if (item.name.endsWith(".accessToken")) item.value = body.AuthenticationResult.AccessToken;
     if (item.name.endsWith(".idToken")) item.value = body.AuthenticationResult.IdToken;
     if (item.name.endsWith(".clockDrift")) item.value = "0";
+  }
+  if (base !== authOrigin) {
+    state.origins = [
+      ...state.origins.filter((row) => row.origin !== base),
+      { origin: base, localStorage: items.map((item) => ({ ...item })) },
+    ];
   }
   return state;
 }

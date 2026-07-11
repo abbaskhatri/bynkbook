@@ -780,7 +780,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       return (
         <div className="min-h-screen flex bg-background">
           {/* Sidebar skeleton */}
-          <div className="hidden md:block w-64 border-r border-bb-border bg-bb-sidebar-bg p-3 space-y-3">
+          <div className="hidden lg:block w-64 border-r border-bb-border bg-bb-sidebar-bg p-3 space-y-3">
             <Skeleton className="h-6 w-36" />
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-full" />
@@ -845,7 +845,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       <aside
         className={[
           collapsed ? "w-16" : "w-56",
-          "bb-modern-sidebar border-r border-bb-border bg-bb-sidebar-bg hidden md:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
+          "bb-modern-sidebar border-r border-bb-border bg-bb-sidebar-bg hidden lg:flex flex-col sticky top-0 h-screen text-bb-sidebar-fg",
           "transition-[width] duration-200 ease-out",
         ].join(" ")}
       >
@@ -897,11 +897,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         {/* Topbar (sticky) */}
         <header className="bb-modern-topbar h-14 border-b border-bb-border flex items-center justify-between gap-2 px-3 md:px-4 sticky top-0 z-40 bg-bb-surface-card/95 backdrop-blur-md">
           {/* Left: Business pill (display-only; we expect 1 business) */}
-          <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none">
+          <div className="flex items-center gap-2 min-w-0 flex-1 lg:flex-none">
             <AppTooltip content="Open navigation" side="bottom">
               <button
                 type="button"
-                className="md:hidden h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
+                className="lg:hidden h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card text-foreground/80 hover:bg-bb-table-row-hover"
                 aria-label="Open navigation"
                 onClick={openMobileNav}
               >
@@ -927,12 +927,12 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           </div>
 
           {/* Center spacer */}
-          <div className="hidden md:block flex-1" />
+          <div className="hidden lg:block flex-1" />
 
           {/* Right: Global search + bell + user menu */}
           <div className="flex shrink-0 items-center gap-2">
             {businessId ? (
-              <div className="hidden md:block">
+              <div className="hidden lg:block">
                 {globalSearchReady ? (
                   <GlobalSearch
                     businessId={businessId}
@@ -1143,7 +1143,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       {/* Mobile bottom tab bar — primary navigation, thumb-friendly. Hidden on
           md+ where the sidebar is shown. */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/92 backdrop-blur-xl flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_-16px_36px_rgba(0,0,0,0.28)]"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 h-[4.75rem] border-t border-bb-border bg-bb-surface-card/92 backdrop-blur-xl flex items-stretch justify-around px-1.5 pb-[env(safe-area-inset-bottom)] pt-1 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_-16px_36px_rgba(0,0,0,0.28)]"
         aria-label="Primary"
       >
         {[
@@ -1190,7 +1190,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         </button>
       </nav>
 
-      <div className="md:hidden">
+      <div className="lg:hidden">
         <AppSidePanel
           open={mobileNavOpen}
           title={<BrandLogo variant="full" size="md" priority />}

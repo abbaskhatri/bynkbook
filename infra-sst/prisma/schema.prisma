@@ -320,6 +320,12 @@ model BankConnection {
   last_sync_at DateTime? @db.Timestamptz(6)
 
   has_new_transactions Boolean @default(false)
+  new_accounts_available Boolean @default(false)
+
+  // Short database lease prevents overlapping manual/webhook drains from
+  // racing the same cursor. The token owner alone may release the lease.
+  sync_lock_token      String?
+  sync_lock_expires_at DateTime? @db.Timestamptz(6)
 
   last_known_balance_cents BigInt?
   last_known_balance_at    DateTime? @db.Timestamptz(6)
