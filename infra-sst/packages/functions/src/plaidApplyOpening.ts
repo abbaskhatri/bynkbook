@@ -1,5 +1,12 @@
-import { getClaims } from "./lib/plaidService";
+import {
+  getClaims,
+  normalizePlaidCurrentBalanceCents,
+  removeBankConnectionWithItemLifecycle,
+  requirePlaidCapability,
+} from "./lib/plaidService";
 import { getPrisma } from "./lib/db";
+import { decryptAccessToken } from "./lib/plaidCrypto";
+import { getPlaidClient } from "./lib/plaidClient";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -22,28 +29,72 @@ export async function handler(event: any) {
   let body: any = {};
   try { body = event?.body ? JSON.parse(event.body) : {}; } catch { return json(400, { ok: false, error: "Invalid JSON" }); }
 
-  const choice = String(body?.choice ?? "").toUpperCase(); // APPLY_PLAID | KEEP_MANUAL | CANCEL
+  const choice = String(body?.choice ?? "").trim().toUpperCase(); // APPLY_PLAID | KEEP_MANUAL | CANCEL
   const effectiveStartDate = String(body?.effectiveStartDate ?? "").trim(); // YYYY-MM-DD
-  const suggestedOpeningCentsRaw = body?.suggestedOpeningCents;
 
-  if (!choice) return json(400, { ok: false, error: "Missing choice" });
+  if (!["APPLY_PLAID", "KEEP_MANUAL", "CANCEL"].includes(choice)) {
+    return json(400, { ok: false, error: "Invalid choice" });
+  }
   if (!effectiveStartDate) return json(400, { ok: false, error: "Missing effectiveStartDate" });
 
   const prisma = await getPrisma();
-  const mem = await prisma.userBusinessRole.findFirst({ where: { business_id: businessId, user_id: sub }, select: { role: true } });
-  if (!mem) return json(403, { ok: false, error: "Forbidden" });
+  const role = await requirePlaidCapability(prisma, businessId, sub, "MANAGE");
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const conn = await prisma.bankConnection.findFirst({ where: { business_id: businessId, account_id: accountId } });
   if (!conn) return json(400, { ok: false, error: "No bank connection" });
+  const account = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { type: true },
+  });
+  if (!account) return json(404, { ok: false, error: "Account not found in business" });
 
   // CANCEL means disconnect mapping and exit (no changes to entries)
   if (choice === "CANCEL") {
-    await prisma.bankConnection.deleteMany({ where: { business_id: businessId, account_id: accountId } });
-    return json(200, { ok: true, cancelled: true });
+    try {
+      const lifecycle = await removeBankConnectionWithItemLifecycle(prisma, businessId, accountId);
+      return json(200, { ok: true, cancelled: true, ...lifecycle });
+    } catch (error: any) {
+      return json(502, {
+        ok: false,
+        error: String(error?.response?.data?.error_message ?? error?.message ?? "Plaid disconnect failed"),
+      });
+    }
   }
 
   const startDate = new Date(`${effectiveStartDate}T00:00:00Z`);
   if (Number.isNaN(startDate.getTime())) return json(400, { ok: false, error: "Invalid effectiveStartDate" });
+
+  // Never trust a browser-provided opening amount. Recompute the authoritative
+  // suggestion from the live Plaid balance and the retained posted rows at the
+  // moment the decision is applied.
+  let suggested: bigint;
+  try {
+    const plaid = await getPlaidClient();
+    const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+    const balanceResponse = await plaid.accountsBalanceGet({ access_token: accessToken });
+    const plaidAccount = balanceResponse.data.accounts.find((candidate: any) => candidate.account_id === conn.plaid_account_id);
+    const current = plaidAccount?.balances?.current ?? null;
+    if (current == null) return json(409, { ok: false, error: "Plaid balance is unavailable; opening was not changed" });
+
+    const retained = await prisma.bankTransaction.aggregate({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        is_removed: false,
+        is_pending: false,
+        posted_date: { gte: startDate },
+      },
+      _sum: { amount_cents: true as any },
+    });
+    const retainedCents = BigInt((retained as any)._sum?.amount_cents ?? 0);
+    suggested = normalizePlaidCurrentBalanceCents(current, account.type) - retainedCents;
+  } catch (error: any) {
+    return json(502, {
+      ok: false,
+      error: String(error?.response?.data?.error_message ?? error?.message ?? "Plaid balance lookup failed"),
+    });
+  }
 
   // Ensure single canonical opening entry by soft-deleting duplicates (audit-safe)
   const entries = await prisma.entry.findMany({
@@ -68,12 +119,11 @@ export async function handler(event: any) {
     // - do NOT create/overwrite opening entry
     // - do NOT touch account.opening_balance_*
     // - store suggestion on connection for reference
-    const s = BigInt(Math.trunc(Number(suggestedOpeningCentsRaw ?? 0)));
     await prisma.bankConnection.updateMany({
       where: { business_id: businessId, account_id: accountId },
       data: {
         opening_policy: "MANUAL",
-        suggested_opening_cents: s,
+        suggested_opening_cents: suggested,
         suggested_opening_date: startDate,
         suggested_balance_cents: conn.last_known_balance_cents ?? null,
         suggested_balance_at: conn.last_known_balance_at ?? null,
@@ -86,7 +136,6 @@ export async function handler(event: any) {
   }
 
   // APPLY_PLAID
-  const suggested = BigInt(Math.trunc(Number(suggestedOpeningCentsRaw ?? 0)));
   const abs = suggested < 0n ? -suggested : suggested;
   const entryType = suggested >= 0n ? "INCOME" : "EXPENSE";
   const signed = entryType === "INCOME" ? abs : -abs;
@@ -126,7 +175,7 @@ export async function handler(event: any) {
   await prisma.$transaction([
     prisma.account.update({
       where: { id: accountId },
-      data: { opening_balance_cents: abs, opening_balance_date: startDate } as any,
+      data: { opening_balance_cents: signed, opening_balance_date: startDate } as any,
     }),
     prisma.bankConnection.updateMany({
       where: { business_id: businessId, account_id: accountId },

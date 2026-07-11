@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { useId } from "react";
 import { X } from "lucide-react";
 import { surfaceCardSoft, ringFocus } from "./tokens";
 
@@ -33,52 +35,22 @@ export function AppSidePanel({
   widthClassName,
   disableOverlayClose = false,
 }: AppSidePanelProps) {
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const t = window.setTimeout(() => {
-      containerRef.current?.focus();
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [open]);
-
-  React.useEffect(() => {
-    if (!open || !onClose) return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
+  const titleId = useId();
 
   const widthClass = widthClassName ?? (panelWidthBySize[size] ?? panelWidthBySize.md);
 
-  const handleOverlayClick = () => {
-    if (!onClose || disableOverlayClose) return;
-    onClose();
-  };
-
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
-      <div
-        className="absolute inset-0 bg-bb-overlay backdrop-blur-[2px] transition-opacity duration-200"
-        onClick={handleOverlayClick}
-        aria-hidden="true"
-      />
-
-      <div className="absolute inset-0 flex min-w-0 items-stretch justify-end overflow-hidden">
-        <div
-          ref={containerRef}
-          tabIndex={-1}
-          role="dialog"
-          aria-modal="true"
+    <DialogPrimitive.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose?.(); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bb-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
+        <div className="pointer-events-none fixed inset-0 z-50 flex min-w-0 items-stretch justify-end overflow-hidden">
+          <DialogPrimitive.Content
+          aria-labelledby={titleId}
+          onEscapeKeyDown={(event) => { if (!onClose) event.preventDefault(); }}
+          onPointerDownOutside={(event) => { if (disableOverlayClose || !onClose) event.preventDefault(); }}
           className={[
             surfaceCardSoft,
+            "pointer-events-auto",
             "h-full max-h-full w-full max-w-[calc(100vw-1rem)] rounded-none border-l border-bb-border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.48)]",
             "transition-transform duration-200 ease-out animate-in slide-in-from-right",
             widthClass,
@@ -86,9 +58,10 @@ export function AppSidePanel({
           ].join(" ")}
         >
           <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-bb-border-muted flex items-start justify-between gap-3 bg-bb-surface-card">
-            <div className="min-w-0 text-sm font-semibold text-bb-text leading-6">
+            <DialogPrimitive.Title id={titleId} className="min-w-0 text-sm font-semibold text-bb-text leading-6">
               {title}
-            </div>
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Description className="sr-only">Side panel</DialogPrimitive.Description>
 
             {onClose ? (
               <button
@@ -108,11 +81,14 @@ export function AppSidePanel({
 
           <div className="min-h-0 flex-1 overflow-auto px-4 py-3 sm:px-5 sm:py-4">{children}</div>
 
-          <div className="min-w-0 shrink-0 overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4 border-t border-bb-border-muted bg-bb-surface-soft">
-            {footer ?? null}
-          </div>
+          {footer ? (
+            <div className="min-w-0 shrink-0 overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4 border-t border-bb-border-muted bg-bb-surface-soft">
+              {footer}
+            </div>
+          ) : null}
+          </DialogPrimitive.Content>
         </div>
-      </div>
-    </div>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

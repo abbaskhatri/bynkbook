@@ -49,21 +49,13 @@ import { AlertTriangle, Check, Monitor, Moon, Settings, Pencil, Archive, Trash2,
 import { inputH7, ringFocus, selectTriggerClass, tabButtonClass } from "@/components/primitives/tokens";
 import { useUploadController } from "@/components/uploads/useUploadController";
 import { useThemePreference, type ThemePreference } from "@/lib/theme";
+import { summarizeActivityPayload } from "@/lib/activitySummary";
+import { LazyAppDialog as AppDialog } from "@/components/primitives/LazyAppDialog";
 
 const PlaidConnectButton = dynamic(
   () => import("@/components/plaid/PlaidConnectButton").then((mod) => mod.PlaidConnectButton),
   { loading: () => null }
 );
-
-const DynamicAppDialog = dynamic(
-  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
-  { loading: () => null }
-);
-
-function AppDialog(props: any) {
-  if (!props.open) return null;
-  return <DynamicAppDialog {...props} />;
-}
 
 const DynamicTable = dynamic(
   () => import("@/components/ui/table").then((mod) => mod.Table),
@@ -1324,6 +1316,7 @@ export default function SettingsPageClient() {
                           .replace(/\b\w/g, (c) => c.toUpperCase());
 
                       const open = actDetailsId === it.id;
+                      const summaryItems = summarizeActivityPayload(it.payload_json);
 
                       return (
                         <Fragment key={it.id}>
@@ -1351,9 +1344,20 @@ export default function SettingsPageClient() {
                           {open ? (
                             <TableRow className="bg-muted/50">
                               <TableCell colSpan={4} className="py-2">
-                                <pre className="text-[11px] whitespace-pre-wrap break-words bg-card border border-border rounded-md p-2">
-                                  {JSON.stringify(it.payload_json ?? {}, null, 2)}
-                                </pre>
+                                {summaryItems.length ? (
+                                  <dl className="grid gap-2 rounded-md border border-border bg-card p-3 text-sm sm:grid-cols-2">
+                                    {summaryItems.map((detail) => (
+                                      <div key={detail.label} className="min-w-0">
+                                        <dt className="font-medium text-muted-foreground">{detail.label}</dt>
+                                        <dd className="mt-0.5 break-words text-foreground">{detail.value}</dd>
+                                      </div>
+                                    ))}
+                                  </dl>
+                                ) : (
+                                  <p className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
+                                    No additional user-facing details were recorded for this event.
+                                  </p>
+                                )}
                               </TableCell>
                             </TableRow>
                           ) : null}
@@ -1481,7 +1485,7 @@ export default function SettingsPageClient() {
                     ) : null}
                   </div>
 
-                  {inviteMsg ? <div className="mt-2 text-xs text-foreground">{inviteMsg}</div> : null}
+                  {inviteMsg ? <div role="status" aria-live="polite" className="mt-2 text-xs text-foreground">{inviteMsg}</div> : null}
                 </div>
 
                 {/* Pending invites */}
@@ -1671,22 +1675,22 @@ export default function SettingsPageClient() {
                 </div>
               </>
             ) : (
-              // Roles & Permissions (still store-only UI, but NOT placeholder buttons)
+              // Roles & Permissions
               <div className="space-y-3">
                 <div className="rounded-xl border border-border bg-card p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-medium text-foreground">Roles & Permissions</div>
-                      <div className="text-[11px] text-muted-foreground">Policies are saved and used by supported UI surfaces; allowlists still remain a fallback.</div>
+                      <div className="text-[11px] text-muted-foreground">These policies control supported changes after the static role allowlist check. Page visibility still follows the role allowlist.</div>
                     </div>
                     <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
-                      Store-only
+                      Enforced
                     </span>
                   </div>
 
                   {polLoading ? <div className="mt-3"><Skeleton className="h-20 w-full" /></div> : null}
                   {polError ? <div className="mt-3 text-xs text-bb-status-danger-fg">{polError}</div> : null}
-                  {polMsg ? <div className="mt-3 text-xs text-foreground">{polMsg}</div> : null}
+                  {polMsg ? <div role="status" aria-live="polite" className="mt-3 text-xs text-foreground">{polMsg}</div> : null}
                 </div>
 
                 <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -1697,7 +1701,7 @@ export default function SettingsPageClient() {
                   <Table minWidth={720}>
                     <THead className="bg-muted/50">
                       <TableRow className="hover:bg-muted/50">
-                        <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Feature</TableHead>
+                        <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Feature changes</TableHead>
                         {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => (
                           <TableHead key={r} className="text-[11px] uppercase tracking-wide text-muted-foreground text-center">{r}</TableHead>
                         ))}
@@ -1706,16 +1710,14 @@ export default function SettingsPageClient() {
 
                     <TableBody>
                       {[
-                        ["dashboard", "Dashboard"],
-                        ["ledger", "Ledger"],
-                        ["reconcile", "Reconcile"],
-                        ["issues", "Issues"],
+                        ["ledger", "Ledger & periods"],
+                        ["reconcile", "Reconciliation"],
+                        ["issues", "Issue resolution"],
                         ["vendors", "Vendors"],
-                        ["invoices", "Invoices"],
-                        ["reports", "Reports"],
-                        ["settings", "Settings"],
-                        ["bank_connections", "Bank Connections"],
-                        ["team_management", "Team Management"],
+                        ["invoices", "Bills & payments"],
+                        ["settings", "Business settings"],
+                        ["bank_connections", "Accounts & bank connections"],
+                        ["team_management", "Team management"],
                       ].map(([key, label]) => (
                         <TableRow key={key} className="hover:bg-muted/50">
                           <TableCell className="py-2 font-medium text-foreground">
@@ -1727,7 +1729,7 @@ export default function SettingsPageClient() {
                           {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => {
                             const row = polRows.find((x) => String(x.role).toUpperCase() === r);
                             const value = String((row?.policy_json as any)?.[key] ?? "NONE").toUpperCase();
-                            const label2 = value === "FULL" ? "Full" : value === "VIEW" ? "View" : "None";
+                            const label2 = value === "FULL" ? "Can change" : value === "VIEW" ? "View only" : "No changes";
                             const cls =
                               value === "FULL"
                                 ? "bg-primary/10 text-primary border-primary/20"
@@ -1791,9 +1793,9 @@ export default function SettingsPageClient() {
                                       <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="NONE">None</SelectItem>
-                                      <SelectItem value="VIEW">View</SelectItem>
-                                      <SelectItem value="FULL">Full</SelectItem>
+                                      <SelectItem value="NONE">No changes</SelectItem>
+                                      <SelectItem value="VIEW">View only</SelectItem>
+                                      <SelectItem value="FULL">Can change</SelectItem>
                                     </SelectContent>
                                   </Select>
                                 ) : (
@@ -1810,7 +1812,7 @@ export default function SettingsPageClient() {
                   </Table>
 
                   <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border">
-                    Policies are active on supported screens. Where a screen does not yet enforce policy directly, allowlists remain the fallback source of truth.
+                    “Can change” is required for supported mutations. “View only” and “No changes” both block mutations; static role allowlists determine page visibility.
                   </div>
                 </div>
               </div>
@@ -1839,7 +1841,7 @@ export default function SettingsPageClient() {
                 </div>
               ) : null}
 
-              {bkMsg ? <div className="text-xs text-foreground">{bkMsg}</div> : null}
+              {bkMsg ? <div role="status" aria-live="polite" className="text-xs text-foreground">{bkMsg}</div> : null}
               {bkLoading ? <Skeleton className="h-20 w-full" /> : null}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2451,6 +2453,13 @@ export default function SettingsPageClient() {
                             if (!res?.ok) throw new Error(res?.error ?? "Create failed");
 
                             qc.invalidateQueries({ queryKey: ["accounts", selectedBusinessId] });
+                            if (!res?.setupComplete) {
+                              setPlaidDraft(null);
+                              setErr(
+                                "The account was created and connected, but its first transaction sync is still pending. Close this dialog, open Reconcile, and use Sync to finish loading the bank history."
+                              );
+                              return;
+                            }
                             setPlaidReviewOpen(false);
                             setOpen(false);
 
@@ -2925,8 +2934,9 @@ export default function SettingsPageClient() {
                             </span>
                           </TableCell>
 
-                          {/* Plaid (status only) */}
+                          {/* Plaid status and last successful transaction sync */}
                           <TableCell className="py-2 text-center">
+                            <div className="flex flex-col items-center gap-1">
                             {!st && loading ? (
                               <span className="text-[11px] text-muted-foreground">Checking…</span>
                             ) : st?.needsAttention ? (
@@ -2949,6 +2959,14 @@ export default function SettingsPageClient() {
                                 Not connected
                               </span>
                             )}
+                            {st?.connected && st.lastSyncAt ? (
+                              <span className="text-xs text-muted-foreground" title={new Date(st.lastSyncAt).toLocaleString()}>
+                                Synced {formatShortDate(st.lastSyncAt)}
+                              </span>
+                            ) : st?.connected ? (
+                              <span className="text-xs text-bb-status-warning-fg">No successful sync yet</span>
+                            ) : null}
+                            </div>
                           </TableCell>
 
 
@@ -3300,7 +3318,7 @@ export default function SettingsPageClient() {
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {bpMsg ? <div className="text-xs text-foreground">{bpMsg}</div> : null}
+              {bpMsg ? <div role="status" aria-live="polite" className="text-xs text-foreground">{bpMsg}</div> : null}
               {backupErr ? (
                 <div className="rounded-md border border-bb-status-danger-border bg-bb-status-danger-bg px-3 py-2 text-xs text-bb-status-danger-fg">
                   {backupErr}

@@ -1757,6 +1757,8 @@ export async function handler(event: any) {
         source: true,
         source_parser: true,
         source_upload_id: true,
+        source_removed_at: true,
+        source_removal_code: true,
         import_hash: true,
         created_at: true,
         raw: true,

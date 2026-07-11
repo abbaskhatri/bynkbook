@@ -92,7 +92,8 @@
   --radius: 0.625rem;
 
   /* Base44 palette (LIGHT) — exact hex, no color drift */
-  --bb-emerald-600: #059669;
+  /* #047857 keeps white primary-button text above WCAG AA for normal text. */
+  --bb-emerald-600: #047857;
   --bb-emerald-700: #047857;
   --bb-emerald-100: #d1fae5;
   --bb-emerald-50:  #ecfdf5;
@@ -231,6 +232,22 @@
   --sidebar-accent-foreground: var(--bb-slate-900);
   --sidebar-border: var(--bb-slate-200);
   --sidebar-ring: var(--bb-emerald-600);
+}
+
+@media (pointer: coarse) {
+  button,
+  a[href],
+  [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Financial tables can remain dense without falling into unreadable 10–11px copy. */
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.75rem;
+  line-height: 1rem;
 }
 
 .dark {

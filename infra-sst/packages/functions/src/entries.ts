@@ -104,6 +104,26 @@ function canWrite(role: string | null) {
   return r === "OWNER" || r === "ADMIN" || r === "BOOKKEEPER" || r === "ACCOUNTANT";
 }
 
+async function requireEntryPolicy(prisma: any, args: {
+  businessId: string;
+  accountId: string;
+  userId: string;
+  role: string;
+  actionKey: "ledger.entry.create" | "ledger.entry.delete" | "ledger.entry.restore";
+  endpoint: string;
+}) {
+  const az = await authorizeWrite(prisma, {
+    businessId: args.businessId,
+    scopeAccountId: args.accountId,
+    actorUserId: args.userId,
+    actorRole: args.role,
+    actionKey: args.actionKey,
+    requiredLevel: "FULL",
+    endpointForLog: args.endpoint,
+  });
+  return az.allowed;
+}
+
 export async function handler(event: any) {
   const method = event?.requestContext?.http?.method;
   const path = event?.requestContext?.http?.path;
@@ -1267,6 +1287,16 @@ export async function handler(event: any) {
   // POST /entries (create)
   if (method === "POST" && path?.endsWith("/entries")) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+    if (!await requireEntryPolicy(prisma, {
+      businessId: biz,
+      accountId: acct,
+      userId: sub,
+      role,
+      actionKey: "ledger.entry.create",
+      endpoint: "POST /entries",
+    })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     let body: any = {};
     try {
@@ -1397,6 +1427,16 @@ export async function handler(event: any) {
   // DELETE /entries/{entryId} (soft delete)
   if (method === "DELETE" && ent) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+    if (!await requireEntryPolicy(prisma, {
+      businessId: biz,
+      accountId: acct,
+      userId: sub,
+      role,
+      actionKey: "ledger.entry.delete",
+      endpoint: "DELETE /entries/{entryId}",
+    })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     // AP invariant: block delete if this entry has ACTIVE bill applications.
     const activeApps = await prisma.billPaymentApplication.count({
@@ -1468,6 +1508,16 @@ export async function handler(event: any) {
   // POST /entries/{entryId}/restore
   if (method === "POST" && ent && path?.endsWith("/restore")) {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+    if (!await requireEntryPolicy(prisma, {
+      businessId: biz,
+      accountId: acct,
+      userId: sub,
+      role,
+      actionKey: "ledger.entry.restore",
+      endpoint: "POST /entries/{entryId}/restore",
+    })) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     const existing = await prisma.entry.findFirst({
       where: { id: ent, business_id: biz, account_id: acct, deleted_at: { not: null } },

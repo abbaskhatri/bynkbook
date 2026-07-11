@@ -1,11 +1,6 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { canonicalMobileRedirectTarget, type MobileRedirectParams } from "@/lib/mobile/canonicalRedirect";
 
-import MobileIssuesPageClient from "./page-client";
-
-export default function MobileIssuesPage() {
-  return (
-    <Suspense fallback={null}>
-      <MobileIssuesPageClient />
-    </Suspense>
-  );
+export default async function MobileIssuesPage({ searchParams }: { searchParams: Promise<MobileRedirectParams> }) {
+  redirect(canonicalMobileRedirectTarget("/issues", await searchParams));
 }

@@ -4,6 +4,7 @@ import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { randomUUID } from "node:crypto";
 import { authorizeWrite } from "./lib/authz";
 import { serializeDateOnly } from "./lib/dateOnly";
+import { safeCsvRow } from "./lib/csvSafe";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -55,7 +56,7 @@ async function requirePolicyWrite(
     actorUserId: args.actorUserId,
     actorRole: args.actorRole,
     actionKey: args.actionKey,
-    requiredLevel: "VIEW",
+    requiredLevel: "FULL",
     endpointForLog: args.endpoint,
   });
   if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
@@ -744,9 +745,9 @@ export async function handler(event: any) {
     `;
 
     const lines: string[] = [];
-    lines.push(`Vendor,${JSON.stringify(vendor.name)}`);
-    lines.push(`From,${from}`);
-    lines.push(`To,${to}`);
+    lines.push(safeCsvRow(["Vendor", vendor.name]));
+    lines.push(safeCsvRow(["From", from]));
+    lines.push(safeCsvRow(["To", to]));
     lines.push("");
     lines.push("Section,BillId,InvoiceDate,DueDate,AmountCents,AppliedCents,OutstandingCents,Status,Memo,UploadId");
 
@@ -755,7 +756,7 @@ export async function handler(event: any) {
       const applied = appliedByBill.get(String(b.id)) ?? 0n;
       const outstanding = amount - applied;
       const st = String(b.status ?? "");
-      lines.push([
+      lines.push(safeCsvRow([
         "BILL",
         b.id,
         serializeDateOnly(b.invoice_date) ?? "",
@@ -764,9 +765,9 @@ export async function handler(event: any) {
         String(applied),
         String(outstanding < 0n ? 0n : outstanding),
         st,
-        JSON.stringify(b.memo ?? ""),
+        b.memo ?? "",
         b.upload_id ?? "",
-      ].join(","));
+      ]));
     }
 
     lines.push("");
@@ -777,16 +778,16 @@ export async function handler(event: any) {
       const amount = rawAmount < 0n ? -rawAmount : rawAmount;
       const applied = toBigIntSafe(p.applied_cents);
       const unapplied = amount - applied;
-      lines.push([
+      lines.push(safeCsvRow([
         "PAYMENT",
         p.id,
         serializeDateOnly(p.date) ?? "",
         String(amount),
         String(applied),
         String(unapplied < 0n ? 0n : unapplied),
-        JSON.stringify(p.payee ?? ""),
-        JSON.stringify(p.memo ?? ""),
-      ].join(","));
+        p.payee ?? "",
+        p.memo ?? "",
+      ]));
     }
 
     return {

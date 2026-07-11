@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -138,6 +139,16 @@ export async function handler(event: any) {
 
   // POST apply
   if (method === "POST" && path === `/v1/businesses/${biz}/category-migration/apply`) {
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "ledger.categoryMigration.write",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /category-migration/apply",
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+
     let body: any = {};
     try {
       body = event?.body ? JSON.parse(event.body) : {};

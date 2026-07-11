@@ -23,9 +23,9 @@ model Business {
   fiscal_year_start_month Int     @default(1)
 
   // Phase 7.1: per-business authz mode flag (default OFF)
-  authz_mode              String                  @default("OFF")
+  authz_mode              String                  @default("ENFORCE")
   // Phase 7.2: enforcement wave gate (0=none, 1=Team+RolePolicy, 2=Reconcile, 3=Snapshots/Exports)
-  authz_enforce_wave      Int                     @default(0)
+  authz_enforce_wave      Int                     @default(4)
   created_at              DateTime                @default(now()) @db.Timestamptz(6)
   accounts                Account[]
   entries                 Entry[]
@@ -338,6 +338,9 @@ model BankConnection {
   institution_name String?
   institution_id   String?
   plaid_mask       String? @db.VarChar(8)
+  plaid_type       String?
+  plaid_subtype    String?
+  plaid_currency_code String? @db.VarChar(3)
   status           String  @default("CONNECTED")
   error_code       String?
   error_message    String?
@@ -378,6 +381,8 @@ model BankTransaction {
 
   is_removed Boolean   @default(false)
   removed_at DateTime? @db.Timestamptz(6)
+  source_removed_at DateTime? @db.Timestamptz(6)
+  source_removal_code String?
 
   raw Json?
 
@@ -391,6 +396,7 @@ model BankTransaction {
   @@unique([business_id, account_id, source, import_hash], map: "u_bank_txn_csv_dedupe")
   @@index([business_id, account_id, posted_date, created_at], map: "i_bank_txn_scope_account_posted_created")
   @@index([business_id, account_id, is_removed, is_pending], map: "i_bank_txn_scope_flags")
+  @@index([business_id, account_id, source_removed_at], map: "i_bank_txn_source_removed")
   @@map("bank_transaction")
 }
 
@@ -729,7 +735,10 @@ model BillPaymentApplication {
   entry    Entry    @relation(fields: [entry_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   bill     Bill     @relation(fields: [bill_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@unique([entry_id, bill_id, is_active], map: "u_bill_app_entry_bill_active")
+  // Active-only uniqueness is enforced by the partial index in
+  // 20260711_ap_active_application_uniqueness. Including is_active in a normal
+  // unique constraint incorrectly permits only one historical inactive row.
+  @@index([entry_id, bill_id, is_active], map: "i_bill_app_entry_bill_active")
   @@index([business_id, bill_id, is_active], map: "i_bill_app_scope_bill_active")
   @@index([business_id, entry_id, is_active], map: "i_bill_app_scope_entry_active")
   @@index([business_id, account_id, entry_id], map: "i_bill_app_scope_account_entry")

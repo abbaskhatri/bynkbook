@@ -21,6 +21,7 @@ import { AccountingScopePills } from "@/components/app/accounting-scope-pills";
 import { CapsuleSelect } from "@/components/app/capsule-select";
 import { FilterBar } from "@/components/primitives/FilterBar";
 import { StatusChip } from "@/components/primitives/StatusChip";
+import { LazyAppDialog as AppDialog } from "@/components/primitives/LazyAppDialog";
 import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { inputH7 } from "@/components/primitives/tokens";
@@ -38,6 +39,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
+import { safeCsvCell } from "@/lib/csv";
 import { listBankTransactions, createEntryFromBankTransaction, cleanupPlaidOverlap, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
 import {
@@ -156,16 +158,6 @@ const UploadsList = dynamic(
   () => import("@/components/uploads/UploadsList").then((mod) => mod.UploadsList),
   { loading: () => <div className="p-3 text-xs text-bb-text-muted">Loading history...</div> }
 );
-
-const DynamicAppDialog = dynamic(
-  () => import("@/components/primitives/AppDialog").then((mod) => mod.AppDialog),
-  { loading: () => null }
-);
-
-function AppDialog(props: any) {
-  if (!props.open) return null;
-  return <DynamicAppDialog {...props} />;
-}
 
 const AutoReconcileDialog = dynamic(
   () => import("@/components/reconcile/auto-reconcile-dialog").then((mod) => mod.AutoReconcileDialog),
@@ -2473,17 +2465,9 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Phase 5D: Export helpers (frontend-only, safe CSV)
   // -------------------------
-  const csvCell = (v: any) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    if (s.includes('"') || s.includes(",") || s.includes("\n") || s.includes("\r")) {
-      return `"${s.replace(/"/g, '""')}"`;
-    }
-    return s;
-  };
-
   const toCsv = (headers: string[], rows: Record<string, any>[]) => {
-    const head = headers.map(csvCell).join(",");
-    const lines = rows.map((r) => headers.map((h) => csvCell(r[h])).join(","));
+    const head = headers.map(safeCsvCell).join(",");
+    const lines = rows.map((r) => headers.map((h) => safeCsvCell(r[h])).join(","));
     return [head, ...lines].join("\r\n");
   };
 
@@ -3348,12 +3332,12 @@ const displayBankActiveList = useMemo(() => {
         </span>
         {plaidHasConnection ? (
           <span className="text-bb-text-muted">
-            Balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
+            Bank balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
           </span>
         ) : null}
         {plaidHasConnection && transactionSyncText ? (
           <span className="text-bb-text-muted">
-            Sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
+            Last bank sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
           </span>
         ) : null}
       </div>
@@ -4559,9 +4543,9 @@ const displayBankActiveList = useMemo(() => {
                         </span>
                       ) : null}
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {syncMsg ? <span>{syncMsg}</span> : null}
+                      {syncMsg ? <span role="status" aria-live="polite">{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {pendingMsg ? <span className="text-bb-status-warning-fg">{pendingMsg}</span> : null}
+                      {pendingMsg ? <span role="status" aria-live="polite" className="text-bb-status-warning-fg">{pendingMsg}</span> : null}
                     </>
                   ) : (
                     "Imported from bank or CSV"
@@ -4929,6 +4913,7 @@ const displayBankActiveList = useMemo(() => {
 
                       const isMatched = isBankTxnFullyMatched(t);
                       const isPendingBankTxn = Boolean(t?.is_pending);
+                      const wasRemovedAtSource = Boolean(t?.source_removed_at);
                       const isRowPending = !!pendingById[txnId] || !!createEntryBusyByBankId[txnId];
                       const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
                       const rowBusyReason = matchedOrPendingCreateEntryMessage;
@@ -5021,6 +5006,12 @@ const displayBankActiveList = useMemo(() => {
                               {isPendingBankTxn ? (
                                 <span className="shrink-0">
                                   <StatusChip label="Pending" tone="warning" />
+                                </span>
+                              ) : null}
+
+                              {wasRemovedAtSource ? (
+                                <span className="shrink-0" title="Plaid removed this source transaction after it was reconciled. The accounting history is preserved for auditability.">
+                                  <StatusChip label="Removed by bank" tone="warning" />
                                 </span>
                               ) : null}
 

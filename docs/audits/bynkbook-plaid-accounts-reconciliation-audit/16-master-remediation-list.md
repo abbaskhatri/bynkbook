@@ -1,59 +1,82 @@
-# Full Deduplicated Remediation List
+# Full Deduplicated Remediation Status
 
-This is the combined list requested by the founder: unresolved findings from the complete-system audit plus new Plaid/account/reconciliation findings. It preserves original IDs. BYNK-PLAID-AUDIT-013 expands BYNK-AUDIT-007 and is listed as one combined remediation item, not counted twice.
+Updated on 2026-07-11 from the complete-system audit and the Plaid/account/reconciliation audit. Original finding IDs are preserved. A status of resolved means the correction is committed and locally verified; it does not mean it has been deployed.
 
-## Open — High (8)
+## Summary
 
-1. **BYNK-AUDIT-002** — Production legal/privacy content contains placeholders.
-2. **BYNK-AUDIT-004** — Backend dependency advisories remain.
-3. **BYNK-AUDIT-005** — Supplied/operational material references a stale production API hostname.
-4. **BYNK-PLAID-AUDIT-001** — Opening application trusts client-supplied amount.
-5. **BYNK-PLAID-AUDIT-002** — Opening-date change can orphan active match links.
-6. **BYNK-PLAID-AUDIT-003** — Credit-card balance sign is not normalized.
-7. **BYNK-PLAID-AUDIT-004** — Active match exclusivity is not database-enforced.
-8. **BYNK-PLAID-AUDIT-005** — Reconnect repair permits incompatible account remapping.
+| Status | Open-list findings | Including 3 previously resolved baseline findings |
+|---|---:|---:|
+| Resolved and verified locally | 27 | 30 |
+| Partially remediated; external verification or migration remains | 3 | 3 |
+| Blocked by business input, production access, or a dedicated migration | 3 | 3 |
+| Open maintainability refactor | 1 | 1 |
+| Total | 34 | 37 |
 
-## Open — Medium (15)
+## High findings
 
-1. **BYNK-AUDIT-006** — Role policies are not dependable across backend paths.
-2. **BYNK-AUDIT-007 + BYNK-PLAID-AUDIT-013** — Write/Plaid financial handlers permit membership/view-level mutation instead of dependable write policy.
-3. **BYNK-AUDIT-008** — Accounts-payable uniqueness/integrity is incomplete.
-4. **BYNK-AUDIT-009** — CSV export formula injection is possible.
-5. **BYNK-AUDIT-010** — Recommended browser security headers are missing/incomplete.
-6. **BYNK-AUDIT-011** — Environment/template values contain placeholders.
-7. **BYNK-AUDIT-012** — Operational controls/runbooks/monitoring are incomplete.
-8. **BYNK-AUDIT-014** — Production resources retain dev-oriented names.
-9. **BYNK-PLAID-AUDIT-006** — Webhook sets a flag but does not trigger durable sync.
-10. **BYNK-PLAID-AUDIT-007** — Capped sync clears update flag without automatic continuation.
-11. **BYNK-PLAID-AUDIT-008** — Historical cutoff can preserve transaction gaps.
-12. **BYNK-PLAID-AUDIT-009** — Disconnect does not remove the final Plaid Item.
-13. **BYNK-PLAID-AUDIT-010** — Multi-account creation is not atomic.
-14. **BYNK-PLAID-AUDIT-011** — Replacement heuristic can transfer durable identity incorrectly.
-15. **BYNK-PLAID-AUDIT-012** — New-account route can report sync success on nested error.
+| ID | Status | Result |
+|---|---|---|
+| BYNK-AUDIT-002 | BLOCKED_BUSINESS_INPUT | Placeholder legal copy must be replaced with counsel/business-approved terms, entity/contact details, jurisdiction, retention, subprocessors, and effective dates. Code cannot safely invent these commitments. |
+| BYNK-AUDIT-004 | RESOLVED_CODE_VERIFIED | Production dependencies audit at zero. Full tooling audit has only two low SST/AWS SDK v2 advisories; CDK and vulnerable transitive tooling were upgraded/overridden without a forced SST major migration. |
+| BYNK-AUDIT-005 | RESOLVED_CODE_VERIFIED | Tracked production environment and bridge documentation now use the canonical `cpjh7t19u1` API; retired `actwy6st05` is explicitly marked non-resolving and prohibited. |
+| BYNK-PLAID-AUDIT-001 | RESOLVED_CODE_VERIFIED | Opening application recomputes the financial amount server-side and rejects invalid choices. |
+| BYNK-PLAID-AUDIT-002 | RESOLVED_CODE_VERIFIED | Opening-date changes protect active legacy and MatchGroup links and soft-remove eligible history instead of deleting it. |
+| BYNK-PLAID-AUDIT-003 | RESOLVED_CODE_VERIFIED | Plaid credit-card balances use the local liability sign convention. |
+| BYNK-PLAID-AUDIT-004 | RESOLVED_CODE_VERIFIED | Match claims are serialized with PostgreSQL advisory locks, preventing concurrent active claims. |
+| BYNK-PLAID-AUDIT-005 | RESOLVED_CODE_VERIFIED | Reconnect repair validates Plaid account identity, type, currency, and mask before remapping. |
 
-## Open — Low (7)
+## Medium findings
 
-1. **BYNK-AUDIT-015** — Named business/demo data remains in repository or UX fixtures.
-2. **BYNK-AUDIT-016** — Some touch targets are below the desired accessible size.
-3. **BYNK-AUDIT-017** — Handler shims/legacy structure remain.
-4. **BYNK-AUDIT-018** — Development-oriented dialogs remain in production UX paths.
-5. **BYNK-AUDIT-019** — Large monolithic frontend pages increase change risk.
-6. **BYNK-PLAID-AUDIT-014** — Matched Plaid removals lack a separate source-removal state.
-7. **BYNK-PLAID-AUDIT-015** — Auto-reconcile considers only the first 250 expected entries.
+| ID | Status | Result |
+|---|---|---|
+| BYNK-AUDIT-006 | RESOLVED_CODE_VERIFIED | Role policy enforcement defaults on at wave 4, legacy bypass mode now enforces, effective defaults are returned to the UI, and supported mutation families use the policy layer. The UI now states that page visibility remains controlled by static role allowlists. |
+| BYNK-AUDIT-007 + BYNK-PLAID-AUDIT-013 | RESOLVED_CODE_VERIFIED | All identified mutation checks require `FULL`; Plaid and account lifecycle operations also enforce `bank_connections` policy after static role checks. |
+| BYNK-AUDIT-008 | RESOLVED_CODE_VERIFIED | AP uses an active-only partial unique index, preserving repeated inactive application history. |
+| BYNK-AUDIT-009 | RESOLVED_CODE_VERIFIED | Frontend and backend CSV exporters share spreadsheet-formula neutralization with malicious-prefix tests. |
+| BYNK-AUDIT-010 | RESOLVED_CODE_VERIFIED | CSP, HSTS, frame, MIME, referrer, permissions, and opener headers are configured; the Next.js signature header is disabled. |
+| BYNK-AUDIT-011 | RESOLVED_CODE_VERIFIED | The tracked production environment contains verified API/Cognito identifiers and clean production builds pass. |
+| BYNK-AUDIT-012 | PARTIAL_EXTERNAL_SETUP | IaC now defines API access-log retention, stage throttling, SQS/DLQ processing, backlog/dead-letter alarms, and a recovery runbook. An approved SNS topic/subscriber list and controlled delivery test are still required; WAF adoption remains a production architecture choice. |
+| BYNK-AUDIT-014 | BLOCKED_PRODUCTION_MIGRATION | Dev-named live Cognito, upload, KMS, and database dependencies cannot be renamed safely in an application-code pass. This requires inventory, data/auth migration, staged cutover, rollback, and deployment approval. |
+| BYNK-PLAID-AUDIT-006 | RESOLVED_CODE_VERIFIED | Verified webhooks enqueue durable sync jobs with a DLQ and partial batch retries. |
+| BYNK-PLAID-AUDIT-007 | RESOLVED_CODE_VERIFIED | Capped sync retains its update flag and the client automatically continues bounded drain calls. |
+| BYNK-PLAID-AUDIT-008 | RESOLVED_CODE_VERIFIED | Date-wide historical cutoff was removed; exact soft-removed IDs remain suppressed without hiding unseen history. |
+| BYNK-PLAID-AUDIT-009 | RESOLVED_CODE_VERIFIED | Final local disconnect removes the Plaid Item first and preserves mapping state if Plaid does not confirm removal. |
+| BYNK-PLAID-AUDIT-010 | RESOLVED_CODE_VERIFIED | Multi-account database creation is atomic. |
+| BYNK-PLAID-AUDIT-011 | RESOLVED_CODE_VERIFIED | The amount/date/name replacement heuristic was removed; distinct source facts retain distinct durable identity. |
+| BYNK-PLAID-AUDIT-012 | RESOLVED_CODE_VERIFIED | New-account onboarding returns `202 PENDING_SYNC` for deferred work and the frontend no longer claims false sync success. |
 
-## Open — Informational / verification debt (4)
+## Low findings
 
-1. **BYNK-AUDIT-020** — No frontend automated test suite.
-2. **BYNK-AUDIT-021** — Authenticated production workflows remain untested.
-3. **BYNK-AUDIT-022** — A dependable SST synth/build-equivalent verification remains unavailable/documented incorrectly; current SST has no `build` command.
-4. **BYNK-PLAID-AUDIT-016** — Legacy partial matching and current full-match groups coexist without a declared migration rule.
+| ID | Status | Result |
+|---|---|---|
+| BYNK-AUDIT-015 | RESOLVED_CODE_VERIFIED | Public demo content is explicitly fictional and generic. |
+| BYNK-AUDIT-016 | RESOLVED_CODE_VERIFIED | Identified public/auth text actions now have accessible touch target sizing. |
+| BYNK-AUDIT-017 | RESOLVED_CODE_VERIFIED | All 24 unused handler re-export shims were removed; typecheck and tests pass. |
+| BYNK-AUDIT-018 | RESOLVED_CODE_VERIFIED | The `/dev/dialogs` production route was removed and is absent from the build route list. |
+| BYNK-AUDIT-019 | OPEN_REFACTOR | Reconcile, ledger, and settings clients remain monolithic. Decomposition is a high-regression architectural program and should follow broader component/E2E coverage; it is not a proven accounting defect. |
+| BYNK-PLAID-AUDIT-014 | RESOLVED_CODE_VERIFIED | Matched source removals retain accounting history while recording and displaying a separate Plaid source-removal state. |
+| BYNK-PLAID-AUDIT-015 | RESOLVED_CODE_VERIFIED | Auto-reconcile no longer truncates expected candidates to the first 250; split-subset work remains explicitly bounded. |
 
-Open deduplicated total: **34** (8 High, 15 Medium, 7 Low, 4 Informational).
+## Informational and verification debt
 
-## Previously resolved baseline findings (3)
+| ID | Status | Result |
+|---|---|---|
+| BYNK-AUDIT-020 | RESOLVED_CODE_VERIFIED | Vitest is configured for the frontend with an initial security regression suite. Broader component/E2E coverage remains desirable but the absence finding is closed. |
+| BYNK-AUDIT-021 | BLOCKED_TEST_ACCESS | Authenticated production workflows still require an approved synthetic test tenant, credentials, and explicit mutation limits. No customer data was used. |
+| BYNK-AUDIT-022 | PARTIAL_EXTERNAL_VERIFICATION | The invalid `sst build` script was replaced by repeatable typecheck/Prisma validation and a documented `sst diff` command. Validation passes; a real diff remains blocked because no AWS profile is configured in this environment. |
+| BYNK-PLAID-AUDIT-016 | PARTIAL_PRODUCTION_MIGRATION | New legacy `BankMatch` write routes are no longer deployed; new matching uses MatchGroup exclusively. Historical BankMatch rows remain readable until production counts and a reversible data migration are approved. |
 
-- **BYNK-AUDIT-001** — Vendor statement issue fixed.
-- **BYNK-AUDIT-003** — Frontend dependency advisories fixed.
-- **BYNK-AUDIT-013** — AWS profile/access blocker resolved for this audit.
+## Previously resolved baseline findings
 
-Source baseline: `docs/audits/bynkbook-complete-system-audit/03-complete-findings-register.md` and `audit-findings.json`. Plaid details: `11-complete-findings-register.md` in this folder.
+- BYNK-AUDIT-001 — vendor statement SQL corrected and export coverage retained.
+- BYNK-AUDIT-003 — frontend production dependency advisories resolved.
+- BYNK-AUDIT-013 — the earlier audit's AWS access blocker was resolved for that audit; the current remediation environment again has no configured AWS profile, as recorded under BYNK-AUDIT-022.
+
+## Latest local verification
+
+- Backend: 26 test files, 284 tests passed.
+- Frontend: 7 unit tests passed; ESLint passed; Next.js 16.2.10 production build passed with 33 routes.
+- Infrastructure: TypeScript validation and Prisma schema validation passed.
+- Dependencies: frontend and backend production dependency audits report zero vulnerabilities; full infrastructure tooling audit reports two low advisories in SST's AWS SDK v2 chain.
+- Git diff whitespace validation passed.
+- Not performed: deployment, database migration execution, AWS resource changes, production data changes, authenticated production E2E, or live Plaid actions.

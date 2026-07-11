@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -63,6 +64,18 @@ export async function handler(event: any) {
   if (!myRole) return json(403, { ok: false, error: "Forbidden" });
 
   const path = getPath(event);
+
+  if (method === "POST" || method === "DELETE") {
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      actorUserId: sub,
+      actorRole: myRole,
+      actionKey: "ledger.closedPeriods.write",
+      requiredLevel: "FULL",
+      endpointForLog: `${method} /closed-periods`,
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+  }
 
   if (method === "GET" && path.endsWith("/closed-periods/preview")) {
     const q = qp(event);

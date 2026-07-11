@@ -30,7 +30,7 @@ No secrets are printed in this document. Secret names, resource IDs, hostnames, 
 - Production API stage: `$default`
 - Production API URL: `https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com`
 - Plaid webhook URL: `https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com/v1/plaid/webhook`
-- Legacy Plaid webhook compatibility URL: `https://actwy6st05.execute-api.us-east-1.amazonaws.com/v1/plaid/webhook`
+- Retired historical API ID: `actwy6st05` (non-resolving; do not configure clients or Plaid to use it)
 - `api.bynkbook.com`: currently unused. It has no active API Gateway mapping in the verified bridge state and must not be created as incidental cleanup.
 
 ### Plaid
@@ -101,7 +101,6 @@ Do not switch production auth to the stale prod-named Cognito pool as cleanup.
 - Amplify app `bynkbook` (`d2idm6n6qepkf3`), branch `main`
 - API Gateway HTTP API `cpjh7t19u1`
 - Prod API URL `https://cpjh7t19u1.execute-api.us-east-1.amazonaws.com`
-- Legacy Plaid webhook compatibility route on API `actwy6st05`
 - Prod API Gateway names use `ledrigo-prod-*`; generated prod route Lambda names use `ledrig-prod-*`
 - Plaid production environment configuration
 
@@ -131,7 +130,8 @@ These are dev-named but live production dependencies. Names alone are misleading
 ### Unused/Stale References
 
 - `api.bynkbook.com` is currently unused and should not be created or wired as incidental cleanup.
-- `bynkbook-web/.env.production` contains `https://api.bynkbook.com` placeholders/stale production API references; do not treat that file as the live production bridge truth without a separate planned config cleanup.
+- `bynkbook-web/.env.production` now contains the verified canonical API and Cognito identifiers used by clean production builds.
+- Historical API ID `actwy6st05` is retired and must not be used as a compatibility endpoint.
 - Stale prod-named Cognito pool `snaxle-prod-UserPoolUserPool-esxdvdxu` (`us-east-1_CgE7Dozj4`) is not the live API authorizer issuer.
 
 ### Risky Resources

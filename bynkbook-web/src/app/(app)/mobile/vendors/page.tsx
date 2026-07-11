@@ -1,11 +1,6 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { canonicalMobileRedirectTarget, type MobileRedirectParams } from "@/lib/mobile/canonicalRedirect";
 
-import MobileVendorsPageClient from "./page-client";
-
-export default function MobileVendorsPage() {
-  return (
-    <Suspense fallback={null}>
-      <MobileVendorsPageClient />
-    </Suspense>
-  );
+export default async function MobileVendorsPage({ searchParams }: { searchParams: Promise<MobileRedirectParams> }) {
+  redirect(canonicalMobileRedirectTarget("/vendors", await searchParams));
 }

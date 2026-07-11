@@ -20,6 +20,21 @@ declare global {
         addAuthorizer(args: unknown): { id: string };
         route(route: string, handler: unknown, args?: unknown): unknown;
       };
+      Queue: new (
+        name: string,
+        args?: any,
+      ) => {
+        arn: any;
+        name: any;
+        url: any;
+        subscribe(subscriber: any, args?: any, options?: any): unknown;
+      };
+    };
+  };
+
+  const aws: {
+    cloudwatch: {
+      MetricAlarm: new (name: string, args: Record<string, unknown>) => unknown;
     };
   };
 }

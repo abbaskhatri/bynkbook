@@ -129,11 +129,31 @@ function ForgotPasswordInner() {
                 </div>
 
                 <div className="px-6 py-6 sm:px-7">
-                  <div className="space-y-4">
+                  <form
+                    className="space-y-4"
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      setBusy(true);
+                      setErr(null);
+                      setMsg(null);
+                      try {
+                        await resetPassword({ username: email.trim() });
+                        setMsg("Code sent. Continue to enter your code and new password.");
+                        router.replace(`/reset-password?email=${encodeURIComponent(email.trim())}&next=${encodeURIComponent(nextUrl)}`);
+                      } catch (e: any) {
+                        setErr(e?.message ?? "Failed to start reset");
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
                     <div className="space-y-2">
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
+                        name="email"
+                        type="email"
+                        required
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         autoComplete="username"
@@ -145,36 +165,21 @@ function ForgotPasswordInner() {
                     </div>
 
                     {err ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
+                      <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                         {err}
                       </div>
                     ) : null}
 
                     {msg ? (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-bb-border dark:bg-bb-surface-soft dark:text-bb-text-muted">
+                      <div role="status" aria-live="polite" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-bb-border dark:bg-bb-surface-soft dark:text-bb-text-muted">
                         {msg}
                       </div>
                     ) : null}
 
                     <Button
+                      type="submit"
                       className="h-11 w-full rounded-xl"
                       disabled={busy || !email.trim()}
-                      onClick={async () => {
-                        setBusy(true);
-                        setErr(null);
-                        setMsg(null);
-                        try {
-                          await resetPassword({ username: email.trim() });
-                          setMsg("Code sent. Continue to enter your code and new password.");
-                          router.replace(
-                            `/reset-password?email=${encodeURIComponent(email.trim())}&next=${encodeURIComponent(nextUrl)}`
-                          );
-                        } catch (e: any) {
-                          setErr(e?.message ?? "Failed to start reset");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
                     >
                       <span>{busy ? "Sending…" : "Send reset code"}</span>
                       {!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
@@ -194,7 +199,7 @@ function ForgotPasswordInner() {
                         Back to sign in
                       </button>
                     </div>
-                  </div>
+                  </form>
                 </div>
               </CardContent>
             </Card>

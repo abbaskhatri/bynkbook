@@ -173,6 +173,18 @@ async function callVerifiedWebhook(body: any) {
 }
 
 describe("createLinkToken", () => {
+  test("denies bank-connection management to a member role", async () => {
+    const { mod, plaid } = await loadSyncTransactions({
+      prisma: {
+        userBusinessRole: { findFirst: vi.fn(async () => ({ role: "MEMBER" })) },
+      },
+    });
+
+    const res = await mod.createLinkToken({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    expect(res.statusCode).toBe(403);
+    expect(plaid.linkTokenCreate).not.toHaveBeenCalled();
+  });
+
   test("includes configured webhook URL for existing-account link tokens", async () => {
     process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
     const { mod, plaid } = await loadSyncTransactions({});
@@ -230,7 +242,99 @@ describe("createLinkToken", () => {
   });
 });
 
+describe("Plaid balance semantics", () => {
+  test("normalizes credit-card amount owed to a negative accounting balance", async () => {
+    const { mod } = await loadSyncTransactions({});
+    expect(mod.normalizePlaidCurrentBalanceCents(125.67, "CREDIT_CARD")).toBe(-12567n);
+    expect(mod.normalizePlaidCurrentBalanceCents(125.67, "CHECKING")).toBe(12567n);
+  });
+});
+
+describe("Plaid disconnect lifecycle", () => {
+  test("removes the Plaid Item before deleting the final local mapping", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      bankConnection: {
+        findFirst: vi.fn(async () => ({ ...baseConn })),
+        count: vi.fn(async () => 1),
+        deleteMany,
+      },
+      $queryRawUnsafe: vi.fn(async () => []),
+    };
+    const { mod, plaid } = await loadSyncTransactions({
+      prisma: { $transaction: vi.fn(async (callback: any) => callback(tx)) },
+    });
+
+    const response = await mod.disconnectBankConnection({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({ itemRemoved: true, remainingItemConnections: 0 });
+    expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-redacted" });
+    expect(deleteMany).toHaveBeenCalledOnce();
+  });
+
+  test("preserves the final local mapping when Plaid revocation fails", async () => {
+    const deleteMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      bankConnection: {
+        findFirst: vi.fn(async () => ({ ...baseConn })),
+        count: vi.fn(async () => 1),
+        deleteMany,
+      },
+      $queryRawUnsafe: vi.fn(async () => []),
+    };
+    const { mod } = await loadSyncTransactions({
+      plaid: { itemRemove: vi.fn(async () => { throw new Error("institution unavailable"); }) },
+      prisma: { $transaction: vi.fn(async (callback: any) => callback(tx)) },
+    });
+
+    const response = await mod.disconnectBankConnection({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("syncTransactions", () => {
+  test("preserves the update flag and resumable cursor when the page cap is reached", async () => {
+    let page = 0;
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => {
+          page += 1;
+          return {
+            data: {
+              added: [],
+              modified: [],
+              removed: [],
+              next_cursor: `cursor-${page}`,
+              has_more: true,
+            },
+          };
+        }),
+      },
+    });
+
+    const response = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({ capped: true, hasMore: true, drainIncomplete: true, pages: 20 });
+    expect(plaid.transactionsSync).toHaveBeenCalledTimes(20);
+    expect(prisma.bankConnection.updateMany).toHaveBeenLastCalledWith({
+      where: { business_id: "biz-1", account_id: "acct-1" },
+      data: expect.objectContaining({ has_new_transactions: true }),
+    });
+  });
+
   test("exchange without a date derives from latest bank transaction and suppresses opening adjustment", async () => {
     const latestPosted = new Date("2026-04-27T00:00:00.000Z");
     const { mod, prisma } = await loadSyncTransactions({
@@ -371,6 +475,40 @@ describe("syncTransactions", () => {
     });
     expect(plaid.itemPublicTokenExchange).toHaveBeenCalledWith({ public_token: "public-token" });
     expect(plaid.accountsGet).toHaveBeenCalledWith({ access_token: "access-token-new" });
+    expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-new" });
+    expect(prisma.bankConnection.upsert).not.toHaveBeenCalled();
+  });
+
+  test("exchange rejects a Plaid account whose accounting type conflicts with the local account", async () => {
+    const { mod, plaid, prisma } = await loadSyncTransactions({
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })) },
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [{
+              account_id: "plaid-acct-1",
+              mask: "1234",
+              type: "credit",
+              subtype: "credit card",
+              balances: { iso_currency_code: "USD" },
+            }],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.exchangePublicToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      publicToken: "public-token",
+      plaidAccountId: "plaid-acct-1",
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("PLAID_ACCOUNT_IDENTITY_MISMATCH");
     expect(plaid.itemRemove).toHaveBeenCalledWith({ access_token: "access-token-new" });
     expect(prisma.bankConnection.upsert).not.toHaveBeenCalled();
   });
@@ -544,7 +682,7 @@ describe("syncTransactions", () => {
     });
   });
 
-  test("rekeys an unambiguous Plaid removed-and-added replacement without duplicating the durable bank row", async () => {
+  test("keeps remove-and-add transactions as distinct source facts instead of guessing identity", async () => {
     const replacement = makeTransaction({
       transaction_id: "txn-new-id",
       date: "2026-07-09",
@@ -586,29 +724,17 @@ describe("syncTransactions", () => {
 
     expect(res.statusCode).toBe(200);
     expect(body).toMatchObject({
-      newCount: 0,
-      upgradedCount: 1,
-      replacementUpgradeCount: 1,
+      newCount: 1,
+      upgradedCount: 0,
+      replacementUpgradeCount: 0,
     });
-    expect(prisma.bankTransaction.create).not.toHaveBeenCalled();
-
-    const rekeyCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
-      (call) => call[0]?.where?.id === "bank-durable-1",
-    );
-    expect(rekeyCall?.[0]).toEqual(expect.objectContaining({
-      where: expect.objectContaining({
-        id: "bank-durable-1",
-        plaid_transaction_id: "txn-old-id",
-      }),
-      data: expect.objectContaining({
-        plaid_transaction_id: "txn-new-id",
-        is_removed: false,
-      }),
+    expect(prisma.bankTransaction.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ plaid_transaction_id: "txn-new-id" }),
     }));
     const removalCall = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
       (call) => call[0]?.where?.plaid_transaction_id === "txn-old-id" && call[0]?.data?.is_removed === true,
     );
-    expect(removalCall).toBeUndefined();
+    expect(removalCall).toBeDefined();
   });
 
   test("protects and restores actively matched bank history from Plaid removal events", async () => {
@@ -658,6 +784,17 @@ describe("syncTransactions", () => {
     expect(destructiveRemoval).toBeUndefined();
     expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
       where: {
+        id: "bank-matched-1",
+        business_id: "biz-1",
+        account_id: "acct-1",
+      },
+      data: expect.objectContaining({
+        source_removed_at: expect.any(Date),
+        source_removal_code: "PLAID_REMOVED",
+      }),
+    });
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
+      where: {
         business_id: "biz-1",
         account_id: "acct-1",
         id: { in: ["bank-matched-1"] },
@@ -667,7 +804,7 @@ describe("syncTransactions", () => {
     });
   });
 
-  test("skips Plaid historical overlap when a full drain starts after uploaded bank history already exists", async () => {
+  test("imports unseen Plaid history even when newer uploaded bank history already exists", async () => {
     const existingHistoryThrough = new Date("2026-04-30T00:00:00Z");
     const oldOverlap = makeTransaction({ transaction_id: "txn-old-overlap", date: "2026-04-01" });
     const sameDayOverlap = makeTransaction({ transaction_id: "txn-same-day-overlap", date: "2026-04-30" });
@@ -699,12 +836,16 @@ describe("syncTransactions", () => {
     const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
     const body = JSON.parse(res.body);
     expect(res.statusCode).toBe(200);
-    expect(body.newCount).toBe(1);
-    expect(body.skippedHistoricalCount).toBe(2);
-    expect(body.historicalCutoffDate).toBe("2026-04-30");
+    expect(body.newCount).toBe(3);
+    expect(body.skippedHistoricalCount).toBe(0);
+    expect(body.historicalCutoffDate).toBeNull();
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
-    expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-new-after-history"]);
+    expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual([
+      "txn-old-overlap",
+      "txn-same-day-overlap",
+      "txn-new-after-history",
+    ]);
   });
 
   test("does not prune existing Plaid history before the reconnect effective date", async () => {
@@ -757,7 +898,8 @@ describe("syncTransactions", () => {
     const body = JSON.parse(res.body);
     expect(res.statusCode).toBe(200);
     expect(body.newCount).toBe(1);
-    expect(body.skippedHistoricalCount).toBe(1);
+    expect(body.skippedHistoricalCount).toBe(0);
+    expect(body.skippedRemovedCount).toBe(1);
 
     const createCalls = (prisma.bankTransaction.create as any).mock.calls as any[][];
     expect(createCalls.map((call) => call[0].data.plaid_transaction_id)).toEqual(["txn-new-after-history"]);
@@ -1409,6 +1551,39 @@ describe("syncTransactions", () => {
     });
   });
 
+  test("repairPlaidAccountMapping refuses a different account mask instead of mixing ledger history", async () => {
+    const { mod, prisma } = await loadSyncTransactions({
+      conn: { plaid_mask: "1234" },
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })) },
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [{
+              account_id: "replacement-plaid-acct",
+              mask: "7777",
+              type: "depository",
+              subtype: "checking",
+              balances: { iso_currency_code: "USD" },
+            }],
+          },
+        })),
+      },
+    });
+
+    const res = await mod.repairPlaidAccountMapping({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      plaidAccountId: "replacement-plaid-acct",
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("PLAID_ACCOUNT_IDENTITY_MISMATCH");
+    expect(prisma.bankConnection.updateMany).not.toHaveBeenCalled();
+  });
+
   test("repairPlaidAccountMapping restores live sibling mappings on the same Item without remapping them", async () => {
     const { mod, prisma } = await loadSyncTransactions({
       plaid: {
@@ -1466,6 +1641,33 @@ describe("syncTransactions", () => {
 });
 
 describe("handleWebhook", () => {
+  test("queues every mapped account after a verified transaction webhook", async () => {
+    const enqueueSync = vi.fn(async () => undefined);
+    const { mod } = await loadSyncTransactions({
+      prisma: {
+        bankConnection: {
+          findMany: vi.fn(async () => [
+            { business_id: "biz-1", account_id: "acct-1" },
+            { business_id: "biz-1", account_id: "acct-2" },
+          ]),
+        },
+      },
+    });
+    const body = { item_id: "item-1", webhook_type: "TRANSACTIONS", webhook_code: "SYNC_UPDATES_AVAILABLE" };
+    const rawBody = JSON.stringify(body);
+    const response = await mod.handleWebhook({
+      body,
+      rawBody,
+      headers: signedPlaidHeaders(rawBody),
+      enqueueSync,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(enqueueSync).toHaveBeenCalledTimes(2);
+    expect(enqueueSync).toHaveBeenNthCalledWith(1, { businessId: "biz-1", accountId: "acct-1", itemId: "item-1" });
+    expect(enqueueSync).toHaveBeenNthCalledWith(2, { businessId: "biz-1", accountId: "acct-2", itemId: "item-1" });
+  });
+
   test("TRANSACTIONS webhook marks matching item as having new transactions", async () => {
     const { res, prisma } = await callVerifiedWebhook({
       webhook_type: "TRANSACTIONS",

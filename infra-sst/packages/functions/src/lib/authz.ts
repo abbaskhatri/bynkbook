@@ -13,7 +13,7 @@ const POLICY_VALUES = new Set<PolicyValue>(["NONE", "VIEW", "FULL"]);
 
 /**
  * Default policies live in code (Option 1).
- * Keys correspond to stored policy_json keys (store-only today).
+ * Keys correspond to stored policy_json keys.
  */
 const DEFAULTS: Record<string, Record<string, PolicyValue>> = {
   OWNER: {
@@ -59,7 +59,7 @@ const DEFAULTS: Record<string, Record<string, PolicyValue>> = {
     invoices: "VIEW",
     reports: "VIEW",
     settings: "VIEW",
-    bank_connections: "VIEW",
+    bank_connections: "FULL",
     team_management: "NONE",
     billing: "NONE",
     ai_automation: "VIEW",
@@ -76,7 +76,7 @@ const DEFAULTS: Record<string, Record<string, PolicyValue>> = {
     invoices: "VIEW",
     reports: "FULL",
     settings: "VIEW",
-    bank_connections: "VIEW",
+    bank_connections: "FULL",
     team_management: "NONE",
     billing: "NONE",
     ai_automation: "VIEW",
@@ -130,11 +130,21 @@ export const ACTION_POLICY_KEY: Record<string, string> = {
   // Reconcile
   "ledger.transfer.write": "ledger",
   "ledger.entry.update": "ledger",
+  "ledger.entry.create": "ledger",
+  "ledger.entry.delete": "ledger",
+  "ledger.entry.restore": "ledger",
+  "ledger.entry.hardDelete": "ledger",
   "ledger.categories.write": "ledger",
+  "ledger.closedPeriods.write": "ledger",
+  "ledger.categoryMigration.write": "ledger",
   "uploads.write": "ledger",
   "budgets.write": "ledger",
   "goals.write": "ledger",
   "bookkeeping.preferences.write": "settings",
+  "business.settings.write": "settings",
+  "issues.resolve": "issues",
+  "bank_connections.manage": "bank_connections",
+  "bank_connections.sync": "bank_connections",
   "vendors.write": "vendors",
   "ap.bills.write": "invoices",
   "ap.payments.write": "invoices",
@@ -171,11 +181,21 @@ export const ACTION_WAVE: Record<string, number> = {
   // Wave 2: core financial writes (ledger + reconcile)
   "ledger.transfer.write": 2,
   "ledger.entry.update": 2,
+  "ledger.entry.create": 2,
+  "ledger.entry.delete": 2,
+  "ledger.entry.restore": 2,
+  "ledger.entry.hardDelete": 2,
   "ledger.categories.write": 2,
+  "ledger.closedPeriods.write": 2,
+  "ledger.categoryMigration.write": 2,
   "uploads.write": 2,
   "budgets.write": 2,
   "goals.write": 2,
   "bookkeeping.preferences.write": 2,
+  "business.settings.write": 2,
+  "issues.resolve": 2,
+  "bank_connections.manage": 2,
+  "bank_connections.sync": 2,
   "vendors.write": 2,
   "ap.bills.write": 2,
   "ap.payments.write": 2,
@@ -202,7 +222,7 @@ export const ACTION_WAVE: Record<string, number> = {
 
 function normalizeMode(m: any): AuthzMode {
   const v = String(m ?? "").trim().toUpperCase() as AuthzMode;
-  return MODES.has(v) ? v : "OFF";
+  return MODES.has(v) ? v : "ENFORCE";
 }
 
 function normalizeLevel(v: any): RequiredLevel {
@@ -218,22 +238,6 @@ function normalizePolicyValue(v: any): PolicyValue {
 function policyAllows(policyValue: PolicyValue, required: RequiredLevel): boolean {
   if (required === "VIEW") return policyValue === "VIEW" || policyValue === "FULL";
   return policyValue === "FULL";
-}
-
-async function getBusinessAuthzMode(prisma: any, businessId: string): Promise<AuthzMode> {
-  // Optional emergency override: AUTHZ_FORCE_MODE=OFF|SOFT
-  const forced = process.env.AUTHZ_FORCE_MODE?.trim();
-  if (forced) {
-    const fm = normalizeMode(forced);
-    // limit override scope to OFF or SOFT only (safety)
-    if (fm === "OFF" || fm === "SOFT") return fm;
-  }
-
-  const row = await prisma.business.findFirst({
-    where: { id: businessId },
-    select: { authz_mode: true },
-  });
-  return normalizeMode(row?.authz_mode);
 }
 
 async function getPolicyForRole(prisma: any, businessId: string, role: string): Promise<Record<string, PolicyValue>> {
@@ -271,6 +275,9 @@ async function getBusinessAuthz(prisma: any, businessId: string): Promise<{ mode
   }
 
   if (typeof prisma.business?.findFirst !== "function") {
+    // Tests and isolated utility callers may provide a partial Prisma mock. Keep
+    // that compatibility without weakening real businesses, which always have
+    // an authz row.
     return { mode: "OFF", wave: 0 };
   }
 
@@ -316,7 +323,13 @@ export async function authorizeWrite(prisma: any, args: {
 
   // Determine if enforcement applies at current wave
   const akWave = actionWave(args.actionKey);
-  const enforced = mode === "ENFORCE" && !excludedFromEnforce && akWave > 0 && wave >= akWave;
+  // ENFORCE_ONLY is a legacy value that previously bypassed policy checks.
+  // Treat it as all-waves enforcement so no stored mode silently disables
+  // authorization. ENFORCE continues to honor the explicit rollout wave.
+  const enforced =
+    !excludedFromEnforce &&
+    akWave > 0 &&
+    (mode === "ENFORCE_ONLY" || (mode === "ENFORCE" && wave >= akWave));
 
   if (mode === "SOFT") {
     await logActivity(prisma, {
@@ -340,8 +353,8 @@ export async function authorizeWrite(prisma: any, args: {
     return { mode, enforced: false, allowed: true as const };
   }
 
-  if (mode !== "ENFORCE") {
-    // OFF / ENFORCE_ONLY not implemented in 7.2 (safe behavior: do nothing, allow)
+  if (mode !== "ENFORCE" && mode !== "ENFORCE_ONLY") {
+    // OFF remains an explicit emergency/rollback state.
     return { mode, enforced: false, allowed: true as const };
   }
 
@@ -353,7 +366,7 @@ export async function authorizeWrite(prisma: any, args: {
       scopeAccountId: args.scopeAccountId ?? null,
       eventType: "AUTHZ_ENFORCED_SKIPPED",
       payloadJson: {
-        mode: "ENFORCE",
+        mode,
         wave,
         actionWave: akWave,
         enforced: false,

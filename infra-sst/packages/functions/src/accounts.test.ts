@@ -106,7 +106,7 @@ async function loadHandler(role = "OWNER") {
     bankMatch: { count: zeroCount },
     bankConnection: {
       count: zeroCount,
-      deleteMany: vi.fn(async () => ({ count: 0 })),
+      deleteMany: vi.fn(async (_args?: any) => ({ count: 0 })),
       findMany: vi.fn(async (args: any) =>
         bankConnections
           .filter((conn) => conn.account_id === "acct-a" && args?.where?.business_id === "biz-a")
@@ -121,6 +121,12 @@ async function loadHandler(role = "OWNER") {
 
   vi.doMock("./lib/db", () => ({
     getPrisma: vi.fn(async () => prisma),
+  }));
+  vi.doMock("./lib/plaidService", () => ({
+    removeBankConnectionWithItemLifecycle: vi.fn(async (_prisma: any, businessId: string, accountId: string) => {
+      await prisma.bankConnection.deleteMany({ where: { business_id: businessId, account_id: accountId } });
+      return { itemRemoved: false, remainingItemConnections: 0 };
+    }),
   }));
 
   const mod = await import("./accounts");

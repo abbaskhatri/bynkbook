@@ -3,6 +3,7 @@ import { Products, CountryCode } from "plaid";
 import { getPlaidClient } from "./plaidClient";
 import { encryptAccessToken, decryptAccessToken } from "./plaidCrypto";
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
+import { authorizeWrite } from "./authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -225,6 +226,64 @@ function accountTypeFromPlaidValue(input?: { type?: string; subtype?: string }, 
   return "OTHER";
 }
 
+function plaidCurrencyCode(account: any) {
+  const value = account?.balances?.iso_currency_code ?? account?.balances?.unofficial_currency_code ?? null;
+  return value ? String(value).trim().toUpperCase() : null;
+}
+
+function plaidAccountIdentityMismatch(params: {
+  localAccount: any;
+  existingConnection?: any;
+  selectedPlaidAccount: any;
+}) {
+  const { localAccount, existingConnection, selectedPlaidAccount } = params;
+  const localType = String(localAccount?.type ?? "").trim().toUpperCase();
+  const selectedType = accountTypeFromPlaidValue({
+    type: selectedPlaidAccount?.type,
+    subtype: selectedPlaidAccount?.subtype,
+  }, "OTHER");
+  if (localType && localType !== "OTHER" && selectedType !== localType) {
+    return `Plaid account type ${selectedType} does not match local account type ${localType}`;
+  }
+
+  const selectedCurrency = plaidCurrencyCode(selectedPlaidAccount);
+  const expectedCurrency = String(
+    existingConnection?.plaid_currency_code ?? localAccount?.currency_code ?? "",
+  ).trim().toUpperCase();
+  if (expectedCurrency && selectedCurrency && expectedCurrency !== selectedCurrency) {
+    return `Plaid account currency ${selectedCurrency} does not match local account currency ${expectedCurrency}`;
+  }
+
+  const storedPlaidType = String(existingConnection?.plaid_type ?? "").trim().toLowerCase();
+  const selectedPlaidType = String(selectedPlaidAccount?.type ?? "").trim().toLowerCase();
+  if (storedPlaidType && selectedPlaidType && storedPlaidType !== selectedPlaidType) {
+    return "Selected Plaid account product type does not match the original connection";
+  }
+
+  const changingPlaidAccount =
+    existingConnection?.plaid_account_id &&
+    String(existingConnection.plaid_account_id) !== String(selectedPlaidAccount?.account_id ?? "");
+  const storedMask = String(existingConnection?.plaid_mask ?? "").trim();
+  const selectedMask = String(selectedPlaidAccount?.mask ?? "").trim();
+  if (changingPlaidAccount && storedMask && selectedMask && storedMask !== selectedMask) {
+    return "Selected Plaid account mask does not match the original connection";
+  }
+
+  return null;
+}
+
+/**
+ * Convert Plaid's product-facing current balance into Bynkbook's signed
+ * accounting balance. Plaid reports credit balances as a positive amount
+ * owed; Bynkbook represents liabilities as negative balances.
+ */
+export function normalizePlaidCurrentBalanceCents(current: unknown, accountType: unknown) {
+  const numeric = Number(current);
+  if (!Number.isFinite(numeric)) throw new Error("Invalid Plaid current balance");
+  const cents = BigInt(Math.round(numeric * 100));
+  return String(accountType ?? "").trim().toUpperCase() === "CREDIT_CARD" ? -cents : cents;
+}
+
 function normalizeAdditionalPlaidAccounts(rows: any[]) {
   const seen = new Set<string>();
   const out: Array<{
@@ -250,19 +309,6 @@ function normalizeAdditionalPlaidAccounts(rows: any[]) {
   }
 
   return out;
-}
-
-function normalizePlaidTransactionName(value: any) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function dateOnlyKey(value: any) {
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
 async function activeMatchedBankTransactionIdsForPlaidSync(
@@ -346,6 +392,7 @@ type PlaidWebhookRequest = {
   body: any;
   rawBody: string;
   headers: Record<string, string | string[] | undefined>;
+  enqueueSync?: (target: { businessId: string; accountId: string; itemId: string }) => Promise<void>;
 };
 
 const plaidWebhookKeyCache = new Map<string, any>();
@@ -445,6 +492,33 @@ export async function requireMembership(prisma: any, businessId: string, userId:
   return row?.role ?? null;
 }
 
+export type PlaidCapability = "MANAGE" | "SYNC";
+
+export async function requirePlaidCapability(
+  prisma: any,
+  businessId: string,
+  userId: string,
+  capability: PlaidCapability,
+) {
+  const role = String(await requireMembership(prisma, businessId, userId) ?? "").trim().toUpperCase();
+  if (!role) return null;
+  const roleAllowed = capability === "MANAGE"
+    ? role === "OWNER" || role === "ADMIN"
+    : ["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"].includes(role);
+  if (!roleAllowed) return null;
+
+  const actionKey = capability === "MANAGE" ? "bank_connections.manage" : "bank_connections.sync";
+  const az = await authorizeWrite(prisma, {
+    businessId,
+    actorUserId: userId,
+    actorRole: role,
+    actionKey,
+    requiredLevel: "FULL",
+    endpointForLog: `PLAID_${capability}`,
+  });
+  return az.allowed ? role : null;
+}
+
 export async function requireAccountInBusiness(prisma: any, businessId: string, accountId: string) {
   const acct = await prisma.account.findFirst({
     where: { id: accountId, business_id: businessId },
@@ -464,7 +538,7 @@ export async function createLinkTokenBusiness(params: {
   const { businessId, userId } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const plaid = await getPlaidClient();
@@ -495,11 +569,14 @@ export async function createLinkToken(params: {
   const { businessId, accountId, userId, mode = "connect" } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const plaid = await getPlaidClient();
 
@@ -637,11 +714,14 @@ export async function exchangePublicToken(params: {
   } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const start = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, effectiveStartDate, connectionMode);
   if (!start) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
@@ -661,6 +741,19 @@ export async function exchangePublicToken(params: {
       ok: false,
       error: "Selected Plaid account was not found on the exchanged Item",
       code: "PLAID_ACCOUNT_SELECTION_MISMATCH",
+    });
+  }
+
+  const primaryIdentityMismatch = plaidAccountIdentityMismatch({
+    localAccount,
+    selectedPlaidAccount: verifiedAccount,
+  });
+  if (primaryIdentityMismatch) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    return json(409, {
+      ok: false,
+      error: primaryIdentityMismatch,
+      code: "PLAID_ACCOUNT_IDENTITY_MISMATCH",
     });
   }
 
@@ -706,8 +799,10 @@ export async function exchangePublicToken(params: {
   const openingAdjustmentCreatedAt = allowOpeningAdjustment ? null : new Date();
   const openingPolicy = allowOpeningAdjustment ? "AUTO" : "MANUAL";
 
-  // Upsert one connection per account
-  await prisma.bankConnection.upsert({
+  // Build all writes before executing them so a multi-account connection is
+  // committed atomically instead of one sibling at a time.
+  const databaseWrites: any[] = [];
+  databaseWrites.push(prisma.bankConnection.upsert({
     where: { business_id_account_id: { business_id: businessId, account_id: accountId } },
     create: {
       business_id: businessId,
@@ -719,6 +814,9 @@ export async function exchangePublicToken(params: {
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
       plaid_mask: verifiedMask,
+      plaid_type: verifiedAccount?.type ? String(verifiedAccount.type) : null,
+      plaid_subtype: verifiedAccount?.subtype ? String(verifiedAccount.subtype) : null,
+      plaid_currency_code: plaidCurrencyCode(verifiedAccount),
       status: "CONNECTED",
       sync_cursor: null,
       has_new_transactions: false,
@@ -733,6 +831,9 @@ export async function exchangePublicToken(params: {
       institution_name: institution?.name ?? null,
       institution_id: institution?.institution_id ?? null,
       plaid_mask: verifiedMask,
+      plaid_type: verifiedAccount?.type ? String(verifiedAccount.type) : null,
+      plaid_subtype: verifiedAccount?.subtype ? String(verifiedAccount.subtype) : null,
+      plaid_currency_code: plaidCurrencyCode(verifiedAccount),
       status: "CONNECTED",
       sync_cursor: null,
       error_code: null,
@@ -742,7 +843,7 @@ export async function exchangePublicToken(params: {
       opening_adjustment_created_at: openingAdjustmentCreatedAt,
       updated_at: new Date(),
     },
-  });
+  }));
 
   const createdAdditionalAccounts: any[] = [];
   for (const row of additional) {
@@ -766,7 +867,7 @@ export async function exchangePublicToken(params: {
       row.type || "CHECKING",
     );
 
-    await prisma.$transaction([
+    databaseWrites.push(
       prisma.account.create({
         data: {
           id: extraAccountId,
@@ -777,6 +878,7 @@ export async function exchangePublicToken(params: {
           opening_balance_date: extraStart,
           institution_name: institution?.name ?? null,
           last4: extraMask,
+          currency_code: plaidCurrencyCode(verified),
         } as any,
       }),
       prisma.bankConnection.create({
@@ -790,6 +892,9 @@ export async function exchangePublicToken(params: {
           institution_name: institution?.name ?? null,
           institution_id: institution?.institution_id ?? null,
           plaid_mask: extraMask,
+          plaid_type: verified?.type ? String(verified.type) : null,
+          plaid_subtype: verified?.subtype ? String(verified.subtype) : null,
+          plaid_currency_code: plaidCurrencyCode(verified),
           status: "CONNECTED",
           sync_cursor: null,
           has_new_transactions: false,
@@ -797,7 +902,7 @@ export async function exchangePublicToken(params: {
           opening_adjustment_created_at: null,
         } as any,
       }),
-    ]);
+    );
 
     createdAdditionalAccounts.push({
       accountId: extraAccountId,
@@ -807,6 +912,13 @@ export async function exchangePublicToken(params: {
       last4: extraMask,
       effectiveStartDate: extraStart.toISOString().slice(0, 10),
     });
+  }
+
+  try {
+    await prisma.$transaction(databaseWrites);
+  } catch (error) {
+    await removePlaidItemBestEffort(plaid, accessToken);
+    throw error;
   }
 
   return json(200, {
@@ -824,8 +936,11 @@ export async function getStatus(params: { businessId: string; accountId: string;
   const role = await requireMembership(prisma, businessId, userId);
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
@@ -1023,11 +1138,14 @@ export async function repairPlaidAccountMapping(params: {
   const { businessId, accountId, userId, plaidAccountId, institution, mask } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true, currency_code: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
@@ -1073,6 +1191,19 @@ export async function repairPlaidAccountMapping(params: {
     });
   }
 
+  const identityMismatch = plaidAccountIdentityMismatch({
+    localAccount,
+    existingConnection: conn,
+    selectedPlaidAccount: selected,
+  });
+  if (identityMismatch) {
+    return json(409, {
+      ok: false,
+      error: identityMismatch,
+      code: "PLAID_ACCOUNT_IDENTITY_MISMATCH",
+    });
+  }
+
   const verifiedMask = selected?.mask ? String(selected.mask) : mask ?? null;
   const repairedStart = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, undefined, "EXISTING_ACCOUNT");
   await prisma.bankConnection.updateMany({
@@ -1080,6 +1211,9 @@ export async function repairPlaidAccountMapping(params: {
     data: {
       plaid_account_id: selectedPlaidAccountId,
       plaid_mask: verifiedMask,
+      plaid_type: selected?.type ? String(selected.type) : conn.plaid_type ?? null,
+      plaid_subtype: selected?.subtype ? String(selected.subtype) : conn.plaid_subtype ?? null,
+      plaid_currency_code: plaidCurrencyCode(selected) ?? conn.plaid_currency_code ?? null,
       ...(repairedStart ? { effective_start_date: repairedStart } : {}),
       institution_name: institution?.name ?? conn.institution_name ?? null,
       institution_id: institution?.institution_id ?? conn.institution_id ?? null,
@@ -1129,20 +1263,70 @@ export async function disconnectBankConnection(params: { businessId: string; acc
   const { businessId, accountId, userId } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
+  const role = await requirePlaidCapability(prisma, businessId, userId, "MANAGE");
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
 
-  // Idempotent disconnect:
-  // Remove ONLY the bank connection mapping/cursor/token for this account.
-  // Do NOT delete bank transaction history (BankTransaction is NOT FK-linked to BankConnection).
-  await prisma.bankConnection.deleteMany({
-    where: { business_id: businessId, account_id: accountId },
-  });
+  try {
+    const result = await removeBankConnectionWithItemLifecycle(prisma, businessId, accountId);
+    return json(200, { ok: true, disconnected: true, ...result });
+  } catch (error: any) {
+    return json(502, {
+      ok: false,
+      error: "Plaid could not confirm the disconnect; the local connection was preserved",
+      detail: plaidErrorMessage(error),
+    });
+  }
+}
 
-  return json(200, { ok: true, disconnected: true });
+export async function removeBankConnectionWithItemLifecycle(
+  prisma: any,
+  businessId: string,
+  accountId: string,
+) {
+  return prisma.$transaction(async (tx: any) => {
+    let conn = await tx.bankConnection.findFirst({
+      where: { business_id: businessId, account_id: accountId },
+    });
+    if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
+
+    // Serialize lifecycle changes for every local mapping that shares an Item.
+    if (typeof tx.$queryRawUnsafe === "function") {
+      await tx.$queryRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `plaid-item:${businessId}:${conn.plaid_item_id}`,
+      );
+      conn = await tx.bankConnection.findFirst({
+        where: { business_id: businessId, account_id: accountId },
+      });
+      if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
+    }
+
+    const itemConnections = await tx.bankConnection.count({
+      where: { business_id: businessId, plaid_item_id: conn.plaid_item_id },
+    });
+    const removingFinalMapping = itemConnections <= 1;
+
+    if (removingFinalMapping) {
+      const plaid = await getPlaidClient();
+      const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+      // This is deliberately not best-effort: retain the local encrypted token
+      // and mapping if Plaid does not confirm revocation, so the operation can
+      // be retried and consent state never becomes unmanageable.
+      await plaid.itemRemove({ access_token: accessToken });
+    }
+
+    await tx.bankConnection.deleteMany({
+      where: { business_id: businessId, account_id: accountId },
+    });
+
+    return {
+      itemRemoved: removingFinalMapping,
+      remainingItemConnections: Math.max(0, itemConnections - 1),
+    };
+  }, { timeout: 15_000 });
 }
 
 /**
@@ -1155,12 +1339,15 @@ export async function syncTransactions(params: {
   userId: string;
   requestRefresh?: boolean;
   afterReconnect?: boolean;
+  system?: boolean;
 }) {
-  const { businessId, accountId, userId, requestRefresh, afterReconnect } = params;
+  const { businessId, accountId, userId, requestRefresh, afterReconnect, system = false } = params;
 
   const prisma = await getPrisma();
-  const role = await requireMembership(prisma, businessId, userId);
-  if (!role) return json(403, { ok: false, error: "Forbidden" });
+  if (!system) {
+    const role = await requirePlaidCapability(prisma, businessId, userId, "SYNC");
+    if (!role) return json(403, { ok: false, error: "Forbidden" });
+  }
 
   const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
   if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
@@ -1169,6 +1356,12 @@ export async function syncTransactions(params: {
     where: { business_id: businessId, account_id: accountId },
   });
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
+
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { type: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const recordSyncFailure = async (error: any) => {
     const code = plaidErrorCode(error);
@@ -1279,7 +1472,7 @@ export async function syncTransactions(params: {
       const acct = balRes.data.accounts.find((a) => a.account_id === plaidAccountId);
       const currentBalance = acct?.balances?.current ?? null;
       if (currentBalance != null) {
-        currentBalanceCents = BigInt(Math.round(currentBalance * 100));
+        currentBalanceCents = normalizePlaidCurrentBalanceCents(currentBalance, localAccount.type);
         balanceLookupSucceeded = true;
       }
     } catch (balanceError: any) {
@@ -1376,7 +1569,6 @@ export async function syncTransactions(params: {
         // Count seen for safety caps
         const pageSeen = (data.added?.length ?? 0) + (data.modified?.length ?? 0) + (data.removed?.length ?? 0);
         totalSeen += pageSeen;
-        if (totalSeen >= MAX_TOTAL) hasMore = false;
 
         // Plaid is already account-filtered. Keep this guard for legacy or unexpected responses.
         candidateUpserts.push(...[...data.added, ...data.modified].filter((t) => t.account_id === plaidAccountId));
@@ -1405,8 +1597,6 @@ export async function syncTransactions(params: {
   }
 
   const now = new Date();
-  const fullDrainFromScratch = !drainStartCursor;
-
   const removedPlaidTransactionIds = Array.from(new Set(
     drainedRemoved
       .map((row: any) => String(row?.transaction_id ?? "").trim())
@@ -1434,27 +1624,6 @@ export async function syncTransactions(params: {
     removedExistingRows.map((row: any) => [String(row?.plaid_transaction_id ?? ""), row]),
   );
   const consumedRemovedPlaidIds = new Set<string>();
-
-  if (fullDrainFromScratch) {
-    const latestExistingBankTransaction = await prisma.bankTransaction.findFirst({
-      where: {
-        business_id: businessId,
-        account_id: accountId,
-        is_removed: false,
-      },
-      orderBy: [
-        { posted_date: "desc" as any },
-        { created_at: "desc" as any },
-        { id: "desc" as any },
-      ],
-      select: { posted_date: true },
-    });
-
-    const latestExistingDate = latestExistingBankTransaction?.posted_date ?? null;
-    if (latestExistingDate && latestExistingDate >= effectiveStartDate) {
-      historicalCutoffDate = latestExistingDate;
-    }
-  }
 
   for (const t of drainedUpserts) {
     // Retention: do not retain anything older than effectiveStartDate
@@ -1488,6 +1657,8 @@ export async function syncTransactions(params: {
             iso_currency_code: t.iso_currency_code ?? null,
             is_removed: false,
             removed_at: null,
+            source_removed_at: null,
+            source_removal_code: null,
             source: "PLAID",
             plaid_account_id: plaidAccountId,
             raw: t as any,
@@ -1502,74 +1673,22 @@ export async function syncTransactions(params: {
       }
     }
 
-    // Plaid can rotate a transaction_id by returning the old transaction in
-    // `removed` and the replacement in `added`. Preserve our durable bank row
-    // (and therefore its match links) when the economic identity is unambiguous.
-    const incomingName = normalizePlaidTransactionName(t.name ?? t.merchant_name ?? "Transaction");
-    const replacementCandidates = removedExistingRows.filter((row: any) => {
-      const oldPlaidId = String(row?.plaid_transaction_id ?? "");
-      if (!oldPlaidId || consumedRemovedPlaidIds.has(oldPlaidId)) return false;
-      if (oldPlaidId === String(t.transaction_id ?? "")) return false;
-      return (
-        BigInt(String(row?.amount_cents ?? 0)) === cents &&
-        dateOnlyKey(row?.posted_date) === dateOnlyKey(posted) &&
-        normalizePlaidTransactionName(row?.name) === incomingName
-      );
+    // A prior explicit overlap cleanup is authoritative. Do not resurrect an
+    // exact Plaid ID that a user/system already soft-removed. Unlike the old
+    // date-wide cutoff, this exact-ID check does not hide unrelated historical
+    // transactions merely because newer CSV/manual history exists.
+    const existingIncomingRow = await prisma.bankTransaction.findFirst({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        plaid_transaction_id: t.transaction_id,
+        plaid_account_id: plaidAccountId,
+      },
+      select: { id: true, is_removed: true },
     });
-
-    if (replacementCandidates.length === 1) {
-      const replacement = replacementCandidates[0];
-      const oldPlaidId = String(replacement.plaid_transaction_id);
-      try {
-        const upgraded = await prisma.bankTransaction.updateMany({
-          where: {
-            id: replacement.id,
-            business_id: businessId,
-            account_id: accountId,
-            plaid_transaction_id: oldPlaidId,
-          },
-          data: {
-            plaid_transaction_id: t.transaction_id,
-            posted_date: posted,
-            authorized_date: t.authorized_date ? new Date(`${t.authorized_date}T00:00:00Z`) : null,
-            amount_cents: cents,
-            name: (t.name ?? t.merchant_name ?? "Transaction").toString(),
-            is_pending: isPending,
-            iso_currency_code: t.iso_currency_code ?? null,
-            is_removed: false,
-            removed_at: null,
-            source: "PLAID",
-            plaid_account_id: plaidAccountId,
-            raw: t as any,
-            updated_at: now,
-          },
-        });
-        if (upgraded.count > 0) {
-          consumedRemovedPlaidIds.add(oldPlaidId);
-          upgradedCount += upgraded.count;
-          replacementUpgradeCount += upgraded.count;
-          continue;
-        }
-      } catch {
-        // If the replacement ID already exists, normal exact-ID dedupe below
-        // is authoritative; never guess which durable row should survive.
-      }
-    }
-
-    if (historicalCutoffDate && posted <= historicalCutoffDate) {
-      const existingPlaidRow = await prisma.bankTransaction.findFirst({
-        where: {
-          business_id: businessId,
-          account_id: accountId,
-          plaid_transaction_id: t.transaction_id,
-          plaid_account_id: plaidAccountId,
-        },
-        select: { id: true, is_removed: true },
-      });
-      if (!existingPlaidRow || existingPlaidRow.is_removed) {
-        skippedHistoricalCount += 1;
-        continue;
-      }
+    if (existingIncomingRow?.is_removed) {
+      skippedRemovedCount += 1;
+      continue;
     }
 
     try {
@@ -1587,6 +1706,8 @@ export async function syncTransactions(params: {
           is_pending: isPending,
           iso_currency_code: t.iso_currency_code ?? null,
           is_removed: false,
+          source_removed_at: null,
+          source_removal_code: null,
           raw: t as any,
         },
       });
@@ -1623,6 +1744,8 @@ export async function syncTransactions(params: {
           iso_currency_code: t.iso_currency_code ?? null,
           is_removed: false,
           removed_at: null,
+          source_removed_at: null,
+          source_removal_code: null,
           source: "PLAID",
           plaid_account_id: plaidAccountId,
           raw: t as any,
@@ -1645,6 +1768,18 @@ export async function syncTransactions(params: {
 
     const existingRemovedRow = removedExistingByPlaidId.get(removedPlaidId);
     if (existingRemovedRow && activeMatchedBankTransactionIdSet.has(String(existingRemovedRow.id))) {
+      await prisma.bankTransaction.updateMany({
+        where: {
+          id: existingRemovedRow.id,
+          business_id: businessId,
+          account_id: accountId,
+        },
+        data: {
+          source_removed_at: now,
+          source_removal_code: "PLAID_REMOVED",
+          updated_at: now,
+        },
+      });
       protectedMatchedRemovalCount += 1;
       continue;
     }
@@ -1656,7 +1791,13 @@ export async function syncTransactions(params: {
         plaid_transaction_id: removedPlaidId,
         plaid_account_id: plaidAccountId,
       },
-      data: { is_removed: true, removed_at: now, updated_at: now },
+      data: {
+        is_removed: true,
+        removed_at: now,
+        source_removed_at: now,
+        source_removal_code: "PLAID_REMOVED",
+        updated_at: now,
+      },
     });
   }
 
@@ -1777,7 +1918,7 @@ export async function syncTransactions(params: {
           prisma.account.update({
             where: { id: accountId },
             data: {
-              opening_balance_cents: abs,
+              opening_balance_cents: signed,
               opening_balance_date: effectiveStartDate,
               updated_at: now,
             } as any,
@@ -1806,7 +1947,7 @@ export async function syncTransactions(params: {
           prisma.account.update({
             where: { id: accountId },
             data: {
-              opening_balance_cents: abs,
+              opening_balance_cents: signed,
               opening_balance_date: effectiveStartDate,
               updated_at: now,
             } as any,
@@ -1821,10 +1962,11 @@ export async function syncTransactions(params: {
     });
   }
 
+  const drainIncomplete = hasMore && (pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL);
   const connectionUpdateData: any = {
     sync_cursor: packSyncCursor(plaidAccountId, cursorScope, cursor),
     last_sync_at: now,
-    has_new_transactions: false,
+    has_new_transactions: drainIncomplete,
     status: "CONNECTED",
     error_code: null,
     error_message: null,
@@ -1866,8 +2008,9 @@ export async function syncTransactions(params: {
     // Progress metadata (useful for UI)
     pages: pageN,
     totalSeen,
-    capped: pageN >= MAX_PAGES || totalSeen >= MAX_TOTAL,
+    capped: drainIncomplete,
     hasMore: hasMore,
+    drainIncomplete,
     drainRestartCount,
     cursorScope,
     accountScopedFallback,
@@ -1900,6 +2043,18 @@ export async function handleWebhook(request: PlaidWebhookRequest) {
       where: { plaid_item_id: itemId },
       data: { has_new_transactions: true, updated_at: new Date() },
     });
+
+    if (request.enqueueSync) {
+      const targets = await prisma.bankConnection.findMany({
+        where: { plaid_item_id: itemId },
+        select: { business_id: true, account_id: true },
+      });
+      await Promise.all(targets.map((target: any) => request.enqueueSync!({
+        businessId: String(target.business_id),
+        accountId: String(target.account_id),
+        itemId,
+      })));
+    }
 
     return json(200, { ok: true, webhookType, webhookCode });
   }

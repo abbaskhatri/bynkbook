@@ -153,11 +153,37 @@ function SignupInner() {
                       <div className="h-px flex-1 bg-slate-200 dark:bg-bb-border" />
                     </div>
 
-                    <div className="space-y-4">
+                    <form
+                      className="space-y-4"
+                      onSubmit={async (event) => {
+                        event.preventDefault();
+                        setBusy(true);
+                        setErr(null);
+                        try {
+                          const res = await signUp({
+                            username: email.trim(),
+                            password,
+                            options: { userAttributes: { email: email.trim() } },
+                          });
+                          if (res?.nextStep?.signUpStep === "CONFIRM_SIGN_UP") {
+                            router.replace(`/confirm-signup?email=${encodeURIComponent(email)}&next=${encodeURIComponent(nextUrl)}`);
+                            return;
+                          }
+                          router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
+                        } catch (e: any) {
+                          setErr(e?.message ?? "Sign up failed");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
                       <div className="space-y-2">
                         <Label htmlFor="email">Email</Label>
                         <Input
                           id="email"
+                          name="email"
+                          type="email"
+                          required
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           autoComplete="username"
@@ -172,7 +198,9 @@ function SignupInner() {
                         <Label htmlFor="pw">Password</Label>
                         <Input
                           id="pw"
+                          name="password"
                           type="password"
+                          required
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           autoComplete="new-password"
@@ -182,43 +210,20 @@ function SignupInner() {
                       </div>
 
                       {err ? (
-                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
+                        <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-bb-status-danger-border dark:bg-bb-status-danger-bg dark:text-bb-status-danger-fg">
                           {err}
                         </div>
                       ) : null}
 
                       <Button
+                        type="submit"
                         className="h-11 w-full rounded-xl"
                         disabled={busy || !email.trim() || !password.trim()}
-                        onClick={async () => {
-                          setBusy(true);
-                          setErr(null);
-                          try {
-                            const res = await signUp({
-                              username: email.trim(),
-                              password,
-                              options: { userAttributes: { email: email.trim() } },
-                            });
-
-                            if (res?.nextStep?.signUpStep === "CONFIRM_SIGN_UP") {
-                              router.replace(
-                                `/confirm-signup?email=${encodeURIComponent(email)}&next=${encodeURIComponent(nextUrl)}`
-                              );
-                              return;
-                            }
-
-                            router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
-                          } catch (e: any) {
-                            setErr(e?.message ?? "Sign up failed");
-                          } finally {
-                            setBusy(false);
-                          }
-                        }}
                       >
                         <span>{busy ? "Creating…" : "Create account"}</span>
                         {!busy ? <ArrowRight className="ml-2 h-4 w-4" /> : null}
                       </Button>
-                    </div>
+                    </form>
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-bb-border dark:bg-bb-surface-soft">
                       <div className="flex items-start gap-3">
@@ -237,7 +242,7 @@ function SignupInner() {
                     <div className="text-xs text-slate-600 dark:text-bb-text-subtle">
                       Already have an account?{" "}
                       <button
-                        className="font-medium text-slate-900 hover:underline dark:text-bb-text"
+                        className="inline-flex min-h-11 items-center px-2 font-medium text-slate-900 hover:underline dark:text-bb-text"
                         onClick={() => router.replace(`/login?next=${encodeURIComponent(nextUrl)}`)}
                         type="button"
                       >

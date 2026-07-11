@@ -1,8 +1,15 @@
 import { getPrisma } from "./lib/db";
-import { exchangePublicToken, syncTransactions, getClaims } from "./lib/plaidService";
+import { exchangePublicToken, syncTransactions, getClaims, requirePlaidCapability } from "./lib/plaidService";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+}
+
+function serviceResponseStatus(response: any) {
+  const statusCode = Number(response?.statusCode ?? 500);
+  let body: any = {};
+  try { body = JSON.parse(response?.body ?? "{}"); } catch { body = {}; }
+  return { statusCode, body, ok: statusCode < 400 && body?.ok !== false };
 }
 
 export async function handler(event: any) {
@@ -39,12 +46,8 @@ export async function handler(event: any) {
 
   const prisma = await getPrisma();
 
-  // Ensure membership (reuse existing table)
-  const mem = await prisma.userBusinessRole.findFirst({
-    where: { business_id: businessId, user_id: sub },
-    select: { role: true },
-  });
-  if (!mem) return json(403, { ok: false, error: "Forbidden" });
+  const role = await requirePlaidCapability(prisma, businessId, sub, "MANAGE");
+  if (!role) return json(403, { ok: false, error: "Forbidden" });
 
   const startIso = new Date(`${effectiveStartDate}T00:00:00Z`);
   if (Number.isNaN(startIso.getTime())) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
@@ -95,22 +98,35 @@ export async function handler(event: any) {
 
   // Sync transactions + compute opening balance from chosen effectiveStartDate
   const sync = await syncTransactions({ businessId, accountId, userId: sub } as any);
+  const primarySync = serviceResponseStatus(sync);
   const additionalSyncs = [];
   for (const created of Array.isArray(exBody?.additionalAccounts) ? exBody.additionalAccounts : []) {
     try {
       const extraSync = await syncTransactions({ businessId, accountId: created.accountId, userId: sub } as any);
-      additionalSyncs.push({ accountId: created.accountId, ok: true, sync: extraSync });
+      const parsed = serviceResponseStatus(extraSync);
+      additionalSyncs.push({
+        accountId: created.accountId,
+        ok: parsed.ok,
+        statusCode: parsed.statusCode,
+        sync: parsed.body,
+      });
     } catch (error: any) {
       additionalSyncs.push({ accountId: created.accountId, ok: false, error: error?.message ?? "Sync failed" });
     }
   }
 
-  return json(200, {
+  const allAdditionalSynced = additionalSyncs.every((result) => result.ok);
+  const setupComplete = primarySync.ok && allAdditionalSynced;
+
+  return json(setupComplete ? 200 : 202, {
     ok: true,
     accountId,
-    synced: true,
+    synced: primarySync.ok,
+    setupComplete,
+    setupStatus: setupComplete ? "COMPLETE" : "PENDING_SYNC",
     exchange: true,
-    sync,
+    sync: primarySync.body,
+    syncStatusCode: primarySync.statusCode,
     additionalAccounts: exBody?.additionalAccounts ?? [],
     additionalSyncs,
   });

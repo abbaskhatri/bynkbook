@@ -32,18 +32,15 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
   const items = [
     {
       label: "Home",
-      href: withBusiness("/mobile", businessId, accountId),
+      href: withBusiness("/dashboard", businessId, accountId),
       icon: <Home className="h-5 w-5" />,
-      active: pathname === "/mobile",
+      active: pathname === "/dashboard",
     },
     {
       label: "Review",
-      href: withBusiness("/mobile/review", businessId, accountId),
+      href: withBusiness("/category-review", businessId, accountId),
       icon: <Tags className="h-5 w-5" />,
-      active:
-        pathname === "/mobile/review" ||
-        pathname === "/mobile/uncategorized" ||
-        pathname === "/mobile/issues",
+      active: pathname === "/category-review",
       disabled: !businessId || !accountId,
     },
     {
@@ -55,9 +52,9 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
     },
     {
       label: "Vendors",
-      href: withBusiness("/mobile/vendors", businessId, accountId),
+      href: withBusiness("/vendors", businessId, accountId),
       icon: <Users className="h-5 w-5" />,
-      active: pathname === "/mobile/vendors",
+      active: pathname === "/vendors",
       disabled: !businessId,
     },
     {

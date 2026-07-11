@@ -8,7 +8,6 @@ import { getCurrentUser } from "aws-amplify/auth";
 import {
   Bell,
   Menu,
-  X,
   HelpCircle,
   UserCircle,
   Building2,
@@ -28,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
+import { isNavigationPathVisible } from "@/lib/navigationPolicy";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { getConfiguredAppEnvironment } from "@/lib/appEnvironment";
@@ -44,6 +44,7 @@ import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pill } from "@/components/app/pill";
+import { AppSidePanel } from "@/components/primitives/AppSidePanel";
 import BrandLogo from "@/components/app/BrandLogo";
 import {
   expireSessionIfNeeded,
@@ -402,6 +403,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   }, [bizIdFromUrl, businessesQ.data]);
 
   const businessId = showChrome ? business?.id ?? bizIdFromUrl ?? "" : "";
+  const activeBusinessRole = String(business?.role ?? "MEMBER").toUpperCase();
   const [globalSearchReady, setGlobalSearchReady] = useState(false);
 
   useEffect(() => {
@@ -650,7 +652,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
   const renderNavGroups = (isCollapsed: boolean, onNavigate?: () => void) => (
     <div className="p-2.5 space-y-2 flex-1 overflow-y-auto">
       {NAV_GROUPS.map((group, groupIndex) => {
-        if (!group.items.length) return null;
+        const visibleItems = group.items.filter((item) => isNavigationPathVisible(item.path, activeBusinessRole));
+        if (!visibleItems.length) return null;
 
         return (
           <div key={group.group} className="space-y-1">
@@ -662,7 +665,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             ) : null}
 
             <div className="space-y-1">
-              {group.items.map((item) => {
+              {visibleItems.map((item) => {
                 const active = pathname.startsWith(item.path);
                 const link = href(item.path, item.needsAccountId);
 
@@ -913,6 +916,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
                   <span className="truncate">
                     {businessesQ.isLoading ? "Loading…" : business?.name ?? "Business"}
                   </span>
+                  {!businessesQ.isLoading ? (
+                    <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
+                      {activeBusinessRole.charAt(0) + activeBusinessRole.slice(1).toLowerCase()}
+                    </span>
+                  ) : null}
                 </span>
               </Pill>
             </div>
@@ -1182,31 +1190,15 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
         </button>
       </nav>
 
-      {mobileNavOpen ? (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <button
-            type="button"
-            className="absolute inset-0 bg-bb-overlay"
-            aria-label="Close navigation"
-            onClick={() => setMobileNavOpen(false)}
-          />
-
-          <aside className="relative flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-bb-border bg-bb-sidebar-bg text-bb-sidebar-fg shadow-xl">
-            <div className="h-14 px-3 border-b border-bb-border flex items-center justify-between bg-bb-sidebar-bg">
-              <BrandLogo variant="full" size="md" priority className="translate-y-[1px]" />
-              <button
-                type="button"
-                className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border text-foreground/80 hover:bg-bb-table-row-hover"
-                title="Close navigation"
-                aria-label="Close navigation"
-                onClick={() => setMobileNavOpen(false)}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
+      <div className="md:hidden">
+        <AppSidePanel
+          open={mobileNavOpen}
+          title={<BrandLogo variant="full" size="md" priority />}
+          onClose={() => setMobileNavOpen(false)}
+          size="sm"
+        >
             {businessId ? (
-              <div className="px-3 pt-3">
+              <div className="pb-3">
                 {globalSearchReady ? (
                   <GlobalSearch
                     businessId={businessId}
@@ -1219,9 +1211,8 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             ) : null}
 
             {renderNavGroups(false, () => setMobileNavOpen(false))}
-          </aside>
-        </div>
-      ) : null}
+        </AppSidePanel>
+      </div>
     </div>
   );
 }

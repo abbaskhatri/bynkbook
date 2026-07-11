@@ -1,6 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { assertEntryNotActiveMatchedForDelete } from "./lib/entryDeleteSafety";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -68,6 +69,17 @@ export async function handler(event: any) {
     const role = await requireMembership(prisma, biz, sub);
     if (!role) return json(403, { ok: false, error: "Forbidden" });
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "ledger.entry.hardDelete",
+      requiredLevel: "FULL",
+      endpointForLog: "DELETE /entries/{entryId}/hard",
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
 
     const acctOk = await requireAccountInBusiness(prisma, biz, acct);
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
