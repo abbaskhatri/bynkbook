@@ -124,6 +124,31 @@ function accountCursorPrefix(plaidAccountId: string) {
   return `account-v2:${plaidAccountId}:`;
 }
 
+const PLAID_REPLAY_IDENTITY_KEYS = new Set([
+  "account_id",
+  "transaction_id",
+  "pending_transaction_id",
+]);
+
+function canonicalPlaidReplayValue(value: any): any {
+  if (Array.isArray(value)) return value.map(canonicalPlaidReplayValue);
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !PLAID_REPLAY_IDENTITY_KEYS.has(key))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, canonicalPlaidReplayValue(nested)]),
+  );
+}
+
+function plaidReplayFingerprint(value: any) {
+  if (!value || typeof value !== "object") return null;
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalPlaidReplayValue(value)))
+    .digest("hex");
+}
+
 function itemCursorPrefix() {
   return "item:";
 }
@@ -1645,6 +1670,7 @@ export async function syncTransactions(params: {
   let skippedHistoricalCount = 0;
   let skippedRemovedCount = 0;
   let replacementUpgradeCount = 0;
+  let accountReplayMergedCount = 0;
   let protectedMatchedRemovalCount = 0;
   let restoredMatchedHistoryCount = 0;
   const retentionPrunedCount = 0;
@@ -1759,6 +1785,83 @@ export async function syncTransactions(params: {
   );
   const consumedRemovedPlaidIds = new Set<string>();
 
+  // A new Plaid Item can assign new account and transaction IDs to unchanged
+  // financial facts. Before inserting that full-drain replay, pair exact stable
+  // payloads with rows from the prior Plaid account identity. Pairing is
+  // cardinality-aware so two genuinely identical same-day charges remain two
+  // rows. Durable row IDs (and any reconciliation links) are preserved.
+  const replayCandidateByIncomingPlaidId = new Map<string, any>();
+  if (drainedUpserts.length > 0) {
+    const legacyReplayRows = await prisma.bankTransaction.findMany({
+      where: {
+        business_id: businessId,
+        account_id: accountId,
+        plaid_transaction_id: { not: null },
+        plaid_account_id: { not: plaidAccountId },
+        posted_date: { gte: effectiveStartDate },
+      },
+      select: {
+        id: true,
+        plaid_transaction_id: true,
+        plaid_account_id: true,
+        is_removed: true,
+        raw: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+    const incomingByFingerprint = new Map<string, any[]>();
+    const legacyByFingerprint = new Map<string, any[]>();
+
+    for (const transaction of drainedUpserts) {
+      const fingerprint = plaidReplayFingerprint(transaction);
+      const incomingPlaidId = String(transaction?.transaction_id ?? "").trim();
+      if (!fingerprint || !incomingPlaidId) continue;
+      const group = incomingByFingerprint.get(fingerprint) ?? [];
+      if (!group.some((row) => String(row?.transaction_id ?? "") === incomingPlaidId)) {
+        group.push(transaction);
+        incomingByFingerprint.set(fingerprint, group);
+      }
+    }
+    for (const row of legacyReplayRows) {
+      const fingerprint = plaidReplayFingerprint(row?.raw);
+      if (!fingerprint) continue;
+      const group = legacyByFingerprint.get(fingerprint) ?? [];
+      group.push(row);
+      legacyByFingerprint.set(fingerprint, group);
+    }
+
+    for (const [fingerprint, incomingRows] of incomingByFingerprint) {
+      const legacyRows = legacyByFingerprint.get(fingerprint) ?? [];
+      if (legacyRows.length === 0) continue;
+
+      const sortedIncoming = [...incomingRows].sort((left, right) =>
+        String(left.transaction_id).localeCompare(String(right.transaction_id)),
+      );
+      const sortedActive = legacyRows
+        .filter((row) => !row.is_removed)
+        .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)) || String(left.id).localeCompare(String(right.id)));
+      const sortedRemoved = legacyRows
+        .filter((row) => row.is_removed)
+        .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)) || String(left.id).localeCompare(String(right.id)));
+
+      // More active legacy rows than incoming facts is ambiguous: automatically
+      // collapsing one could hide a legitimate repeated transaction.
+      if (sortedActive.length > sortedIncoming.length) continue;
+
+      let incomingIndex = 0;
+      for (const legacyRow of sortedActive) {
+        replayCandidateByIncomingPlaidId.set(String(sortedIncoming[incomingIndex].transaction_id), legacyRow);
+        incomingIndex += 1;
+      }
+      for (const legacyRow of sortedRemoved) {
+        if (incomingIndex >= sortedIncoming.length) break;
+        replayCandidateByIncomingPlaidId.set(String(sortedIncoming[incomingIndex].transaction_id), legacyRow);
+        incomingIndex += 1;
+      }
+    }
+  }
+
   for (const t of drainedUpserts) {
     // Retention: do not retain anything older than effectiveStartDate
     const posted = t.date ? new Date(`${t.date}T00:00:00Z`) : null;
@@ -1823,6 +1926,47 @@ export async function syncTransactions(params: {
     if (existingIncomingRow?.is_removed) {
       skippedRemovedCount += 1;
       continue;
+    }
+
+    const replayCandidate = !existingIncomingRow
+      ? replayCandidateByIncomingPlaidId.get(String(t.transaction_id))
+      : null;
+    if (replayCandidate) {
+      const replayed = await prisma.bankTransaction.updateMany({
+        where: {
+          id: replayCandidate.id,
+          business_id: businessId,
+          account_id: accountId,
+          plaid_transaction_id: replayCandidate.plaid_transaction_id,
+          plaid_account_id: replayCandidate.plaid_account_id,
+        },
+        data: {
+          plaid_transaction_id: t.transaction_id,
+          plaid_account_id: plaidAccountId,
+          posted_date: posted,
+          authorized_date: t.authorized_date ? new Date(`${t.authorized_date}T00:00:00Z`) : null,
+          amount_cents: cents,
+          name: (t.name ?? t.merchant_name ?? "Transaction").toString(),
+          is_pending: isPending,
+          iso_currency_code: t.iso_currency_code ?? null,
+          source: "PLAID",
+          raw: t as any,
+          updated_at: now,
+          ...(replayCandidate.is_removed
+            ? {}
+            : {
+                is_removed: false,
+                removed_at: null,
+                source_removed_at: null,
+                source_removal_code: null,
+              }),
+        },
+      });
+      if (replayed.count > 0) {
+        if (replayCandidate.is_removed) skippedRemovedCount += 1;
+        else accountReplayMergedCount += 1;
+        continue;
+      }
     }
 
     try {
@@ -2125,6 +2269,7 @@ export async function syncTransactions(params: {
     skippedHistoricalCount,
     skippedRemovedCount,
     replacementUpgradeCount,
+    accountReplayMergedCount,
     protectedMatchedRemovalCount,
     restoredMatchedHistoryCount,
     retentionPrunedCount,

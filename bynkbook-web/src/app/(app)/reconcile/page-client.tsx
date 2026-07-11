@@ -64,7 +64,7 @@ import {
 import { getTeam } from "@/lib/api/team";
 import { aiSuggestReconcileBank, aiSuggestReconcileEntry } from "@/lib/api/ai";
 
-import { GitMerge, RefreshCw, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
+import { GitMerge, RefreshCw, Upload, Download, Sparkles, AlertCircle, Wrench, Undo2, Plus, ClipboardList, RotateCcw, FileText } from "lucide-react";
 
 import {
   type BankTab,
@@ -734,6 +734,7 @@ export default function ReconcilePageClient() {
   const [plaidStatusError, setPlaidStatusError] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [pendingMsg, setPendingMsg] = useState<string | null>(null);
+  const [pendingMsgTone, setPendingMsgTone] = useState<"muted" | "warning">("warning");
 
   // Dialogs
   const [openUpload, setOpenUpload] = useState(false);
@@ -905,6 +906,12 @@ export default function ReconcilePageClient() {
 
     return () => {
       cancelled = true;
+      // React Strict Mode intentionally mounts, cleans up, and remounts effects
+      // in development. Release this scope reservation when the request is
+      // cancelled so the replacement effect can finish loading Plaid status.
+      if (plaidLoadedForScopeRef.current === scopeKey) {
+        plaidLoadedForScopeRef.current = "";
+      }
     };
   }, [selectedBusinessId, selectedAccountId]);
 
@@ -3368,7 +3375,7 @@ const displayBankActiveList = useMemo(() => {
   const trClass = "h-[23px] border-b border-bb-border-muted";
   const stickyActionHeaderClass = "sticky right-0 z-20 bg-bb-table-header border-l border-bb-border shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
   const stickyActionCellClass = "sticky right-0 z-[5] border-l border-bb-border shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
-  const reconcileTextClampClass = "block min-w-0 max-w-[22rem] overflow-hidden text-ellipsis whitespace-nowrap xl:max-w-[30rem] xl:whitespace-normal xl:[display:-webkit-box] xl:[-webkit-line-clamp:2] xl:[-webkit-box-orient:vertical]";
+  const reconcileTextClampClass = "block min-w-0 flex-1 truncate";
 
   function EmptyState({ label }: { label: string }) {
     return (
@@ -4546,9 +4553,9 @@ const displayBankActiveList = useMemo(() => {
 
         {/* Bank Transactions */}
         <div className="bb-spreadsheet-shell flex flex-col min-h-0 overflow-hidden rounded-lg">
-          <div className="px-4 py-3">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-              <div className="min-w-0 space-y-2">
+          <div className="px-3 py-2.5">
+            <div className="grid gap-x-4 gap-y-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+              <div className="min-w-0 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   <div className="text-sm font-semibold text-bb-text">Bank transactions</div>
                   <StatusChip label="Source: Bank" tone="info" />
@@ -4578,7 +4585,15 @@ const displayBankActiveList = useMemo(() => {
                       {syncMsg ? <span className="text-bb-text-subtle"> • </span> : null}
                       {syncMsg ? <span role="status" aria-live="polite">{syncMsg}</span> : null}
                       {pendingMsg ? <span className="text-bb-text-subtle"> • </span> : null}
-                      {pendingMsg ? <span role="status" aria-live="polite" className="text-bb-status-warning-fg">{pendingMsg}</span> : null}
+                      {pendingMsg ? (
+                        <span
+                          role="status"
+                          aria-live="polite"
+                          className={pendingMsgTone === "warning" ? "text-bb-status-warning-fg" : "text-bb-text-muted"}
+                        >
+                          {pendingMsg}
+                        </span>
+                      ) : null}
                     </>
                   ) : (
                     "Imported from bank or CSV"
@@ -4586,14 +4601,14 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5 xl:justify-end [&>button]:whitespace-nowrap">
                 {!plaidHealthyConnected ? (
                   <button
                     type="button"
                     className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                     onClick={() => setOpenUpload(true)}
                   >
-                    <Download className="h-3.5 w-3.5" /> Upload CSV
+                    <Upload className="h-3.5 w-3.5" /> Upload CSV
                   </button>
                 ) : (
                   <>
@@ -4602,7 +4617,7 @@ const displayBankActiveList = useMemo(() => {
                       className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       onClick={() => setOpenUpload(true)}
                     >
-                      <Download className="h-3.5 w-3.5" /> Upload CSV
+                      <Upload className="h-3.5 w-3.5" /> Upload CSV
                     </button>
 
                     <button
@@ -4623,6 +4638,7 @@ const displayBankActiveList = useMemo(() => {
                           const upgradedCount = Number(res?.upgradedCount ?? 0);
                           const skippedHistoricalCount = Number(res?.skippedHistoricalCount ?? 0);
                           const replacementUpgradeCount = Number(res?.replacementUpgradeCount ?? 0);
+                          const accountReplayMergedCount = Number(res?.accountReplayMergedCount ?? 0);
                           const postedUpgradeCount = Math.max(0, upgradedCount - replacementUpgradeCount);
                           const restoredMatchedHistoryCount = Number(res?.restoredMatchedHistoryCount ?? 0);
                           const pendingCount = Number(res?.pendingCount ?? 0);
@@ -4632,6 +4648,7 @@ const displayBankActiveList = useMemo(() => {
 
                           if (res?.syncInProgress) {
                             setSyncMsg(res?.message ?? "A bank sync is already running for this account.");
+                            setPendingMsgTone("muted");
                             setPendingMsg("BynkBook will show the results when the active sync finishes.");
                           } else if (res?.syncDeferred) {
                             setSyncMsg(res?.message ?? "A bank sync completed moments ago; no transaction changes were applied.");
@@ -4641,22 +4658,26 @@ const displayBankActiveList = useMemo(() => {
                             const syncParts = [`Transactions refreshed: ${newCount} new`];
                             if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
                             if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
+                            if (accountReplayMergedCount > 0) syncParts.push(`${accountReplayMergedCount} reconnect replay merged`);
                             if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
                             if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
                             if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
                             if (refreshRequested) {
-                              syncParts.push(refreshSucceeded ? "instant refresh requested" : "instant refresh unavailable");
+                              syncParts.push(refreshSucceeded ? "on-demand refresh requested" : "scheduled Plaid data checked");
                             }
 
                             setSyncMsg(syncParts.join(" • "));
                             if (pendingCount > 0) {
+                              setPendingMsgTone("warning");
                               setPendingMsg("Pending shown read-only until posted.");
                             } else if (refreshSucceeded) {
-                              setPendingMsg("No pending transactions available from Plaid yet.");
+                              setPendingMsgTone("muted");
+                              setPendingMsg("Plaid is checking the bank now. Any changes will appear after the refresh webhook arrives.");
                             } else if (refreshErrorCode) {
+                              setPendingMsgTone("warning");
                               setPendingMsg(
                                 refreshErrorCode === "INVALID_PRODUCT" || refreshErrorCode === "PRODUCT_NOT_ENABLED"
-                                  ? "Instant Plaid refresh is not enabled; showing Plaid's latest scheduled transaction data."
+                                  ? null
                                   : "Instant Plaid refresh is temporarily unavailable; showing the latest synced data."
                               );
                             }
@@ -4672,6 +4693,7 @@ const displayBankActiveList = useMemo(() => {
                           setBankCountRefreshSeq((n) => n + 1);
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Unable to refresh transactions");
+                          setPendingMsgTone("warning");
                           setPendingMsg(
                             e?.payload?.updatesPending
                               ? "Plaid still reports bank activity; retry after a short wait."
@@ -4700,7 +4722,7 @@ const displayBankActiveList = useMemo(() => {
                         if (!selectedBusinessId || !selectedAccountId) return;
 
                         setPlaidCleanupBusy(true);
-                        setSyncMsg("Cleaning Plaid overlap...");
+                        setSyncMsg("Checking imported CSV overlap...");
                         setPendingMsg(null);
 
                         try {
@@ -4712,8 +4734,8 @@ const displayBankActiveList = useMemo(() => {
                           const throughDate = String(res?.throughDate ?? "").trim();
                           setSyncMsg(
                             removedCount > 0
-                              ? `Removed ${removedCount} duplicate Plaid rows${throughDate ? ` through ${throughDate}` : ""}`
-                              : (res?.message ?? "No duplicate Plaid overlap found")
+                              ? `Removed ${removedCount} Plaid rows already represented by CSV imports${throughDate ? ` through ${throughDate}` : ""}`
+                              : (res?.message ?? "No CSV/Plaid overlap found")
                           );
 
                           await refreshTablesFully({
@@ -4723,13 +4745,15 @@ const displayBankActiveList = useMemo(() => {
                           setBankCountRefreshSeq((n) => n + 1);
                         } catch (e: any) {
                           setSyncMsg(e?.message ?? "Unable to clean duplicate Plaid rows");
+                          setPendingMsgTone("warning");
                           setPendingMsg("No bank transactions were changed.");
                         } finally {
                           setPlaidCleanupBusy(false);
                         }
                       }}
+                      title="Remove Plaid rows already represented by imported CSV transactions"
                     >
-                      <Wrench className="h-3.5 w-3.5" /> {plaidCleanupBusy ? "Cleaning..." : "Clean overlap"}
+                      <Wrench className="h-3.5 w-3.5" /> {plaidCleanupBusy ? "Cleaning..." : "CSV overlap"}
                     </button>
                     {plaidNewAccountsAvailable ? (
                       <PlaidConnectButton
@@ -4825,6 +4849,7 @@ const displayBankActiveList = useMemo(() => {
                     const initialSyncFailed = !!syncResult?.syncFailed || syncResult?.ok === false;
                     if (initialSyncFailed) {
                       setSyncMsg(`Initial transaction sync failed: ${syncResult?.error ?? "Unable to refresh transactions"}`);
+                      setPendingMsgTone("warning");
                       setPendingMsg("Connected bank, but the transaction list may be stale. Try Sync.");
                     } else if (syncResult) {
                       const newCount = Number(syncResult?.newCount ?? 0);
@@ -4836,6 +4861,7 @@ const displayBankActiveList = useMemo(() => {
                       if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
                       if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
                       setSyncMsg(syncParts.join(" • "));
+                      setPendingMsgTone("warning");
                       setPendingMsg(pendingCount > 0 ? "Pending shown read-only until posted." : null);
                     } else {
                       setSyncMsg(null);
@@ -4967,7 +4993,7 @@ const displayBankActiveList = useMemo(() => {
                           />
                         ) : null}
                       </th>
-                      <th className={thClass}>DATE</th>
+                      <th className={`${thClass} text-center`}>DATE</th>
                       <th className={thClass}>DESCRIPTION</th>
                       <th className={`${thClass} text-right pr-2`}>AMOUNT</th>
                       <th className={`${thClass} ${stickyActionHeaderClass} text-right pr-2`}>ACTIONS</th>

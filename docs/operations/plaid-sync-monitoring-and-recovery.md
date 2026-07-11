@@ -27,6 +27,14 @@
 - Repeated webhook deliveries do not duplicate imported transactions.
 - Matched transactions removed by Plaid retain their accounting history and show the separate source-removal state.
 
+## On-demand Transactions Refresh
+
+- Normal Transactions Items are refreshed by Plaid on the institution's schedule, typically one or more times per day. `SYNC_UPDATES_AVAILABLE` remains the source-of-truth signal that `/transactions/sync` has changes to drain.
+- `/transactions/refresh` is a separately priced Transactions add-on. Production access cannot be enabled in BynkBook code or AWS configuration. Request `Transactions Refresh` in the Plaid Dashboard product-access area or through the Plaid account manager, confirm the per-request price, and then verify the production client has access. See Plaid's [Transactions API reference](https://plaid.com/docs/api/products/transactions/#transactionsrefresh).
+- A successful refresh request starts an on-demand extraction; it does not guarantee that the immediately following sync already contains the new data. Wait for `SYNC_UPDATES_AVAILABLE`, then let the queue worker drain the cursor.
+- Do not retry refresh calls in a tight loop. Plaid bills the endpoint per successful request and applies Item-level rate limits.
+- `INVALID_PRODUCT` or `PRODUCT_NOT_ENABLED` means scheduled transaction data is still usable. The UI should report that scheduled data was checked, not present this entitlement state as a failed transaction sync.
+
 ## Required production setup
 
 After the first deployment that creates a managed topic, operations must add approved recipients to the returned `plaidAlarmTopicArn`, confirm subscriptions, and perform a controlled non-customer alarm-delivery test. The repository deliberately does not invent notification recipients. Environments with an existing approved topic should continue setting `BYNKBOOK_ALARM_TOPIC_ARN`.
