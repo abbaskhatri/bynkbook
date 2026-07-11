@@ -299,6 +299,107 @@ function plaidAccountIdentityMismatch(params: {
   return null;
 }
 
+type ReusablePlaidSiblingMapping = {
+  connection: any;
+  plaidAccount: any;
+};
+
+async function findReusablePlaidSiblingMappings(params: {
+  prisma: any;
+  businessId: string;
+  primaryAccountId: string;
+  primaryPlaidAccountId: string;
+  institutionId?: string | null;
+  institutionName?: string | null;
+  livePlaidAccounts: any[];
+}) {
+  const siblings = await params.prisma.bankConnection.findMany({
+    where: {
+      business_id: params.businessId,
+      account_id: { not: params.primaryAccountId },
+    },
+    select: {
+      account_id: true,
+      plaid_item_id: true,
+      plaid_account_id: true,
+      plaid_mask: true,
+      plaid_type: true,
+      plaid_subtype: true,
+      plaid_currency_code: true,
+      institution_id: true,
+      institution_name: true,
+      effective_start_date: true,
+      account: { select: { id: true, type: true, currency_code: true, name: true } },
+    },
+  });
+
+  const expectedInstitutionId = String(params.institutionId ?? "").trim();
+  const expectedInstitutionName = String(params.institutionName ?? "").trim().toLowerCase();
+  const usedLocalAccountIds = new Set<string>();
+  const reusable: ReusablePlaidSiblingMapping[] = [];
+
+  for (const plaidAccount of params.livePlaidAccounts) {
+    const liveId = String(plaidAccount?.account_id ?? "").trim();
+    if (!liveId || liveId === params.primaryPlaidAccountId) continue;
+    const liveMask = String(plaidAccount?.mask ?? "").trim();
+    if (!liveMask) continue;
+
+    const candidates = siblings.filter((connection: any) => {
+      const localId = String(connection?.account_id ?? "").trim();
+      if (!localId || usedLocalAccountIds.has(localId)) return false;
+      if (String(connection?.plaid_mask ?? "").trim() !== liveMask) return false;
+
+      const siblingInstitutionId = String(connection?.institution_id ?? "").trim();
+      const siblingInstitutionName = String(connection?.institution_name ?? "").trim().toLowerCase();
+      if (expectedInstitutionId && siblingInstitutionId && siblingInstitutionId !== expectedInstitutionId) return false;
+      if (!expectedInstitutionId && expectedInstitutionName && siblingInstitutionName !== expectedInstitutionName) return false;
+
+      return !plaidAccountIdentityMismatch({
+        localAccount: connection?.account,
+        existingConnection: connection,
+        selectedPlaidAccount: plaidAccount,
+      });
+    });
+
+    // Mask plus institution and account identity must resolve uniquely. Never
+    // guess when two local accounts could represent the same live bank account.
+    if (candidates.length !== 1) continue;
+    usedLocalAccountIds.add(String(candidates[0].account_id));
+    reusable.push({ connection: candidates[0], plaidAccount });
+  }
+
+  return reusable;
+}
+
+function repairedSiblingConnectionData(params: {
+  itemId: string;
+  accessTokenCiphertext: string;
+  plaidAccount: any;
+  institution?: { name?: string; institution_id?: string };
+  fallbackInstitutionName?: string | null;
+  fallbackInstitutionId?: string | null;
+}) {
+  const { plaidAccount } = params;
+  return {
+    plaid_item_id: params.itemId,
+    plaid_account_id: String(plaidAccount.account_id),
+    access_token_ciphertext: params.accessTokenCiphertext,
+    plaid_mask: plaidAccount?.mask ? String(plaidAccount.mask) : null,
+    plaid_type: plaidAccount?.type ? String(plaidAccount.type) : null,
+    plaid_subtype: plaidAccount?.subtype ? String(plaidAccount.subtype) : null,
+    plaid_currency_code: plaidCurrencyCode(plaidAccount),
+    institution_name: params.institution?.name ?? params.fallbackInstitutionName ?? null,
+    institution_id: params.institution?.institution_id ?? params.fallbackInstitutionId ?? null,
+    status: "CONNECTED",
+    error_code: null,
+    error_message: null,
+    sync_cursor: null,
+    has_new_transactions: true,
+    new_accounts_available: false,
+    updated_at: new Date(),
+  };
+}
+
 /**
  * Convert Plaid's product-facing current balance into Bynkbook's signed
  * accounting balance. Plaid reports credit balances as a positive amount
@@ -800,7 +901,23 @@ export async function exchangePublicToken(params: {
     });
   }
 
-  const selectedPlaidIds = [plaidAccountId, ...additional.map((row) => row.plaidAccountId)];
+  const reusableSiblings = await findReusablePlaidSiblingMappings({
+    prisma,
+    businessId,
+    primaryAccountId: accountId,
+    primaryPlaidAccountId: plaidAccountId,
+    institutionId: institution?.institution_id,
+    institutionName: institution?.name,
+    livePlaidAccounts: verifiedPlaidAccounts,
+  });
+  const reusableByPlaidId = new Map(
+    reusableSiblings.map((row) => [String(row.plaidAccount.account_id), row]),
+  );
+  const selectedPlaidIds = Array.from(new Set([
+    plaidAccountId,
+    ...additional.map((row) => row.plaidAccountId),
+    ...reusableSiblings.map((row) => String(row.plaidAccount.account_id)),
+  ]));
   const duplicateConnections = await prisma.bankConnection.findMany({
     where: {
       business_id: businessId,
@@ -808,10 +925,15 @@ export async function exchangePublicToken(params: {
     },
     select: { account_id: true, plaid_account_id: true },
   });
+  const expectedAccountByPlaidId = new Map<string, string>([[plaidAccountId, accountId]]);
+  for (const row of reusableSiblings) {
+    expectedAccountByPlaidId.set(String(row.plaidAccount.account_id), String(row.connection.account_id));
+  }
   const conflictingConnection = duplicateConnections.find(
-    (row: any) =>
-      String(row.plaid_account_id) !== String(plaidAccountId) ||
-      String(row.account_id) !== String(accountId),
+    (row: any) => {
+      const expectedAccountId = expectedAccountByPlaidId.get(String(row.plaid_account_id));
+      return !expectedAccountId || String(row.account_id) !== expectedAccountId;
+    },
   );
   if (conflictingConnection) {
     await removePlaidItemBestEffort(plaid, accessToken);
@@ -873,8 +995,35 @@ export async function exchangePublicToken(params: {
     },
   }));
 
+  const repairedExistingAccounts: any[] = [];
+  for (const reusable of reusableSiblings) {
+    const livePlaidAccountId = String(reusable.plaidAccount.account_id);
+    databaseWrites.push(prisma.bankConnection.updateMany({
+      where: {
+        business_id: businessId,
+        account_id: reusable.connection.account_id,
+        plaid_account_id: reusable.connection.plaid_account_id,
+      },
+      data: repairedSiblingConnectionData({
+        itemId,
+        accessTokenCiphertext: ciphertext,
+        plaidAccount: reusable.plaidAccount,
+        institution,
+        fallbackInstitutionName: reusable.connection.institution_name,
+        fallbackInstitutionId: reusable.connection.institution_id,
+      }),
+    }));
+    repairedExistingAccounts.push({
+      accountId: reusable.connection.account_id,
+      accountName: reusable.connection.account?.name ?? null,
+      plaidAccountId: livePlaidAccountId,
+      last4: reusable.plaidAccount?.mask ? String(reusable.plaidAccount.mask) : null,
+    });
+  }
+
   const createdAdditionalAccounts: any[] = [];
   for (const row of additional) {
+    if (reusableByPlaidId.has(row.plaidAccountId)) continue;
     const verified = verifiedByPlaidId.get(row.plaidAccountId) as any;
     const extraStart = await derivePlaidEffectiveStartDate(
       prisma,
@@ -953,6 +1102,7 @@ export async function exchangePublicToken(params: {
     ok: true,
     connected: true,
     effectiveStartDate: start.toISOString().slice(0, 10),
+    repairedExistingAccounts,
     additionalAccounts: createdAdditionalAccounts,
   });
 }
@@ -1241,7 +1391,23 @@ export async function repairPlaidAccountMapping(params: {
     });
   }
 
-  const selectedPlaidIds = [selectedPlaidAccountId, ...requestedAdditional.map((row) => row.plaidAccountId)];
+  const reusableSiblings = await findReusablePlaidSiblingMappings({
+    prisma,
+    businessId,
+    primaryAccountId: accountId,
+    primaryPlaidAccountId: selectedPlaidAccountId,
+    institutionId: institution?.institution_id ?? conn.institution_id,
+    institutionName: institution?.name ?? conn.institution_name,
+    livePlaidAccounts: accounts,
+  });
+  const reusableByPlaidId = new Map(
+    reusableSiblings.map((row) => [String(row.plaidAccount.account_id), row]),
+  );
+  const selectedPlaidIds = Array.from(new Set([
+    selectedPlaidAccountId,
+    ...requestedAdditional.map((row) => row.plaidAccountId),
+    ...reusableSiblings.map((row) => String(row.plaidAccount.account_id)),
+  ]));
   const existingMappings = await prisma.bankConnection.findMany({
     where: {
       business_id: businessId,
@@ -1249,12 +1415,15 @@ export async function repairPlaidAccountMapping(params: {
     },
     select: { account_id: true, plaid_account_id: true },
   });
-  const primaryConflict = existingMappings.find(
-    (row: any) =>
-      String(row.plaid_account_id) === selectedPlaidAccountId &&
-      String(row.account_id) !== String(accountId),
-  );
-  if (primaryConflict) {
+  const expectedAccountByPlaidId = new Map<string, string>([[selectedPlaidAccountId, accountId]]);
+  for (const row of reusableSiblings) {
+    expectedAccountByPlaidId.set(String(row.plaidAccount.account_id), String(row.connection.account_id));
+  }
+  const mappingConflict = existingMappings.find((row: any) => {
+    const expectedAccountId = expectedAccountByPlaidId.get(String(row.plaid_account_id));
+    return !expectedAccountId || String(row.account_id) !== expectedAccountId;
+  });
+  if (mappingConflict) {
     return json(409, {
       ok: false,
       error: "Selected Plaid account is already connected to another BynkBook account",
@@ -1262,7 +1431,9 @@ export async function repairPlaidAccountMapping(params: {
     });
   }
   const alreadyMappedPlaidIds = new Set(existingMappings.map((row: any) => String(row.plaid_account_id)));
-  const additionsToCreate = requestedAdditional.filter((row) => !alreadyMappedPlaidIds.has(row.plaidAccountId));
+  const additionsToCreate = requestedAdditional.filter(
+    (row) => !alreadyMappedPlaidIds.has(row.plaidAccountId) && !reusableByPlaidId.has(row.plaidAccountId),
+  );
 
   const verifiedMask = selected?.mask ? String(selected.mask) : mask ?? null;
   const repairedStart = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, undefined, "EXISTING_ACCOUNT");
@@ -1289,9 +1460,10 @@ export async function repairPlaidAccountMapping(params: {
   }));
 
   // One Plaid Item can contain several separately mapped BynkBook accounts.
-  // A successful update-mode reconnect repairs the Item, so clear stale
-  // reconnect flags for every sibling whose exact Plaid account is still live.
-  // Never change a sibling's plaid_account_id or cursor here.
+  // A successful update-mode reconnect repairs the Item, so clear stale flags
+  // for exact mappings already on it. Separately connected Items from the same
+  // bank login are consolidated below only when institution, mask, type, and
+  // currency uniquely identify a live account on this repaired Item.
   const livePlaidAccountIds = accounts
     .map((account: any) => String(account?.account_id ?? "").trim())
     .filter(Boolean);
@@ -1310,6 +1482,31 @@ export async function repairPlaidAccountMapping(params: {
       updated_at: new Date(),
     },
   }));
+
+  const repairedExistingAccounts: any[] = [];
+  for (const reusable of reusableSiblings) {
+    databaseWrites.push(prisma.bankConnection.updateMany({
+      where: {
+        business_id: businessId,
+        account_id: reusable.connection.account_id,
+        plaid_account_id: reusable.connection.plaid_account_id,
+      },
+      data: repairedSiblingConnectionData({
+        itemId: conn.plaid_item_id,
+        accessTokenCiphertext: conn.access_token_ciphertext,
+        plaidAccount: reusable.plaidAccount,
+        institution,
+        fallbackInstitutionName: conn.institution_name,
+        fallbackInstitutionId: conn.institution_id,
+      }),
+    }));
+    repairedExistingAccounts.push({
+      accountId: reusable.connection.account_id,
+      accountName: reusable.connection.account?.name ?? null,
+      plaidAccountId: String(reusable.plaidAccount.account_id),
+      last4: reusable.plaidAccount?.mask ? String(reusable.plaidAccount.mask) : null,
+    });
+  }
 
   const createdAdditionalAccounts: any[] = [];
   for (const row of additionsToCreate) {
@@ -1388,6 +1585,7 @@ export async function repairPlaidAccountMapping(params: {
     last4: verifiedMask,
     institutionName: institution?.name ?? conn.institution_name ?? null,
     restoredConnectionCount: Number(restored?.count ?? 0),
+    repairedExistingAccounts,
     additionalAccounts: createdAdditionalAccounts,
   });
 }
