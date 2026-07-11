@@ -120,6 +120,17 @@ export async function handler(event: any) {
     const acctOk = await requireAccountInBusiness(prisma, biz, acct);
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
 
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "ledger.transfer.write",
+      requiredLevel: "FULL",
+      endpointForLog: `${method} /transfers${tid ? "/{transferId}" : ""}`,
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+
     // POST /.../transfers
     if (method === "POST" && path?.endsWith("/transfers")) {
       let body: any = {};
@@ -160,27 +171,6 @@ export async function handler(event: any) {
       const memo = body?.memo ?? null;
       const methodField = body?.method ?? null;
       const status = String(body?.status ?? "EXPECTED").trim();
-
-      const az = await authorizeWrite(prisma, {
-        businessId: biz,
-        scopeAccountId: acct,
-        actorUserId: sub,
-        actorRole: role,
-        actionKey: "ledger.transfer.write",
-        requiredLevel: "FULL",
-        endpointForLog: "POST /v1/businesses/{businessId}/accounts/{accountId}/transfers",
-      });
-      if (!az.allowed) {
-        return json(403, {
-          ok: false,
-          error: "Policy denied",
-          code: "POLICY_DENIED",
-          actionKey: "ledger.transfer.write",
-          requiredLevel: az.requiredLevel,
-          policyValue: az.policyValue,
-          policyKey: az.policyKey,
-        });
-      }
 
       const created = await prisma.$transaction(async (tx: any) => {
         const transfer = await tx.transfer.create({

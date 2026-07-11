@@ -1677,7 +1677,7 @@ export default function SettingsPageClient() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-medium text-foreground">Roles & Permissions</div>
-                      <div className="text-[11px] text-muted-foreground">Policies are enforced by supported backend operations after the role allowlist check.</div>
+                      <div className="text-[11px] text-muted-foreground">These policies control supported changes after the static role allowlist check. Page visibility still follows the role allowlist.</div>
                     </div>
                     <span className="inline-flex items-center rounded-full bg-muted text-foreground px-2 py-0.5 text-[11px] font-medium">
                       Enforced
@@ -1697,7 +1697,7 @@ export default function SettingsPageClient() {
                   <Table minWidth={720}>
                     <THead className="bg-muted/50">
                       <TableRow className="hover:bg-muted/50">
-                        <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Feature</TableHead>
+                        <TableHead className="text-[11px] uppercase tracking-wide text-muted-foreground">Feature changes</TableHead>
                         {["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT", "MEMBER"].map((r) => (
                           <TableHead key={r} className="text-[11px] uppercase tracking-wide text-muted-foreground text-center">{r}</TableHead>
                         ))}
@@ -1706,16 +1706,14 @@ export default function SettingsPageClient() {
 
                     <TableBody>
                       {[
-                        ["dashboard", "Dashboard"],
-                        ["ledger", "Ledger"],
-                        ["reconcile", "Reconcile"],
-                        ["issues", "Issues"],
+                        ["ledger", "Ledger & periods"],
+                        ["reconcile", "Reconciliation"],
+                        ["issues", "Issue resolution"],
                         ["vendors", "Vendors"],
-                        ["invoices", "Invoices"],
-                        ["reports", "Reports"],
-                        ["settings", "Settings"],
-                        ["bank_connections", "Bank Connections"],
-                        ["team_management", "Team Management"],
+                        ["invoices", "Bills & payments"],
+                        ["settings", "Business settings"],
+                        ["bank_connections", "Accounts & bank connections"],
+                        ["team_management", "Team management"],
                       ].map(([key, label]) => (
                         <TableRow key={key} className="hover:bg-muted/50">
                           <TableCell className="py-2 font-medium text-foreground">
@@ -1810,7 +1808,7 @@ export default function SettingsPageClient() {
                   </Table>
 
                   <div className="px-3 py-2 text-[11px] text-muted-foreground border-t border-border">
-                    Backend policy checks enforce these values for supported operations. Static role allowlists remain an additional upper bound.
+                    “Can change” is required for supported mutations. “View only” and “No changes” both block mutations; static role allowlists determine page visibility.
                   </div>
                 </div>
               </div>

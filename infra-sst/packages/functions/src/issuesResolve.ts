@@ -1,5 +1,6 @@
 import { getPrisma } from "./lib/db";
 import { writeCategoryMemoryFeedback } from "./lib/categoryMemoryWriteback";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -84,6 +85,17 @@ export async function handler(event: any) {
     const role = await requireRole(prisma, sub, biz);
     if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
+
+    const az = await authorizeWrite(prisma, {
+      businessId: biz,
+      scopeAccountId: acct,
+      actorUserId: sub,
+      actorRole: role,
+      actionKey: "issues.resolve",
+      requiredLevel: "FULL",
+      endpointForLog: "POST /issues/{issueId}/resolve",
+    });
+    if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
 
     const acctOk = await requireAccountInBusiness(prisma, biz, acct);
     if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });

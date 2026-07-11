@@ -1,6 +1,7 @@
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { randomUUID } from "node:crypto";
+import { authorizeWrite } from "./lib/authz";
 
 function json(statusCode: number, body: any) {
   return {
@@ -57,6 +58,18 @@ async function safeQuery<T>(label: string, fn: () => Promise<T>, fallback: T): P
     console.error(`[businesses.backup] ${label} failed`, err?.message ?? err);
     return fallback;
   }
+}
+
+async function requireSettingsPolicy(prisma: any, businessId: string, userId: string, role: string, endpoint: string) {
+  const az = await authorizeWrite(prisma, {
+    businessId,
+    actorUserId: userId,
+    actorRole: role,
+    actionKey: "business.settings.write",
+    requiredLevel: "FULL",
+    endpointForLog: endpoint,
+  });
+  return az.allowed;
 }
 
 export async function handler(event: any) {
@@ -406,6 +419,9 @@ export async function handler(event: any) {
   if (method === "POST" && businessId && path?.endsWith(`/v1/businesses/${businessId}/reset`)) {
     const authz = await requireOwner(prisma, businessId, sub);
     if (!authz.ok) return json(authz.status, { ok: false, error: authz.error });
+    if (!await requireSettingsPolicy(prisma, businessId, sub, "OWNER", "POST /businesses/{businessId}/reset")) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     let body: any = {};
     try {
@@ -690,6 +706,9 @@ export async function handler(event: any) {
   if (method === "DELETE" && businessId && path.includes("/v1/businesses/")) {
     const authz = await requireOwner(prisma, businessId, sub);
     if (!authz.ok) return json(authz.status, { ok: false, error: authz.error });
+    if (!await requireSettingsPolicy(prisma, businessId, sub, "OWNER", "DELETE /businesses/{businessId}")) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     let body: any = {};
     try {
@@ -723,6 +742,9 @@ export async function handler(event: any) {
     const role = String(membership?.role ?? "").toUpperCase();
     if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
     if (!(role === "OWNER" || role === "ADMIN")) return json(403, { ok: false, error: "Forbidden (requires OWNER/ADMIN)" });
+    if (!await requireSettingsPolicy(prisma, businessId, sub, role, "PATCH /businesses/{businessId}")) {
+      return json(403, { ok: false, error: "Policy denied", code: "POLICY_DENIED" });
+    }
 
     let body: any = {};
     try {
