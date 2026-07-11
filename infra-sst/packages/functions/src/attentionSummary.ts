@@ -94,10 +94,8 @@ async function countUncategorizedEntries(prisma: any, businessId: string, accoun
       account_id: accountId,
       category_id: null,
       deleted_at: null,
-      NOT: [
-        { status: "VOIDED" },
-        { type: "OPENING" },
-      ],
+      type: { in: ["EXPENSE", "INCOME"] },
+      NOT: [{ status: "VOIDED" }],
     },
   });
   return Number(count) || 0;

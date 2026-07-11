@@ -156,3 +156,11 @@ These findings are provisional until the complete matrix is rerun. Confirmed mea
 - Evidence: User screenshot at 100 rows shows pagination, the older-row explanation, two actions, and all financial totals competing in one wrapping flex container. The totals fall to an unstructured second line against the bottom border and the explanation truncates despite available vertical space.
 - Impact: Important totals are visually detached from their scope, controls are difficult to scan, and the footer looks broken at a normal desktop width.
 - Required correction: Give navigation/loading and totals separate padded rows, preserve complete monetary values, allow explanatory text to wrap, and verify desktop/tablet/mobile layouts in both themes.
+
+## BYNK-EXH-CATEGORY-002 — Sidebar Category Review badge includes a non-categorizable entry type
+
+- Severity: MEDIUM
+- Status: Corrected in code; production verification pending
+- Evidence: Post-deploy production QA showed `Category Review 142` in the sidebar while the page's authoritative filtered query showed `141 Uncategorized` and `Showing 100 of 141`. The shared attention summary counted every uncategorized non-opening row, while Category Review intentionally accepts only `EXPENSE` and `INCOME`.
+- Impact: The badge sends users to a queue that can never reach zero and disagrees with the destination page.
+- Required correction: Apply the same actionable `EXPENSE`/`INCOME`, active, non-voided scope in both the sidebar summary and Category Review query.

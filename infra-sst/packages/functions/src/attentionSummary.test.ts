@@ -147,7 +147,7 @@ describe("attention summary", () => {
     expect(queryText).toContain("duplicate_group_count >= 2");
   });
 
-  test("uncategorized count excludes deleted voided and opening rows", async () => {
+  test("uncategorized count matches the actionable income and expense review queue", async () => {
     const { handler, prisma } = await loadHandler({ uncategorizedCount: 4 });
 
     const res = await handler(event());
@@ -158,10 +158,8 @@ describe("attention summary", () => {
         account_id: "22222222-2222-4222-8222-222222222222",
         category_id: null,
         deleted_at: null,
-        NOT: [
-          { status: "VOIDED" },
-          { type: "OPENING" },
-        ],
+        type: { in: ["EXPENSE", "INCOME"] },
+        NOT: [{ status: "VOIDED" }],
       },
     });
   });
