@@ -4851,6 +4851,7 @@ const displayBankActiveList = useMemo(() => {
                     </button>
                     {plaidNewAccountsAvailable ? (
                       <PlaidConnectButton
+                        key={`plaid-more-accounts:${selectedBusinessId ?? ""}:${selectedAccountId ?? ""}`}
                         businessId={selectedBusinessId ?? ""}
                         accountId={selectedAccountId ?? ""}
                         businessName={selectedBusinessName}
@@ -4927,6 +4928,7 @@ const displayBankActiveList = useMemo(() => {
                     Retry status
                   </button>
                 ) : <PlaidConnectButton
+                  key={`plaid-primary:${selectedBusinessId ?? ""}:${selectedAccountId ?? ""}:${plaidNeedsAttention ? "reconnect" : "connect"}`}
                   businessId={selectedBusinessId ?? ""}
                   accountId={selectedAccountId ?? ""}
                   businessName={selectedBusinessName}

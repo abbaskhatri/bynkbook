@@ -772,12 +772,19 @@ export async function createLinkToken(params: {
       .filter((connection: any) => sourceAccounts.some((account: any) =>
         String(account?.account_id ?? "") === String(connection.plaid_account_id ?? ""),
       ))
-      .map((connection: any) => ({
-        accountId: String(connection.account_id),
-        plaidAccountId: String(connection.plaid_account_id),
-        mask: connection.plaid_mask ?? null,
-        name: connection.account?.name ?? null,
-      }));
+      .map((connection: any) => {
+        const live = sourceAccounts.find((account: any) =>
+          String(account?.account_id ?? "") === String(connection.plaid_account_id ?? ""),
+        );
+        return {
+          accountId: String(connection.account_id),
+          plaidAccountId: String(connection.plaid_account_id),
+          mask: live?.mask ?? connection.plaid_mask ?? null,
+          plaidType: live?.type ?? connection.plaid_type ?? null,
+          plaidSubtype: live?.subtype ?? connection.plaid_subtype ?? null,
+          name: connection.account?.name ?? null,
+        };
+      });
 
     const res = await plaid.linkTokenCreate({
       user: { client_user_id: userId },
@@ -799,6 +806,11 @@ export async function createLinkToken(params: {
       targetPlaidMask: localAccount.last4 ?? null,
       targetAccountName: localAccount.name ?? null,
       requiredPreservedAccounts,
+      relatedInstitutionAccounts: itemConnections.map((connection: any) => ({
+        accountId: String(connection.account_id),
+        name: connection.account?.name ?? null,
+        mask: connection.plaid_mask ?? null,
+      })),
     });
   }
 
@@ -883,20 +895,44 @@ export async function createLinkToken(params: {
         .filter((connection: any) => updateLiveAccounts.some((account: any) =>
           String(account?.account_id ?? "") === String(connection.plaid_account_id ?? ""),
         ))
-        .map((connection: any) => ({
-          accountId: String(connection.account_id),
-          plaidAccountId: String(connection.plaid_account_id),
-          mask: connection.plaid_mask ?? null,
-          name: connection.account?.name ?? null,
-        }))
+        .map((connection: any) => {
+          const live = updateLiveAccounts.find((account: any) =>
+            String(account?.account_id ?? "") === String(connection.plaid_account_id ?? ""),
+          );
+          return {
+            accountId: String(connection.account_id),
+            plaidAccountId: String(connection.plaid_account_id),
+            mask: live?.mask ?? connection.plaid_mask ?? null,
+            plaidType: live?.type ?? connection.plaid_type ?? null,
+            plaidSubtype: live?.subtype ?? connection.plaid_subtype ?? null,
+            name: connection.account?.name ?? null,
+          };
+        })
       : updateConnectionMappingLive
         ? [{
           accountId,
           plaidAccountId: String(conn.plaid_account_id),
-          mask: conn.plaid_mask ?? null,
+          mask: updateLiveAccounts.find((account: any) =>
+            String(account?.account_id ?? "") === String(conn.plaid_account_id ?? ""),
+          )?.mask ?? conn.plaid_mask ?? null,
+          plaidType: updateLiveAccounts.find((account: any) =>
+            String(account?.account_id ?? "") === String(conn.plaid_account_id ?? ""),
+          )?.type ?? conn.plaid_type ?? null,
+          plaidSubtype: updateLiveAccounts.find((account: any) =>
+            String(account?.account_id ?? "") === String(conn.plaid_account_id ?? ""),
+          )?.subtype ?? conn.plaid_subtype ?? null,
           name: localAccount.name ?? null,
         }]
         : [];
+    const relatedInstitutionAccounts = knownConnections
+      .filter((connection: any, index: number, all: any[]) =>
+        all.findIndex((candidate: any) => String(candidate.account_id) === String(connection.account_id)) === index,
+      )
+      .map((connection: any) => ({
+        accountId: String(connection.account_id),
+        name: connection.account?.name ?? null,
+        mask: connection.plaid_mask ?? null,
+      }));
     return json(200, {
       ok: true,
       link_token: res.data.link_token,
@@ -907,6 +943,7 @@ export async function createLinkToken(params: {
       targetPlaidMask: conn.plaid_mask ?? null,
       targetAccountName: localAccount.name ?? null,
       requiredPreservedAccounts,
+      relatedInstitutionAccounts,
     });
   }
 

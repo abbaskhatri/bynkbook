@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Landmark } from "lucide-react";
 import {
   plaidApplyOpening,
@@ -12,6 +12,7 @@ import {
   plaidSync,
 } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
+import { missingRequiredPlaidAccount } from "@/lib/plaid/accountSelection";
 
 function TinySpinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
@@ -197,6 +198,32 @@ export function PlaidConnectButton(props: Props) {
     setPendingReconnectRepair(false);
     setPendingRepairSourceAccountId(null);
   }, []);
+
+  useEffect(() => {
+    // This component can stay mounted while Reconcile changes business/account.
+    // Never carry a warning, token, modal, or Link handler into the next scope.
+    try {
+      handlerRef.current?.exit?.();
+      handlerRef.current?.destroy?.();
+    } catch {}
+    handlerRef.current = null;
+    openingRef.current = false;
+    setBusy(false);
+    setConnecting(false);
+    setErrorMsg(null);
+    setConfirmed(false);
+    setOpenConfirm(false);
+    setPreparedLinkContext(null);
+    setSelectedConnectionSourceId("new");
+    setOpenSelect(false);
+    resetPendingSelection();
+    setOpenSyncing(false);
+    setSyncInfo(null);
+    setSyncErrorMsg(null);
+    setOpenOpeningReview(false);
+    setOpeningReview(null);
+    setOpeningBusy(false);
+  }, [accountId, businessId, mode, resetPendingSelection]);
 
   const runInitialSync = useCallback(async (options?: { afterReconnect?: boolean }) => {
     setOpenSyncing(true);
@@ -441,13 +468,7 @@ export function PlaidConnectButton(props: Props) {
               const requiredPreservedAccounts = Array.isArray(lt?.requiredPreservedAccounts)
                 ? lt.requiredPreservedAccounts
                 : [];
-              const missingPreservedAccount = requiredPreservedAccounts.find((required: any) =>
-                !accounts.some((account) =>
-                  required?.plaidAccountId
-                    ? account.id === String(required.plaidAccountId)
-                    : required?.mask && account.mask === String(required.mask),
-                ),
-              );
+              const missingPreservedAccount = missingRequiredPlaidAccount(requiredPreservedAccounts, accounts);
               if (missingPreservedAccount) {
                 const preservedName = String(missingPreservedAccount?.name ?? "the existing account");
                 throw new Error(
@@ -666,9 +687,25 @@ export function PlaidConnectButton(props: Props) {
 
           {mode === "reconnect" ? (
             <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
-              {preparedLinkContext?.usingSharedItem
-                ? `Plaid will open the existing ${preparedLinkContext?.institutionName ?? "bank"} authorization. Keep ${preparedLinkContext?.requiredPreservedAccounts?.[0]?.name ?? "the currently connected account"} selected, then add ${preparedLinkContext?.targetAccountName ?? "this account"}. The BynkBook ledgers remain separate.`
-                : "In Plaid, keep every bank account already used in BynkBook selected. De-selecting an account revokes that account's feed. BynkBook will reuse matching existing accounts instead of creating duplicates."}
+              <div>
+                {preparedLinkContext?.usingSharedItem
+                  ? `Plaid will open the existing ${preparedLinkContext?.institutionName ?? "bank"} authorization. Add ${preparedLinkContext?.targetAccountName ?? "this account"} without unchecking the accounts already shared with BynkBook.`
+                  : "In Plaid, keep every bank account already used in BynkBook selected. De-selecting an account revokes that account's feed. BynkBook will reuse matching existing accounts instead of creating duplicates."}
+              </div>
+              {Array.isArray(preparedLinkContext?.relatedInstitutionAccounts)
+                && preparedLinkContext.relatedInstitutionAccounts.length > 0 ? (
+                  <div className="mt-2">
+                    <div className="font-semibold">When these accounts appear under this same bank login, leave them checked:</div>
+                    <ul className="ml-5 mt-1 list-disc space-y-0.5">
+                      {preparedLinkContext.relatedInstitutionAccounts.map((related: any) => (
+                        <li key={String(related.accountId)}>
+                          {related.name ?? "Bank account"}{related.mask ? ` (****${related.mask})` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              <div className="mt-2">Each BynkBook ledger remains separate after the shared bank authorization is repaired.</div>
             </div>
           ) : (
             <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
