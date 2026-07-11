@@ -139,7 +139,7 @@
         actorUserId: sub,
         actorRole: role,
         actionKey: "ledger.entry.update",
-        requiredLevel: "VIEW",
+        requiredLevel: "FULL",
         endpointForLog: `${method} /v1/businesses/{businessId}/accounts/{accountId}/entries/{entryId}`,
       });
       if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });

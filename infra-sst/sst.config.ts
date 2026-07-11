@@ -101,6 +101,7 @@ export default $config({
     });
 
     const api = new sst.aws.ApiGatewayV2(optionalEnv("BYNKBOOK_API_NAME", `${resourcePrefix}-sst-api`), {
+      accessLog: { retention: "3 months" },
       cors: {
         allowHeaders: ["authorization", "content-type"],
         allowMethods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],

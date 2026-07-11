@@ -330,7 +330,7 @@ function LoginInner() {
                       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-bb-text-subtle">
                         <button
                           type="button"
-                          className="hover:text-slate-700 dark:hover:text-bb-text"
+                          className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text"
                           onClick={() => {
                             setNeedsNewPassword(false);
                             setNewPassword("");
@@ -342,7 +342,7 @@ function LoginInner() {
 
                         <button
                           type="button"
-                          className="hover:text-slate-700 dark:hover:text-bb-text"
+                          className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text"
                           onClick={() => router.replace(`/forgot-password?next=${encodeURIComponent(nextUrl)}`)}
                         >
                           Forgot password
@@ -400,7 +400,7 @@ function LoginInner() {
                             <Label htmlFor="password">Password</Label>
                             <button
                               type="button"
-                              className="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-bb-text-subtle dark:hover:text-bb-text"
+                              className="inline-flex min-h-11 items-center px-2 text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-bb-text-subtle dark:hover:text-bb-text"
                               onClick={() => router.replace(`/forgot-password?next=${encodeURIComponent(nextUrl)}`)}
                             >
                               Forgot password?
@@ -446,18 +446,18 @@ function LoginInner() {
                       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-bb-text-subtle">
                         <button
                           type="button"
-                          className="hover:text-slate-700 dark:hover:text-bb-text"
+                          className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text"
                           onClick={() => router.replace(`/signup?next=${encodeURIComponent(nextUrl)}`)}
                         >
                           Create account
                         </button>
 
                         <div className="flex items-center gap-3">
-                          <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/privacy")}>
+                          <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/privacy")}>
                             Privacy
                           </button>
                           <span className="text-slate-300 dark:text-bb-border-strong">•</span>
-                          <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/terms")}>
+                          <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/terms")}>
                             Terms
                           </button>
                         </div>

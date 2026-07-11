@@ -292,10 +292,10 @@ export default function Home() {
         <footer className="mx-auto mt-10 flex max-w-7xl flex-col items-center justify-between gap-4 border-t border-slate-200/80 pt-6 text-xs text-slate-500 sm:flex-row">
           <div>BynkBook • Cleaner books • Safer close</div>
           <div className="flex items-center gap-4">
-            <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/privacy")}>
+            <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700" onClick={() => router.replace("/privacy")}>
               Privacy
             </button>
-            <button type="button" className="hover:text-slate-700" onClick={() => router.replace("/terms")}>
+            <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700" onClick={() => router.replace("/terms")}>
               Terms
             </button>
           </div>
@@ -312,7 +312,7 @@ function ProductScene() {
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-4">
           <div>
             <div className="text-sm font-semibold">Reconciliation cockpit</div>
-            <div className="mt-1 text-xs text-slate-500">Flo Vapor and More Dallas • May 2026</div>
+            <div className="mt-1 text-xs text-slate-500">Fictional sample business • Illustrative data only</div>
           </div>
           <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
             Clean month

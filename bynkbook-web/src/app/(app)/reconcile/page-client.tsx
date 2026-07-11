@@ -38,6 +38,7 @@ import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
+import { safeCsvCell } from "@/lib/csv";
 import { listBankTransactions, createEntryFromBankTransaction, cleanupPlaidOverlap, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
 import {
@@ -2473,17 +2474,9 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Phase 5D: Export helpers (frontend-only, safe CSV)
   // -------------------------
-  const csvCell = (v: any) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    if (s.includes('"') || s.includes(",") || s.includes("\n") || s.includes("\r")) {
-      return `"${s.replace(/"/g, '""')}"`;
-    }
-    return s;
-  };
-
   const toCsv = (headers: string[], rows: Record<string, any>[]) => {
-    const head = headers.map(csvCell).join(",");
-    const lines = rows.map((r) => headers.map((h) => csvCell(r[h])).join(","));
+    const head = headers.map(safeCsvCell).join(",");
+    const lines = rows.map((r) => headers.map((h) => safeCsvCell(r[h])).join(","));
     return [head, ...lines].join("\r\n");
   };
 

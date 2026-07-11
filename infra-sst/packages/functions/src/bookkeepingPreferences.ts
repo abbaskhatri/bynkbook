@@ -108,7 +108,7 @@ export async function handler(event: any) {
       actorUserId: sub,
       actorRole: role,
       actionKey: "bookkeeping.preferences.write",
-      requiredLevel: "VIEW",
+      requiredLevel: "FULL",
       endpointForLog: "PUT /v1/businesses/{businessId}/bookkeeping/preferences",
     });
     if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });

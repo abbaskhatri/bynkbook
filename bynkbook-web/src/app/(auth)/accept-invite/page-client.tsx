@@ -88,14 +88,14 @@ export default function AcceptInviteClient() {
           {needsAuth ? (
             <div className="flex items-center gap-2">
               <Button
-                className="h-8 px-3 text-xs"
+                className="h-11 px-3 text-xs"
                 onClick={() => router.replace(`/login?next=${encodeURIComponent(nextUrl)}`)}
               >
                 Sign in
               </Button>
 
               <Button
-                className="h-8 px-3 text-xs"
+                className="h-11 px-3 text-xs"
                 variant="outline"
                 onClick={() => router.replace(`/signup?next=${encodeURIComponent(nextUrl)}`)}
               >

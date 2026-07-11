@@ -4,6 +4,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash, randomUUID } from "node:crypto";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
+import { safeCsvCell } from "./lib/csvSafe";
 
 function json(statusCode: number, body: any) {
   return {
@@ -67,15 +68,9 @@ function monthBoundsChicagoAsDateStrings(month: string) {
   return { start, end };
 }
 
-function csvEscape(value: any) {
-  const s = value === null || value === undefined ? "" : String(value);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
 function toCsv(headers: string[], rows: any[][]) {
-  const lines = [headers.map(csvEscape).join(",")];
-  for (const r of rows) lines.push(r.map(csvEscape).join(","));
+  const lines = [headers.map(safeCsvCell).join(",")];
+  for (const r of rows) lines.push(r.map(safeCsvCell).join(","));
   return lines.join("\n") + "\n";
 }
 

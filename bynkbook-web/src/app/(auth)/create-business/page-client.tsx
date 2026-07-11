@@ -423,16 +423,16 @@ export default function CreateBusinessClient() {
               </form>
 
               <div className="mt-6 flex items-center justify-between text-xs text-slate-500 dark:text-bb-text-subtle">
-                <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/login")}>
+                <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/login")}>
                   Back to sign in
                 </button>
 
                 <div className="flex items-center gap-3">
-                  <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/privacy")}>
+                  <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/privacy")}>
                     Privacy
                   </button>
                   <span className="text-slate-300 dark:text-bb-border-strong">•</span>
-                  <button type="button" className="hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/terms")}>
+                  <button type="button" className="inline-flex min-h-11 items-center px-2 hover:text-slate-700 dark:hover:text-bb-text" onClick={() => router.replace("/terms")}>
                     Terms
                   </button>
                 </div>

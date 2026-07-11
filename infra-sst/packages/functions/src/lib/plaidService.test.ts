@@ -784,6 +784,17 @@ describe("syncTransactions", () => {
     expect(destructiveRemoval).toBeUndefined();
     expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
       where: {
+        id: "bank-matched-1",
+        business_id: "biz-1",
+        account_id: "acct-1",
+      },
+      data: expect.objectContaining({
+        source_removed_at: expect.any(Date),
+        source_removal_code: "PLAID_REMOVED",
+      }),
+    });
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
+      where: {
         business_id: "biz-1",
         account_id: "acct-1",
         id: { in: ["bank-matched-1"] },

@@ -1643,6 +1643,8 @@ export async function syncTransactions(params: {
             iso_currency_code: t.iso_currency_code ?? null,
             is_removed: false,
             removed_at: null,
+            source_removed_at: null,
+            source_removal_code: null,
             source: "PLAID",
             plaid_account_id: plaidAccountId,
             raw: t as any,
@@ -1690,6 +1692,8 @@ export async function syncTransactions(params: {
           is_pending: isPending,
           iso_currency_code: t.iso_currency_code ?? null,
           is_removed: false,
+          source_removed_at: null,
+          source_removal_code: null,
           raw: t as any,
         },
       });
@@ -1726,6 +1730,8 @@ export async function syncTransactions(params: {
           iso_currency_code: t.iso_currency_code ?? null,
           is_removed: false,
           removed_at: null,
+          source_removed_at: null,
+          source_removal_code: null,
           source: "PLAID",
           plaid_account_id: plaidAccountId,
           raw: t as any,
@@ -1748,6 +1754,18 @@ export async function syncTransactions(params: {
 
     const existingRemovedRow = removedExistingByPlaidId.get(removedPlaidId);
     if (existingRemovedRow && activeMatchedBankTransactionIdSet.has(String(existingRemovedRow.id))) {
+      await prisma.bankTransaction.updateMany({
+        where: {
+          id: existingRemovedRow.id,
+          business_id: businessId,
+          account_id: accountId,
+        },
+        data: {
+          source_removed_at: now,
+          source_removal_code: "PLAID_REMOVED",
+          updated_at: now,
+        },
+      });
       protectedMatchedRemovalCount += 1;
       continue;
     }
@@ -1759,7 +1777,13 @@ export async function syncTransactions(params: {
         plaid_transaction_id: removedPlaidId,
         plaid_account_id: plaidAccountId,
       },
-      data: { is_removed: true, removed_at: now, updated_at: now },
+      data: {
+        is_removed: true,
+        removed_at: now,
+        source_removed_at: now,
+        source_removal_code: "PLAID_REMOVED",
+        updated_at: now,
+      },
     });
   }
 

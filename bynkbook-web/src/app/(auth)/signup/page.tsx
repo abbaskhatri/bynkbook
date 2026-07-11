@@ -237,7 +237,7 @@ function SignupInner() {
                     <div className="text-xs text-slate-600 dark:text-bb-text-subtle">
                       Already have an account?{" "}
                       <button
-                        className="font-medium text-slate-900 hover:underline dark:text-bb-text"
+                        className="inline-flex min-h-11 items-center px-2 font-medium text-slate-900 hover:underline dark:text-bb-text"
                         onClick={() => router.replace(`/login?next=${encodeURIComponent(nextUrl)}`)}
                         type="button"
                       >

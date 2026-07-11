@@ -45,7 +45,7 @@ async function requirePolicyWrite(prisma: any, args: { businessId: string; actor
     actorUserId: args.actorUserId,
     actorRole: args.actorRole,
     actionKey: "vendors.write",
-    requiredLevel: "VIEW",
+    requiredLevel: "FULL",
     endpointForLog: args.endpoint,
   });
   if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });

@@ -264,7 +264,10 @@ export function AutoReconcileDialog(props: {
     if (!open) return [];
     if (!bankTxns?.length || !expectedEntries?.length) return [];
 
-    const entries = expectedEntries.slice(0, 250); // safety cap
+    // Index every expected entry for exact one-to-one candidates. The previous
+    // first-250 slice made results depend on pagination/order and silently
+    // omitted otherwise exact matches.
+    const entries = expectedEntries;
     const entriesByAmount = new Map<string, any[]>();
 
     for (const e of entries) {
@@ -346,7 +349,11 @@ export function AutoReconcileDialog(props: {
         .sort((a, b) => {
           if (a.abs !== b.abs) return a.abs > b.abs ? -1 : 1;
           return String(a.e.id).localeCompare(String(b.e.id));
-        });
+        })
+        // Split matching is bounded independently because its subset search is
+        // combinatorial. Candidates are already date-window and direction
+        // filtered; one-to-one matching above remains complete.
+        .slice(0, 24);
 
       if (candidates.length < 2) return;
 

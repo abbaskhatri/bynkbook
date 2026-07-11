@@ -173,7 +173,7 @@ export async function handler(event: any) {
       actorUserId: sub,
       actorRole: role,
       actionKey: "uploads.write",
-      requiredLevel: "VIEW",
+      requiredLevel: "FULL",
       endpointForLog: `${method ?? "UNKNOWN"} ${uploadsBasePath}`,
     });
     if (!az.allowed) return json(403, { ok: false, error: "Policy denied", code: az.code ?? "POLICY_DENIED" });
