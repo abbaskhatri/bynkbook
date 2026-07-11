@@ -56,3 +56,16 @@ These passing commands prove compilation and isolated logic, not complete workfl
 | Backend TypeScript after corrections | Passed |
 | Next.js production build after corrections | Passed; 33 built routes |
 | Local authenticated visual attempt | Inconclusive by design: production API rejected the localhost origin through CORS; no visual-pass claim recorded |
+
+## Production remediation verification
+
+| Check | Result |
+|---|---|
+| Backend deployment | SST production deploy completed on canonical API |
+| Frontend deployment | Amplify job 333 succeeded for commit `93d1ca130d3a7cdded4e11ab25dafade3e8a8616` |
+| Ledger footer, desktop dark | Separate navigation and totals rows rendered; complete monetary values; note uses normal wrapping with no ellipsis |
+| Ledger footer, tablet/mobile shells | No document-level horizontal overflow; the wide ledger remains inside its table scroller |
+| Issues authoritative totals | `Open 325`, `Duplicate groups 60`, `Categories 141`, `Stale 59` on first page |
+| Issues navigation side effect | Zero non-GET `/issues` requests while opening the page; scan remains explicit |
+| Category Review counts | Sidebar 141, headline 141, queue 141, status `Showing 100 of 141` |
+| Final category summary deploy | SST production deploy completed after 14 focused tests and backend typecheck passed |

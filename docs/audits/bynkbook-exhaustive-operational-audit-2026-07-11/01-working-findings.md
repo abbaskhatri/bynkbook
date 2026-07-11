@@ -25,32 +25,32 @@ These findings are provisional until the complete matrix is rerun. Confirmed mea
 ## BYNK-EXH-ISSUES-001 — Opening Issues can mutate production by automatically scanning
 
 - Severity: MEDIUM
-- Status: Corrected in code; production verification pending
-- Evidence: `issues/page-client.tsx` automatically calls the POST scan endpoint when a browser-local timestamp is missing or older than six hours. Fresh audit browser contexts triggered POST `/issues/scan` merely by navigating to the page.
+- Status: Fixed and production-verified
+- Evidence: `issues/page-client.tsx` automatically called the POST scan endpoint when a browser-local timestamp was missing or older than six hours. Fresh audit browser contexts triggered POST `/issues/scan` merely by navigating to the page. After correction, production navigation generated zero non-GET Issues requests.
 - Impact: A supposedly read-only visit performs writes and expensive detection work. A new browser/device repeats scans because freshness is localStorage-only rather than server-authoritative.
 - Required correction: Define intentional product behavior. If auto-scan remains, use server scan freshness, one in-flight lease, accurate copy, and explicit operational evidence. Otherwise keep scan manual.
 
 ## BYNK-EXH-ISSUES-002 — Issues page KPIs count only loaded pages
 
 - Severity: MEDIUM
-- Status: Corrected in code; production verification pending
-- Evidence: `issues/page-client.tsx` computes Open/Duplicates/Stale/Missing from `issues.length`. Canonical production-QA evidence changed from `Open 67 / Duplicates 67 / Categories 0 / Stale 0` on first load to `Open 325 / Duplicates 125 / Categories 141 / Stale 59` after seven Load More actions. The sidebar showed `Issues 184`, a separate duplicate-plus-stale metric.
+- Status: Fixed and production-verified
+- Evidence: The old client computed KPIs from `issues.length`. After correction, the first production page reports authoritative totals: `Open 325 / Duplicate groups 60 / Categories 141 / Stale 59`.
 - Impact: Page KPI cards understate outstanding work and disagree with sidebar badges until every page is loaded.
 - Required correction: Use authoritative totals, or label all counters as loaded/visible and provide full pagination totals by type.
 
 ## BYNK-EXH-ISSUES-003 — “Duplicate groups” counts entries, not groups
 
 - Severity: MEDIUM
-- Status: Corrected in code; production verification pending
-- Evidence: The Duplicate groups card uses `issues.filter(kind === "DUPLICATE").length`; it does not count unique `group_key` values. Production-QA showed 125 duplicate issue rows after full pagination.
+- Status: Fixed and production-verified
+- Evidence: The old Duplicate groups card counted duplicate issue rows. After correction, production shows 60 unique groups rather than 125 affected rows.
 - Impact: Users cannot tell how many decisions are required because a two-entry group counts as two and overlapping peer hydration can change loaded counts nonlinearly.
 - Required correction: Count unique active duplicate group keys for group labels and separately show affected entry count where useful.
 
 ## BYNK-EXH-CATEGORY-001 — Category Review headline count uses loaded rows instead of total queue
 
 - Severity: MEDIUM
-- Status: Corrected in code; production verification pending
-- Evidence: Production displayed `100 Uncategorized` and `Showing 100 of 141 uncategorized entries` simultaneously. The headline uses `loadedCount`; the API metadata exposes `totalCount`.
+- Status: Fixed and production-verified
+- Evidence: Production now displays `141 Uncategorized`, queue `141`, and separately `Showing 100 of 141 uncategorized entries`.
 - Impact: Users underestimate work remaining and cannot trust the page summary.
 - Required correction: Show total queue in the primary KPI and separately label loaded/visible rows.
 
@@ -152,7 +152,7 @@ These findings are provisional until the complete matrix is rerun. Confirmed mea
 ## BYNK-EXH-LEDGER-001 — Ledger footer controls and totals collapse into a cramped clipped layout
 
 - Severity: MEDIUM
-- Status: Corrected in code; production visual verification pending
+- Status: Fixed and production-verified
 - Evidence: User screenshot at 100 rows shows pagination, the older-row explanation, two actions, and all financial totals competing in one wrapping flex container. The totals fall to an unstructured second line against the bottom border and the explanation truncates despite available vertical space.
 - Impact: Important totals are visually detached from their scope, controls are difficult to scan, and the footer looks broken at a normal desktop width.
 - Required correction: Give navigation/loading and totals separate padded rows, preserve complete monetary values, allow explanatory text to wrap, and verify desktop/tablet/mobile layouts in both themes.
@@ -160,7 +160,7 @@ These findings are provisional until the complete matrix is rerun. Confirmed mea
 ## BYNK-EXH-CATEGORY-002 — Sidebar Category Review badge includes a non-categorizable entry type
 
 - Severity: MEDIUM
-- Status: Corrected in code; production verification pending
+- Status: Fixed and production-verified
 - Evidence: Post-deploy production QA showed `Category Review 142` in the sidebar while the page's authoritative filtered query showed `141 Uncategorized` and `Showing 100 of 141`. The shared attention summary counted every uncategorized non-opening row, while Category Review intentionally accepts only `EXPENSE` and `INCOME`.
 - Impact: The badge sends users to a queue that can never reach zero and disagrees with the destination page.
 - Required correction: Apply the same actionable `EXPENSE`/`INCOME`, active, non-voided scope in both the sidebar summary and Category Review query.
