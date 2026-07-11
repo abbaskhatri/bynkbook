@@ -382,7 +382,7 @@ export default function CategoryReviewPageClient() {
     getNextPageParam: (lastPage) => (lastPage.meta.hasMore ? lastPage.meta.nextCursor ?? undefined : undefined),
     staleTime: 30_000,
     gcTime: 10 * 60_000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: "always",
   });
 
   async function refreshCategoryReviewAfterMutation() {

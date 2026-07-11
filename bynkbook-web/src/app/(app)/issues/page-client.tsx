@@ -181,7 +181,7 @@ export default function IssuesPageClient() {
     return () => clearTimeout(t);
   }, [payeeQuery]);
 
-  const [filterIssueType, setFilterIssueType] = useState<"ALL" | "DUPLICATE" | "STALE_CHECK">("ALL");
+  const [filterIssueType, setFilterIssueType] = useState<"ALL" | "DUPLICATE" | "MISSING_CATEGORY" | "STALE_CHECK">("ALL");
   const [filterStatus, setFilterStatus] = useState<"OPEN" | "ALL">("OPEN");
   const [filterSeverity, setFilterSeverity] = useState<"ALL" | "WARNING">("ALL");
 
@@ -263,20 +263,22 @@ export default function IssuesPageClient() {
         {
           method: "POST",
           body: JSON.stringify({
-            includeMissingCategory: false,
+            includeMissingCategory: true,
             dryRun: false,
           }),
         }
       );
 
-      // Targeted invalidation only
-      void qc.invalidateQueries({
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
+        qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
+        qc.invalidateQueries({ queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId), exact: false }),
+        qc.invalidateQueries({ queryKey: ["categoryReviewEntries", selectedBusinessId, selectedAccountId], exact: false }),
+      ]);
+      await qc.refetchQueries({
         queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
         exact: false,
-      });
-      void qc.invalidateQueries({
-        queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"),
-        exact: false,
+        type: "active",
       });
 
       // Persist last scan timestamp (UI-only throttle)
@@ -289,6 +291,11 @@ export default function IssuesPageClient() {
         }
       }
       setLastScanAt(nowIso);
+      window.dispatchEvent(
+        new CustomEvent("bynkbook:issues-scanned", {
+          detail: { businessId: selectedBusinessId, accountId: selectedAccountId, scannedAt: nowIso },
+        })
+      );
     } catch (e: any) {
       const r = applyMutationError(e, "Can’t scan issues");
       if (!r.isClosed) setScanErr(r.msg);
@@ -343,7 +350,7 @@ export default function IssuesPageClient() {
     enabled: !!selectedBusinessId && !!selectedAccountId,
     initialPageParam: null as string | null,
     staleTime: 10_000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: "always",
     queryFn: async ({ pageParam }) => {
       const statusParam = filterStatus === "ALL" ? "ALL" : "OPEN";
       return listAccountIssues({
@@ -358,6 +365,41 @@ export default function IssuesPageClient() {
       lastPage.hasMore && lastPage.nextCursor ? lastPage.nextCursor : undefined
     ),
   });
+
+  useEffect(() => {
+    if (!scanKey || !selectedBusinessId || !selectedAccountId) return;
+
+    const refreshFromScan = (scannedAt: string | null) => {
+      if (scannedAt) setLastScanAt(scannedAt);
+      void Promise.all([
+        qc.invalidateQueries({ queryKey: ["entryIssues", selectedBusinessId, selectedAccountId], exact: false }),
+        qc.invalidateQueries({ queryKey: issueCountKey(selectedBusinessId, selectedAccountId, "OPEN"), exact: false }),
+        qc.invalidateQueries({ queryKey: attentionSummaryKey(selectedBusinessId, selectedAccountId), exact: false }),
+      ]).then(() =>
+        qc.refetchQueries({
+          queryKey: ["entryIssues", selectedBusinessId, selectedAccountId],
+          exact: false,
+          type: "active",
+        })
+      );
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === scanKey) refreshFromScan(event.newValue);
+    };
+    const onScan = (event: Event) => {
+      const detail = (event as CustomEvent<{ businessId?: string; accountId?: string; scannedAt?: string }>).detail;
+      if (detail?.businessId !== selectedBusinessId || detail?.accountId !== selectedAccountId) return;
+      refreshFromScan(detail.scannedAt ?? null);
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("bynkbook:issues-scanned", onScan);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("bynkbook:issues-scanned", onScan);
+    };
+  }, [qc, scanKey, selectedAccountId, selectedBusinessId]);
 
   async function refreshIssuesAfterMutation() {
     if (!selectedBusinessId || !selectedAccountId) return;
@@ -440,15 +482,14 @@ export default function IssuesPageClient() {
     detected_at: it.detected_at,
   }));
 
-  // Map API issues to UI rows (exclude missing category on Issues page)
+  // Map every account issue to a visible row. Category Review remains the
+  // specialized bulk workflow, while Issues provides the complete audit queue.
   const issues = useMemo(() => {
     const apiIssues = loadedApiIssues;
     const out: IssueRow[] = [];
 
     for (const it of apiIssues) {
       const kind = (it.issue_type || "").toUpperCase() as IssueKind;
-      if (kind === "MISSING_CATEGORY") continue; // Category Review owns it
-
       const entryId = it.entry_id;
       const rawMethod = (it.entry_method ?? "").toString();
       const amt = toBigIntSafe(it.entry_amount_cents);
@@ -472,7 +513,7 @@ export default function IssuesPageClient() {
         flags: {
           dup: kind === "DUPLICATE",
           stale: kind === "STALE_CHECK",
-          missing: false,
+          missing: kind === "MISSING_CATEGORY",
         },
       });
     }
@@ -501,11 +542,13 @@ export default function IssuesPageClient() {
     const openTotal = issues.length;
     const dup = issues.filter((x) => x.kind === "DUPLICATE").length;
     const stale = issues.filter((x) => x.kind === "STALE_CHECK").length;
-    return { openTotal, dup, stale };
+    const missing = issues.filter((x) => x.kind === "MISSING_CATEGORY").length;
+    return { openTotal, dup, missing, stale };
   }, [issues]);
 
   const selectedQueueLabel = useMemo(() => {
     if (filterIssueType === "DUPLICATE") return "Duplicate groups";
+    if (filterIssueType === "MISSING_CATEGORY") return "Missing categories";
     if (filterIssueType === "STALE_CHECK") return "Stale checks";
     return "All issues";
   }, [filterIssueType]);
@@ -555,9 +598,14 @@ export default function IssuesPageClient() {
 
     const dupGroups = new Map<string, IssueRow[]>();
     const staleRows: IssueRow[] = [];
+    const missingCategoryRows: IssueRow[] = [];
     const dupEntryIds = new Set<string>();
 
     for (const r of filteredIssues) {
+      if (r.kind === "MISSING_CATEGORY") {
+        missingCategoryRows.push(r);
+        continue;
+      }
       if (r.kind === "STALE_CHECK") {
         staleRows.push(r);
         continue;
@@ -621,6 +669,15 @@ export default function IssuesPageClient() {
       });
     }
 
+    for (const missing of missingCategoryRows) {
+      out.push({
+        rowType: "ITEM",
+        rowKey: `${missing.id}|${missing.kind}`,
+        item: missing,
+        isChild: false,
+      });
+    }
+
     return out;
   }, [filteredIssues, expandedGroups]);
 
@@ -643,7 +700,7 @@ export default function IssuesPageClient() {
 
     for (const issue of openIssues) {
       const kind = String(issue.issue_type || "").toUpperCase();
-      if (kind !== "DUPLICATE" && kind !== "STALE_CHECK") continue;
+      if (kind !== "DUPLICATE" && kind !== "MISSING_CATEGORY" && kind !== "STALE_CHECK") continue;
 
       const key = `${issue.entry_id}|${kind}`;
       if (!selectedKeySet.has(key)) continue;
@@ -727,6 +784,7 @@ export default function IssuesPageClient() {
           <SelectContent side="bottom" align="start">
             <SelectItem value="ALL">All Types</SelectItem>
             <SelectItem value="DUPLICATE">Duplicate</SelectItem>
+            <SelectItem value="MISSING_CATEGORY">Missing category</SelectItem>
             <SelectItem value="STALE_CHECK">Stale check</SelectItem>
           </SelectContent>
         </Select>
@@ -885,6 +943,9 @@ export default function IssuesPageClient() {
             Duplicates <span className="font-medium text-foreground">{kpi.dup}</span>
           </span>
           <span>
+            Categories <span className="font-medium text-foreground">{kpi.missing}</span>
+          </span>
+          <span>
             Stale <span className="font-medium text-foreground">{kpi.stale}</span>
           </span>
 
@@ -913,6 +974,15 @@ export default function IssuesPageClient() {
                 active={filterIssueType === "DUPLICATE"}
                 actionLabel="Review groups"
                 onAction={() => setFilterIssueType("DUPLICATE")}
+              />
+              <QueueCard
+                title="Missing categories"
+                count={kpi.missing}
+                hint="Assign in Issues or Category Review"
+                tone="info"
+                active={filterIssueType === "MISSING_CATEGORY"}
+                actionLabel="Review categories"
+                onAction={() => setFilterIssueType("MISSING_CATEGORY")}
               />
               <QueueCard
                 title="All open issues"
@@ -1072,11 +1142,14 @@ export default function IssuesPageClient() {
                     const r = row.item;
                     const isDup = r.kind === "DUPLICATE";
                     const isStale = r.kind === "STALE_CHECK";
+                    const isMissing = r.kind === "MISSING_CATEGORY";
                     const rowKey = row.rowKey;
                     const actionLabel = isDup && String(r.details ?? "").toLowerCase().includes("matched")
                       ? "Review match"
                       : isStale
                         ? "Acknowledge"
+                        : isMissing
+                          ? "Choose category"
                         : "Review";
 
                     return (
@@ -1098,10 +1171,12 @@ export default function IssuesPageClient() {
                                     ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
                                     : isStale
                                       ? "border-bb-status-info-border bg-bb-status-info-bg text-bb-status-info-fg"
-                                      : "border-border bg-muted text-muted-foreground"
+                                      : isMissing
+                                        ? "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg"
+                                        : "border-border bg-muted text-muted-foreground"
                                 }`}
                               >
-                                {isDup ? "Duplicate" : isStale ? "Stale check" : "Issue"}
+                                {isDup ? "Duplicate" : isStale ? "Stale check" : isMissing ? "Missing category" : "Issue"}
                               </span>
                               <span className={`${chip} border-border bg-card text-muted-foreground`}>
                                 {r.status === "RESOLVED" ? "Resolved" : "Open"}
@@ -1117,7 +1192,7 @@ export default function IssuesPageClient() {
                             </div>
                             <Button
                               className="mt-2 h-7 px-3 text-xs"
-                              onClick={() => setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : "STALE_CHECK" })}
+                              onClick={() => setFixDialog({ id: r.id, kind: isDup ? "DUPLICATE" : isMissing ? "MISSING_CATEGORY" : "STALE_CHECK" })}
                             >
                               {actionLabel}
                             </Button>
