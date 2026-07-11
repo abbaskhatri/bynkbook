@@ -22,5 +22,7 @@ export async function handler(event: any) {
     accountId,
     userId: sub,
     mode: body?.mode === "update" || body?.reconnect === true ? "update" : "connect",
+    sourceAccountId: (body?.sourceAccountId ?? "").toString().trim() || undefined,
+    listOptions: body?.listOptions === true,
   });
 }

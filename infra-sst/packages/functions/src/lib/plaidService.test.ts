@@ -237,6 +237,206 @@ describe("createLinkToken", () => {
     );
   });
 
+  test("reconnect uses a healthy same-institution sibling Item when the target Item is empty", async () => {
+    const healthySibling = {
+      ...baseConn,
+      account_id: "acct-healthy-sibling",
+      plaid_item_id: "item-shared-live",
+      plaid_account_id: "plaid-sibling-live",
+      access_token_ciphertext: "ciphertext-shared",
+      institution_id: "ins_1",
+      institution_name: "Bank of America",
+      plaid_mask: "1751",
+      status: "CONNECTED",
+      account: { id: "acct-healthy-sibling", name: "Frisco" },
+    };
+    let accountsGetCalls = 0;
+    const { mod, plaid } = await loadSyncTransactions({
+      conn: {
+        institution_id: "ins_1",
+        institution_name: "Bank of America",
+        plaid_mask: "0358",
+        status: "PLAID_ACCOUNT_MISSING",
+      },
+      plaid: {
+        accountsGet: vi.fn(async () => {
+          accountsGetCalls += 1;
+          return accountsGetCalls === 1
+            ? { data: { accounts: [] } }
+            : { data: { accounts: [{ account_id: "plaid-sibling-live", mask: "1751" }] } };
+        }),
+      },
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({
+            id: "acct-1",
+            name: "Dallas",
+            type: "CHECKING",
+            currency_code: "USD",
+          })),
+        },
+        bankConnection: {
+          findMany: vi.fn(async () => [healthySibling]),
+        },
+      },
+    });
+
+    const res = await mod.createLinkToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      mode: "update",
+    });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      mode: "update",
+      usingSharedItem: true,
+      repairSourceAccountId: "acct-healthy-sibling",
+      institutionName: "Bank of America",
+      targetPlaidMask: "0358",
+      targetAccountName: "Dallas",
+      requiredPreservedAccounts: [{
+        accountId: "acct-healthy-sibling",
+        plaidAccountId: "plaid-sibling-live",
+        mask: "1751",
+        name: "Frisco",
+      }],
+    });
+    expect(plaid.accountsGet).toHaveBeenCalledTimes(2);
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access_token: "access-token-redacted",
+        update: { account_selection_enabled: true },
+      }),
+    );
+  });
+
+  test("connect lists reusable live Items so another ledger can use the same bank login", async () => {
+    const { mod, prisma } = await loadSyncTransactions({
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({
+            id: "acct-1",
+            name: "Dallas",
+            type: "CHECKING",
+            currency_code: "USD",
+            institution_name: null,
+            last4: null,
+          })),
+        },
+        bankConnection: {
+          findMany: vi.fn(async () => [
+            {
+              account_id: "acct-frisco",
+              plaid_item_id: "item-bank-of-america",
+              institution_name: "Bank of America",
+              plaid_mask: "1751",
+              account: { id: "acct-frisco", name: "Frisco" },
+            },
+            {
+              account_id: "acct-dallas-existing",
+              plaid_item_id: "item-bank-of-america",
+              institution_name: "Bank of America",
+              plaid_mask: "0358",
+              account: { id: "acct-dallas-existing", name: "Dallas existing" },
+            },
+          ]),
+        },
+      },
+    });
+
+    const res = await mod.createLinkToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      mode: "connect",
+      listOptions: true,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      mode: "connect",
+      options: [{
+        sourceAccountId: "acct-frisco",
+        institutionName: "Bank of America",
+        accountName: "Frisco",
+        last4: "1751",
+      }],
+    });
+    expect(prisma.bankConnection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { business_id: "biz-1", status: "CONNECTED" } }),
+    );
+  });
+
+  test("connect can open update mode on an explicitly selected existing bank login", async () => {
+    const sourceConnection = {
+      ...baseConn,
+      account_id: "acct-frisco",
+      plaid_item_id: "item-bank-of-america",
+      plaid_account_id: "plaid-frisco",
+      institution_name: "Bank of America",
+      institution_id: "ins_1",
+      plaid_mask: "1751",
+      account: { id: "acct-frisco", name: "Frisco" },
+    };
+    const { mod, plaid } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: { accounts: [{ account_id: "plaid-frisco", mask: "1751" }] },
+        })),
+      },
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({
+            id: "acct-1",
+            name: "Dallas",
+            type: "CHECKING",
+            currency_code: "USD",
+            institution_name: null,
+            last4: "0358",
+          })),
+        },
+        bankConnection: {
+          findFirst: vi.fn(async () => sourceConnection),
+          findMany: vi.fn(async () => [sourceConnection]),
+        },
+      },
+    });
+
+    const res = await mod.createLinkToken({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      mode: "connect",
+      sourceAccountId: "acct-frisco",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      mode: "update",
+      attachToExistingItem: true,
+      usingSharedItem: true,
+      repairSourceAccountId: "acct-frisco",
+      targetPlaidMask: "0358",
+      requiredPreservedAccounts: [{
+        accountId: "acct-frisco",
+        plaidAccountId: "plaid-frisco",
+        mask: "1751",
+        name: "Frisco",
+      }],
+    });
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access_token: "access-token-redacted",
+        update: { account_selection_enabled: true },
+      }),
+    );
+  });
+
   test("includes configured webhook URL for business/new-account link tokens", async () => {
     process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
     const { mod, plaid } = await loadSyncTransactions({});
@@ -1880,6 +2080,189 @@ describe("syncTransactions", () => {
         error_code: null,
         error_message: null,
         sync_cursor: null,
+      }),
+    });
+  });
+
+  test("repair maps a sequentially selected target onto the healthy sibling Item", async () => {
+    const targetConnection = {
+      ...baseConn,
+      institution_id: "ins_1",
+      institution_name: "Bank of America",
+      plaid_mask: "0358",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
+      plaid_currency_code: "USD",
+      status: "PLAID_ACCOUNT_MISSING",
+    };
+    const sourceConnection = {
+      ...baseConn,
+      account_id: "acct-healthy-sibling",
+      plaid_item_id: "item-shared-live",
+      plaid_account_id: "plaid-sibling-live",
+      access_token_ciphertext: "ciphertext-shared",
+      institution_id: "ins_1",
+      institution_name: "Bank of America",
+      plaid_mask: "1751",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
+      plaid_currency_code: "USD",
+      status: "CONNECTED",
+      account: {
+        id: "acct-healthy-sibling",
+        name: "Frisco",
+        type: "CHECKING",
+        currency_code: "USD",
+      },
+    };
+    const { mod, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              {
+                account_id: "plaid-sibling-live",
+                mask: "1751",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+              {
+                account_id: "plaid-target-on-shared-item",
+                mask: "0358",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+            ],
+          },
+        })),
+      },
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({ id: "acct-1", type: "CHECKING", currency_code: "USD" })),
+        },
+        bankConnection: {
+          findFirst: vi.fn(async (args: any) =>
+            args?.where?.account_id === "acct-healthy-sibling" ? sourceConnection : targetConnection
+          ),
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.account_id?.not === "acct-1" ? [sourceConnection] : []
+          ),
+        },
+      },
+    });
+
+    const res = await mod.repairPlaidAccountMapping({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      sourceAccountId: "acct-healthy-sibling",
+      plaidAccountId: "plaid-target-on-shared-item",
+      institution: { name: "Bank of America", institution_id: "ins_1" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(prisma.bankConnection.updateMany).toHaveBeenCalledWith({
+      where: { business_id: "biz-1", account_id: "acct-1" },
+      data: expect.objectContaining({
+        plaid_item_id: "item-shared-live",
+        plaid_account_id: "plaid-target-on-shared-item",
+        access_token_ciphertext: "ciphertext-shared",
+        plaid_mask: "0358",
+        status: "CONNECTED",
+        error_code: null,
+        error_message: null,
+        sync_cursor: null,
+      }),
+    });
+    expect(prisma.account.create).not.toHaveBeenCalled();
+  });
+
+  test("repair attaches an unconnected ledger to an existing shared Item without creating a duplicate ledger", async () => {
+    const sourceConnection = {
+      ...baseConn,
+      account_id: "acct-frisco",
+      plaid_item_id: "item-bank-of-america",
+      plaid_account_id: "plaid-frisco",
+      access_token_ciphertext: "ciphertext-shared",
+      institution_id: "ins_1",
+      institution_name: "Bank of America",
+      plaid_mask: "1751",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
+      plaid_currency_code: "USD",
+      account: {
+        id: "acct-frisco",
+        name: "Frisco",
+        type: "CHECKING",
+        currency_code: "USD",
+      },
+    };
+    const { mod, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              {
+                account_id: "plaid-frisco",
+                mask: "1751",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+              {
+                account_id: "plaid-dallas",
+                mask: "0358",
+                type: "depository",
+                subtype: "checking",
+                balances: { iso_currency_code: "USD" },
+              },
+            ],
+          },
+        })),
+      },
+      prisma: {
+        account: {
+          findFirst: vi.fn(async () => ({
+            id: "acct-1",
+            type: "CHECKING",
+            currency_code: "USD",
+            last4: "0358",
+          })),
+        },
+        bankConnection: {
+          findFirst: vi.fn(async (args: any) =>
+            args?.where?.account_id === "acct-frisco" ? sourceConnection : null
+          ),
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.account_id?.not === "acct-1" ? [sourceConnection] : []
+          ),
+        },
+      },
+    });
+
+    const res = await mod.repairPlaidAccountMapping({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      sourceAccountId: "acct-frisco",
+      plaidAccountId: "plaid-dallas",
+      institution: { name: "Bank of America", institution_id: "ins_1" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(prisma.account.create).not.toHaveBeenCalled();
+    expect(prisma.bankConnection.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        business_id: "biz-1",
+        account_id: "acct-1",
+        plaid_item_id: "item-bank-of-america",
+        plaid_account_id: "plaid-dallas",
+        access_token_ciphertext: "ciphertext-shared",
+        plaid_mask: "0358",
+        status: "CONNECTED",
+        opening_policy: "MANUAL",
       }),
     });
   });
