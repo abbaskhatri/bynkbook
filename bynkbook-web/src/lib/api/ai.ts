@@ -84,8 +84,9 @@ export async function aiSuggestCategory(args: {
     memo?: string;
   }>;
   limitPerItem?: number;
+  includeAiFallback?: boolean;
 }) {
-  const { businessId, accountId, items, limitPerItem } = args;
+  const { businessId, accountId, items, limitPerItem, includeAiFallback } = args;
 
   return apiFetch(`/v1/businesses/${encodeURIComponent(businessId)}/ai/category-suggestions`, {
     method: "POST",
@@ -100,6 +101,7 @@ export async function aiSuggestCategory(args: {
         memo: x.memo,
       })),
       limitPerItem: limitPerItem ?? 3,
+      includeAiFallback: includeAiFallback !== false,
     }),
   });
 }

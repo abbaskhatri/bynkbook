@@ -1366,6 +1366,12 @@ export default function DashboardPageClient() {
                   </div>
                 </div>
               </div>
+              <Button asChild variant="outline" className="mt-3 h-9 w-full justify-between bg-bb-surface-card">
+                <Link href={`/operations?businessId=${encodeURIComponent(String(selectedBusinessId ?? ""))}`}>
+                  Financial operations
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
             </div>
           </div>
         </CardContent>

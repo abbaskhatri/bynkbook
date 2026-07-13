@@ -216,6 +216,31 @@ function bankTransactionSearchText(bankTxn: any) {
     .join(" ");
 }
 
+function bankTransactionCategoryContext(bankTxn: any) {
+  const raw = bankTxn?.raw && typeof bankTxn.raw === "object" ? bankTxn.raw : {};
+  const pfc = raw?.personal_finance_category ?? raw?.personalFinanceCategory ?? {};
+  return [
+    pfc?.primary,
+    pfc?.detailed,
+    rawString(raw, ["payment_channel", "paymentChannel", "transaction_type", "transactionType"]),
+  ]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(" • ");
+}
+
+function bankTransactionPublicMetadata(bankTxn: any) {
+  const raw = bankTxn?.raw && typeof bankTxn.raw === "object" ? bankTxn.raw : {};
+  const pfc = raw?.personal_finance_category ?? raw?.personalFinanceCategory ?? {};
+  return {
+    merchant_name: rawString(raw, ["merchant_name", "merchantName"]) || null,
+    original_description: rawString(raw, ["original_description", "originalDescription"]) || null,
+    payment_channel: rawString(raw, ["payment_channel", "paymentChannel"]) || null,
+    personal_finance_category_primary: String(pfc?.primary ?? "").trim() || null,
+    personal_finance_category_detailed: String(pfc?.detailed ?? "").trim() || null,
+  };
+}
+
 function inferMethodFromBankTransaction(bankTxn: any) {
   if (extractCheckNumberFromBankTransaction(bankTxn)) return "CHECK";
 
@@ -1164,8 +1189,8 @@ export async function handler(event: any) {
                 businessId,
                 accountId,
                 bankTransactionId: bankId,
-                payee: (bankTxn.name ?? "").toString().trim() || "Bank transaction",
-                memo: memoOverride || (bankTxn.name ?? "").toString(),
+                payee: bankTransactionSearchText(bankTxn) || "Bank transaction",
+                memo: [memoOverride, bankTransactionCategoryContext(bankTxn)].filter(Boolean).join(" • "),
                 amountCents: entryAmountCents,
               });
           const categoryIdFinal = categoryIdOverride || inferredCategory?.category_id || null;
@@ -1539,8 +1564,8 @@ export async function handler(event: any) {
             businessId,
             accountId,
             bankTransactionId,
-            payee: (bankTxn.name ?? "").toString().trim() || "Bank transaction",
-            memo: memoOverride || (bankTxn.name ?? "").toString(),
+            payee: bankTransactionSearchText(bankTxn) || "Bank transaction",
+            memo: [memoOverride, bankTransactionCategoryContext(bankTxn)].filter(Boolean).join(" • "),
             amountCents: entryAmountCents,
           });
       const categoryIdFinal = categoryIdOverride || inferredCategory?.category_id || null;
@@ -1885,6 +1910,7 @@ export async function handler(event: any) {
     return {
       ...rest,
       check_number: extractCheckNumberFromBankTransaction(row) || null,
+      ...bankTransactionPublicMetadata(row),
     };
   });
   const nextCursor = hasMore ? encodeCursor(pageRows[pageRows.length - 1]) : null;

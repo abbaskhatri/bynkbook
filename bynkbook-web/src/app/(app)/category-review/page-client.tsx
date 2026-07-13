@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 // Auth is handled by AppShell
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -396,6 +396,8 @@ export default function CategoryReviewPageClient() {
     setSuggestionMapByEntryId({});
     setSuggestionLoadedAtByEntryId({});
     setSuggestionsRequestedKey(null);
+    setSuggestionRequestUsesAi(false);
+    autoSuggestionKeyRef.current = "";
 
     await Promise.all([
       qc.invalidateQueries({ queryKey: entriesKey, exact: true }),
@@ -439,6 +441,8 @@ export default function CategoryReviewPageClient() {
   const [suggestionLoadedAtByEntryId, setSuggestionLoadedAtByEntryId] = useState<Record<string, number>>({});
   const [suggestionsRequestedKey, setSuggestionsRequestedKey] = useState<string | null>(null);
   const [suggestionRequestNonce, setSuggestionRequestNonce] = useState(0);
+  const [suggestionRequestUsesAi, setSuggestionRequestUsesAi] = useState(false);
+  const autoSuggestionKeyRef = useRef<string>("");
   const [autoFixPendingIds, setAutoFixPendingIds] = useState<string[] | null>(null);
 
   const [applyOpen, setApplyOpen] = useState(false);
@@ -661,6 +665,7 @@ export default function CategoryReviewPageClient() {
       selectedAccountId,
       suggestionsRequestedKey,
       suggestionRequestNonce,
+      suggestionRequestUsesAi,
     ],
     enabled:
       !!selectedBusinessId &&
@@ -681,6 +686,7 @@ export default function CategoryReviewPageClient() {
         accountId: selectedAccountId,
         items: suggestionRequestTargets,
         limitPerItem: 3,
+        includeAiFallback: suggestionRequestUsesAi,
       });
 
       const next: Record<string, any[]> = {};
@@ -719,6 +725,7 @@ export default function CategoryReviewPageClient() {
       for (const entryId of Object.keys(nextData)) next[entryId] = loadedAt;
       return next;
     });
+    setSuggestionsRequestedKey(null);
   }, [suggestionsQ.data]);
 
   const sugByEntryId = suggestionMapByEntryId;
@@ -826,15 +833,16 @@ export default function CategoryReviewPageClient() {
   const autoFixPreparing = !!autoFixPendingIds && suggestionsQ.isFetching;
   const SUGGESTION_STALE_MS = 60_000;
 
-  function requestSuggestionTargets(targets: typeof suggestionTargets) {
+  const requestSuggestionTargets = useCallback((targets: typeof suggestionTargets, includeAiFallback = true) => {
     const requestTargets = targets.slice(0, 200);
     const requestKey = requestTargets.map((x) => x.id).join("|");
     if (!requestKey) return false;
 
     setSuggestionsRequestedKey(requestKey);
+    setSuggestionRequestUsesAi(includeAiFallback);
     setSuggestionRequestNonce((n) => n + 1);
     return true;
-  }
+  }, []);
 
   function loadSuggestionsForCurrentFilters() {
     if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0 || sugLoading || sugUpdating) return;
@@ -842,8 +850,28 @@ export default function CategoryReviewPageClient() {
     clearMutErr();
     setApplySummary(null);
 
-    requestSuggestionTargets(suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets);
+    requestSuggestionTargets(suggestionsLoadedForCurrentFilters ? suggestionTargets : missingSuggestionTargets, true);
   }
+
+  useEffect(() => {
+    if (!selectedBusinessId || !selectedAccountId || suggestionTargets.length === 0) return;
+    if (suggestionsQ.isFetching || suggestionsRequestedKey) return;
+
+    const targets = missingSuggestionTargets.slice(0, 50);
+    const key = targets.map((target) => target.id).join("|");
+    if (!key || autoSuggestionKeyRef.current === key) return;
+
+    autoSuggestionKeyRef.current = key;
+    requestSuggestionTargets(targets, false);
+  }, [
+    selectedBusinessId,
+    selectedAccountId,
+    suggestionTargets,
+    missingSuggestionTargets,
+    suggestionsQ.isFetching,
+    suggestionsRequestedKey,
+    requestSuggestionTargets,
+  ]);
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

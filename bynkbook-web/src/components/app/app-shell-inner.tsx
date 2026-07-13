@@ -24,6 +24,7 @@ import {
   PieChart,
   Settings,
   FileText,
+  Activity,
 } from "lucide-react";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -97,6 +98,7 @@ const NAV_GROUPS = [
     group: "Core",
     items: [
       { label: "Dashboard", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className={NAV_ICON_CLASS} /> },
+      { label: "Operations", path: "/operations", needsAccountId: false, icon: <Activity className={NAV_ICON_CLASS} /> },
       { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
     ],
   },
