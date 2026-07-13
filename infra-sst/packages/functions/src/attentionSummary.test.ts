@@ -159,7 +159,10 @@ describe("attention summary", () => {
         category_id: null,
         deleted_at: null,
         type: { in: ["EXPENSE", "INCOME"] },
-        NOT: [{ status: "VOIDED" }],
+        status: { notIn: ["VOIDED", "DELETED", "SOFT_DELETED", "REMOVED"] },
+        NOT: [
+          { payee: { startsWith: "opening balance", mode: "insensitive" } },
+        ],
       },
     });
   });

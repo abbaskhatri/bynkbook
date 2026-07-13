@@ -1,4 +1,5 @@
 import { getPrisma } from "./lib/db";
+import { actionableUncategorizedEntryWhere } from "./lib/uncategorizedEntries";
 
 const ATTENTION_ISSUE_TYPES = ["DUPLICATE", "STALE_CHECK"] as const;
 
@@ -89,14 +90,7 @@ async function countActionableIssues(prisma: any, businessId: string, accountId:
 
 async function countUncategorizedEntries(prisma: any, businessId: string, accountId: string) {
   const count = await prisma.entry.count({
-    where: {
-      business_id: businessId,
-      account_id: accountId,
-      category_id: null,
-      deleted_at: null,
-      type: { in: ["EXPENSE", "INCOME"] },
-      NOT: [{ status: "VOIDED" }],
-    },
+    where: actionableUncategorizedEntryWhere({ businessId, accountId }),
   });
   return Number(count) || 0;
 }

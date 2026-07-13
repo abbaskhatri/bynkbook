@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api/client";
+import { notifyEntryCategoriesChanged } from "@/lib/categoryRefreshEvent";
 
 /**
  * We normalize the API response because implementations may vary slightly.
@@ -426,6 +427,10 @@ export async function updateEntry(params: {
       body: JSON.stringify(updates),
     }
   );
+
+  if (Object.prototype.hasOwnProperty.call(updates, "category_id")) {
+    notifyEntryCategoriesChanged({ businessId, accountId });
+  }
 
   // Handler returns { ok: true, entry: {...} }
   const row = res?.entry ?? res;

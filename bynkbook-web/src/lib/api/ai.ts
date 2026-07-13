@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import { notifyEntryCategoriesChanged } from "@/lib/categoryRefreshEvent";
 
 export async function queryGlobalSearch(args: { businessId: string; accountId?: string; q: string; limit?: number }) {
   const { businessId, accountId, q, limit } = args;
@@ -47,13 +48,16 @@ export async function applyCategoryBatch(args: {
 }) {
   const { businessId, accountId, items } = args;
 
-  return apiFetch(
+  const result = await apiFetch(
     `/v1/businesses/${encodeURIComponent(businessId)}/accounts/${encodeURIComponent(accountId)}/entries/apply-category-batch`,
     {
       method: "POST",
       body: JSON.stringify({ items }),
     }
   );
+
+  notifyEntryCategoriesChanged({ businessId, accountId });
+  return result;
 }
 
 // ---------- Bundle E AI surfaces (LLM) ----------

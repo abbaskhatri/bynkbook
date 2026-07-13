@@ -222,6 +222,8 @@ export async function handler(event: any) {
         ${whereAcctSql}
         AND e.deleted_at IS NULL
         AND UPPER(COALESCE(e.type, '')) IN ('INCOME', 'EXPENSE')
+        AND UPPER(COALESCE(e.status, '')) NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')
+        AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
         AND e.category_id IS NULL
         AND e.date >= $3::date
         AND e.date <= $4::date

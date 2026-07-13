@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { getPrisma } from "./lib/db";
+import { actionableUncategorizedEntryWhere } from "./lib/uncategorizedEntries";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { logActivity } from "./lib/activityLog";
@@ -348,13 +349,7 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     `,
     prisma.entryIssue.count({ where: { business_id: businessId, status: "OPEN" } }),
     prisma.entry.count({
-      where: {
-        business_id: businessId,
-        deleted_at: null,
-        category_id: null,
-        type: { in: ["INCOME", "EXPENSE"] },
-        NOT: [{ status: "VOIDED" }],
-      },
+      where: actionableUncategorizedEntryWhere({ businessId, activeAccountsOnly: true }),
     }),
     prisma.categoryMemory.findMany({
       where: { business_id: businessId },

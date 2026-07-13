@@ -176,7 +176,7 @@ export default function OperationsPageClient() {
               icon={<BrainCircuit className="h-4 w-4" />}
               label="Category intelligence"
               value={`${data.categorization.safe_reuse_rules} safe rules`}
-              meta={`${data.categorization.uncategorized_count} uncategorized • ${data.categorization.acceptance_rate == null ? "learning" : `${data.categorization.acceptance_rate}% accepted`}`}
+              meta={`${data.categorization.uncategorized_count} uncategorized across active accounts • ${data.categorization.acceptance_rate == null ? "learning" : `${data.categorization.acceptance_rate}% accepted`}`}
               tone={data.categorization.uncategorized_count ? "warning" : "good"}
             />
             <StatCard
