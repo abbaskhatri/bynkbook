@@ -40,10 +40,9 @@ function plaidWebhookUrl() {
 }
 
 function plaidLinkCustomizationName() {
-  // Plaid update mode does not reliably inherit the Dashboard's visible
-  // customization unless the Link token names it. The published `default`
-  // customization is configured for multi-account selection so one bank login
-  // can keep every separately mapped BynkBook ledger authorized.
+  // Link tokens must name the exact published Dashboard customization. The
+  // default fallback exists for local/dev/test only; production deployment
+  // requires PLAID_LINK_CUSTOMIZATION_NAME through the SST stage config.
   const name = String(process.env.PLAID_LINK_CUSTOMIZATION_NAME ?? "default").trim();
   return name || "default";
 }
