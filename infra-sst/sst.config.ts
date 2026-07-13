@@ -74,7 +74,7 @@ export default $config({
       ? requiredEnv("BYNKBOOK_PROD_PLAID_SECRET_SECRET_ID")
       : (process.env.BYNKBOOK_DEV_PLAID_SECRET_SECRET_ID?.trim() || `${resourcePrefix}/plaid/secret`);
     const plaidLinkCustomizationName = isProd
-      ? optionalEnv("BYNKBOOK_PROD_PLAID_LINK_CUSTOMIZATION_NAME", "default")
+      ? requiredEnv("BYNKBOOK_PROD_PLAID_LINK_CUSTOMIZATION_NAME")
       : optionalEnv("BYNKBOOK_DEV_PLAID_LINK_CUSTOMIZATION_NAME", "default");
     const validPlaidEnvs = new Set(["sandbox", "development", "production"]);
     if (!validPlaidEnvs.has(plaidEnv)) {

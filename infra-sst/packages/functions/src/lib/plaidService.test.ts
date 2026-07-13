@@ -461,14 +461,14 @@ describe("createLinkToken", () => {
   });
 
   test("binds new Link tokens to the configured published customization", async () => {
-    process.env.PLAID_LINK_CUSTOMIZATION_NAME = "bynkbook-multi-account";
+    process.env.PLAID_LINK_CUSTOMIZATION_NAME = "bynkbook_production_us";
     const { mod, plaid } = await loadSyncTransactions({});
 
     const res = await mod.createLinkTokenBusiness({ businessId: "biz-1", userId: "user-1" });
 
     expect(res.statusCode).toBe(200);
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ link_customization_name: "bynkbook-multi-account" }),
+      expect.objectContaining({ link_customization_name: "bynkbook_production_us" }),
     );
   });
 
