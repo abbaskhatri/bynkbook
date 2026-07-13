@@ -700,6 +700,11 @@ const insightsDashboardHandler = {
   handler: "packages/functions/src/insightsDashboard.handler",
 } satisfies ApiHandler;
 
+const operationsOverviewHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/operationsOverview.handler",
+} satisfies ApiHandler;
+
 const searchQueryHandler = {
   ...bizHandler,
   handler: "packages/functions/src/searchQuery.handler",
@@ -740,6 +745,17 @@ api.route("POST /v1/ai/merchant-normalize", aiHandler, { auth: { jwt: { authoriz
 api.route(
   "GET /v1/businesses/{businessId}/insights/dashboard",
   insightsDashboardHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+
+api.route(
+  "GET /v1/businesses/{businessId}/operations/overview",
+  operationsOverviewHandler,
+  { auth: { jwt: { authorizer: authorizer.id } } }
+);
+api.route(
+  "POST /v1/businesses/{businessId}/operations/transfer-pairs",
+  operationsOverviewHandler,
   { auth: { jwt: { authorizer: authorizer.id } } }
 );
 

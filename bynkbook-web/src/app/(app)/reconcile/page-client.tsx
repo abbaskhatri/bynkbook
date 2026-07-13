@@ -1646,7 +1646,18 @@ export default function ReconcilePageClient() {
 
     // IMPORTANT: bankTxSorted is declared later in this file; avoid TDZ by using bankTx (state) here.
     const t = (bankTx ?? []).find((x: any) => String(x.id) === bankId);
-    const desc = (t?.name ?? "").toString().trim();
+    const desc = [t?.merchant_name, t?.original_description, t?.name]
+      .map((value: any) => String(value ?? "").trim())
+      .filter((value: string, index: number, values: string[]) => !!value && values.indexOf(value) === index)
+      .join(" • ");
+    const categoryContext = [
+      t?.personal_finance_category_primary,
+      t?.personal_finance_category_detailed,
+      t?.payment_channel,
+    ]
+      .map((value: any) => String(value ?? "").trim())
+      .filter(Boolean)
+      .join(" • ");
 
     let cancelled = false;
 
@@ -1666,7 +1677,7 @@ export default function ReconcilePageClient() {
               date: t?.posted_date ? String(t.posted_date).slice(0, 10) : undefined,
               amount_cents: t?.amount_cents,
               payee_or_name: desc,
-              memo: "",
+              memo: categoryContext,
             },
           ],
           limitPerItem: 3,
