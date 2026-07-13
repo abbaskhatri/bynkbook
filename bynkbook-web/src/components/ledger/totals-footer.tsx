@@ -110,10 +110,8 @@ export function TotalsFooter(props: {
   }, [autoLoadMore, loadMoreText, canLoadMore, isLoadingMore, onLoadMore]);
 
   return (
-    <div className="grid gap-3 px-3 py-3 text-xs text-bb-text-muted sm:px-4">
-      {/* Pagination and loading controls get their own row so totals never
-          collapse underneath them or touch the card edge. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
+    <div className="flex min-w-0 items-center gap-3 overflow-x-auto px-3 py-2 text-xs text-bb-text-muted sm:px-4">
+      <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
         <span>Rows:</span>
 
         <Select
@@ -124,7 +122,7 @@ export function TotalsFooter(props: {
             setPage(1);
           }}
         >
-          <SelectTrigger className={`${inputH7} !h-7 !py-0 w-[70px]`}>
+          <SelectTrigger className={`${inputH7} !h-7 !py-0 w-16`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent side="top" align="start">
@@ -157,40 +155,42 @@ export function TotalsFooter(props: {
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
-
-        {paginationNote ? (
-          <div className="flex min-w-[220px] flex-1 flex-wrap items-center gap-2 text-[11px] text-bb-text-muted lg:flex-nowrap">
-            <span className="min-w-0" title={typeof paginationNote === "string" ? paginationNote : undefined}>
-              {paginationNote}
-            </span>
-            {paginationActionLabel && onPaginationAction ? (
-              <button
-                type="button"
-                className="h-6 shrink-0 rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text hover:bg-bb-table-row-hover"
-                onClick={onPaginationAction}
-              >
-                {paginationActionLabel}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {loadMoreText ? (
-          <div ref={loadMoreRef}>
-            <Button
-              variant="outline"
-              className="h-7 rounded-md px-2 text-xs"
-              disabled={!canLoadMore || isLoadingMore}
-              onClick={() => onLoadMore?.()}
-            >
-              {isLoadingMore ? "Loading…" : loadMoreText}
-            </Button>
-          </div>
-        ) : null}
       </div>
 
-      {/* Totals stay on a distinct, padded row and wrap as complete values. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-bb-border/70 pt-2 text-left text-xs tabular-nums lg:justify-end lg:text-right">
+      {paginationNote ? (
+        <div className="flex min-w-0 max-w-[420px] items-center gap-2 text-[11px] text-bb-text-muted">
+          <span
+            className="min-w-0 truncate"
+            title={typeof paginationNote === "string" ? paginationNote : undefined}
+          >
+            {paginationNote}
+          </span>
+          {paginationActionLabel && onPaginationAction ? (
+            <button
+              type="button"
+              className="h-6 shrink-0 rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-medium text-bb-text hover:bg-bb-table-row-hover"
+              onClick={onPaginationAction}
+            >
+              {paginationActionLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {loadMoreText ? (
+        <div ref={loadMoreRef} className="shrink-0">
+          <Button
+            variant="outline"
+            className="h-7 rounded-md px-2 text-xs"
+            disabled={!canLoadMore || isLoadingMore}
+            onClick={() => onLoadMore?.()}
+          >
+            {isLoadingMore ? "Loading…" : loadMoreText}
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="ml-auto flex shrink-0 items-center gap-3 border-l border-bb-border/70 pl-3 text-right text-xs tabular-nums">
         {totalsScopeLabel ? (
           <div className="flex items-center gap-2">
             <span className="inline-flex h-6 items-center rounded-md border border-bb-border bg-bb-surface-card px-2 text-[11px] font-semibold text-bb-text">
