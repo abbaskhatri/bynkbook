@@ -158,7 +158,7 @@ export function TotalsFooter(props: {
       </div>
 
       {paginationNote ? (
-        <div className="flex min-w-0 max-w-[420px] items-center gap-2 text-[11px] text-bb-text-muted">
+        <div className="flex min-w-[180px] max-w-[420px] flex-1 items-center gap-2 text-[11px] text-bb-text-muted">
           <span
             className="min-w-0 truncate"
             title={typeof paginationNote === "string" ? paginationNote : undefined}
