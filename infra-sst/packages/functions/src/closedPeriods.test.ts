@@ -116,6 +116,10 @@ describe("closed period preview", () => {
       expect(queryText).toContain("UPPER(COALESCE(e.type, '')) <> 'OPENING'");
       expect(queryText).toContain("NOT LIKE 'opening balance%'");
     }
+
+    const uncategorizedQuery = rawQueryTexts(prisma).find((query) => query.includes("e.category_id IS NULL"));
+    expect(uncategorizedQuery).toContain("NOT LIKE 'opening balance%'");
+    expect(uncategorizedQuery).toContain("NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')");
   });
 
   test("rejects non-member access before preview queries", async () => {

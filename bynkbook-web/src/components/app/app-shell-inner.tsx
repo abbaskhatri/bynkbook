@@ -33,6 +33,10 @@ import { useAccounts } from "@/lib/queries/useAccounts";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { getConfiguredAppEnvironment } from "@/lib/appEnvironment";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
+import {
+  ENTRY_CATEGORIES_CHANGED_EVENT,
+  type EntryCategoriesChangedDetail,
+} from "@/lib/categoryRefreshEvent";
 import { getActivity, type ActivityLogItem } from "@/lib/api/activity";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -610,6 +614,27 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    const refreshCategoryCounts = (event: Event) => {
+      const detail = (event as CustomEvent<EntryCategoriesChangedDetail>).detail;
+      const changedBusinessId = String(detail?.businessId ?? "").trim();
+      const changedAccountId = String(detail?.accountId ?? "").trim();
+      if (!changedBusinessId || !changedAccountId) return;
+
+      void qc.invalidateQueries({
+        queryKey: attentionSummaryKey(changedBusinessId, changedAccountId),
+        exact: false,
+      });
+      void qc.invalidateQueries({
+        queryKey: ["operationsOverview", changedBusinessId],
+        exact: false,
+      });
+    };
+
+    window.addEventListener(ENTRY_CATEGORIES_CHANGED_EVENT, refreshCategoryCounts);
+    return () => window.removeEventListener(ENTRY_CATEGORIES_CHANGED_EVENT, refreshCategoryCounts);
+  }, [qc]);
 
   // IMPORTANT: never flash a fake "0" while loading — skeleton-first.
   const attnIssues = issuesCountQ.isLoading ? null : (Number(issuesCountQ.data?.issue_count ?? 0) || 0);
