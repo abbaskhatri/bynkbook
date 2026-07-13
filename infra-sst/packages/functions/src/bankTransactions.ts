@@ -78,6 +78,12 @@ const POSSIBLE_DUPLICATE_ENTRY_MESSAGE =
 const PENDING_BANK_TRANSACTION_CODE = "PENDING_BANK_TRANSACTION_NOT_ACTIONABLE";
 const PENDING_BANK_TRANSACTION_MESSAGE =
   "Pending bank transactions can be reviewed once they post.";
+const PENDING_ENTRY_CONSENT_REQUIRED_CODE = "PENDING_ENTRY_CONSENT_REQUIRED";
+const PENDING_ENTRY_CONSENT_REQUIRED_MESSAGE =
+  "Confirm that you understand this pending transaction may change or disappear before creating an unmatched ledger entry.";
+const PENDING_AUTO_MATCH_NOT_ALLOWED_CODE = "PENDING_AUTO_MATCH_NOT_ALLOWED";
+const PENDING_AUTO_MATCH_NOT_ALLOWED_MESSAGE =
+  "Pending bank transactions cannot be matched until they post.";
 const CREATE_ENTRY_DUPLICATE_WINDOW_DAYS = 3;
 const CREATE_ENTRY_GENERIC_BANK_DUPLICATE_WINDOW_DAYS = 7;
 
@@ -1430,6 +1436,7 @@ export async function handler(event: any) {
 
       const autoMatch = body?.autoMatch === true;
       const allowPossibleDuplicate = body?.allowPossibleDuplicate === true;
+      const pendingEntryConsent = body?.pendingEntryConsent === true;
 
       const rawMemo = body?.memo ? String(body.memo) : "";
       const memoOverride = rawMemo.trim() ? rawMemo.trim().slice(0, 400) : "";
@@ -1462,11 +1469,20 @@ export async function handler(event: any) {
 
       if (!bankTxn) return json(404, { ok: false, error: "Bank transaction not found" });
       if (bankTxn.is_pending) {
-        return json(409, {
-          ok: false,
-          code: PENDING_BANK_TRANSACTION_CODE,
-          error: PENDING_BANK_TRANSACTION_MESSAGE,
-        });
+        if (!pendingEntryConsent) {
+          return json(409, {
+            ok: false,
+            code: PENDING_ENTRY_CONSENT_REQUIRED_CODE,
+            error: PENDING_ENTRY_CONSENT_REQUIRED_MESSAGE,
+          });
+        }
+        if (autoMatch) {
+          return json(409, {
+            ok: false,
+            code: PENDING_AUTO_MATCH_NOT_ALLOWED_CODE,
+            error: PENDING_AUTO_MATCH_NOT_ALLOWED_MESSAGE,
+          });
+        }
       }
 
       const bankAmt = BigInt(bankTxn.amount_cents);
@@ -1582,6 +1598,8 @@ export async function handler(event: any) {
           entry_id: existing.id,
           match_group_id: createdMatchGroupId,
           auto_matched: !!createdMatchGroupId,
+          pending_entry: !!bankTxn.is_pending,
+          requires_posting_before_match: !!bankTxn.is_pending,
         });
       }
 
@@ -1706,6 +1724,8 @@ export async function handler(event: any) {
           entry_id: result.createdEntryId,
           match_group_id: result.createdMatchGroupId,
           auto_matched: !!result.createdMatchGroupId,
+          pending_entry: !!bankTxn.is_pending,
+          requires_posting_before_match: !!bankTxn.is_pending,
         });
       }
 
@@ -1739,6 +1759,8 @@ export async function handler(event: any) {
           match_group_id: result.createdMatchGroupId,
           duplicate_warning_overridden: allowPossibleDuplicate && possibleDuplicateCandidates.length > 0,
           possible_duplicate_candidates: allowPossibleDuplicate ? possibleDuplicateCandidates : undefined,
+          pending_entry: !!bankTxn.is_pending,
+          pending_entry_consent: !!bankTxn.is_pending && pendingEntryConsent,
           remaining_abs_cents: result.createdMatchGroupId ? "0" : bankAbs.toString(),
         },
       });
@@ -1749,6 +1771,8 @@ export async function handler(event: any) {
         match_group_id: result.createdMatchGroupId,
         auto_matched: !!result.createdMatchGroupId,
         duplicate_warning_overridden: allowPossibleDuplicate && possibleDuplicateCandidates.length > 0,
+        pending_entry: !!bankTxn.is_pending,
+        requires_posting_before_match: !!bankTxn.is_pending,
         category_id: categoryIdFinal,
         category_auto_applied: !categoryIdOverride && !!inferredCategory,
         category_suggestion_source: inferredCategory?.source ?? null,

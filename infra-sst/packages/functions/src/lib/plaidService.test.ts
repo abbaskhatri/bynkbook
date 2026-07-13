@@ -1023,6 +1023,74 @@ describe("syncTransactions", () => {
     });
   });
 
+  test("upgrades a pending row in place when Plaid posts it so its ledger-entry linkage survives", async () => {
+    const posted = makeTransaction({
+      transaction_id: "txn-posted",
+      pending_transaction_id: "txn-pending",
+      pending: false,
+      date: "2026-07-10",
+      authorized_date: "2026-07-09",
+      amount: 13.45,
+      name: "Coffee Shop - final",
+    });
+    const pendingRow = {
+      id: "bank-durable-pending",
+      plaid_transaction_id: "txn-pending",
+      posted_date: new Date("2026-07-09T00:00:00Z"),
+      amount_cents: -1234n,
+      name: "Coffee Shop - pending",
+      is_removed: false,
+    };
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      conn: { sync_cursor: "account-v2:plaid-acct-1:cursor-start" },
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [posted],
+            modified: [],
+            removed: [{ transaction_id: "txn-pending" }],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findMany: vi.fn(async (args: any) =>
+            args?.where?.plaid_transaction_id?.in?.includes("txn-pending") ? [pendingRow] : [],
+          ),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ newCount: 0, upgradedCount: 1 });
+    expect(prisma.bankTransaction.create).not.toHaveBeenCalled();
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledWith({
+      where: {
+        business_id: "biz-1",
+        account_id: "acct-1",
+        plaid_transaction_id: "txn-pending",
+        plaid_account_id: "plaid-acct-1",
+      },
+      data: expect.objectContaining({
+        plaid_transaction_id: "txn-posted",
+        is_pending: false,
+        amount_cents: -1345n,
+        name: "Coffee Shop - final",
+        is_removed: false,
+      }),
+    });
+    const pendingRemoval = ((prisma.bankTransaction.updateMany as any).mock.calls as any[][]).find(
+      (call) => call[0]?.where?.plaid_transaction_id === "txn-pending" && call[0]?.data?.is_removed === true,
+    );
+    expect(pendingRemoval).toBeUndefined();
+  });
+
   test("rekeys exact transaction payloads replayed under a new Plaid account identity", async () => {
     const replayed = makeTransaction({
       transaction_id: "txn-new-item-id",

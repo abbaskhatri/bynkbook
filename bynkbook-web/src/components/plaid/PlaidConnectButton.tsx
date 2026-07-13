@@ -13,8 +13,8 @@ import {
 } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import {
-  canAutomaticallyRepairPlaidSelection,
   missingRequiredPlaidAccount,
+  resolveTargetPlaidAccount,
   splitPlaidAccountsByExistingMapping,
   type RelatedBynkbookAccount,
 } from "@/lib/plaid/accountSelection";
@@ -168,7 +168,8 @@ export function PlaidConnectButton(props: Props) {
   const [preparedLinkContext, setPreparedLinkContext] = useState<any>(null);
   const [selectedConnectionSourceId, setSelectedConnectionSourceId] = useState<string>("new");
 
-  // Step 2: after Plaid returns metadata, user must choose exactly one account + history window
+  // Local mapping fallback only. Plaid owns account selection and consent; this
+  // dialog opens only when the returned accounts cannot be mapped safely.
   const [openSelect, setOpenSelect] = useState(false);
   const [pendingPublicToken, setPendingPublicToken] = useState<string | null>(null);
   const [pendingInstitution, setPendingInstitution] = useState<any>(null);
@@ -484,10 +485,21 @@ export function PlaidConnectButton(props: Props) {
               }
 
               const targetMask = String(lt?.targetPlaidMask ?? "").trim();
+              const relatedBynkbookAccounts = Array.isArray(lt?.relatedInstitutionAccounts)
+                ? lt.relatedInstitutionAccounts
+                : [];
+              const targetResolution = resolveTargetPlaidAccount({
+                returnedAccounts: accounts,
+                requiredAccounts: requiredPreservedAccounts,
+                relatedAccounts: relatedBynkbookAccounts,
+                targetBynkbookAccountId: accountId,
+                targetMask,
+                targetType: lt?.targetAccountType,
+              });
               const targetMatches = targetMask
                 ? accounts.filter((account) => String(account.mask ?? "").trim() === targetMask)
                 : [];
-              if (targetMask && targetMatches.length === 0) {
+              if (targetMask && targetMatches.length === 0 && !targetResolution.certain) {
                 throw new Error(
                   `Plaid did not share ${lt?.targetAccountName ?? "this account"}. Reopen Plaid, keep the existing accounts selected, and add this account.`,
                 );
@@ -501,12 +513,8 @@ export function PlaidConnectButton(props: Props) {
                   `Plaid did not add an account for ${lt?.targetAccountName ?? "this ledger"}. Keep the existing accounts selected and add the new account before continuing.`,
                 );
               }
-              const targetSelectionIsCertain = targetMatches.length === 1 || newlySharedAccounts.length === 1;
-              const targetAccount = targetMatches.length === 1
-                ? targetMatches[0]
-                : newlySharedAccounts.length === 1
-                  ? newlySharedAccounts[0]
-                  : accounts[0];
+              const targetAccount = targetResolution.account ?? accounts[0];
+              const targetSelectionIsCertain = targetResolution.certain;
 
               if (accounts.length === 1) {
                 await completeReconnectRepair(
@@ -520,18 +528,12 @@ export function PlaidConnectButton(props: Props) {
               }
 
               if (accounts.length > 1) {
-                const relatedBynkbookAccounts = Array.isArray(lt?.relatedInstitutionAccounts)
-                  ? lt.relatedInstitutionAccounts
-                  : [];
                 // Plaid requires the user to grant consent, but once consent is
                 // complete BynkBook can repair every recognized sibling ledger
-                // without asking the user to map the same accounts again.
-                if (canAutomaticallyRepairPlaidSelection({
-                  returnedAccounts: accounts,
-                  relatedAccounts: relatedBynkbookAccounts,
-                  targetPlaidAccountId: targetAccount?.id,
-                  targetSelectionIsCertain,
-                })) {
+                // without asking the user to map the same accounts again. Any
+                // unmatched selected accounts remain unlinked unless the user
+                // explicitly creates ledgers for them elsewhere.
+                if (targetSelectionIsCertain) {
                   await completeReconnectRepair(
                     targetAccount.id,
                     targetAccount,
@@ -570,7 +572,30 @@ export function PlaidConnectButton(props: Props) {
               return;
             }
 
-            // Open selection step only when Plaid returns multiple possible accounts.
+            const targetResolution = resolveTargetPlaidAccount({
+              returnedAccounts: accounts,
+              requiredAccounts: [],
+              relatedAccounts: [],
+              targetBynkbookAccountId: accountId,
+              targetMask: lt?.targetPlaidMask,
+              targetType: lt?.targetAccountType,
+            });
+            if (targetResolution.certain && targetResolution.account?.id) {
+              const targetAccount = targetResolution.account;
+              const additionalAccounts = accounts.filter((account) => account.id !== targetAccount.id);
+              await completeExistingAccountConnect(
+                public_token,
+                targetAccount.id,
+                targetAccount,
+                institution,
+                additionalAccounts,
+              );
+              return;
+            }
+
+            // Plaid already collected account consent. A brand-new Item still
+            // needs one local ledger mapping when several accounts were shared
+            // and BynkBook has no remembered identity for the target ledger.
             setPendingPublicToken(public_token);
             setPendingInstitution(institution);
             setPendingAccounts(accounts);
@@ -761,14 +786,27 @@ export function PlaidConnectButton(props: Props) {
                     Plaid will add this account to the existing authorization. BynkBook will automatically preserve and reconnect recognized accounts; it will not create a ledger for a new unmatched account without your approval.
                   </div>
                 </div>
-              ) : "Bank-level encryption - Read-only access - No password stored"}
+              ) : (
+                <div>
+                  <div className="font-bold">Plaid controls which bank accounts you share.</div>
+                  <div className="mt-1">
+                    BynkBook uses read-only access and never stores your bank password. Recognized accounts stay mapped to their existing ledgers.
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           <div className="text-xs text-bb-text">
             Before continuing:
             <ul className="list-disc ml-5 mt-1 text-bb-text-muted">
-              <li>{mode === "reconnect" ? "This will repair the shared bank authorization." : "This will connect a bank feed for this account."}</li>
+              <li>
+                {mode === "reconnect"
+                  ? "This will repair the shared bank authorization."
+                  : selectedConnectionSourceId !== "new"
+                    ? "This will add the current ledger to the existing shared bank authorization."
+                    : "This will connect a separate BynkBook ledger for every bank account you select in Plaid."}
+              </li>
               {mode === "reconnect" || selectedConnectionSourceId !== "new" ? (
                 <li><strong>Keep all existing BynkBook bank accounts selected inside Plaid.</strong></li>
               ) : null}
@@ -789,7 +827,7 @@ export function PlaidConnectButton(props: Props) {
                 ? "I understand I must keep all existing BynkBook bank accounts selected in Plaid."
                 : selectedConnectionSourceId !== "new"
                   ? "I understand I must keep all existing BynkBook bank accounts selected while adding this account in Plaid."
-                  : "I understand this will open Plaid to connect a live bank feed for this account."}
+                  : "I understand that if I select multiple bank accounts in Plaid, BynkBook will connect each one to a separate ledger."}
             </span>
           </label>
 
@@ -826,21 +864,21 @@ export function PlaidConnectButton(props: Props) {
         </div>
       </AppDialog>
 
-      {/* Step 2: select exactly one bank account only when Plaid returns multiple accounts. */}
+      {/* Local ledger mapping fallback after Plaid has completed account consent. */}
       <AppDialog
         open={openSelect}
         onClose={() => {
           setOpenSelect(false);
           resetPendingSelection();
         }}
-        title={pendingReconnectRepair ? "Repair bank account mapping" : "Choose bank account"}
+        title={pendingReconnectRepair ? "Repair bank account mapping" : "Confirm ledger mapping"}
         size="md"
       >
         <div className="space-y-4">
           <div className="text-xs text-bb-text-muted">
             {pendingReconnectRepair
-              ? "Plaid reconnected. Select the live bank account that belongs to this BynkBook account."
-              : "Select exactly one bank account to link to this BynkBook account."}
+              ? "Plaid consent is complete, but BynkBook could not identify this ledger safely. Confirm which returned bank account belongs to it."
+              : "Plaid consent is complete. Confirm which returned bank account belongs to this existing BynkBook ledger."}
           </div>
 
           <div className="space-y-2">

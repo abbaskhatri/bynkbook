@@ -617,6 +617,75 @@ describe("bank transactions list status and pagination", () => {
   });
 });
 
+describe("pending bank transaction entry creation", () => {
+  test("requires explicit pending-entry consent", async () => {
+    const rows = [tx("bank-pending", "2026-07-13", "2026-07-13T12:00:00.000Z", {
+      name: "Pending card purchase",
+      amount_cents: -4250n,
+      is_pending: true,
+    })];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const res = await handler(postCreateEntryEvent("bank-pending", { autoMatch: false }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("PENDING_ENTRY_CONSENT_REQUIRED");
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("never allows a pending transaction to auto-match", async () => {
+    const rows = [tx("bank-pending-match", "2026-07-13", "2026-07-13T12:00:00.000Z", {
+      name: "Pending card purchase",
+      amount_cents: -4250n,
+      is_pending: true,
+    })];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const res = await handler(postCreateEntryEvent("bank-pending-match", {
+      autoMatch: true,
+      pendingEntryConsent: true,
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("PENDING_AUTO_MATCH_NOT_ALLOWED");
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("creates one expected unmatched entry after consent", async () => {
+    const rows = [tx("bank-pending-consented", "2026-07-13", "2026-07-13T12:00:00.000Z", {
+      name: "Pending card purchase",
+      amount_cents: -4250n,
+      is_pending: true,
+    })];
+    const { handler, prisma } = await loadHandler({ rows });
+
+    const res = await handler(postCreateEntryEvent("bank-pending-consented", {
+      autoMatch: false,
+      pendingEntryConsent: true,
+    }));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body).toMatchObject({
+      ok: true,
+      auto_matched: false,
+      pending_entry: true,
+      requires_posting_before_match: true,
+    });
+    expect(prisma.entry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        sourceBankTransactionId: "bank-pending-consented",
+        status: "EXPECTED",
+      }),
+    }));
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("bank transaction create-entry duplicate preflight", () => {
   test("blocks generic imported deposit when same amount manual customer entry exists nearby", async () => {
     const rows = [
