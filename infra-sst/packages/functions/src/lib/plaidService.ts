@@ -39,6 +39,15 @@ function plaidWebhookUrl() {
   return url || undefined;
 }
 
+function plaidLinkCustomizationName() {
+  // Plaid update mode does not reliably inherit the Dashboard's visible
+  // customization unless the Link token names it. The published `default`
+  // customization is configured for multi-account selection so one bank login
+  // can keep every separately mapped BynkBook ledger authorized.
+  const name = String(process.env.PLAID_LINK_CUSTOMIZATION_NAME ?? "default").trim();
+  return name || "default";
+}
+
 function reconnectStatusForPlaidFailure(code: string, message: string) {
   const text = `${code} ${message}`.toUpperCase();
   if (text.includes("NO_ACCOUNTS") || text.includes("INVALID_ACCOUNT")) {
@@ -674,6 +683,7 @@ export async function createLinkTokenBusiness(params: {
   const res = await plaid.linkTokenCreate({
     user: { client_user_id: userId },
     client_name: "BynkBook",
+    link_customization_name: plaidLinkCustomizationName(),
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
@@ -789,6 +799,7 @@ export async function createLinkToken(params: {
     const res = await plaid.linkTokenCreate({
       user: { client_user_id: userId },
       client_name: "BynkBook",
+      link_customization_name: plaidLinkCustomizationName(),
       country_codes: [CountryCode.Us],
       language: "en",
       webhook: plaidWebhookUrl(),
@@ -881,6 +892,7 @@ export async function createLinkToken(params: {
     const res = await plaid.linkTokenCreate({
       user: { client_user_id: userId },
       client_name: "BynkBook",
+      link_customization_name: plaidLinkCustomizationName(),
       country_codes: [CountryCode.Us],
       language: "en",
       webhook: plaidWebhookUrl(),
@@ -958,6 +970,7 @@ export async function createLinkToken(params: {
   const res = await plaid.linkTokenCreate({
     user: { client_user_id: userId },
     client_name: "BynkBook",
+    link_customization_name: plaidLinkCustomizationName(),
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",

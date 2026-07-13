@@ -143,6 +143,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   delete process.env.PLAID_WEBHOOK_URL;
+  delete process.env.PLAID_LINK_CUSTOMIZATION_NAME;
 });
 
 const { publicKey: testPublicKey, privateKey: testPrivateKey } = generateKeyPairSync("ec", {
@@ -226,6 +227,7 @@ describe("createLinkToken", () => {
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         access_token: "access-token-redacted",
+        link_customization_name: "default",
         update: { account_selection_enabled: true },
       })
     );
@@ -452,8 +454,21 @@ describe("createLinkToken", () => {
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         access_token: "access-token-redacted",
+        link_customization_name: "default",
         update: { account_selection_enabled: true },
       }),
+    );
+  });
+
+  test("binds new Link tokens to the configured published customization", async () => {
+    process.env.PLAID_LINK_CUSTOMIZATION_NAME = "bynkbook-multi-account";
+    const { mod, plaid } = await loadSyncTransactions({});
+
+    const res = await mod.createLinkTokenBusiness({ businessId: "biz-1", userId: "user-1" });
+
+    expect(res.statusCode).toBe(200);
+    expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ link_customization_name: "bynkbook-multi-account" }),
     );
   });
 
@@ -1020,6 +1035,47 @@ describe("syncTransactions", () => {
       account_id: "acct-1",
       plaid_transaction_id: "txn-removed",
       plaid_account_id: "plaid-acct-1",
+    });
+  });
+
+  test("stores pending transactions returned by Plaid and reports the active pending count", async () => {
+    const pending = makeTransaction({
+      transaction_id: "txn-pending",
+      pending: true,
+      date: "2026-07-13",
+      authorized_date: "2026-07-13",
+      name: "Pending card purchase",
+    });
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [pending],
+            modified: [],
+            removed: [],
+            next_cursor: "cursor-next",
+            has_more: false,
+          },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          count: vi.fn(async (args: any) => args?.where?.is_pending === true ? 1 : 0),
+        },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ newCount: 1, pendingCount: 1 });
+    expect(prisma.bankTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        plaid_transaction_id: "txn-pending",
+        plaid_account_id: "plaid-acct-1",
+        is_pending: true,
+      }),
     });
   });
 

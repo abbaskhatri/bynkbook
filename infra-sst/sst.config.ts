@@ -73,6 +73,9 @@ export default $config({
     const plaidSecretSecretId = isProd
       ? requiredEnv("BYNKBOOK_PROD_PLAID_SECRET_SECRET_ID")
       : (process.env.BYNKBOOK_DEV_PLAID_SECRET_SECRET_ID?.trim() || `${resourcePrefix}/plaid/secret`);
+    const plaidLinkCustomizationName = isProd
+      ? optionalEnv("BYNKBOOK_PROD_PLAID_LINK_CUSTOMIZATION_NAME", "default")
+      : optionalEnv("BYNKBOOK_DEV_PLAID_LINK_CUSTOMIZATION_NAME", "default");
     const validPlaidEnvs = new Set(["sandbox", "development", "production"]);
     if (!validPlaidEnvs.has(plaidEnv)) {
       throw new Error(`Invalid Plaid environment "${plaidEnv}" for ${$app.stage} stage`);
@@ -316,6 +319,7 @@ const plaidHandler = {
     PLAID_ENV: plaidEnv,
     PLAID_CLIENT_ID_SECRET_ID: plaidClientIdSecretId,
     PLAID_SECRET_SECRET_ID: plaidSecretSecretId,
+    PLAID_LINK_CUSTOMIZATION_NAME: plaidLinkCustomizationName,
     PLAID_TOKEN_KMS_KEY_ARN: sharedKmsKeyArn,
     PLAID_WEBHOOK_URL: plaidWebhookUrl,
   },
