@@ -805,6 +805,7 @@ export async function createLinkToken(params: {
       institutionName: sourceConnection.institution_name ?? null,
       targetPlaidMask: localAccount.last4 ?? null,
       targetAccountName: localAccount.name ?? null,
+      targetAccountType: localAccount.type ?? null,
       requiredPreservedAccounts,
       relatedInstitutionAccounts: itemConnections.map((connection: any) => ({
         accountId: String(connection.account_id),
@@ -948,6 +949,7 @@ export async function createLinkToken(params: {
       institutionName: updateConnection.institution_name ?? conn.institution_name ?? null,
       targetPlaidMask: conn.plaid_mask ?? null,
       targetAccountName: localAccount.name ?? null,
+      targetAccountType: localAccount.type ?? null,
       requiredPreservedAccounts,
       relatedInstitutionAccounts,
     });
@@ -965,7 +967,13 @@ export async function createLinkToken(params: {
     transactions: { days_requested: 730 },
   });
 
-  return json(200, { ok: true, link_token: res.data.link_token });
+  return json(200, {
+    ok: true,
+    link_token: res.data.link_token,
+    targetPlaidMask: localAccount.last4 ?? null,
+    targetAccountName: localAccount.name ?? null,
+    targetAccountType: localAccount.type ?? null,
+  });
 }
 
 type PlaidConnectionMode = "NEW_ACCOUNT" | "EXISTING_ACCOUNT";

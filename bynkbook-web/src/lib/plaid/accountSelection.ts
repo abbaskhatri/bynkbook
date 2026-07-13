@@ -21,6 +21,20 @@ function normalized(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizedBynkbookAccountType(value: unknown) {
+  const raw = normalized(value).replace(/[^a-z]/g, "");
+  if (raw.includes("credit")) return "creditcard";
+  if (raw.includes("saving")) return "savings";
+  if (raw.includes("checking") || raw === "depository") return "checking";
+  return raw;
+}
+
+function returnedAccountType(account: ReturnedPlaidAccount) {
+  const subtype = normalizedBynkbookAccountType(account?.subtype);
+  if (subtype) return subtype;
+  return normalizedBynkbookAccountType(account?.type);
+}
+
 export function plaidAccountSelectionMatches(
   required: RequiredPlaidAccount,
   returned: ReturnedPlaidAccount,
@@ -80,21 +94,52 @@ export function splitPlaidAccountsByExistingMapping<T extends ReturnedPlaidAccou
   return { existing, unmatched };
 }
 
-export function canAutomaticallyRepairPlaidSelection<T extends ReturnedPlaidAccount>(params: {
+export function resolveTargetPlaidAccount<T extends ReturnedPlaidAccount>(params: {
   returnedAccounts: T[];
+  requiredAccounts: RequiredPlaidAccount[];
   relatedAccounts: RelatedBynkbookAccount[];
-  targetPlaidAccountId?: string | null;
-  targetSelectionIsCertain: boolean;
+  targetBynkbookAccountId?: string | null;
+  targetMask?: string | null;
+  targetType?: string | null;
 }) {
-  if (!params.targetSelectionIsCertain || !params.targetPlaidAccountId) return false;
-
-  const targetId = String(params.targetPlaidAccountId);
-  const { unmatched } = splitPlaidAccountsByExistingMapping(
+  const mappedTarget = splitPlaidAccountsByExistingMapping(
     params.returnedAccounts,
     params.relatedAccounts,
+  ).existing.filter(({ mapping }) =>
+    String(mapping.accountId ?? "") === String(params.targetBynkbookAccountId ?? ""),
   );
+  if (mappedTarget.length === 1) {
+    return { account: mappedTarget[0].account, certain: true, reason: "existing_mapping" as const };
+  }
 
-  // The target ledger can itself be the one newly selected account. Any other
-  // unmatched account needs an explicit user choice before creating a ledger.
-  return unmatched.every((account) => String(account.id ?? "") === targetId);
+  const targetMask = normalized(params.targetMask);
+  const maskMatches = targetMask
+    ? params.returnedAccounts.filter((account) => normalized(account.mask) === targetMask)
+    : [];
+  if (maskMatches.length === 1) {
+    return { account: maskMatches[0], certain: true, reason: "unique_mask" as const };
+  }
+
+  const targetType = normalizedBynkbookAccountType(params.targetType);
+  const typeMatches = targetType
+    ? params.returnedAccounts.filter((account) => returnedAccountType(account) === targetType)
+    : [];
+  if (typeMatches.length === 1) {
+    return { account: typeMatches[0], certain: true, reason: "unique_type" as const };
+  }
+
+  const newlyShared = params.returnedAccounts.filter(
+    (account) => !params.requiredAccounts.some((required) =>
+      plaidAccountSelectionMatches(required, account),
+    ),
+  );
+  if (newlyShared.length === 1) {
+    return { account: newlyShared[0], certain: true, reason: "single_new_account" as const };
+  }
+
+  return {
+    account: params.returnedAccounts[0] ?? null,
+    certain: false,
+    reason: "ambiguous" as const,
+  };
 }

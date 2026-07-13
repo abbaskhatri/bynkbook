@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  canAutomaticallyRepairPlaidSelection,
   missingRequiredPlaidAccount,
   plaidAccountSelectionMatches,
+  resolveTargetPlaidAccount,
   splitPlaidAccountsByExistingMapping,
 } from "./accountSelection";
 
@@ -53,24 +53,28 @@ describe("Plaid update-mode account retention", () => {
     expect(result.unmatched.map((account) => account.id)).toEqual(["new-savings"]);
   });
 
-  test("automatically repairs recognized siblings after the user selects a new target account", () => {
+  test("resolves the target ledger from its remembered mapping after Plaid changes account ids", () => {
     const returnedAccounts = [
       { id: "new-frisco", mask: "1751", type: "depository", subtype: "checking" },
       { id: "new-dallas", mask: "0358", type: "depository", subtype: "checking" },
     ];
     const relatedAccounts = [
       { accountId: "acct-frisco", plaidAccountId: "old-frisco", mask: "1751", plaidType: "depository", plaidSubtype: "checking" },
+      { accountId: "acct-dallas", plaidAccountId: "old-dallas", mask: "0358", plaidType: "depository", plaidSubtype: "checking" },
     ];
 
-    expect(canAutomaticallyRepairPlaidSelection({
+    const result = resolveTargetPlaidAccount({
       returnedAccounts,
+      requiredAccounts: relatedAccounts,
       relatedAccounts,
-      targetPlaidAccountId: "new-dallas",
-      targetSelectionIsCertain: true,
-    })).toBe(true);
+      targetBynkbookAccountId: "acct-dallas",
+      targetMask: "0358",
+    });
+
+    expect(result).toMatchObject({ account: { id: "new-dallas" }, certain: true, reason: "existing_mapping" });
   });
 
-  test("requires review when Plaid returns an additional unmatched account", () => {
+  test("keeps the target certain when Plaid also returns an unmatched selected account", () => {
     const returnedAccounts = [
       { id: "new-frisco", mask: "1751", type: "depository", subtype: "checking" },
       { id: "new-dallas", mask: "0358", type: "depository", subtype: "checking" },
@@ -78,13 +82,48 @@ describe("Plaid update-mode account retention", () => {
     ];
     const relatedAccounts = [
       { accountId: "acct-frisco", plaidAccountId: "old-frisco", mask: "1751", plaidType: "depository", plaidSubtype: "checking" },
+      { accountId: "acct-dallas", plaidAccountId: "old-dallas", mask: "0358", plaidType: "depository", plaidSubtype: "checking" },
     ];
 
-    expect(canAutomaticallyRepairPlaidSelection({
+    const result = resolveTargetPlaidAccount({
       returnedAccounts,
+      requiredAccounts: relatedAccounts,
       relatedAccounts,
-      targetPlaidAccountId: "new-dallas",
-      targetSelectionIsCertain: true,
-    })).toBe(false);
+      targetBynkbookAccountId: "acct-dallas",
+      targetMask: "0358",
+    });
+
+    expect(result).toMatchObject({ account: { id: "new-dallas" }, certain: true });
+  });
+
+  test("requires review only when the target ledger cannot be identified safely", () => {
+    const result = resolveTargetPlaidAccount({
+      returnedAccounts: [
+        { id: "checking-a", type: "depository", subtype: "checking" },
+        { id: "checking-b", type: "depository", subtype: "checking" },
+      ],
+      requiredAccounts: [],
+      relatedAccounts: [],
+      targetBynkbookAccountId: "acct-without-bank-identity",
+      targetMask: null,
+    });
+
+    expect(result).toMatchObject({ account: { id: "checking-a" }, certain: false, reason: "ambiguous" });
+  });
+
+  test("identifies a new target ledger when only one returned account has its type", () => {
+    const result = resolveTargetPlaidAccount({
+      returnedAccounts: [
+        { id: "checking", type: "depository", subtype: "checking" },
+        { id: "credit", type: "credit", subtype: "credit card" },
+      ],
+      requiredAccounts: [],
+      relatedAccounts: [],
+      targetBynkbookAccountId: "acct-credit",
+      targetMask: null,
+      targetType: "CREDIT_CARD",
+    });
+
+    expect(result).toMatchObject({ account: { id: "credit" }, certain: true, reason: "unique_type" });
   });
 });

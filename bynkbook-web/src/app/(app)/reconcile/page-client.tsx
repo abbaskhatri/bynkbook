@@ -1570,6 +1570,14 @@ export default function ReconcilePageClient() {
   const [createEntryAutoMatch, setCreateEntryAutoMatch] = useState(true);
   const [createEntryDuplicateCandidates, setCreateEntryDuplicateCandidates] = useState<any[]>([]);
   const [createEntryDuplicateConfirm, setCreateEntryDuplicateConfirm] = useState("");
+  const [createEntryPendingConsent, setCreateEntryPendingConsent] = useState(false);
+  const selectedCreateEntryBankTxn = useMemo(
+    () => createEntryBankTxnId
+      ? bankTx.find((row: any) => String(row?.id ?? "") === String(createEntryBankTxnId)) ?? null
+      : null,
+    [bankTx, createEntryBankTxnId],
+  );
+  const isPendingCreateEntry = Boolean(selectedCreateEntryBankTxn?.is_pending);
 
   // Overrides
   const [createEntryMemo, setCreateEntryMemo] = useState("");
@@ -1939,6 +1947,17 @@ export default function ReconcilePageClient() {
     return m;
   }, [allEntriesSorted]);
 
+  const entryBySourceBankTransactionId = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const entry of allEntriesSorted ?? []) {
+      const bankId = String(
+        entry?.sourceBankTransactionId ?? entry?.source_bank_transaction_id ?? "",
+      ).trim();
+      if (bankId && !m.has(bankId)) m.set(bankId, entry);
+    }
+    return m;
+  }, [allEntriesSorted]);
+
   const bankByIdFast = useMemo(() => {
     const m = new Map<string, any>();
     for (const t of bankTxSorted ?? []) m.set(String(t.id), t);
@@ -2160,7 +2179,9 @@ export default function ReconcilePageClient() {
 
     const bank = bankByIdFast.get(id);
     if (!bank) return "Refresh the bank transaction list before trying again.";
-    if (bank?.is_pending) return "Pending transaction. Actions unlock once it posts.";
+    if (bank?.is_pending && entryBySourceBankTransactionId.has(id)) {
+      return "An unmatched ledger entry has already been created. Matching unlocks after the bank transaction posts.";
+    }
     if (isBankTxnFullyMatched(bank) || (remainingAbsByBankTxnId.get(id) ?? 0n) === 0n) {
       return matchedOrPendingCreateEntryMessage;
     }
@@ -3625,29 +3646,43 @@ const displayBankActiveList = useMemo(() => {
             setCreateEntryAutoMatch(true);
             setCreateEntryDuplicateCandidates([]);
             setCreateEntryDuplicateConfirm("");
+            setCreateEntryPendingConsent(false);
             setCreateEntryCategoryTouched(false);
           }}
-          title={createEntryDuplicateCandidates.length ? "Possible duplicate ledger entry" : "Create entry"}
+          title={
+            createEntryDuplicateCandidates.length
+              ? "Possible duplicate ledger entry"
+              : isPendingCreateEntry
+                ? "Create entry from pending transaction"
+                : "Create entry"
+          }
           size="lg"
           bodyClassName="overflow-hidden sm:overflow-hidden"
           footer={openCreateEntry ? (
             <DialogFooter
               left={
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-bb-text-muted whitespace-nowrap">Auto-match</span>
-                  <PillToggle
-                    checked={createEntryAutoMatch}
-                    onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
-                    disabled={
-                      !canWriteReconcileEffective ||
-                      !!(createEntryBankTxnId && getCreateEntryActionBlockReason(String(createEntryBankTxnId)))
-                    }
-                  />
-                </div>
+                isPendingCreateEntry ? (
+                  <div className="flex items-center gap-2 text-xs text-bb-text-muted">
+                    <StatusChip label="Pending" tone="warning" />
+                    <span>Entry stays unmatched until posted</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-bb-text-muted whitespace-nowrap">Auto-match</span>
+                    <PillToggle
+                      checked={createEntryAutoMatch}
+                      onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
+                      disabled={
+                        !canWriteReconcileEffective ||
+                        !!(createEntryBankTxnId && getCreateEntryActionBlockReason(String(createEntryBankTxnId)))
+                      }
+                    />
+                  </div>
+                )
               }
               right={
                 <>
-                  {createEntryDuplicateCandidates.length ? (
+                  {createEntryDuplicateCandidates.length && !isPendingCreateEntry ? (
                     <BusyButton
                       variant="primary"
                       size="md"
@@ -3663,6 +3698,7 @@ const displayBankActiveList = useMemo(() => {
                         setCreateEntryBankTxnId(null);
                         setCreateEntryDuplicateCandidates([]);
                         setCreateEntryDuplicateConfirm("");
+                        setCreateEntryPendingConsent(false);
                         if (!bankId) return;
                         setMatchBankTxnId(bankId);
                         setMatchSearch("");
@@ -3688,8 +3724,10 @@ const displayBankActiveList = useMemo(() => {
                     size="md"
                     onClick={() => {
                       setOpenCreateEntry(false);
+                      setCreateEntryBankTxnId(null);
                       setCreateEntryDuplicateCandidates([]);
                       setCreateEntryDuplicateConfirm("");
+                      setCreateEntryPendingConsent(false);
                     }}
                     disabled={!!(createEntryBankTxnId && createEntryBusyByBankId[String(createEntryBankTxnId)])}
                   >
@@ -3709,6 +3747,7 @@ const displayBankActiveList = useMemo(() => {
                         !canWriteReconcileEffective ||
                         !createEntryBankTxnId ||
                         !!(createEntryBankTxnId && getCreateEntryActionBlockReason(String(createEntryBankTxnId))) ||
+                        (isPendingCreateEntry && !createEntryPendingConsent) ||
                         (createEntryDuplicateCandidates.length > 0 &&
                           createEntryDuplicateConfirm.trim() !== "Create a separate ledger entry")
                       }
@@ -3723,6 +3762,10 @@ const displayBankActiveList = useMemo(() => {
                           setCreateEntryErr(blockedReason);
                           return;
                         }
+                        if (isPendingCreateEntry && !createEntryPendingConsent) {
+                          setCreateEntryErr("Confirm the pending-transaction acknowledgment before creating this entry.");
+                          return;
+                        }
 
                         const bankTxn = bankTxSorted.find((x: any) => String(x.id) === bankId) ?? null;
                         const optimisticEntryId = `optimistic-entry:${bankId}`;
@@ -3733,11 +3776,13 @@ const displayBankActiveList = useMemo(() => {
 
                         // Instant UX: hide bank row and show pending expected entry immediately.
                         markPending(bankId);
-                        setOptimisticHiddenBankTxnIds((prev) => {
-                          const next = new Set(prev);
-                          next.add(bankId);
-                          return next;
-                        });
+                        if (!isPendingCreateEntry) {
+                          setOptimisticHiddenBankTxnIds((prev) => {
+                            const next = new Set(prev);
+                            next.add(bankId);
+                            return next;
+                          });
+                        }
 
                         if (bankTxn) {
                           setOptimisticPendingEntryDrafts((prev) => {
@@ -3764,12 +3809,13 @@ const displayBankActiveList = useMemo(() => {
                             businessId: selectedBusinessId,
                             accountId: selectedAccountId,
                             bankTransactionId: bankId,
-                            autoMatch: !!createEntryAutoMatch,
+                            autoMatch: isPendingCreateEntry ? false : !!createEntryAutoMatch,
                             memo: createEntryMemo,
                             method: createEntryMethod,
                             category_id: categoryIdFinal,
                             suggested_category_id: suggestedCategoryId || "",
                             allowPossibleDuplicate: createEntryDuplicateCandidates.length > 0,
+                            pendingEntryConsent: isPendingCreateEntry && createEntryPendingConsent,
                           });
 
                           clearMutErr();
@@ -3777,17 +3823,20 @@ const displayBankActiveList = useMemo(() => {
                           setCreateEntryBankTxnId(null);
                           setCreateEntryDuplicateCandidates([]);
                           setCreateEntryDuplicateConfirm("");
+                          setCreateEntryPendingConsent(false);
                           setCreateEntryCategoryTouched(false);
                           settleReconcileInBackground("created entry", async () => {
                             await refreshIssuesAfterBankEntryCreate();
                             setOptimisticPendingEntryDrafts((prev) =>
                               prev.filter((x: any) => String(x?.__source_bank_txn_id ?? "") !== bankId)
                             );
-                            setOptimisticHiddenBankTxnIds((prev) => {
-                              const next = new Set(prev);
-                              next.delete(bankId);
-                              return next;
-                            });
+                            if (!isPendingCreateEntry) {
+                              setOptimisticHiddenBankTxnIds((prev) => {
+                                const next = new Set(prev);
+                                next.delete(bankId);
+                                return next;
+                              });
+                            }
                           });
                         } catch (e: any) {
                           setOptimisticPendingEntryDrafts((prev) =>
@@ -3823,7 +3872,11 @@ const displayBankActiveList = useMemo(() => {
                         }
                       }}
                     >
-                      {createEntryDuplicateCandidates.length ? "Create separate entry" : "Create entry"}
+                      {createEntryDuplicateCandidates.length
+                        ? "Create separate entry"
+                        : isPendingCreateEntry
+                          ? "Create unmatched entry"
+                          : "Create entry"}
                     </BusyButton>
                   </HintWrap>
                 </>
@@ -3864,7 +3917,11 @@ const displayBankActiveList = useMemo(() => {
                 <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
                   <div className="text-xs text-bb-text-muted">
                     {createEntryDuplicateCandidates.length
-                      ? "A likely existing ledger entry was found. Match the existing entry first unless this bank transaction is truly a separate event."
+                      ? isPendingCreateEntry
+                        ? "A likely existing ledger entry was found. Because the bank transaction is still pending, it cannot be matched yet; create another entry only if this is truly a separate event."
+                        : "A likely existing ledger entry was found. Match the existing entry first unless this bank transaction is truly a separate event."
+                      : isPendingCreateEntry
+                        ? "This creates an Expected ledger entry now, but it will remain unmatched until Plaid reports the bank transaction as posted."
                       : createEntryAutoMatch
                         ? createEntryAndMatchConfirmationCopy
                         : "This will create a new ledger entry from this bank transaction. Review the category, amount, and date before continuing."}
@@ -3873,6 +3930,26 @@ const displayBankActiveList = useMemo(() => {
                   {createEntryBlockReason ? (
                     <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
                       {createEntryBlockReason}
+                    </div>
+                  ) : null}
+
+                  {isPendingCreateEntry ? (
+                    <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
+                      <div className="font-semibold text-bb-text">Pending transaction acknowledgment</div>
+                      <div className="mt-1 leading-5">
+                        The amount, date, description, or category may change before this transaction posts, and the bank may remove it entirely. BynkBook will not match it while it is pending.
+                      </div>
+                      <label className="mt-2 flex items-start gap-2 rounded-md border border-bb-status-warning-border bg-bb-surface-card px-2 py-2 text-bb-text">
+                        <input
+                          type="checkbox"
+                          className="bb-checkbox mt-0.5"
+                          checked={createEntryPendingConsent}
+                          onChange={(event) => setCreateEntryPendingConsent(event.target.checked)}
+                        />
+                        <span className="text-[11px] leading-4">
+                          I understand this transaction is not final. Create an unmatched Expected entry now, and I will review and match it after the bank posts it.
+                        </span>
+                      </label>
                     </div>
                   ) : null}
 
@@ -4002,9 +4079,13 @@ const displayBankActiveList = useMemo(() => {
 
                   {createEntryDuplicateCandidates.length ? (
                     <div className="mt-3 rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
-                      <div className="font-semibold text-bb-text">Suggested existing match</div>
+                      <div className="font-semibold text-bb-text">
+                        {isPendingCreateEntry ? "Possible existing entry" : "Suggested existing match"}
+                      </div>
                       <div className="mt-1 text-bb-text-muted">
-                        Match an existing entry when it represents this bank transaction. Create a separate entry only when these are truly separate transactions.
+                        {isPendingCreateEntry
+                          ? "Wait until the bank transaction posts before matching it. Create a separate entry now only when these are truly separate transactions."
+                          : "Match an existing entry when it represents this bank transaction. Create a separate entry only when these are truly separate transactions."}
                       </div>
                       <div className="mt-1 text-bb-text-muted">
                         Duplication is suspected because the candidate has the same amount, a nearby date, a similar payee, or a generic bank description that commonly hides customer names.
@@ -5115,6 +5196,9 @@ const displayBankActiveList = useMemo(() => {
 
                       const isMatched = isBankTxnFullyMatched(t);
                       const isPendingBankTxn = Boolean(t?.is_pending);
+                      const pendingLinkedEntry = isPendingBankTxn
+                        ? entryBySourceBankTransactionId.get(txnId) ?? null
+                        : null;
                       const wasRemovedAtSource = Boolean(t?.source_removed_at);
                       const isRowPending = !!pendingById[txnId] || !!createEntryBusyByBankId[txnId];
                       const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
@@ -5159,15 +5243,15 @@ const displayBankActiveList = useMemo(() => {
                           title={bankTab === "matched" ? "View audit detail" : undefined}
                         >
                           <td className={tdClass}>
-                            {bankTab === "unmatched" ? (
+                            {bankTab === "unmatched" && !isPendingBankTxn ? (
                               <input
                                 type="checkbox"
                                 className="h-3 w-3"
-                                checked={!isPendingBankTxn && !isRowPending && isSelected}
-                                disabled={isPendingBankTxn || isRowPending}
-                                title={isPendingBankTxn ? pendingActionReason : isRowPending ? rowBusyReason : "Select bank transaction"}
+                                checked={!isRowPending && isSelected}
+                                disabled={isRowPending}
+                                title={isRowPending ? rowBusyReason : "Select bank transaction"}
                                 onChange={(e) => {
-                                  if (isPendingBankTxn || isRowPending) return;
+                                  if (isRowPending) return;
                                   const checked = e.target.checked;
                                   setSelectedBankTxnIds((prev) => {
                                     const next = new Set(prev);
@@ -5211,6 +5295,12 @@ const displayBankActiveList = useMemo(() => {
                                 </span>
                               ) : null}
 
+                              {pendingLinkedEntry ? (
+                                <span className="shrink-0" title="Expected ledger entry created; matching unlocks after this transaction posts.">
+                                  <StatusChip label="Entry created" tone="success" />
+                                </span>
+                              ) : null}
+
                               {wasRemovedAtSource ? (
                                 <span className="shrink-0" title="Plaid removed this source transaction after it was reconciled. The accounting history is preserved for auditability.">
                                   <StatusChip label="Removed by bank" tone="warning" />
@@ -5238,6 +5328,57 @@ const displayBankActiveList = useMemo(() => {
                           </td>
 
                           <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2 overflow-hidden`}>
+                            {isPendingBankTxn ? (
+                              pendingLinkedEntry ? (
+                                <span
+                                  className="text-xs text-bb-text-muted"
+                                  title="Ledger entry created. Matching unlocks after this transaction posts."
+                                  aria-label="Ledger entry created; no further actions until transaction posts"
+                                >
+                                  —
+                                </span>
+                              ) : (
+                                <HintWrap
+                                  disabled={!canWriteReconcileEffective || isRowPending}
+                                  reason={
+                                    isRowPending
+                                      ? rowBusyReason
+                                      : !canWriteReconcileEffective
+                                        ? reconcileWriteReason
+                                        : null
+                                  }
+                                >
+                                  <button
+                                    type="button"
+                                    className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-status-warning-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isRowPending ? "hover:bg-bb-status-warning-bg" : "opacity-50 cursor-not-allowed"}`}
+                                    disabled={!canWriteReconcileEffective || isRowPending}
+                                    title="Create an unmatched Expected entry after confirming the pending-transaction acknowledgment"
+                                    aria-label="Create unmatched entry from pending transaction"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      if (!canWriteReconcileEffective || isRowPending) return;
+                                      setCreateEntryErr(null);
+                                      setCreateEntryDuplicateCandidates([]);
+                                      setCreateEntryDuplicateConfirm("");
+                                      setCreateEntryPendingConsent(false);
+                                      setCreateEntryBankTxnId(txnId);
+                                      setCreateEntryAutoMatch(false);
+
+                                      const defaultDesc = (t?.name ?? "").toString().trim() || "—";
+                                      setCreateEntryMemo(`Bank txn: ${defaultDesc} • ${txnId}`);
+                                      setCreateEntryMethod(inferMethodFromBankTransaction(t));
+                                      setCreateEntryCategoryId("");
+                                      setCreateEntryCategoryName("");
+                                      setCreateEntryCategoryTouched(false);
+                                      setCategoryQuery("");
+                                      setOpenCreateEntry(true);
+                                    }}
+                                  >
+                                    <Plus className="h-4 w-4 text-bb-status-warning-fg" />
+                                  </button>
+                                </HintWrap>
+                              )
+                            ) : (
                             <div className="flex min-w-0 items-center justify-end gap-1">
                               {pendingById[String(t.id)] ? <TinySpinner /> : null}
 
@@ -5444,6 +5585,7 @@ const displayBankActiveList = useMemo(() => {
                                     setCreateEntryErr(null);
                                     setCreateEntryDuplicateCandidates([]);
                                     setCreateEntryDuplicateConfirm("");
+                                    setCreateEntryPendingConsent(false);
                                     setCreateEntryBankTxnId(bankId);
                                     setCreateEntryAutoMatch(true);
 
@@ -5494,6 +5636,7 @@ const displayBankActiveList = useMemo(() => {
                                 })()
                                 : null}
                             </div>
+                            )}
                           </td>
                         </tr>
                       );
