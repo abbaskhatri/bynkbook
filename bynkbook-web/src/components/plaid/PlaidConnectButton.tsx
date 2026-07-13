@@ -12,7 +12,12 @@ import {
   plaidSync,
 } from "@/lib/api/plaid";
 import { AppDialog } from "@/components/primitives/AppDialog";
-import { missingRequiredPlaidAccount } from "@/lib/plaid/accountSelection";
+import {
+  canAutomaticallyRepairPlaidSelection,
+  missingRequiredPlaidAccount,
+  splitPlaidAccountsByExistingMapping,
+  type RelatedBynkbookAccount,
+} from "@/lib/plaid/accountSelection";
 
 function TinySpinner() {
   return <span className="inline-block h-3 w-3 animate-spin rounded-full border border-bb-text-muted border-t-transparent" />;
@@ -172,6 +177,7 @@ export function PlaidConnectButton(props: Props) {
   const [selectedAdditionalPlaidAccountIds, setSelectedAdditionalPlaidAccountIds] = useState<string[]>([]);
   const [pendingReconnectRepair, setPendingReconnectRepair] = useState(false);
   const [pendingRepairSourceAccountId, setPendingRepairSourceAccountId] = useState<string | null>(null);
+  const [pendingRelatedBynkbookAccounts, setPendingRelatedBynkbookAccounts] = useState<RelatedBynkbookAccount[]>([]);
 
   // Initial sync progress
   const [openSyncing, setOpenSyncing] = useState(false);
@@ -197,6 +203,7 @@ export function PlaidConnectButton(props: Props) {
     setSelectedAdditionalPlaidAccountIds([]);
     setPendingReconnectRepair(false);
     setPendingRepairSourceAccountId(null);
+    setPendingRelatedBynkbookAccounts([]);
   }, []);
 
   useEffect(() => {
@@ -494,6 +501,7 @@ export function PlaidConnectButton(props: Props) {
                   `Plaid did not add an account for ${lt?.targetAccountName ?? "this ledger"}. Keep the existing accounts selected and add the new account before continuing.`,
                 );
               }
+              const targetSelectionIsCertain = targetMatches.length === 1 || newlySharedAccounts.length === 1;
               const targetAccount = targetMatches.length === 1
                 ? targetMatches[0]
                 : newlySharedAccounts.length === 1
@@ -512,6 +520,28 @@ export function PlaidConnectButton(props: Props) {
               }
 
               if (accounts.length > 1) {
+                const relatedBynkbookAccounts = Array.isArray(lt?.relatedInstitutionAccounts)
+                  ? lt.relatedInstitutionAccounts
+                  : [];
+                // Plaid requires the user to grant consent, but once consent is
+                // complete BynkBook can repair every recognized sibling ledger
+                // without asking the user to map the same accounts again.
+                if (canAutomaticallyRepairPlaidSelection({
+                  returnedAccounts: accounts,
+                  relatedAccounts: relatedBynkbookAccounts,
+                  targetPlaidAccountId: targetAccount?.id,
+                  targetSelectionIsCertain,
+                })) {
+                  await completeReconnectRepair(
+                    targetAccount.id,
+                    targetAccount,
+                    institution,
+                    undefined,
+                    lt?.repairSourceAccountId,
+                  );
+                  return;
+                }
+
                 setPendingPublicToken(null);
                 setPendingInstitution(institution);
                 setPendingAccounts(accounts);
@@ -523,6 +553,7 @@ export function PlaidConnectButton(props: Props) {
                 setSelectedAdditionalPlaidAccountIds([]);
                 setPendingReconnectRepair(true);
                 setPendingRepairSourceAccountId(lt?.repairSourceAccountId ?? accountId);
+                setPendingRelatedBynkbookAccounts(relatedBynkbookAccounts);
                 setOpenSelect(true);
                 return;
               }
@@ -574,6 +605,15 @@ export function PlaidConnectButton(props: Props) {
       }
     }
   }, [accountId, businessId, busy, completeExistingAccountConnect, completeReconnectRepair, disabled, mode, onConnected, preparedLinkContext, runInitialSync, selectedConnectionSourceId]);
+
+  const pendingAccountMapping = splitPlaidAccountsByExistingMapping(
+    pendingAccounts,
+    pendingRelatedBynkbookAccounts,
+  );
+  const pendingExistingMappingByPlaidId = new Map(
+    pendingAccountMapping.existing.map(({ account, mapping }) => [String(account.id), mapping]),
+  );
+  const pendingNewAccounts = pendingAccountMapping.unmatched;
 
   const requestPlaidLaunch = useCallback(async () => {
     if (disabled) return;
@@ -687,7 +727,10 @@ export function PlaidConnectButton(props: Props) {
 
           {mode === "reconnect" ? (
             <div className="rounded-md border border-bb-status-warning-border bg-bb-status-warning-bg px-3 py-2 text-xs text-bb-status-warning-fg">
-              <div>
+              <div className="font-bold">
+                Important: keep every BynkBook-linked account checked when Plaid asks which accounts to share.
+              </div>
+              <div className="mt-1">
                 {preparedLinkContext?.usingSharedItem
                   ? `Plaid will open the existing ${preparedLinkContext?.institutionName ?? "bank"} authorization. Add ${preparedLinkContext?.targetAccountName ?? "this account"} without unchecking the accounts already shared with BynkBook.`
                   : "In Plaid, keep every bank account already used in BynkBook selected. De-selecting an account revokes that account's feed. BynkBook will reuse matching existing accounts instead of creating duplicates."}
@@ -705,13 +748,20 @@ export function PlaidConnectButton(props: Props) {
                     </ul>
                   </div>
                 ) : null}
-              <div className="mt-2">Each BynkBook ledger remains separate after the shared bank authorization is repaired.</div>
+              <div className="mt-2 font-semibold">
+                BynkBook remembers these mappings and automatically reconnects every selected account it recognizes. Each ledger remains separate.
+              </div>
             </div>
           ) : (
             <div className="rounded-md border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
-              {selectedConnectionSourceId !== "new"
-                ? "Plaid will add this account to the existing bank authorization without replacing the connected account."
-                : "Bank-level encryption - Read-only access - No password stored"}
+              {selectedConnectionSourceId !== "new" ? (
+                <div>
+                  <div className="font-bold">Important: keep every existing BynkBook-linked account selected in Plaid.</div>
+                  <div className="mt-1">
+                    Plaid will add this account to the existing authorization. BynkBook will automatically preserve and reconnect recognized accounts; it will not create a ledger for a new unmatched account without your approval.
+                  </div>
+                </div>
+              ) : "Bank-level encryption - Read-only access - No password stored"}
             </div>
           )}
 
@@ -719,7 +769,9 @@ export function PlaidConnectButton(props: Props) {
             Before continuing:
             <ul className="list-disc ml-5 mt-1 text-bb-text-muted">
               <li>{mode === "reconnect" ? "This will repair the shared bank authorization." : "This will connect a bank feed for this account."}</li>
-              {mode === "reconnect" ? <li>Keep all existing BynkBook bank accounts selected inside Plaid.</li> : null}
+              {mode === "reconnect" || selectedConnectionSourceId !== "new" ? (
+                <li><strong>Keep all existing BynkBook bank accounts selected inside Plaid.</strong></li>
+              ) : null}
               <li>This does not delete existing entries.</li>
               <li>This may import bank transactions after connection.</li>
             </ul>
@@ -732,10 +784,12 @@ export function PlaidConnectButton(props: Props) {
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            <span className="min-w-0 break-words">
+            <span className={`min-w-0 break-words ${mode === "reconnect" || selectedConnectionSourceId !== "new" ? "font-semibold" : ""}`}>
               {mode === "reconnect"
                 ? "I understand I must keep all existing BynkBook bank accounts selected in Plaid."
-                : "I understand this will open Plaid to connect a live bank feed for this account."}
+                : selectedConnectionSourceId !== "new"
+                  ? "I understand I must keep all existing BynkBook bank accounts selected while adding this account in Plaid."
+                  : "I understand this will open Plaid to connect a live bank feed for this account."}
             </span>
           </label>
 
@@ -792,6 +846,7 @@ export function PlaidConnectButton(props: Props) {
           <div className="space-y-2">
             {pendingAccounts.map((a) => {
               const label = `${a.name ?? "Account"}${a.mask ? ` • ****${a.mask}` : ""}${a.subtype ? ` • ${a.subtype}` : a.type ? ` • ${a.type}` : ""}`;
+              const existingMapping = pendingExistingMappingByPlaidId.get(a.id);
               return (
                 <label key={a.id} className="flex items-center gap-2 rounded-md border border-bb-border bg-bb-surface-card px-3 py-2 text-xs text-bb-text">
                   <input
@@ -808,24 +863,31 @@ export function PlaidConnectButton(props: Props) {
                       }
                     }}
                   />
-                  <span className="truncate">{label}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{label}</span>
+                    {existingMapping ? (
+                      <span className="mt-0.5 block text-[11px] font-semibold text-bb-status-success-fg">
+                        Existing BynkBook ledger: {existingMapping.name ?? "linked account"} — reconnects automatically
+                      </span>
+                    ) : null}
+                  </span>
                 </label>
               );
             })}
           </div>
 
-          {pendingAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
+          {pendingNewAccounts.some((a) => a.id !== selectedPlaidAccountId) ? (
             <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2">
               <div className="text-xs font-semibold text-bb-text">
-                {pendingReconnectRepair ? "Other newly shared accounts" : "Other consented accounts"}
+                {pendingReconnectRepair ? "New unmatched accounts" : "Other consented accounts"}
               </div>
               <div className="mt-1 text-[11px] text-bb-text-muted">
                 {pendingReconnectRepair
-                  ? "Existing BynkBook accounts are retained automatically. Select an unmatched account here only if you also want BynkBook to create a new ledger for it."
+                  ? "Existing BynkBook accounts reconnect automatically. Select an account here only if you also want BynkBook to create a new ledger for this previously unlinked account."
                   : "Optional: create separate BynkBook accounts for other bank accounts from this same Plaid connection."}
               </div>
               <div className="mt-2 space-y-2">
-                {pendingAccounts
+                {pendingNewAccounts
                   .filter((a) => a.id !== selectedPlaidAccountId)
                   .map((a) => {
                     const label = `${a.name ?? "Account"}${a.mask ? ` • ****${a.mask}` : ""}${a.subtype ? ` • ${a.subtype}` : a.type ? ` • ${a.type}` : ""}`;
@@ -869,7 +931,7 @@ export function PlaidConnectButton(props: Props) {
 
                 const selected = pendingAccounts.find((x) => x.id === selectedPlaidAccountId);
                 if (pendingReconnectRepair) {
-                  const additional = pendingAccounts.filter(
+                  const additional = pendingNewAccounts.filter(
                     (x) => x.id !== selectedPlaidAccountId && selectedAdditionalPlaidAccountIds.includes(x.id),
                   );
                   await completeReconnectRepair(

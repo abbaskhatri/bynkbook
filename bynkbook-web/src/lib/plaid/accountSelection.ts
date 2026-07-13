@@ -13,6 +13,10 @@ export type ReturnedPlaidAccount = {
   subtype?: string | null;
 };
 
+export type RelatedBynkbookAccount = RequiredPlaidAccount & {
+  accountId?: string | null;
+};
+
 function normalized(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -50,4 +54,47 @@ export function missingRequiredPlaidAccount(
   return requiredAccounts.find(
     (required) => !returnedAccounts.some((returned) => plaidAccountSelectionMatches(required, returned)),
   );
+}
+
+export function splitPlaidAccountsByExistingMapping<T extends ReturnedPlaidAccount>(
+  returnedAccounts: T[],
+  relatedAccounts: RelatedBynkbookAccount[],
+) {
+  const existing: Array<{ account: T; mapping: RelatedBynkbookAccount }> = [];
+  const unmatched: T[] = [];
+  const remainingMappings = [...relatedAccounts];
+
+  for (const account of returnedAccounts) {
+    const mappingIndex = remainingMappings.findIndex((related) =>
+      plaidAccountSelectionMatches(related, account),
+    );
+    if (mappingIndex < 0) {
+      unmatched.push(account);
+      continue;
+    }
+
+    const [mapping] = remainingMappings.splice(mappingIndex, 1);
+    existing.push({ account, mapping });
+  }
+
+  return { existing, unmatched };
+}
+
+export function canAutomaticallyRepairPlaidSelection<T extends ReturnedPlaidAccount>(params: {
+  returnedAccounts: T[];
+  relatedAccounts: RelatedBynkbookAccount[];
+  targetPlaidAccountId?: string | null;
+  targetSelectionIsCertain: boolean;
+}) {
+  if (!params.targetSelectionIsCertain || !params.targetPlaidAccountId) return false;
+
+  const targetId = String(params.targetPlaidAccountId);
+  const { unmatched } = splitPlaidAccountsByExistingMapping(
+    params.returnedAccounts,
+    params.relatedAccounts,
+  );
+
+  // The target ledger can itself be the one newly selected account. Any other
+  // unmatched account needs an explicit user choice before creating a ledger.
+  return unmatched.every((account) => String(account.id ?? "") === targetId);
 }

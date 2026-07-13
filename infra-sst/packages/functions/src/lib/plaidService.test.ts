@@ -247,6 +247,8 @@ describe("createLinkToken", () => {
       institution_id: "ins_1",
       institution_name: "Bank of America",
       plaid_mask: "1751",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
       status: "CONNECTED",
       account: { id: "acct-healthy-sibling", name: "Frisco" },
     };
@@ -304,6 +306,14 @@ describe("createLinkToken", () => {
         mask: "1751",
         name: "Frisco",
       }],
+      relatedInstitutionAccounts: expect.arrayContaining([{
+        accountId: "acct-healthy-sibling",
+        plaidAccountId: "plaid-sibling-live",
+        mask: "1751",
+        plaidType: "depository",
+        plaidSubtype: "checking",
+        name: "Frisco",
+      }]),
     });
     expect(plaid.accountsGet).toHaveBeenCalledTimes(2);
     expect(plaid.linkTokenCreate).toHaveBeenCalledWith(
@@ -381,6 +391,8 @@ describe("createLinkToken", () => {
       institution_name: "Bank of America",
       institution_id: "ins_1",
       plaid_mask: "1751",
+      plaid_type: "depository",
+      plaid_subtype: "checking",
       account: { id: "acct-frisco", name: "Frisco" },
     };
     const { mod, plaid } = await loadSyncTransactions({
@@ -426,6 +438,14 @@ describe("createLinkToken", () => {
         accountId: "acct-frisco",
         plaidAccountId: "plaid-frisco",
         mask: "1751",
+        name: "Frisco",
+      }],
+      relatedInstitutionAccounts: [{
+        accountId: "acct-frisco",
+        plaidAccountId: "plaid-frisco",
+        mask: "1751",
+        plaidType: "depository",
+        plaidSubtype: "checking",
         name: "Frisco",
       }],
     });

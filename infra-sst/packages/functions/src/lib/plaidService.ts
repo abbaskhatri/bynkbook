@@ -808,8 +808,11 @@ export async function createLinkToken(params: {
       requiredPreservedAccounts,
       relatedInstitutionAccounts: itemConnections.map((connection: any) => ({
         accountId: String(connection.account_id),
+        plaidAccountId: connection.plaid_account_id ? String(connection.plaid_account_id) : null,
         name: connection.account?.name ?? null,
         mask: connection.plaid_mask ?? null,
+        plaidType: connection.plaid_type ?? null,
+        plaidSubtype: connection.plaid_subtype ?? null,
       })),
     });
   }
@@ -930,8 +933,11 @@ export async function createLinkToken(params: {
       )
       .map((connection: any) => ({
         accountId: String(connection.account_id),
+        plaidAccountId: connection.plaid_account_id ? String(connection.plaid_account_id) : null,
         name: connection.account?.name ?? null,
         mask: connection.plaid_mask ?? null,
+        plaidType: connection.plaid_type ?? null,
+        plaidSubtype: connection.plaid_subtype ?? null,
       }));
     return json(200, {
       ok: true,
