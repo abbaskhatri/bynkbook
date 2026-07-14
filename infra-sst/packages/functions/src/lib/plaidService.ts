@@ -35,6 +35,58 @@ export function plaidErrorMessage(error: any) {
   return compactSafePlaidValue(data?.error_message ?? data?.display_message ?? error?.message, "Plaid sync failed");
 }
 
+type PlaidItemFreshness = {
+  lastSuccessfulUpdateAt: string | null;
+  lastFailedUpdateAt: string | null;
+  transactionsRefreshProductActive: boolean | null;
+  lookupErrorCode: string | null;
+};
+
+function plaidTimestamp(value: any) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+async function getPlaidItemFreshness(plaid: any, accessToken: string): Promise<PlaidItemFreshness> {
+  if (typeof plaid?.itemGet !== "function") {
+    return {
+      lastSuccessfulUpdateAt: null,
+      lastFailedUpdateAt: null,
+      transactionsRefreshProductActive: null,
+      lookupErrorCode: null,
+    };
+  }
+
+  try {
+    const response = await plaid.itemGet({ access_token: accessToken });
+    const item = response?.data?.item ?? {};
+    const transactionStatus = item?.status?.transactions ?? {};
+    const productLists = [item?.products, item?.billed_products].filter(Array.isArray);
+    const products = productLists.flat().map((value: any) => String(value ?? "").trim().toLowerCase());
+
+    return {
+      lastSuccessfulUpdateAt: plaidTimestamp(transactionStatus?.last_successful_update),
+      lastFailedUpdateAt: plaidTimestamp(transactionStatus?.last_failed_update),
+      transactionsRefreshProductActive: productLists.length > 0 ? products.includes("transactions_refresh") : null,
+      lookupErrorCode: null,
+    };
+  } catch (error: any) {
+    return {
+      lastSuccessfulUpdateAt: null,
+      lastFailedUpdateAt: null,
+      transactionsRefreshProductActive: null,
+      lookupErrorCode: plaidErrorCode(error),
+    };
+  }
+}
+
+function isTransactionsRefreshUnavailable(code: string | null | undefined) {
+  const normalized = String(code ?? "").trim().toUpperCase();
+  return normalized === "INVALID_PRODUCT" || normalized === "PRODUCT_NOT_ENABLED";
+}
+
 function plaidWebhookUrl() {
   const url = String(process.env.PLAID_WEBHOOK_URL ?? "").trim();
   return url || undefined;
@@ -1386,6 +1438,9 @@ export async function getStatus(params: { businessId: string; accountId: string;
       effectiveStartDate: null,
       lastKnownBalanceCents: null,
       lastKnownBalanceAt: null,
+      plaidLastSuccessfulUpdateAt: null,
+      plaidLastFailedUpdateAt: null,
+      transactionsRefreshProductActive: false,
       error: null,
       bankingApplicable: false,
     });
@@ -1410,6 +1465,9 @@ export async function getStatus(params: { businessId: string; accountId: string;
       effectiveStartDate: null,
       lastKnownBalanceCents: null,
       lastKnownBalanceAt: null,
+      plaidLastSuccessfulUpdateAt: null,
+      plaidLastFailedUpdateAt: null,
+      transactionsRefreshProductActive: null,
       error: null,
     });
     
@@ -1420,6 +1478,12 @@ export async function getStatus(params: { businessId: string; accountId: string;
   let plaidAccountLive: boolean | null = null;
   let plaidHealthErrorCode: string | null = null;
   let plaidHealthErrorMessage: string | null = null;
+  let plaidItemFreshness: PlaidItemFreshness = {
+    lastSuccessfulUpdateAt: null,
+    lastFailedUpdateAt: null,
+    transactionsRefreshProductActive: null,
+    lookupErrorCode: null,
+  };
 
   try {
     const plaid = await getPlaidClient();
@@ -1427,6 +1491,7 @@ export async function getStatus(params: { businessId: string; accountId: string;
     const accountsRes = await plaid.accountsGet({ access_token: accessToken });
     const accounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
     const acct = accounts.find((a) => a.account_id === connRow.plaid_account_id);
+    plaidItemFreshness = await getPlaidItemFreshness(plaid, accessToken);
 
     if (acct) {
       plaidAccountLive = true;
@@ -1571,6 +1636,10 @@ export async function getStatus(params: { businessId: string; accountId: string;
     effectiveStartDate: connRow.effective_start_date.toISOString().slice(0, 10),
     lastKnownBalanceCents: connRow.last_known_balance_cents?.toString?.() ?? null,
     lastKnownBalanceAt: connRow.last_known_balance_at ? connRow.last_known_balance_at.toISOString() : null,
+    plaidLastSuccessfulUpdateAt: plaidItemFreshness.lastSuccessfulUpdateAt,
+    plaidLastFailedUpdateAt: plaidItemFreshness.lastFailedUpdateAt,
+    transactionsRefreshProductActive: plaidItemFreshness.transactionsRefreshProductActive,
+    plaidFreshnessErrorCode: plaidItemFreshness.lookupErrorCode,
     error: connRow.error_message ?? null,
     plaidAccountLive,
     plaidHealthErrorCode,
@@ -2129,6 +2198,12 @@ export async function syncTransactions(params: {
     let refreshSucceeded = false;
     let refreshErrorCode: string | null = null;
     let refreshErrorMessage: string | null = null;
+    let plaidItemFreshness: PlaidItemFreshness = {
+      lastSuccessfulUpdateAt: null,
+      lastFailedUpdateAt: null,
+      transactionsRefreshProductActive: null,
+      lookupErrorCode: null,
+    };
 
     if (requestRefresh) {
       refreshRequested = true;
@@ -2139,7 +2214,26 @@ export async function syncTransactions(params: {
         refreshErrorCode = plaidErrorCode(refreshError);
         refreshErrorMessage = plaidErrorMessage(refreshError);
       }
+
+      plaidItemFreshness = await getPlaidItemFreshness(plaid, accessToken);
+      if (isTransactionsRefreshUnavailable(refreshErrorCode)) {
+        console.warn("Plaid on-demand transaction refresh unavailable", {
+          businessId,
+          accountId,
+          errorCode: refreshErrorCode,
+          lastSuccessfulUpdateAt: plaidItemFreshness.lastSuccessfulUpdateAt,
+        });
+      }
     }
+
+    const refreshUnavailable = refreshRequested && !refreshSucceeded && isTransactionsRefreshUnavailable(refreshErrorCode);
+    const transactionsRefreshProductActive = refreshRequested
+      ? refreshSucceeded
+        ? true
+        : refreshUnavailable
+          ? false
+          : plaidItemFreshness.transactionsRefreshProductActive
+      : plaidItemFreshness.transactionsRefreshProductActive;
 
     const plaidAccountId = conn.plaid_account_id;
     const effectiveStartDate = conn.effective_start_date;
@@ -2803,8 +2897,13 @@ export async function syncTransactions(params: {
     lastSyncAt: now.toISOString(),
     refreshRequested,
     refreshSucceeded,
+    refreshUnavailable,
     refreshErrorCode,
     refreshErrorMessage,
+    plaidLastSuccessfulUpdateAt: plaidItemFreshness.lastSuccessfulUpdateAt,
+    plaidLastFailedUpdateAt: plaidItemFreshness.lastFailedUpdateAt,
+    plaidFreshnessErrorCode: plaidItemFreshness.lookupErrorCode,
+    transactionsRefreshProductActive,
     balanceLookupSucceeded,
     balanceErrorCode,
     balanceErrorMessage,

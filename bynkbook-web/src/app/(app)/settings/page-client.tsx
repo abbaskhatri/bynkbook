@@ -239,6 +239,8 @@ type PlaidCellState = {
   last4?: string | null;
   status?: string;
   lastSyncAt?: string | null;
+  plaidLastSuccessfulUpdateAt?: string | null;
+  transactionsRefreshProductActive?: boolean | null;
   needsAttention?: boolean;
   errorMessage?: string | null;
   _error?: boolean;
@@ -993,12 +995,25 @@ export default function SettingsPageClient() {
                 res?.institutionName ?? res?.institution_name ?? res?.institution?.name ?? undefined;
               const status = res?.status ?? undefined;
               const lastSyncAt = res?.lastSyncAt ?? null;
+              const plaidLastSuccessfulUpdateAt = res?.plaidLastSuccessfulUpdateAt ?? null;
+              const transactionsRefreshProductActive = res?.transactionsRefreshProductActive ?? null;
               const last4 = res?.last4 ?? null;
 
               const needsAttention = !!res?.needsAttention;
               const errorMessage = (res?.errorMessage ?? res?.error ?? null) as string | null;
 
-              results.push({ id: a.id, connected, institutionName, status, lastSyncAt, last4, needsAttention, errorMessage });
+              results.push({
+                id: a.id,
+                connected,
+                institutionName,
+                status,
+                lastSyncAt,
+                plaidLastSuccessfulUpdateAt,
+                transactionsRefreshProductActive,
+                last4,
+                needsAttention,
+                errorMessage,
+              });
             } catch {
               results.push({ id: a.id, connected: false as const, institutionName: undefined, _error: true as const });
             }
@@ -1018,6 +1033,8 @@ export default function SettingsPageClient() {
               last4: (r as any).last4 ?? null,
               status: (r as any).status,
               lastSyncAt: (r as any).lastSyncAt ?? null,
+              plaidLastSuccessfulUpdateAt: (r as any).plaidLastSuccessfulUpdateAt ?? null,
+              transactionsRefreshProductActive: (r as any).transactionsRefreshProductActive ?? null,
               needsAttention: !!(r as any).needsAttention,
               errorMessage: (r as any).errorMessage ?? null,
               _error: !!r._error,
@@ -3003,9 +3020,22 @@ export default function SettingsPageClient() {
                                 Not connected
                               </span>
                             )}
-                            {!isCashAccount && st?.connected && st.lastSyncAt ? (
-                              <span className="text-xs text-muted-foreground" title={new Date(st.lastSyncAt).toLocaleString()}>
-                                Synced {formatShortDate(st.lastSyncAt)}
+                            {!isCashAccount && st?.connected && (st.plaidLastSuccessfulUpdateAt || st.lastSyncAt) ? (
+                              <span
+                                className="text-xs text-muted-foreground"
+                                title={[
+                                  st.plaidLastSuccessfulUpdateAt
+                                    ? `Plaid bank data: ${new Date(st.plaidLastSuccessfulUpdateAt).toLocaleString()}`
+                                    : null,
+                                  st.lastSyncAt
+                                    ? `BynkBook cursor sync: ${new Date(st.lastSyncAt).toLocaleString()}`
+                                    : null,
+                                  st.transactionsRefreshProductActive === false
+                                    ? "Instant bank refresh is not enabled; Plaid uses scheduled updates."
+                                    : null,
+                                ].filter(Boolean).join(" • ")}
+                              >
+                                {st.plaidLastSuccessfulUpdateAt ? "Bank data" : "App sync"} {formatShortDate(st.plaidLastSuccessfulUpdateAt || st.lastSyncAt!)}
                               </span>
                             ) : !isCashAccount && st?.connected ? (
                               <span className="text-xs text-bb-status-warning-fg">No successful sync yet</span>
@@ -3053,6 +3083,8 @@ export default function SettingsPageClient() {
                                               last4: res?.last4 ?? null,
                                               status: res?.status ?? undefined,
                                               lastSyncAt: res?.lastSyncAt ?? null,
+                                              plaidLastSuccessfulUpdateAt: res?.plaidLastSuccessfulUpdateAt ?? null,
+                                              transactionsRefreshProductActive: res?.transactionsRefreshProductActive ?? null,
                                               needsAttention: !!res?.needsAttention,
                                               errorMessage: (res?.errorMessage ?? res?.error ?? null) as any,
                                             } as any,
@@ -3088,6 +3120,8 @@ export default function SettingsPageClient() {
                                               last4: res?.last4 ?? null,
                                               status: res?.status ?? undefined,
                                               lastSyncAt: res?.lastSyncAt ?? null,
+                                              plaidLastSuccessfulUpdateAt: res?.plaidLastSuccessfulUpdateAt ?? null,
+                                              transactionsRefreshProductActive: res?.transactionsRefreshProductActive ?? null,
                                               needsAttention: !!res?.needsAttention,
                                               errorMessage: (res?.errorMessage ?? res?.error ?? null) as any,
                                             },
@@ -3124,6 +3158,8 @@ export default function SettingsPageClient() {
                                                 last4: res?.last4 ?? null,
                                                 status: res?.status ?? undefined,
                                                 lastSyncAt: res?.lastSyncAt ?? null,
+                                                plaidLastSuccessfulUpdateAt: res?.plaidLastSuccessfulUpdateAt ?? null,
+                                                transactionsRefreshProductActive: res?.transactionsRefreshProductActive ?? null,
                                                 needsAttention: !!res?.needsAttention,
                                                 errorMessage: (res?.errorMessage ?? res?.error ?? null) as any,
                                               },
