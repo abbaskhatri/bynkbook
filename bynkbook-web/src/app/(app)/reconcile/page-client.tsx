@@ -1439,6 +1439,12 @@ export default function ReconcilePageClient() {
     const refreshUnavailable = Boolean(res?.refreshUnavailable) ||
       refreshErrorCode === "INVALID_PRODUCT" ||
       refreshErrorCode === "PRODUCT_NOT_ENABLED";
+    const snapshotAuditRequested = Boolean(res?.snapshotAuditRequested);
+    const snapshotAuditSucceeded = Boolean(res?.snapshotAuditSucceeded);
+    const snapshotAuditSeen = Number(res?.snapshotAuditSeen ?? 0);
+    const snapshotAuditRecoveredCount = Number(res?.snapshotAuditRecoveredCount ?? 0);
+    const snapshotAuditNewestDate = String(res?.snapshotAuditNewestDate ?? "").trim();
+    const snapshotAuditErrorCode = String(res?.snapshotAuditErrorCode ?? "").trim();
     const plaidLastSuccessfulUpdateAt = String(res?.plaidLastSuccessfulUpdateAt ?? "").trim();
     const plaidLastSuccessfulUpdateText = plaidLastSuccessfulUpdateAt
       ? new Date(plaidLastSuccessfulUpdateAt).toLocaleString()
@@ -1455,6 +1461,10 @@ export default function ReconcilePageClient() {
     if (restoredMatchedHistoryCount > 0) syncParts.push(`${restoredMatchedHistoryCount} matched history restored`);
     if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
     if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
+    if (snapshotAuditRecoveredCount > 0) {
+      syncParts.push(`${snapshotAuditRecoveredCount} missed ${snapshotAuditRecoveredCount === 1 ? "transaction" : "transactions"} recovered`);
+    }
+    else if (snapshotAuditSucceeded) syncParts.push(`recent snapshot checked (${snapshotAuditSeen})`);
     if (refreshRequested) {
       if (refreshSucceeded) syncParts.push("fresh bank check completed");
       else if (refreshUnavailable) syncParts.push("instant bank refresh unavailable");
@@ -1467,10 +1477,17 @@ export default function ReconcilePageClient() {
       setPendingMsg("Pending shown read-only until posted.");
     } else if (refreshUnavailable) {
       setPendingMsgTone("warning");
+      const snapshotDetail = snapshotAuditSucceeded
+        ? snapshotAuditNewestDate
+          ? ` BynkBook also checked Plaid's recent account snapshot through ${new Date(`${snapshotAuditNewestDate}T00:00:00`).toLocaleDateString()} and found ${snapshotAuditRecoveredCount} missing transaction ${snapshotAuditRecoveredCount === 1 ? "record" : "records"}.`
+          : " BynkBook also checked Plaid's recent account snapshot, but Plaid returned no posted transactions in the audit window."
+        : snapshotAuditRequested && snapshotAuditErrorCode
+          ? " The recent Plaid snapshot consistency check could not complete."
+          : "";
       setPendingMsg(
         plaidLastSuccessfulUpdateText
-          ? `Plaid last received bank data ${plaidLastSuccessfulUpdateText}. Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update.`
-          : "Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update."
+          ? `Plaid last received bank data ${plaidLastSuccessfulUpdateText}.${snapshotDetail} Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update.`
+          : `${snapshotDetail.trim() ? `${snapshotDetail.trim()} ` : ""}Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update.`
       );
     } else if (refreshSucceeded) {
       setPendingMsgTone("muted");

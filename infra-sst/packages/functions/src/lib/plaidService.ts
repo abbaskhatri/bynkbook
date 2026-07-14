@@ -1,6 +1,6 @@
 import { getPrisma } from "./db";
 import { Products, CountryCode } from "plaid";
-import type { TransactionsSyncRequest } from "plaid";
+import type { TransactionsGetRequest, TransactionsSyncRequest } from "plaid";
 import { getPlaidClient } from "./plaidClient";
 import { encryptAccessToken, decryptAccessToken } from "./plaidCrypto";
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
@@ -62,7 +62,7 @@ async function getPlaidItemFreshness(plaid: any, accessToken: string): Promise<P
   try {
     const response = await plaid.itemGet({ access_token: accessToken });
     const item = response?.data?.item ?? {};
-    const transactionStatus = item?.status?.transactions ?? {};
+    const transactionStatus = response?.data?.status?.transactions ?? item?.status?.transactions ?? {};
     const productLists = [item?.products, item?.billed_products].filter(Array.isArray);
     const products = productLists.flat().map((value: any) => String(value ?? "").trim().toLowerCase());
 
@@ -2294,6 +2294,18 @@ export async function syncTransactions(params: {
   let restoredMatchedHistoryCount = 0;
   const retentionPrunedCount = 0;
   let historicalCutoffDate: Date | null = null;
+  let snapshotAuditRequested = false;
+  let snapshotAuditSucceeded = false;
+  let snapshotAuditPages = 0;
+  let snapshotAuditSeen = 0;
+  let snapshotAuditTotalAvailable = 0;
+  let snapshotAuditNewestDate: string | null = null;
+  let snapshotAuditStartDate: string | null = null;
+  let snapshotAuditEndDate: string | null = null;
+  let snapshotAuditErrorCode: string | null = null;
+  let snapshotAuditErrorMessage: string | null = null;
+  let snapshotAuditRecoveredCount = 0;
+  const snapshotOnlyTransactionIds = new Set<string>();
 
   // pendingCount will be computed from DB at end (accurate), not guessed during loop
   let pendingCount = 0;
@@ -2372,6 +2384,78 @@ export async function syncTransactions(params: {
         continue;
       }
       throw error;
+    }
+  }
+
+  // A cursor is the normal source of truth, but older reconnect/cursor bugs can
+  // leave it ahead of rows actually retained by BynkBook. On every manual sync,
+  // compare a bounded recent account snapshot with the cursor results. The
+  // existing exact-ID, replay, removal, and match protections below still own
+  // every write, so this can recover a gap without creating a second import path.
+  if (requestRefresh && typeof plaid.transactionsGet === "function") {
+    snapshotAuditRequested = true;
+    const snapshotEnd = new Date();
+    const boundedStart = new Date(snapshotEnd.getTime() - 45 * 24 * 60 * 60 * 1000);
+    const snapshotStart = effectiveStartDate > boundedStart ? effectiveStartDate : boundedStart;
+    snapshotAuditStartDate = snapshotStart.toISOString().slice(0, 10);
+    snapshotAuditEndDate = snapshotEnd.toISOString().slice(0, 10);
+
+    try {
+      const snapshotByPlaidId = new Map<string, any>();
+      const SNAPSHOT_PAGE_SIZE = 500;
+      const SNAPSHOT_MAX_PAGES = 5;
+
+      for (let page = 0; page < SNAPSHOT_MAX_PAGES; page += 1) {
+        const request: TransactionsGetRequest = {
+          access_token: accessToken,
+          start_date: snapshotAuditStartDate,
+          end_date: snapshotAuditEndDate,
+          options: {
+            account_ids: [plaidAccountId],
+            count: SNAPSHOT_PAGE_SIZE,
+            offset: page * SNAPSHOT_PAGE_SIZE,
+          },
+        };
+        const response = await plaid.transactionsGet(request);
+        snapshotAuditPages += 1;
+        const transactions = Array.isArray(response?.data?.transactions)
+          ? response.data.transactions.filter((transaction: any) => transaction?.account_id === plaidAccountId)
+          : [];
+        const totalAvailable = Number(response?.data?.total_transactions ?? transactions.length);
+        snapshotAuditTotalAvailable = Math.max(snapshotAuditTotalAvailable, Number.isFinite(totalAvailable) ? totalAvailable : 0);
+
+        for (const transaction of transactions) {
+          const transactionId = String(transaction?.transaction_id ?? "").trim();
+          if (!transactionId) continue;
+          snapshotByPlaidId.set(transactionId, transaction);
+          const transactionDate = String(transaction?.date ?? "").trim();
+          if (transactionDate && (!snapshotAuditNewestDate || transactionDate > snapshotAuditNewestDate)) {
+            snapshotAuditNewestDate = transactionDate;
+          }
+        }
+        snapshotAuditSeen += transactions.length;
+        if (transactions.length < SNAPSHOT_PAGE_SIZE || (page + 1) * SNAPSHOT_PAGE_SIZE >= totalAvailable) break;
+      }
+
+      const drainedPlaidIds = new Set(
+        drainedUpserts.map((transaction: any) => String(transaction?.transaction_id ?? "").trim()).filter(Boolean),
+      );
+      for (const [transactionId, transaction] of snapshotByPlaidId) {
+        if (!drainedPlaidIds.has(transactionId)) {
+          snapshotOnlyTransactionIds.add(transactionId);
+          drainedUpserts.push(transaction);
+        }
+      }
+      snapshotAuditSucceeded = true;
+    } catch (snapshotError: any) {
+      snapshotAuditErrorCode = plaidErrorCode(snapshotError);
+      snapshotAuditErrorMessage = plaidErrorMessage(snapshotError);
+      console.warn("Plaid recent transaction snapshot audit skipped", {
+        businessId,
+        accountId,
+        errorCode: snapshotAuditErrorCode,
+        errorMessage: snapshotAuditErrorMessage,
+      });
     }
   }
 
@@ -2609,6 +2693,7 @@ export async function syncTransactions(params: {
         },
       });
       newCount += 1;
+      if (snapshotOnlyTransactionIds.has(String(t.transaction_id))) snapshotAuditRecoveredCount += 1;
     } catch {
       const existingPlaidRow = await prisma.bankTransaction.findFirst({
         where: {
@@ -2919,6 +3004,17 @@ export async function syncTransactions(params: {
     accountScopedFallback,
     accountScopedFallbackCode,
     cursorResetFromLegacyScope: initialCursorInfo.resetFromLegacyCursor,
+    snapshotAuditRequested,
+    snapshotAuditSucceeded,
+    snapshotAuditPages,
+    snapshotAuditSeen,
+    snapshotAuditTotalAvailable,
+    snapshotAuditNewestDate,
+    snapshotAuditStartDate,
+    snapshotAuditEndDate,
+    snapshotAuditRecoveredCount,
+    snapshotAuditErrorCode,
+    snapshotAuditErrorMessage,
   });
   } catch (error) {
     return recordSyncFailure(error);

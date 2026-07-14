@@ -63,17 +63,18 @@ async function loadSyncTransactions(options: {
         item: {
           products: ["transactions", "transactions_refresh"],
           billed_products: ["transactions"],
-          status: {
-            transactions: {
-              last_successful_update: "2026-07-14T14:30:00Z",
-              last_failed_update: null,
-            },
+        },
+        status: {
+          transactions: {
+            last_successful_update: "2026-07-14T14:30:00Z",
+            last_failed_update: null,
           },
         },
       },
     })),
     itemRemove: vi.fn(async () => ({ data: {} })),
     transactionsRefresh: vi.fn(async () => ({ data: { request_id: "refresh-request" } })),
+    transactionsGet: vi.fn(async () => ({ data: { transactions: [], total_transactions: 0 } })),
     transactionsSync: vi.fn(async () => ({
       data: {
         added: [],
@@ -2037,11 +2038,11 @@ describe("syncTransactions", () => {
             item: {
               products: ["transactions"],
               billed_products: ["transactions"],
-              status: {
-                transactions: {
-                  last_successful_update: "2026-07-14T12:15:30Z",
-                  last_failed_update: "2026-07-14T12:10:00Z",
-                },
+            },
+            status: {
+              transactions: {
+                last_successful_update: "2026-07-14T12:15:30Z",
+                last_failed_update: "2026-07-14T12:10:00Z",
               },
             },
           },
@@ -2072,6 +2073,200 @@ describe("syncTransactions", () => {
     expect(consoleWarn).toHaveBeenCalledWith(
       "Plaid on-demand transaction refresh unavailable",
       expect.objectContaining({ errorCode: "INVALID_PRODUCT" }),
+    );
+  });
+
+  test("repairs a missing recent transaction from an account snapshot when the cursor is empty", async () => {
+    const transactionDate = new Date().toISOString().slice(0, 10);
+    const missingTransaction = makeTransaction({
+      transaction_id: "txn-missed-by-cursor",
+      date: transactionDate,
+      amount: 78.91,
+      name: "Recent posted purchase",
+    });
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsRefresh: vi.fn(async () => {
+          const error: any = new Error("client is not authorized to access Transactions Refresh");
+          error.response = { data: { error_code: "INVALID_PRODUCT", error_message: error.message } };
+          throw error;
+        }),
+        transactionsGet: vi.fn(async () => ({
+          data: { transactions: [missingTransaction], total_transactions: 1 },
+        })),
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      newCount: 1,
+      totalSeen: 0,
+      snapshotAuditRequested: true,
+      snapshotAuditSucceeded: true,
+      snapshotAuditSeen: 1,
+      snapshotAuditTotalAvailable: 1,
+      snapshotAuditNewestDate: transactionDate,
+      snapshotAuditRecoveredCount: 1,
+    });
+    expect(plaid.transactionsGet).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: expect.any(String),
+      end_date: transactionDate,
+      options: expect.objectContaining({ account_ids: ["plaid-acct-1"] }),
+    }));
+    expect(prisma.bankTransaction.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        plaid_transaction_id: "txn-missed-by-cursor",
+        plaid_account_id: "plaid-acct-1",
+      }),
+    }));
+  });
+
+  test("repairs a snapshot-only transaction even when the cursor returns another update", async () => {
+    const transactionDate = new Date().toISOString().slice(0, 10);
+    const cursorTransaction = makeTransaction({ transaction_id: "txn-from-cursor", date: transactionDate });
+    const snapshotOnlyTransaction = makeTransaction({ transaction_id: "txn-snapshot-only", date: transactionDate, amount: 44.12 });
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsSync: vi.fn(async () => ({
+          data: {
+            added: [cursorTransaction],
+            modified: [],
+            removed: [],
+            next_cursor: "cursor-with-update",
+            has_more: false,
+          },
+        })),
+        transactionsGet: vi.fn(async () => ({
+          data: {
+            transactions: [cursorTransaction, snapshotOnlyTransaction],
+            total_transactions: 2,
+          },
+        })),
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      newCount: 2,
+      totalSeen: 1,
+      snapshotAuditSeen: 2,
+      snapshotAuditRecoveredCount: 1,
+    });
+    expect((prisma.bankTransaction.create as any).mock.calls.map((call: any[]) => call[0].data.plaid_transaction_id)).toEqual([
+      "txn-from-cursor",
+      "txn-snapshot-only",
+    ]);
+  });
+
+  test("does not duplicate an existing transaction returned by the recent snapshot", async () => {
+    const transactionDate = new Date().toISOString().slice(0, 10);
+    const existingTransaction = makeTransaction({
+      transaction_id: "txn-already-retained",
+      date: transactionDate,
+    });
+    const create = vi.fn(async () => {
+      throw new Error("unique constraint");
+    });
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const { syncTransactions, prisma } = await loadSyncTransactions({
+      plaid: {
+        transactionsGet: vi.fn(async () => ({
+          data: { transactions: [existingTransaction], total_transactions: 1 },
+        })),
+      },
+      prisma: {
+        bankTransaction: {
+          findFirst: vi.fn(async (args: any) =>
+            args?.where?.plaid_transaction_id === "txn-already-retained"
+              ? { id: "bank-row-1", is_removed: false }
+              : null,
+          ),
+          create,
+          updateMany,
+        },
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      newCount: 0,
+      duplicateCount: 1,
+      snapshotAuditSeen: 1,
+      snapshotAuditRecoveredCount: 0,
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        account_id: "acct-1",
+        plaid_transaction_id: "txn-already-retained",
+        plaid_account_id: "plaid-acct-1",
+      }),
+    }));
+    expect(prisma.bankTransaction.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps a successful cursor sync when the recent snapshot audit is unavailable", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { syncTransactions } = await loadSyncTransactions({
+      plaid: {
+        transactionsGet: vi.fn(async () => {
+          const error: any = new Error("snapshot temporarily unavailable");
+          error.response = {
+            data: {
+              error_code: "INSTITUTION_DOWN",
+              error_message: "snapshot temporarily unavailable",
+            },
+          };
+          throw error;
+        }),
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      newCount: 0,
+      snapshotAuditRequested: true,
+      snapshotAuditSucceeded: false,
+      snapshotAuditErrorCode: "INSTITUTION_DOWN",
+      snapshotAuditErrorMessage: "snapshot temporarily unavailable",
+    });
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Plaid recent transaction snapshot audit skipped",
+      expect.objectContaining({ errorCode: "INSTITUTION_DOWN" }),
     );
   });
 
