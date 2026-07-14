@@ -63,6 +63,7 @@ async function loadSyncTransactions(options: {
         item: {
           products: ["transactions", "transactions_refresh"],
           billed_products: ["transactions"],
+          webhook: null,
         },
         status: {
           transactions: {
@@ -73,6 +74,7 @@ async function loadSyncTransactions(options: {
       },
     })),
     itemRemove: vi.fn(async () => ({ data: {} })),
+    itemWebhookUpdate: vi.fn(async () => ({ data: { item: { item_id: "item-1" } } })),
     transactionsRefresh: vi.fn(async () => ({ data: { request_id: "refresh-request" } })),
     transactionsGet: vi.fn(async () => ({ data: { transactions: [], total_transactions: 0 } })),
     transactionsSync: vi.fn(async () => ({
@@ -581,6 +583,78 @@ describe("Plaid disconnect lifecycle", () => {
 });
 
 describe("syncTransactions", () => {
+  test("migrates a stale Plaid Item webhook before draining transactions", async () => {
+    process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      plaid: {
+        itemGet: vi.fn(async () => ({
+          data: { item: { webhook: "https://old.example.com/v1/plaid/webhook" } },
+        })),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      webhookConfigured: true,
+      webhookUpdated: true,
+      webhookErrorCode: null,
+    });
+    expect(plaid.itemWebhookUpdate).toHaveBeenCalledWith({
+      access_token: "access-token-redacted",
+      webhook: "https://example.com/v1/plaid/webhook",
+    });
+  });
+
+  test("does not rewrite a Plaid Item webhook that already matches production", async () => {
+    process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      plaid: {
+        itemGet: vi.fn(async () => ({
+          data: { item: { webhook: "https://example.com/v1/plaid/webhook" } },
+        })),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      ok: true,
+      webhookConfigured: true,
+      webhookUpdated: false,
+      webhookErrorCode: null,
+    });
+    expect(plaid.itemWebhookUpdate).not.toHaveBeenCalled();
+  });
+
+  test("continues transaction sync when Plaid temporarily rejects webhook repair", async () => {
+    process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      plaid: {
+        itemGet: vi.fn(async () => {
+          throw Object.assign(new Error("Plaid unavailable"), {
+            response: { data: { error_code: "API_ERROR", error_message: "Temporary failure" } },
+          });
+        }),
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      ok: true,
+      webhookConfigured: true,
+      webhookUpdated: false,
+      webhookErrorCode: "API_ERROR",
+    });
+    expect(plaid.transactionsSync).toHaveBeenCalled();
+  });
+
   test("does not sync bank transactions into a cash account", async () => {
     const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
       prisma: {

@@ -92,6 +92,41 @@ function plaidWebhookUrl() {
   return url || undefined;
 }
 
+type PlaidWebhookRepairResult = {
+  configured: boolean;
+  updated: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+
+async function ensurePlaidItemWebhook(plaid: any, accessToken: string): Promise<PlaidWebhookRepairResult> {
+  const configuredWebhook = plaidWebhookUrl();
+  if (!configuredWebhook) {
+    return { configured: false, updated: false, errorCode: null, errorMessage: null };
+  }
+
+  try {
+    const itemResponse = await plaid.itemGet({ access_token: accessToken });
+    const currentWebhook = String(itemResponse?.data?.item?.webhook ?? "").trim();
+    if (currentWebhook === configuredWebhook) {
+      return { configured: true, updated: false, errorCode: null, errorMessage: null };
+    }
+
+    await plaid.itemWebhookUpdate({
+      access_token: accessToken,
+      webhook: configuredWebhook,
+    });
+    return { configured: true, updated: true, errorCode: null, errorMessage: null };
+  } catch (error: any) {
+    return {
+      configured: true,
+      updated: false,
+      errorCode: plaidErrorCode(error),
+      errorMessage: plaidErrorMessage(error),
+    };
+  }
+}
+
 function plaidLinkCustomizationName() {
   // Link tokens must name the exact published Dashboard customization. The
   // default fallback exists for local/dev/test only; production deployment
@@ -2194,6 +2229,15 @@ export async function syncTransactions(params: {
   try {
     const plaid = await getPlaidClient();
     const accessToken = await decryptAccessToken(conn.access_token_ciphertext);
+    const webhookRepair = await ensurePlaidItemWebhook(plaid, accessToken);
+    if (webhookRepair.errorCode) {
+      console.warn("Plaid Item webhook repair skipped during transaction sync", {
+        businessId,
+        accountId,
+        errorCode: webhookRepair.errorCode,
+        errorMessage: webhookRepair.errorMessage,
+      });
+    }
     let refreshRequested = false;
     let refreshSucceeded = false;
     let refreshErrorCode: string | null = null;
@@ -2992,6 +3036,10 @@ export async function syncTransactions(params: {
     balanceLookupSucceeded,
     balanceErrorCode,
     balanceErrorMessage,
+    webhookConfigured: webhookRepair.configured,
+    webhookUpdated: webhookRepair.updated,
+    webhookErrorCode: webhookRepair.errorCode,
+    webhookErrorMessage: webhookRepair.errorMessage,
 
     // Progress metadata (useful for UI)
     pages: pageN,
