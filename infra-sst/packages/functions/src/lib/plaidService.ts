@@ -5,6 +5,7 @@ import { getPlaidClient } from "./plaidClient";
 import { encryptAccessToken, decryptAccessToken } from "./plaidCrypto";
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { authorizeWrite } from "./authz";
+import { CASH_ACCOUNT_BANKING_ERROR, isCashAccountType } from "./accountCapabilities";
 
 function json(statusCode: number, body: any) {
   return {
@@ -716,6 +717,9 @@ export async function createLinkToken(params: {
     select: { id: true, name: true, type: true, currency_code: true, institution_name: true, last4: true },
   });
   if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
+  if (isCashAccountType(localAccount.type)) {
+    return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
+  }
 
   const plaid = await getPlaidClient();
 
@@ -1096,6 +1100,9 @@ export async function exchangePublicToken(params: {
     select: { id: true, type: true, currency_code: true, last4: true },
   });
   if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
+  if (isCashAccountType(localAccount.type)) {
+    return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
+  }
 
   const start = await derivePlaidEffectiveStartDate(prisma, businessId, accountId, effectiveStartDate, connectionMode);
   if (!start) return json(400, { ok: false, error: "Invalid effectiveStartDate (YYYY-MM-DD required)" });
@@ -1364,6 +1371,25 @@ export async function getStatus(params: { businessId: string; accountId: string;
     select: { id: true, type: true, currency_code: true, last4: true },
   });
   if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
+  if (isCashAccountType(localAccount.type)) {
+    return json(200, {
+      ok: true,
+      connected: false,
+      status: "NOT_APPLICABLE",
+      needsAttention: false,
+      errorMessage: null,
+      institutionName: null,
+      last4: null,
+      lastSyncAt: null,
+      hasNewTransactions: false,
+      newAccountsAvailable: false,
+      effectiveStartDate: null,
+      lastKnownBalanceCents: null,
+      lastKnownBalanceAt: null,
+      error: null,
+      bankingApplicable: false,
+    });
+  }
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
@@ -1590,6 +1616,9 @@ export async function repairPlaidAccountMapping(params: {
     select: { id: true, type: true, currency_code: true, last4: true },
   });
   if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
+  if (isCashAccountType(localAccount.type)) {
+    return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
+  }
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
@@ -1978,19 +2007,19 @@ export async function syncTransactions(params: {
     if (!role) return json(403, { ok: false, error: "Forbidden" });
   }
 
-  const okAcct = await requireAccountInBusiness(prisma, businessId, accountId);
-  if (!okAcct) return json(404, { ok: false, error: "Account not found in business" });
+  const localAccount = await prisma.account.findFirst({
+    where: { id: accountId, business_id: businessId },
+    select: { id: true, type: true },
+  });
+  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
+  if (isCashAccountType(localAccount.type)) {
+    return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
+  }
 
   const conn = await prisma.bankConnection.findFirst({
     where: { business_id: businessId, account_id: accountId },
   });
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
-
-  const localAccount = await prisma.account.findFirst({
-    where: { id: accountId, business_id: businessId },
-    select: { type: true },
-  });
-  if (!localAccount) return json(404, { ok: false, error: "Account not found in business" });
 
   const syncLeaseToken = (await import("node:crypto")).randomUUID();
   const syncLeaseExpiresAt = new Date(Date.now() + 6 * 60_000);

@@ -1270,14 +1270,20 @@ export default function DashboardPageClient() {
             !!(pnlQ.data?.period?.expense_cents && pnlQ.data.period.expense_cents !== "0") ||
             (Array.isArray(pnlQ.data?.monthly) && pnlQ.data.monthly.length > 0);
 
+          const selectedAccountRow =
+            accountScopeId === "all"
+              ? null
+              : ((accountsAllQ.data?.rows ?? []) as any[]).find(
+                  (row: any) => String(row.account_id ?? "") === accountScopeId
+                ) ?? null;
           const selectedAccountLabel =
             accountScopeId === "all"
               ? "All accounts"
-              : String(
-                  ((accountsAllQ.data?.rows ?? []) as any[]).find(
-                    (row: any) => String(row.account_id ?? "") === accountScopeId
-                  )?.name ?? "Selected account"
-                );
+              : String(selectedAccountRow?.name ?? "Selected account");
+          const isCashAccountScope = String(selectedAccountRow?.type ?? "").toUpperCase() === "CASH";
+          const cashLedgerHref = selectedBusinessId && accountScopeId !== "all"
+            ? `/ledger?businessId=${encodeURIComponent(selectedBusinessId)}&accountId=${encodeURIComponent(accountScopeId)}`
+            : "/ledger";
 
           const commandStatus = showAttentionLoading
             ? null
@@ -1337,15 +1343,27 @@ export default function DashboardPageClient() {
                   tone="success"
                   loading={showAttentionLoading}
                 />
-                <DashboardCommandAction
-                  href={reconcileHref}
-                  icon={Landmark}
-                  label="Bank unmatched"
-                  count={bankUnmatchedN}
-                  meta="Review activity"
-                  tone="warning"
-                  loading={showAttentionLoading}
-                />
+                {isCashAccountScope ? (
+                  <DashboardCommandAction
+                    href={cashLedgerHref}
+                    icon={Landmark}
+                    label="Cash book"
+                    count={0}
+                    meta="Reconciliation not required"
+                    tone="success"
+                    loading={showAttentionLoading}
+                  />
+                ) : (
+                  <DashboardCommandAction
+                    href={reconcileHref}
+                    icon={Landmark}
+                    label="Bank unmatched"
+                    count={bankUnmatchedN}
+                    meta="Review activity"
+                    tone="warning"
+                    loading={showAttentionLoading}
+                  />
+                )}
               </div>
             </div>
 

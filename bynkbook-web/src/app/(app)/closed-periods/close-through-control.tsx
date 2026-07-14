@@ -274,7 +274,7 @@ export function CloseThroughControl({
       {/* Preview box */}
       <div className="rounded-md border border-bb-border overflow-hidden">
         <div className="bg-bb-surface-soft px-3 h-9 flex items-center justify-between">
-          <div className="text-xs font-semibold text-bb-text">Reconciliation</div>
+          <div className="text-xs font-semibold text-bb-text">Close readiness</div>
           <div
             className={`text-xs font-semibold ${
               preview ? (isClean ? "text-primary" : "text-bb-status-warning-fg") : "text-bb-text-muted"
@@ -288,10 +288,11 @@ export function CloseThroughControl({
           {!preview ? (
             <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
               <MetricTile label="Total" value={stats.entries_total} />
               <MetricTile label="Reconciled" value={stats.entries_reconciled} />
               <MetricTile label="Unreconciled" value={stats.entries_unreconciled} />
+              <MetricTile label="Cash book (exempt)" value={stats.entries_reconciliation_exempt ?? 0} />
               <MetricTile label="Open issues" value={stats.issues_open} />
             </div>
           )}

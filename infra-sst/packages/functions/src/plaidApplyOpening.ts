@@ -7,6 +7,7 @@ import {
 import { getPrisma } from "./lib/db";
 import { decryptAccessToken } from "./lib/plaidCrypto";
 import { getPlaidClient } from "./lib/plaidClient";
+import { CASH_ACCOUNT_BANKING_ERROR, isCashAccountType } from "./lib/accountCapabilities";
 
 function json(statusCode: number, body: any) {
   return { statusCode, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
@@ -48,6 +49,7 @@ export async function handler(event: any) {
     select: { type: true },
   });
   if (!account) return json(404, { ok: false, error: "Account not found in business" });
+  if (isCashAccountType(account.type)) return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
 
   // CANCEL means disconnect mapping and exit (no changes to entries)
   if (choice === "CANCEL") {

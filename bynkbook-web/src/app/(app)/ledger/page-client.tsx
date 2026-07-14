@@ -28,6 +28,7 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useEntries } from "@/lib/queries/useEntries";
 import { usePreferredAccountId } from "@/lib/accountSelection";
+import { isCashAccountType } from "@/lib/accountCapabilities";
 
 import {
   createEntry,
@@ -437,6 +438,7 @@ export default function LedgerPageClient() {
     const list = accountsQ.data ?? [];
     return list.find((a) => a.id === selectedAccountId) ?? null;
   }, [accountsQ.data, selectedAccountId]);
+  const isCashAccount = isCashAccountType(selectedAccount?.type);
 
   const selectedBusinessName = useMemo(() => {
     const list = businessesQ.data ?? [];
@@ -456,7 +458,13 @@ export default function LedgerPageClient() {
 
   // Filters + toggle
   const [ledgerViewMode, setLedgerViewMode] = useState<LedgerViewMode>("chronological");
-  const isNeedsReconcileView = ledgerViewMode === "needsReconcile";
+  const isNeedsReconcileView = ledgerViewMode === "needsReconcile" && !isCashAccount;
+
+  useEffect(() => {
+    if (isCashAccount && ledgerViewMode !== "chronological") {
+      setLedgerViewMode("chronological");
+    }
+  }, [isCashAccount, ledgerViewMode]);
   const [searchPayee, setSearchPayee] = useState("");
   const [debouncedPayee, setDebouncedPayee] = useState("");
   const deletedToggleKey = useMemo(() => {
@@ -3067,11 +3075,16 @@ export default function LedgerPageClient() {
       <div className="flex items-center gap-2 min-w-0">
         {/* Left cluster: search + filters (can shrink) */}
         <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 py-1 pl-1">
-          <div className="inline-flex h-7 shrink-0 items-center rounded-md border border-bb-border bg-bb-table-header p-0.5">
-            {([
-              { value: "chronological", label: "Chronological" },
-              { value: "needsReconcile", label: "Needs Reconcile" },
-            ] as Array<{ value: LedgerViewMode; label: string }>).map((option) => {
+          {isCashAccount ? (
+            <span className="inline-flex h-7 shrink-0 items-center rounded-md border border-bb-border bg-bb-table-header px-2 text-xs font-medium text-bb-text">
+              Cash book
+            </span>
+          ) : (
+            <div className="inline-flex h-7 shrink-0 items-center rounded-md border border-bb-border bg-bb-table-header p-0.5">
+              {([
+                { value: "chronological", label: "Chronological" },
+                { value: "needsReconcile", label: "Needs Reconcile" },
+              ] as Array<{ value: LedgerViewMode; label: string }>).map((option) => {
               const active = ledgerViewMode === option.value;
               return (
                 <button
@@ -3089,8 +3102,9 @@ export default function LedgerPageClient() {
                   {option.label}
                 </button>
               );
-            })}
-          </div>
+              })}
+            </div>
+          )}
 
           <input
             ref={searchInputRef}
@@ -3453,6 +3467,7 @@ export default function LedgerPageClient() {
     scanBusy,
     scanIssues,
     isServerFiltered,
+    isCashAccount,
     qc,
     rowsUi,
     selectablePageIds,
@@ -4542,7 +4557,7 @@ export default function LedgerPageClient() {
                             Explain
                           </button>
 
-                          {selectedBusinessId && selectedAccountId && ["EXPECTED", "PARTIAL"].includes(String(r.rawStatus ?? "").toUpperCase()) ? (
+                          {!isCashAccount && selectedBusinessId && selectedAccountId && ["EXPECTED", "PARTIAL"].includes(String(r.rawStatus ?? "").toUpperCase()) ? (
                             <button
                               type="button"
                               className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-bb-table-row-hover inline-flex items-center gap-2"
@@ -4710,6 +4725,7 @@ export default function LedgerPageClient() {
     categoryComboboxOptions,
     createMut,
     hardDeleteMut.isPending,
+    isCashAccount,
     isNeedsReconcileView,
     qc,
     restoreMut,
@@ -5175,18 +5191,10 @@ export default function LedgerPageClient() {
       ).length === 0 ? (
         <div className="px-3 mt-2">
           {String(selectedAccount?.type ?? "").toUpperCase() === "CASH" ? (
-            // Cash accounts have no bank to connect — guide to manual entry /
-            // statement upload instead of an irrelevant "Connect bank" CTA.
             <EmptyStateCard
               title="No entries in this account yet"
-              description="This is a cash account. Add entries using the row at the top of the table, or upload a CSV / PDF statement to import them."
-              primary={{
-                label: "Upload statement",
-                onClick: () => {
-                  setUploadType("BANK_STATEMENT");
-                  setOpenUpload(true);
-                },
-              }}
+              description="Record cash receipts, payments, and transfers directly using the entry row above. Cash books do not connect to a bank or require reconciliation."
+              primary={{ label: "Manage account", href: `/settings?businessId=${encodeURIComponent(selectedBusinessId)}&tab=accounts` }}
             />
           ) : (
             <EmptyStateCard

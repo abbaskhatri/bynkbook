@@ -10,6 +10,9 @@ export type Account = {
   type: AccountType;
   opening_balance_cents: number;
   opening_balance_date: string; // YYYY-MM-DD
+  currency_code?: string | null;
+  institution_name?: string | null;
+  last4?: string | null;
   archived_at: string | null;
   created_at?: string;
   updated_at?: string;
@@ -45,6 +48,9 @@ export async function createAccount(
     type: AccountType;
     opening_balance_cents: number;
     opening_balance_date: string; // YYYY-MM-DD
+    currency_code?: string | null;
+    institution_name?: string | null;
+    last4?: string | null;
   }
 ): Promise<Account> {
   const res: any = await apiFetch(`/v1/businesses/${businessId}/accounts`, {
@@ -70,6 +76,9 @@ export async function patchAccount(
     type: AccountType;
     opening_balance_cents: number;
     opening_balance_date: string;
+    currency_code: string | null;
+    institution_name: string | null;
+    last4: string | null;
   }>,
 ): Promise<Account> {
   const res: any = await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}`, {

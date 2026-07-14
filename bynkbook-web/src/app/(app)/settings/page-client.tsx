@@ -12,6 +12,7 @@ import { userFacingErrorMessage } from "@/lib/errors/app-error";
 import { signOutAndClearSession } from "@/lib/auth/sessionPolicy";
 import { formatDateOnlyShort, normalizeDateOnly } from "@/lib/dateOnly";
 import { parseMoneyToCents } from "@/lib/money";
+import { isCashAccountType, supportsBankConnection } from "@/lib/accountCapabilities";
 
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { patchBusiness, resetBusiness, deleteBusiness, getBusinessUsage, getBusinessBackup, type Business } from "@/lib/api/businesses";
@@ -649,6 +650,7 @@ export default function SettingsPageClient() {
   const [manualCurrency, setManualCurrency] = useState("USD");
   const [manualInstitution, setManualInstitution] = useState("");
   const [manualLast4, setManualLast4] = useState("");
+  const isManualCash = isCashAccountType(type);
 
   async function onDownloadBackup() {
     if (!selectedBusinessId) return;
@@ -770,6 +772,9 @@ export default function SettingsPageClient() {
       type,
       opening_balance_cents: cents,
       opening_balance_date: openingDate,
+      currency_code: manualCurrency || null,
+      institution_name: isManualCash ? null : manualInstitution.trim() || null,
+      last4: isManualCash ? null : manualLast4.trim().length === 4 ? manualLast4.trim() : null,
       archived_at: null,
     };
 
@@ -788,9 +793,9 @@ export default function SettingsPageClient() {
 
         // Manual metadata (optional)
         currency_code: manualCurrency || null,
-        institution_name: manualInstitution.trim() || null,
-        last4: manualLast4.trim().length === 4 ? manualLast4.trim() : null,
-      } as any);
+        institution_name: isManualCash ? null : manualInstitution.trim() || null,
+        last4: isManualCash ? null : manualLast4.trim().length === 4 ? manualLast4.trim() : null,
+      });
 
       qc.setQueryData<Account[]>(key, (cur) => {
         const list = cur ?? [];
@@ -955,6 +960,7 @@ export default function SettingsPageClient() {
 
     (async () => {
       const toFetch = list.filter((a) => {
+        if (!supportsBankConnection(a.type)) return false;
         const connUpdated = String((a as any)?.plaid_connection?.updated_at ?? "");
         const key = `${selectedBusinessId}:${a.id}:${connUpdated}`;
         return !plaidStatusRequestedRef.current.has(key);
@@ -2243,7 +2249,17 @@ export default function SettingsPageClient() {
 
                         <div className="space-y-1">
                           <Label>Type</Label>
-                          <Select value={type} onValueChange={(v) => setType(v as AccountType)}>
+                          <Select
+                            value={type}
+                            onValueChange={(v) => {
+                              const nextType = v as AccountType;
+                              setType(nextType);
+                              if (isCashAccountType(nextType)) {
+                                setManualInstitution("");
+                                setManualLast4("");
+                              }
+                            }}
+                          >
                             <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="CHECKING">Checking</SelectItem>
@@ -2255,7 +2271,16 @@ export default function SettingsPageClient() {
                           </Select>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
+                        {isManualCash ? (
+                          <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
+                            <div className="text-xs font-semibold text-foreground">Cash book</div>
+                            <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                              Record receipts and payments directly in the ledger. A cash book has no bank institution, account number, Plaid connection, or reconciliation workflow.
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className={`grid gap-3 ${isManualCash ? "grid-cols-1" : "grid-cols-2"}`}>
                           <div className="space-y-1">
                             <Label>Currency</Label>
                             <Select value={manualCurrency} onValueChange={(v) => setManualCurrency(v)}>
@@ -2270,40 +2295,44 @@ export default function SettingsPageClient() {
                             </Select>
                           </div>
 
-                          <div className="space-y-1">
-                            <Label>Last 4 digits</Label>
-                            <Input
-                              className={inputH7}
-                              value={manualLast4}
-                              onChange={(e) => setManualLast4(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
-                              placeholder="1234"
-                            />
-                          </div>
+                          {!isManualCash ? (
+                            <>
+                              <div className="space-y-1">
+                                <Label>Last 4 digits</Label>
+                                <Input
+                                  className={inputH7}
+                                  value={manualLast4}
+                                  onChange={(e) => setManualLast4(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                                  placeholder="1234"
+                                />
+                              </div>
 
-                          <div className="space-y-1 col-span-2">
-                            <Label>Institution name</Label>
-                            <Input
-                              className={inputH7}
-                              value={manualInstitution}
-                              onChange={(e) => setManualInstitution(e.target.value)}
-                              placeholder="Bank name (optional)"
-                              list="institution-suggestions"
-                            />
-                            <datalist id="institution-suggestions">
-                              {institutionSuggestions.map((x) => (
-                                <option key={x} value={x} />
-                              ))}
-                            </datalist>
-                          </div>
+                              <div className="col-span-2 space-y-1">
+                                <Label>Institution name</Label>
+                                <Input
+                                  className={inputH7}
+                                  value={manualInstitution}
+                                  onChange={(e) => setManualInstitution(e.target.value)}
+                                  placeholder="Bank name (optional)"
+                                  list="institution-suggestions"
+                                />
+                                <datalist id="institution-suggestions">
+                                  {institutionSuggestions.map((x) => (
+                                    <option key={x} value={x} />
+                                  ))}
+                                </datalist>
+                              </div>
+                            </>
+                          ) : null}
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <Label>Opening balance</Label>
+                            <Label>{isManualCash ? "Opening cash balance" : "Opening balance"}</Label>
                             <Input className={inputH7} value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
                           </div>
                           <div className="space-y-1">
-                            <Label>Opening date</Label>
+                            <Label>{isManualCash ? "Cash book start date" : "Opening date"}</Label>
                             <div className="w-full">
                               <AppDatePicker value={openingDate} onChange={(next) => setOpeningDate(next)} allowClear={false} />
                             </div>                          </div>
@@ -2818,6 +2847,12 @@ export default function SettingsPageClient() {
                       </Select>
                     </div>
 
+                    {isCashAccountType(editType) ? (
+                      <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                        Cash books do not connect to a bank or use reconciliation. Any existing bank connection must be disconnected before this type can be saved.
+                      </div>
+                    ) : null}
+
                     {(() => {
                       const elig = editAccountId ? deleteEligByAccount[editAccountId] : null;
                       const canEditOpening = !!elig?.eligible;
@@ -2883,6 +2918,7 @@ export default function SettingsPageClient() {
                       const amount = currency.format(a.opening_balance_cents / 100);
                       const date = formatDateOnlyShort(a.opening_balance_date);
                       const isArchived = !!a.archived_at;
+                      const isCashAccount = isCashAccountType(a.type);
 
                       const st = plaidByAccount[a.id];
                       const loading = !!plaidLoading[a.id];
@@ -2899,7 +2935,9 @@ export default function SettingsPageClient() {
 
                           {/* Institution (Plaid OR manual) */}
                           <TableCell className="py-2 text-foreground text-xs">
-                            {st?.institutionName ? (
+                            {isCashAccount ? (
+                              <span className="text-muted-foreground">Not applicable</span>
+                            ) : st?.institutionName ? (
                               <span className="truncate inline-block max-w-[220px]" title={st.institutionName}>
                                 {st.institutionName}
                               </span>
@@ -2914,7 +2952,9 @@ export default function SettingsPageClient() {
 
                           {/* Last 4 (Plaid OR manual) */}
                           <TableCell className="py-2 text-foreground text-xs font-mono">
-                            {st?.last4
+                            {isCashAccount
+                              ? <span className="text-muted-foreground">—</span>
+                              : st?.last4
                               ? `•••• ${st.last4}`
                               : (a as any)?.last4
                                 ? `•••• ${(a as any).last4}`
@@ -2937,7 +2977,11 @@ export default function SettingsPageClient() {
                           {/* Plaid status and last successful transaction sync */}
                           <TableCell className="py-2 text-center">
                             <div className="flex flex-col items-center gap-1">
-                            {!st && loading ? (
+                            {isCashAccount ? (
+                              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground">
+                                Cash book
+                              </span>
+                            ) : !st && loading ? (
                               <span className="text-[11px] text-muted-foreground">Checking…</span>
                             ) : st?.needsAttention ? (
                               <span
@@ -2959,11 +3003,11 @@ export default function SettingsPageClient() {
                                 Not connected
                               </span>
                             )}
-                            {st?.connected && st.lastSyncAt ? (
+                            {!isCashAccount && st?.connected && st.lastSyncAt ? (
                               <span className="text-xs text-muted-foreground" title={new Date(st.lastSyncAt).toLocaleString()}>
                                 Synced {formatShortDate(st.lastSyncAt)}
                               </span>
-                            ) : st?.connected ? (
+                            ) : !isCashAccount && st?.connected ? (
                               <span className="text-xs text-bb-status-warning-fg">No successful sync yet</span>
                             ) : null}
                             </div>
@@ -2981,7 +3025,7 @@ export default function SettingsPageClient() {
                                 if (isArchived) return null;
 
                                 // Cash accounts never connect to Plaid
-                                if (String(a.type ?? "").toUpperCase() === "CASH") return null;
+                                if (isCashAccount) return null;
 
                                 // While status is still loading/unknown, don't render connect/switch controls (prevents wrong flashes).
                                 if (!checked || loading) return null;

@@ -3,8 +3,21 @@ import { parseDateOnlyToUtcDate, serializeDateOnly } from "./lib/dateOnly";
 import { randomUUID } from "node:crypto";
 import { removeBankConnectionWithItemLifecycle } from "./lib/plaidService";
 import { authorizeWrite } from "./lib/authz";
+import { isCashAccountType } from "./lib/accountCapabilities";
 
 const ACCOUNT_TYPES = ["CHECKING", "SAVINGS", "CREDIT_CARD", "CASH", "OTHER"] as const;
+
+function normalizeCurrencyCode(value: unknown) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (!normalized) return null;
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : null;
+}
+
+function normalizeLast4(value: unknown) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+  return /^\d{4}$/.test(normalized) ? normalized : null;
+}
 
 function json(statusCode: number, body: any) {
   return {
@@ -115,6 +128,9 @@ export async function handler(event: any) {
           business_id: a.business_id,
           name: a.name,
           type: a.type,
+          currency_code: a.currency_code ?? null,
+          institution_name: isCashAccountType(a.type) ? null : a.institution_name ?? null,
+          last4: isCashAccountType(a.type) ? null : a.last4 ?? null,
           opening_balance_cents: a.opening_balance_cents?.toString?.() ?? String(a.opening_balance_cents),
           opening_balance_date: serializeDateOnly(a.opening_balance_date),
           archived_at: a.archived_at ? a.archived_at.toISOString() : null,
@@ -158,7 +174,7 @@ export async function handler(event: any) {
       return json(400, { ok: false, error: "Invalid JSON body" });
     }
 
-    const existing = await findAccountInBusiness(prisma, businessId, accountId);
+    const existing = await findAccountInBusiness(prisma, businessId, accountId, { id: true, type: true });
     if (!existing) return json(404, { ok: false, error: "Account not found" });
 
     const patch: any = {};
@@ -176,15 +192,39 @@ export async function handler(event: any) {
     }
 
     if ("currency_code" in body) {
-      patch.currency_code = body.currency_code ?? null;
+      const currencyCode = normalizeCurrencyCode(body.currency_code);
+      if (body.currency_code && !currencyCode) {
+        return json(400, { ok: false, error: "currency_code must be a three-letter ISO code" });
+      }
+      patch.currency_code = currencyCode;
     }
 
     if ("institution_name" in body) {
-      patch.institution_name = body.institution_name ?? null;
+      patch.institution_name = String(body.institution_name ?? "").trim() || null;
     }
 
     if ("last4" in body) {
-      patch.last4 = body.last4 ?? null;
+      const last4 = normalizeLast4(body.last4);
+      if (body.last4 && !last4) return json(400, { ok: false, error: "last4 must contain exactly four digits" });
+      patch.last4 = last4;
+    }
+
+    const resultingType = String(patch.type ?? existing.type ?? "").toUpperCase();
+    if (isCashAccountType(resultingType)) {
+      if (!isCashAccountType(existing.type)) {
+        const connectionCount = await prisma.bankConnection.count({
+          where: { business_id: businessId, account_id: accountId },
+        });
+        if (connectionCount > 0) {
+          return json(409, {
+            ok: false,
+            code: "CASH_ACCOUNT_CONNECTED_BANK",
+            error: "Disconnect the bank connection before changing this account to Cash.",
+          });
+        }
+      }
+      patch.institution_name = null;
+      patch.last4 = null;
     }
 
     const wantsOpening = "opening_balance_cents" in body || "opening_balance_date" in body;
@@ -243,6 +283,9 @@ export async function handler(event: any) {
       business_id: true,
       name: true,
       type: true,
+      currency_code: true,
+      institution_name: true,
+      last4: true,
       opening_balance_cents: true,
       opening_balance_date: true,
       archived_at: true,
@@ -259,6 +302,9 @@ export async function handler(event: any) {
         business_id: updated.business_id,
         name: updated.name,
         type: updated.type,
+        currency_code: updated.currency_code ?? null,
+        institution_name: updated.institution_name ?? null,
+        last4: updated.last4 ?? null,
         opening_balance_cents: updated.opening_balance_cents?.toString?.() ?? String(updated.opening_balance_cents),
         opening_balance_date: serializeDateOnly(updated.opening_balance_date),
         archived_at: updated.archived_at ? updated.archived_at.toISOString() : null,
@@ -422,15 +468,21 @@ export async function handler(event: any) {
     }
 
     const name = (body?.name ?? "").toString().trim();
-    const type = (body?.type ?? "").toString().trim();
-    const currency_code = body?.currency_code ?? null;
-    const institution_name = body?.institution_name ?? null;
-    const last4 = body?.last4 ?? null;
+    const type = (body?.type ?? "").toString().trim().toUpperCase();
+    const currency_code = normalizeCurrencyCode(body?.currency_code);
+    const institution_name = isCashAccountType(type) ? null : String(body?.institution_name ?? "").trim() || null;
+    const last4 = isCashAccountType(type) ? null : normalizeLast4(body?.last4);
     const opening_balance_cents_raw = body?.opening_balance_cents ?? 0;
     const opening_balance_date_raw = (body?.opening_balance_date ?? "").toString().trim();
 
     if (name.length < 2) return json(400, { ok: false, error: "Account name is required (min 2 chars)" });
     if (!ACCOUNT_TYPES.includes(type as any)) return json(400, { ok: false, error: "Invalid account type" });
+    if (body?.currency_code && !currency_code) {
+      return json(400, { ok: false, error: "currency_code must be a three-letter ISO code" });
+    }
+    if (!isCashAccountType(type) && body?.last4 && !last4) {
+      return json(400, { ok: false, error: "last4 must contain exactly four digits" });
+    }
     if (!opening_balance_date_raw) return json(400, { ok: false, error: "opening_balance_date is required (YYYY-MM-DD)" });
 
     const openingBalanceNumber = Number(opening_balance_cents_raw);
@@ -466,6 +518,9 @@ export async function handler(event: any) {
         business_id: created.business_id,
         name: created.name,
         type: created.type,
+        currency_code: created.currency_code ?? null,
+        institution_name: created.institution_name ?? null,
+        last4: created.last4 ?? null,
         opening_balance_cents: created.opening_balance_cents.toString(),
         opening_balance_date: serializeDateOnly(created.opening_balance_date),
       },

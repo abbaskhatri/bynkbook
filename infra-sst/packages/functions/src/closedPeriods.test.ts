@@ -27,6 +27,7 @@ async function loadHandler(options: {
   role?: string | null;
   total?: number;
   reconciled?: number;
+  reconciliationExempt?: number;
   issuesOpen?: number;
   uncategorized?: number;
 } = {}) {
@@ -39,6 +40,7 @@ async function loadHandler(options: {
       ),
     },
     $queryRawUnsafe: vi.fn(async (query: string) => {
+      if (query.includes('INNER JOIN "account" a')) return [{ n: options.reconciliationExempt ?? 0 }];
       if (query.includes("active_match_group_amounts")) return [{ n: options.reconciled ?? 0 }];
       if (query.includes("FROM \"entry_issues\"")) return [{ n: options.issuesOpen ?? 0 }];
       if (query.includes("e.category_id IS NULL")) return [{ n: options.uncategorized ?? 0 }];
@@ -104,6 +106,31 @@ describe("closed period preview", () => {
     expect(reconciledQuery).toContain("FROM \"match_group_bank\" mgb");
     expect(reconciledQuery).toContain("COALESCE(mgm.matched_abs_cents, 0) >= ABS(e.amount_cents)");
     expect(reconciledQuery).not.toContain("category_id IS NULL");
+  });
+
+  test("does not require cash book entries to be bank reconciled", async () => {
+    const { handler, prisma } = await loadHandler({
+      total: 4,
+      reconciled: 1,
+      reconciliationExempt: 3,
+      issuesOpen: 0,
+      uncategorized: 0,
+    });
+
+    const res = await handler(previewEvent());
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.stats).toMatchObject({
+      entries_total: 4,
+      entries_reconciled: 1,
+      entries_reconciliation_exempt: 3,
+      entries_unreconciled: 0,
+      is_clean: true,
+    });
+
+    const exemptQuery = rawQueryTexts(prisma).find((query) => query.includes('INNER JOIN "account" a'));
+    expect(exemptQuery).toContain("UPPER(COALESCE(a.type, '')) = 'CASH'");
   });
 
   test("excludes opening balance rows from period totals and issue counts", async () => {

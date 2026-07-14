@@ -128,6 +128,28 @@ export async function handler(event: any) {
       to
     );
 
+    const reconciliationExemptRows: any[] = await prisma.$queryRawUnsafe(
+      `
+      SELECT COUNT(*)::int AS n
+      FROM "entry" e
+      INNER JOIN "account" a
+        ON a.id = e.account_id
+       AND a.business_id = e.business_id
+      WHERE e.business_id = $1::uuid
+        ${whereAcctSql}
+        AND UPPER(COALESCE(a.type, '')) = 'CASH'
+        AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
+        AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
+        AND e.date >= $3::date
+        AND e.date <= $4::date
+      `,
+      biz,
+      acctParam,
+      from,
+      to
+    );
+
     const reconciledRows: any[] = await prisma.$queryRawUnsafe(
       `
       WITH active_match_group_amounts AS (
@@ -236,9 +258,10 @@ export async function handler(event: any) {
 
     const entries_total = Number(totalRows?.[0]?.n ?? 0);
     const entries_reconciled = Number(reconciledRows?.[0]?.n ?? 0);
+    const entries_reconciliation_exempt = Number(reconciliationExemptRows?.[0]?.n ?? 0);
     const issues_open = Number(issuesRows?.[0]?.n ?? 0);
     const entries_uncategorized = Number(uncategorizedRows?.[0]?.n ?? 0);
-    const entries_unreconciled = Math.max(0, entries_total - entries_reconciled);
+    const entries_unreconciled = Math.max(0, entries_total - entries_reconciled - entries_reconciliation_exempt);
 
     const is_clean = entries_unreconciled === 0 && issues_open === 0 && entries_uncategorized === 0;
 
@@ -251,6 +274,7 @@ export async function handler(event: any) {
       stats: {
         entries_total,
         entries_reconciled,
+        entries_reconciliation_exempt,
         entries_unreconciled,
         issues_open,
         entries_uncategorized,
