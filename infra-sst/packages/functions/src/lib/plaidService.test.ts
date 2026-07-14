@@ -58,7 +58,22 @@ async function loadSyncTransactions(options: {
     })),
     linkTokenCreate: vi.fn(async () => ({ data: { link_token: "link-token" } })),
     itemPublicTokenExchange: vi.fn(async () => ({ data: { access_token: "access-token-new", item_id: "item-new" } })),
+    itemGet: vi.fn(async () => ({
+      data: {
+        item: {
+          products: ["transactions", "transactions_refresh"],
+          billed_products: ["transactions"],
+          status: {
+            transactions: {
+              last_successful_update: "2026-07-14T14:30:00Z",
+              last_failed_update: null,
+            },
+          },
+        },
+      },
+    })),
     itemRemove: vi.fn(async () => ({ data: {} })),
+    transactionsRefresh: vi.fn(async () => ({ data: { request_id: "refresh-request" } })),
     transactionsSync: vi.fn(async () => ({
       data: {
         added: [],
@@ -2003,6 +2018,63 @@ describe("syncTransactions", () => {
     expect(plaid.accountsGet).not.toHaveBeenCalled();
   });
 
+  test("reports provider freshness when on-demand Transactions Refresh is not enabled", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { syncTransactions } = await loadSyncTransactions({
+      plaid: {
+        transactionsRefresh: vi.fn(async () => {
+          const error: any = new Error("client is not authorized to access Transactions Refresh");
+          error.response = {
+            data: {
+              error_code: "INVALID_PRODUCT",
+              error_message: "client is not authorized to access Transactions Refresh",
+            },
+          };
+          throw error;
+        }),
+        itemGet: vi.fn(async () => ({
+          data: {
+            item: {
+              products: ["transactions"],
+              billed_products: ["transactions"],
+              status: {
+                transactions: {
+                  last_successful_update: "2026-07-14T12:15:30Z",
+                  last_failed_update: "2026-07-14T12:10:00Z",
+                },
+              },
+            },
+          },
+        })),
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      newCount: 0,
+      refreshRequested: true,
+      refreshSucceeded: false,
+      refreshUnavailable: true,
+      refreshErrorCode: "INVALID_PRODUCT",
+      plaidLastSuccessfulUpdateAt: "2026-07-14T12:15:30.000Z",
+      plaidLastFailedUpdateAt: "2026-07-14T12:10:00.000Z",
+      transactionsRefreshProductActive: false,
+    });
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Plaid on-demand transaction refresh unavailable",
+      expect.objectContaining({ errorCode: "INVALID_PRODUCT" }),
+    );
+  });
+
   test("status treats generic sync errors as connected instead of reconnect-required", async () => {
     const { mod } = await loadSyncTransactions({
       conn: {
@@ -2024,6 +2096,8 @@ describe("syncTransactions", () => {
       errorMessage: null,
       status: "ERROR",
       plaidAccountLive: true,
+      plaidLastSuccessfulUpdateAt: "2026-07-14T14:30:00.000Z",
+      transactionsRefreshProductActive: true,
     });
   });
 

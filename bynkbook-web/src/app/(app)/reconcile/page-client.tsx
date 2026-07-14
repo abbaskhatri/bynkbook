@@ -136,6 +136,9 @@ type PlaidStatusState = {
   newAccountsAvailable?: boolean;
   lastKnownBalanceCents?: string | null;
   lastKnownBalanceAt?: string | null;
+  plaidLastSuccessfulUpdateAt?: string | null;
+  plaidLastFailedUpdateAt?: string | null;
+  transactionsRefreshProductActive?: boolean | null;
 };
 type CountProbeResult = { count: number; capped: boolean };
 type BankUnmatchedScopeCounts = {
@@ -1433,8 +1436,19 @@ export default function ReconcilePageClient() {
     const refreshRequested = Boolean(res?.refreshRequested);
     const refreshSucceeded = Boolean(res?.refreshSucceeded);
     const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
+    const refreshUnavailable = Boolean(res?.refreshUnavailable) ||
+      refreshErrorCode === "INVALID_PRODUCT" ||
+      refreshErrorCode === "PRODUCT_NOT_ENABLED";
+    const plaidLastSuccessfulUpdateAt = String(res?.plaidLastSuccessfulUpdateAt ?? "").trim();
+    const plaidLastSuccessfulUpdateText = plaidLastSuccessfulUpdateAt
+      ? new Date(plaidLastSuccessfulUpdateAt).toLocaleString()
+      : "";
 
-    const syncParts = [`Transactions refreshed: ${newCount} new`];
+    const syncParts = [
+      refreshSucceeded
+        ? `Bank checked: ${newCount} new`
+        : `Plaid updates synced: ${newCount} new`,
+    ];
     if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
     if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
     if (accountReplayMergedCount > 0) syncParts.push(`${accountReplayMergedCount} reconnect replay merged`);
@@ -1442,17 +1456,26 @@ export default function ReconcilePageClient() {
     if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
     if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
     if (refreshRequested) {
-      syncParts.push(refreshSucceeded ? "on-demand refresh requested" : "scheduled Plaid data checked");
+      if (refreshSucceeded) syncParts.push("fresh bank check completed");
+      else if (refreshUnavailable) syncParts.push("instant bank refresh unavailable");
+      else syncParts.push("latest available Plaid data checked");
     }
 
     setSyncMsg(syncParts.join(" • "));
     if (pendingCount > 0) {
       setPendingMsgTone("warning");
       setPendingMsg("Pending shown read-only until posted.");
+    } else if (refreshUnavailable) {
+      setPendingMsgTone("warning");
+      setPendingMsg(
+        plaidLastSuccessfulUpdateText
+          ? `Plaid last received bank data ${plaidLastSuccessfulUpdateText}. Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update.`
+          : "Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update."
+      );
     } else if (refreshSucceeded) {
       setPendingMsgTone("muted");
-      setPendingMsg("Plaid is checking the bank now. Any changes will appear after the refresh webhook arrives.");
-    } else if (refreshErrorCode && refreshErrorCode !== "INVALID_PRODUCT" && refreshErrorCode !== "PRODUCT_NOT_ENABLED") {
+      setPendingMsg(newCount === 0 ? "The fresh bank check completed; no newer Plaid transactions were available." : null);
+    } else if (refreshErrorCode) {
       setPendingMsgTone("warning");
       setPendingMsg("Instant Plaid refresh is temporarily unavailable; showing the latest synced data.");
     } else {
@@ -3466,6 +3489,10 @@ const displayBankActiveList = useMemo(() => {
   const plaidHealthyConnected = !!plaid?.connected && !plaidNeedsAttention;
   const plaidHasConnection = plaidHealthyConnected || plaidNeedsAttention || !!plaid?.institutionName;
   const transactionSyncText = plaid?.lastSyncAt ? new Date(plaid.lastSyncAt).toLocaleString() : "";
+  const plaidBankUpdateText = plaid?.plaidLastSuccessfulUpdateAt
+    ? new Date(plaid.plaidLastSuccessfulUpdateAt).toLocaleString()
+    : "";
+  const plaidUsesScheduledUpdates = plaid?.transactionsRefreshProductActive === false;
   const bankUpdatesAvailable =
     plaidHealthyConnected &&
     !!plaid?.hasNewTransactions &&
@@ -3515,9 +3542,14 @@ const displayBankActiveList = useMemo(() => {
             Bank balance <span className="font-semibold text-bb-text tabular-nums">{balanceText}</span>
           </span>
         ) : null}
-        {plaidHasConnection && transactionSyncText ? (
+        {plaidHasConnection && plaidBankUpdateText ? (
           <span className="text-bb-text-muted">
-            Last bank sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
+            Bank data <span className="font-semibold text-bb-text">{plaidBankUpdateText}</span>
+          </span>
+        ) : null}
+        {plaidHasConnection && transactionSyncText ? (
+          <span className="text-bb-text-muted" title="When BynkBook last checked Plaid's transaction cursor">
+            App sync <span className="font-semibold text-bb-text">{transactionSyncText}</span>
           </span>
         ) : null}
       </div>
@@ -4814,6 +4846,21 @@ const displayBankActiveList = useMemo(() => {
                   {plaidHasConnection ? (
                     <>
                       {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
+                      {plaidBankUpdateText ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {plaidBankUpdateText ? (
+                        <span title="Plaid's latest successful transaction update from this bank">
+                          Bank data {plaidBankUpdateText}
+                        </span>
+                      ) : null}
+                      {plaidUsesScheduledUpdates ? <span className="text-bb-text-subtle"> • </span> : null}
+                      {plaidUsesScheduledUpdates ? (
+                        <span
+                          className="text-bb-status-warning-fg"
+                          title="On-demand Transactions Refresh is not active for this Plaid connection"
+                        >
+                          Scheduled updates
+                        </span>
+                      ) : null}
                       {plaidNeedsAttention && plaid?.errorMessage ? <span className="text-bb-text-subtle"> • </span> : null}
                       {plaidNeedsAttention && plaid?.errorMessage ? <span className="text-bb-status-warning-fg">{plaid.errorMessage}</span> : null}
                       {bankUpdatesAvailable ? <span className="text-bb-text-subtle"> • </span> : null}
@@ -4873,12 +4920,21 @@ const displayBankActiveList = useMemo(() => {
                       type="button"
                       className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       disabled={plaidSyncing}
+                      title={
+                        plaidUsesScheduledUpdates
+                          ? "Checks the latest transaction data Plaid has received from the bank"
+                          : "Refreshes the bank feed and imports new Plaid transaction updates"
+                      }
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId || plaidSyncRequestRef.current) return;
 
                         plaidSyncRequestRef.current = true;
                         setPlaidSyncing(true);
-                        setSyncMsg("Checking bank for latest transactions...");
+                        setSyncMsg(
+                          plaidUsesScheduledUpdates
+                            ? "Checking Plaid's latest scheduled bank data..."
+                            : "Checking bank for latest transactions..."
+                        );
                         setPendingMsg(null);
                         let monitoringActiveSync = false;
 
@@ -4901,7 +4957,15 @@ const displayBankActiveList = useMemo(() => {
                           }
 
                           const st = await plaidStatus(selectedBusinessId, selectedAccountId);
-                          setPlaid(st);
+                          setPlaid({
+                            ...st,
+                            plaidLastSuccessfulUpdateAt:
+                              st?.plaidLastSuccessfulUpdateAt ?? res?.plaidLastSuccessfulUpdateAt ?? null,
+                            plaidLastFailedUpdateAt:
+                              st?.plaidLastFailedUpdateAt ?? res?.plaidLastFailedUpdateAt ?? null,
+                            transactionsRefreshProductActive:
+                              st?.transactionsRefreshProductActive ?? res?.transactionsRefreshProductActive ?? null,
+                          });
 
                           if (!monitoringActiveSync) {
                             await refreshTablesFully({
@@ -5079,7 +5143,7 @@ const displayBankActiveList = useMemo(() => {
                       const upgradedCount = Number(syncResult?.upgradedCount ?? 0);
                       const skippedHistoricalCount = Number(syncResult?.skippedHistoricalCount ?? 0);
                       const pendingCount = Number(syncResult?.pendingCount ?? 0);
-                      const syncParts = [`Transactions refreshed: ${newCount} new`];
+                      const syncParts = [`Plaid updates synced: ${newCount} new`];
                       if (upgradedCount > 0) syncParts.push(`${upgradedCount} posted`);
                       if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
                       if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
