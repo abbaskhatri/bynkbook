@@ -184,6 +184,21 @@ async function callVerifiedWebhook(body: any) {
 }
 
 describe("createLinkToken", () => {
+  test("does not create a bank link token for a cash account", async () => {
+    const { mod, plaid } = await loadSyncTransactions({
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CASH" })) },
+      },
+    });
+
+    const res = await mod.createLinkToken({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("CASH_ACCOUNT_BANKING_NOT_APPLICABLE");
+    expect(plaid.linkTokenCreate).not.toHaveBeenCalled();
+  });
+
   test("denies bank-connection management to a member role", async () => {
     const { mod, plaid } = await loadSyncTransactions({
       prisma: {
@@ -550,6 +565,22 @@ describe("Plaid disconnect lifecycle", () => {
 });
 
 describe("syncTransactions", () => {
+  test("does not sync bank transactions into a cash account", async () => {
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CASH" })) },
+      },
+    });
+
+    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("CASH_ACCOUNT_BANKING_NOT_APPLICABLE");
+    expect(prisma.bankConnection.findFirst).not.toHaveBeenCalled();
+    expect(plaid.transactionsSync).not.toHaveBeenCalled();
+  });
+
   test("returns a coalesced success while another drain owns the account lease", async () => {
     const { syncTransactions, plaid } = await loadSyncTransactions({
       prisma: {
@@ -1954,6 +1985,22 @@ describe("syncTransactions", () => {
       error_code: "PRODUCT_NOT_READY",
       has_new_transactions: true,
     });
+  });
+
+  test("reports bank connection status as not applicable for a cash account", async () => {
+    const { mod, plaid, prisma } = await loadSyncTransactions({
+      prisma: {
+        account: { findFirst: vi.fn(async () => ({ id: "acct-1", type: "CASH" })) },
+      },
+    });
+
+    const res = await mod.getStatus({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body).toMatchObject({ connected: false, status: "NOT_APPLICABLE", bankingApplicable: false });
+    expect(prisma.bankConnection.findFirst).not.toHaveBeenCalled();
+    expect(plaid.accountsGet).not.toHaveBeenCalled();
   });
 
   test("status treats generic sync errors as connected instead of reconnect-required", async () => {

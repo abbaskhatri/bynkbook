@@ -16,7 +16,7 @@ function project(row: any, select: any) {
   return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, row[key]]));
 }
 
-async function loadHandler(role = "OWNER") {
+async function loadHandler(role = "OWNER", bankConnectionCount = 0) {
   vi.resetModules();
 
   const accounts = [
@@ -25,6 +25,9 @@ async function loadHandler(role = "OWNER") {
       business_id: "biz-a",
       name: "Operating",
       type: "CHECKING",
+      currency_code: "USD",
+      institution_name: "Manual Bank",
+      last4: "4321",
       opening_balance_cents: 0n,
       opening_balance_date: new Date("2026-01-01T00:00:00.000Z"),
       archived_at: null,
@@ -94,6 +97,16 @@ async function loadHandler(role = "OWNER") {
         }
         return { count };
       }),
+      create: vi.fn(async (args: any) => {
+        const row = {
+          ...args.data,
+          archived_at: null,
+          created_at: new Date("2026-07-13T00:00:00.000Z"),
+          updated_at: new Date("2026-07-13T00:00:00.000Z"),
+        };
+        accounts.unshift(row);
+        return row;
+      }),
       deleteMany: vi.fn(async (args: any) => {
         const index = accounts.findIndex((account) => account.id === args?.where?.id && account.business_id === args?.where?.business_id);
         if (index < 0) return { count: 0 };
@@ -105,7 +118,7 @@ async function loadHandler(role = "OWNER") {
     bankTransaction: { count: zeroCount },
     bankMatch: { count: zeroCount },
     bankConnection: {
-      count: zeroCount,
+      count: vi.fn(async () => bankConnectionCount),
       deleteMany: vi.fn(async (_args?: any) => ({ count: 0 })),
       findMany: vi.fn(async (args: any) =>
         bankConnections
@@ -149,6 +162,9 @@ describe("account business scoping", () => {
     expect(body.accounts).toHaveLength(2);
     expect(body.accounts[0]).toMatchObject({
       id: "acct-a",
+      currency_code: "USD",
+      institution_name: "Manual Bank",
+      last4: "4321",
       plaid_connection: {
         connected: true,
         status: "CONNECTED",
@@ -170,6 +186,48 @@ describe("account business scoping", () => {
         access_token_ciphertext: expect.anything(),
       }),
     });
+  });
+
+  test("creates cash accounts without bank-only metadata", async () => {
+    const { handler, prisma } = await loadHandler("OWNER");
+
+    const res = await handler(
+      event("POST", "/v1/businesses/biz-a/accounts", "biz-a", undefined, {
+        name: "Petty cash",
+        type: "cash",
+        currency_code: "usd",
+        institution_name: "Should not persist",
+        last4: "1234",
+        opening_balance_cents: 25000,
+        opening_balance_date: "2026-07-13",
+      }),
+    );
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(201);
+    expect(body.account).toMatchObject({
+      name: "Petty cash",
+      type: "CASH",
+      currency_code: "USD",
+      institution_name: null,
+      last4: null,
+    });
+    expect(prisma.account.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: "CASH", institution_name: null, last4: null }),
+    });
+  });
+
+  test("requires disconnect before converting a connected bank account to cash", async () => {
+    const { handler, prisma } = await loadHandler("OWNER", 1);
+
+    const res = await handler(
+      event("PATCH", "/v1/businesses/biz-a/accounts/acct-a", "biz-a", "acct-a", { type: "CASH" }),
+    );
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(409);
+    expect(body.code).toBe("CASH_ACCOUNT_CONNECTED_BANK");
+    expect(prisma.account.updateMany).not.toHaveBeenCalled();
   });
 
   test("blocks a Business A user from patching a Business B account", async () => {

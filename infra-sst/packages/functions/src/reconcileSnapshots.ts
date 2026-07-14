@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { safeCsvCell } from "./lib/csvSafe";
+import { CASH_ACCOUNT_BANKING_ERROR, isCashAccountType } from "./lib/accountCapabilities";
 
 function json(statusCode: number, body: any) {
   return {
@@ -34,9 +35,9 @@ async function requireMembership(prisma: any, businessId: string, userId: string
 async function requireAccountInBusiness(prisma: any, businessId: string, accountId: string) {
   const acct = await prisma.account.findFirst({
     where: { id: accountId, business_id: businessId },
-    select: { id: true },
+    select: { id: true, type: true },
   });
-  return !!acct;
+  return acct;
 }
 
 const WRITE_ROLES = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
@@ -320,8 +321,11 @@ export async function handler(event: any) {
   const role = await requireMembership(prisma, biz, sub);
   if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
 
-  const acctOk = await requireAccountInBusiness(prisma, biz, acct);
-  if (!acctOk) return json(404, { ok: false, error: "Account not found in this business" });
+  const account = await requireAccountInBusiness(prisma, biz, acct);
+  if (!account) return json(404, { ok: false, error: "Account not found in this business" });
+  if (isCashAccountType(account.type)) {
+    return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
+  }
 
   const region = process.env.AWS_REGION || "us-east-1";
   const s3 = new S3Client({ region });

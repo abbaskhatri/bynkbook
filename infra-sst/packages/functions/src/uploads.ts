@@ -8,6 +8,7 @@ import { streamToString } from "./lib/csv/streamToString";
 import { parseBankStatementCsv } from "./lib/csv/parseBankStatementCsv";
 import { computeImportHash, normalizeDesc } from "./lib/csv/importHash";
 import { authorizeWrite } from "./lib/authz";
+import { CASH_ACCOUNT_BANKING_ERROR, isCashAccountType } from "./lib/accountCapabilities";
 
 function json(statusCode: number, body: any) {
   return {
@@ -224,6 +225,15 @@ export async function handler(event: any) {
     if (accountId) {
       const ok = await requireAccountInBusiness(prisma, biz, accountId);
       if (!ok) return json(404, { ok: false, error: "Account not found in this business" });
+      if (uploadType === "BANK_STATEMENT") {
+        const account = await prisma.account.findFirst({
+          where: { id: accountId, business_id: biz },
+          select: { type: true },
+        });
+        if (isCashAccountType(account?.type)) {
+          return json(409, { ok: false, ...CASH_ACCOUNT_BANKING_ERROR });
+        }
+      }
     }
 
     // Validate content type

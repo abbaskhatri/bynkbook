@@ -79,7 +79,7 @@ export function pickPreferredAccountId<T extends AccountSelectionRow>({
 
   if (requested && requested !== "all") {
     const requestedAllowed = (!excludeTemp || !requested.startsWith("temp_"));
-    if (requestedAllowed && (selectable.length === 0 || selectable.some((account) => String(account.id) === requested))) {
+    if (requestedAllowed && (accounts.length === 0 || selectable.some((account) => String(account.id) === requested))) {
       return requested;
     }
   }

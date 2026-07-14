@@ -555,14 +555,14 @@ export async function handler(event: any) {
   // - OPENING: never requires category
   // - ADJUSTMENT: never requires category
   // - TRANSFER: never requires category (including entries with transfer_id or entry_kind=TRANSFER)
-  // - CASH account entries: never require category
+  // - CASH account income and expenses still require categories; only bank
+  //   reconciliation is not applicable to cash books.
   // - VOID/VOIDED/DELETED entries: should never surface issues
   if (includeMissingCategory) {
     for (const e of entries) {
       const typeUpper = String((e as any).type ?? "").toUpperCase();
       const statusUpper = String((e as any).status ?? "").toUpperCase();
       const kindUpper = String((e as any).entry_kind ?? "").toUpperCase();
-      const accountTypeUpper = String((e as any)?.account?.type ?? "").toUpperCase();
       const payeeLower = String((e as any).payee ?? "").trim().toLowerCase();
 
       const isOpening =
@@ -573,11 +573,10 @@ export async function handler(event: any) {
       const isAdjustment = typeUpper === "ADJUSTMENT" || (e as any).is_adjustment === true;
       // Catch all transfer variants: type=TRANSFER, entry_kind=TRANSFER, or transfer_id is set
       const isTransfer = typeUpper === "TRANSFER" || kindUpper === "TRANSFER" || !!(e as any).transfer_id;
-      const isCashAccount = accountTypeUpper === "CASH";
       // Voided/deleted entries should never surface category issues
       const isVoided = statusUpper === "VOID" || statusUpper === "VOIDED" || statusUpper === "DELETED";
 
-      if (isOpening || isAdjustment || isTransfer || isCashAccount || isVoided) {
+      if (isOpening || isAdjustment || isTransfer || isVoided) {
         continue;
       }
 

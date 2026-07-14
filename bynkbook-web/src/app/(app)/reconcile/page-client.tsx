@@ -445,7 +445,7 @@ export default function ReconcilePageClient() {
 
     if (accountsQ.isLoading) return;
 
-    if (selectedAccountId && !accountIdFromUrl) {
+    if (selectedAccountId && String(accountIdFromUrl ?? "") !== selectedAccountId) {
       router.replace(`/reconcile?businessId=${selectedBusinessId}&accountId=${selectedAccountId}`);
     }
   }, [
@@ -3570,6 +3570,41 @@ const displayBankActiveList = useMemo(() => {
   async function retryReconcileSurfaces() {
     await refreshBankAndMatches({ preserveOnEmpty: true });
     await entriesQ.refetch?.();
+  }
+
+  const activeAccounts = (accountsQ.data ?? []).filter((account) => !account.archived_at);
+  const firstCashAccount = activeAccounts.find((account) => String(account.type ?? "").toUpperCase() === "CASH") ?? null;
+  const hasOnlyCashBooks =
+    !!selectedBusinessId &&
+    !accountsQ.isLoading &&
+    activeAccounts.length > 0 &&
+    opts.length === 0;
+
+  if (hasOnlyCashBooks) {
+    const ledgerHref = firstCashAccount
+      ? `/ledger?businessId=${encodeURIComponent(selectedBusinessId)}&accountId=${encodeURIComponent(firstCashAccount.id)}`
+      : `/settings?businessId=${encodeURIComponent(selectedBusinessId)}&tab=accounts`;
+
+    return (
+      <div className="flex flex-col gap-1.5 overflow-hidden" style={containerStyle}>
+        <div className="bb-page-command-surface rounded-xl overflow-hidden">
+          <div className="px-3 py-1.5">
+            <PageHeader
+              icon={<GitMerge className="h-4 w-4" />}
+              title="Reconcile"
+            />
+          </div>
+          <div className="h-px bg-bb-border" />
+          <div className="p-3">
+            <EmptyStateCard
+              title="No accounts need reconciliation"
+              description="Cash books are maintained directly in the ledger. They do not have a bank feed, imported bank statement, or reconciliation workflow."
+              primary={{ label: firstCashAccount ? "Open cash book" : "Manage accounts", href: ledgerHref }}
+            />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -118,6 +118,24 @@ afterEach(() => {
   vi.resetModules();
 });
 
+describe("issues scan category requirements", () => {
+  test("requires categories for cash book income and expenses", async () => {
+    const cashExpense = entry("cash-expense", "2026-07-13", -2500n, {
+      category_id: null,
+      method: "CASH",
+      account: { type: "CASH" },
+    });
+
+    const { handler, prisma } = await loadHandler({ entries: [cashExpense] });
+    const res = await handler(scanEvent({ includeMissingCategory: true }));
+
+    expect(res.statusCode).toBe(200);
+    expect(createdIssues(prisma)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entry_id: "cash-expense", issue_type: "MISSING_CATEGORY" }),
+    ]));
+  });
+});
+
 describe("issues scan duplicate detection", () => {
   test("flags generic imported deposit and manual customer entry with same amount near date", async () => {
     const manual = entry("manual-shop", "2026-05-12", 245900n, {
