@@ -583,6 +583,25 @@ describe("Plaid disconnect lifecycle", () => {
 });
 
 describe("syncTransactions", () => {
+  test("requires account-management permission for a billed refresh", async () => {
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      prisma: {
+        userBusinessRole: { findFirst: vi.fn(async () => ({ role: "BOOKKEEPER" })) },
+      },
+    });
+
+    const res = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(plaid.transactionsRefresh).not.toHaveBeenCalled();
+    expect(plaid.transactionsSync).not.toHaveBeenCalled();
+  });
+
   test("migrates a stale Plaid Item webhook before draining transactions", async () => {
     process.env.PLAID_WEBHOOK_URL = "https://example.com/v1/plaid/webhook";
     const { syncTransactions, plaid } = await loadSyncTransactions({
@@ -2367,6 +2386,38 @@ describe("syncTransactions", () => {
       plaidAccountLive: true,
       plaidLastSuccessfulUpdateAt: "2026-07-14T14:30:00.000Z",
       transactionsRefreshProductActive: true,
+    });
+  });
+
+  test("status repairs a legacy Item webhook without requiring a Sync click", async () => {
+    process.env.PLAID_WEBHOOK_URL = "https://api.example.com/v1/plaid/webhook";
+    const { mod, plaid } = await loadSyncTransactions({
+      plaid: {
+        itemGet: vi.fn(async () => ({
+          data: {
+            item: {
+              webhook: "https://retired.example.com/v1/plaid/webhook",
+              products: ["transactions"],
+              billed_products: ["transactions"],
+            },
+            status: { transactions: { last_successful_update: "2026-07-14T14:30:00Z" } },
+          },
+        })),
+      },
+    });
+
+    const res = await mod.getStatus({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({
+      ok: true,
+      webhookConfigured: true,
+      webhookUpdated: true,
+      webhookErrorCode: null,
+    });
+    expect(plaid.itemWebhookUpdate).toHaveBeenCalledWith({
+      access_token: "access-token-redacted",
+      webhook: "https://api.example.com/v1/plaid/webhook",
     });
   });
 

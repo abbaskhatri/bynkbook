@@ -80,7 +80,7 @@ export async function plaidDisconnect(businessId: string, accountId: string) {
   });
 }
 
-export async function plaidSync(businessId: string, accountId: string, options?: { refresh?: boolean; afterReconnect?: boolean }) {
+export async function plaidSync(businessId: string, accountId: string, options?: { afterReconnect?: boolean }) {
   const totals = {
     newCount: 0,
     upgradedCount: 0,
@@ -101,7 +101,6 @@ export async function plaidSync(businessId: string, accountId: string, options?:
     result = await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
       method: "POST",
       body: JSON.stringify({
-        refresh: pass === 0 && options?.refresh === true,
         afterReconnect: pass === 0 && options?.afterReconnect === true,
       }),
     });

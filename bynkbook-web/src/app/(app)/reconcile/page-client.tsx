@@ -4936,27 +4936,23 @@ const displayBankActiveList = useMemo(() => {
                     <button
                       type="button"
                       className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-                      disabled={plaidSyncing}
+                      disabled={plaidSyncing || !bankUpdatesAvailable}
                       title={
-                        plaidUsesScheduledUpdates
-                          ? "Checks the latest transaction data Plaid has received from the bank"
-                          : "Refreshes the bank feed and imports new Plaid transaction updates"
+                        bankUpdatesAvailable
+                          ? "Import transaction updates Plaid has reported as ready"
+                          : "No Plaid transaction updates are waiting to sync"
                       }
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId || plaidSyncRequestRef.current) return;
 
                         plaidSyncRequestRef.current = true;
                         setPlaidSyncing(true);
-                        setSyncMsg(
-                          plaidUsesScheduledUpdates
-                            ? "Checking Plaid's latest scheduled bank data..."
-                            : "Checking bank for latest transactions..."
-                        );
+                        setSyncMsg("Importing available Plaid transaction updates...");
                         setPendingMsg(null);
                         let monitoringActiveSync = false;
 
                         try {
-                          const res = await plaidSync(selectedBusinessId, selectedAccountId, { refresh: true });
+                          const res = await plaidSync(selectedBusinessId, selectedAccountId);
 
                           if (res?.syncInProgress) {
                             monitoringActiveSync = true;
@@ -5013,7 +5009,8 @@ const displayBankActiveList = useMemo(() => {
                         }
                       }}
                     >
-                      <RefreshCw className="h-3.5 w-3.5" /> {plaidSyncing ? "Syncing…" : "Sync"}
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      {plaidSyncing ? "Syncing…" : bankUpdatesAvailable ? "Sync available" : "Up to date"}
                     </button>
 
                     <button

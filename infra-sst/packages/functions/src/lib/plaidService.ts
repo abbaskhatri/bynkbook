@@ -1519,10 +1519,17 @@ export async function getStatus(params: { businessId: string; accountId: string;
     transactionsRefreshProductActive: null,
     lookupErrorCode: null,
   };
+  let webhookRepair: PlaidWebhookRepairResult = {
+    configured: Boolean(plaidWebhookUrl()),
+    updated: false,
+    errorCode: null,
+    errorMessage: null,
+  };
 
   try {
     const plaid = await getPlaidClient();
     const accessToken = await decryptAccessToken(connRow.access_token_ciphertext);
+    webhookRepair = await ensurePlaidItemWebhook(plaid, accessToken);
     const accountsRes = await plaid.accountsGet({ access_token: accessToken });
     const accounts = Array.isArray(accountsRes?.data?.accounts) ? accountsRes.data.accounts : [];
     const acct = accounts.find((a) => a.account_id === connRow.plaid_account_id);
@@ -1675,6 +1682,9 @@ export async function getStatus(params: { businessId: string; accountId: string;
     plaidLastFailedUpdateAt: plaidItemFreshness.lastFailedUpdateAt,
     transactionsRefreshProductActive: plaidItemFreshness.transactionsRefreshProductActive,
     plaidFreshnessErrorCode: plaidItemFreshness.lookupErrorCode,
+    webhookConfigured: webhookRepair.configured,
+    webhookUpdated: webhookRepair.updated,
+    webhookErrorCode: webhookRepair.errorCode,
     error: connRow.error_message ?? null,
     plaidAccountLive,
     plaidHealthErrorCode,
@@ -2107,7 +2117,7 @@ export async function syncTransactions(params: {
 
   const prisma = await getPrisma();
   if (!system) {
-    const role = await requirePlaidCapability(prisma, businessId, userId, "SYNC");
+    const role = await requirePlaidCapability(prisma, businessId, userId, requestRefresh ? "MANAGE" : "SYNC");
     if (!role) return json(403, { ok: false, error: "Forbidden" });
   }
 

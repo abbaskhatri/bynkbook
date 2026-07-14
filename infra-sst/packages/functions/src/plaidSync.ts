@@ -21,7 +21,10 @@ export async function handler(event: any) {
     businessId,
     accountId,
     userId: sub,
-    requestRefresh: body?.refresh === true || body?.forceRefresh === true,
+    // Ordinary cursor syncs are free and webhook-driven. Keep the billed
+    // Transactions Refresh call behind an explicit force-only contract so an
+    // older client or repeated Sync click cannot create per-call Plaid fees.
+    requestRefresh: body?.forceRefresh === true,
     afterReconnect: body?.afterReconnect === true,
   });
 }
