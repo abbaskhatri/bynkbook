@@ -1175,13 +1175,11 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
       >
         {[
           { label: "Home", path: "/dashboard", needsAccountId: false, icon: <LayoutDashboard className={NAV_ICON_CLASS} /> },
-          { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
+          { label: "Transactions", path: "/operations", needsAccountId: false, icon: <Activity className={NAV_ICON_CLASS} /> },
           { label: "Reconcile", path: "/reconcile", needsAccountId: true, icon: <GitMerge className={NAV_ICON_CLASS} /> },
-          { label: "Issues", path: "/issues", needsAccountId: true, icon: <AlertTriangle className={NAV_ICON_CLASS} /> },
+          { label: "Ledger", path: "/ledger", needsAccountId: true, icon: <BookOpen className={NAV_ICON_CLASS} /> },
         ].map((item) => {
           const active = pathname.startsWith(item.path);
-          const showBadge =
-            item.label === "Issues" && typeof attnIssues === "number" && attnIssues > 0;
           return (
             <Link
               key={item.path}
@@ -1193,14 +1191,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
               ].join(" ")}
               aria-current={active ? "page" : undefined}
             >
-              <span className="relative">
-                {item.icon}
-                {showBadge ? (
-                  <span className="absolute -top-1.5 -right-2 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-bb-status-warning-bg px-1 text-[9px] font-semibold text-bb-status-warning-fg border border-bb-status-warning-border">
-                    {attnIssues}
-                  </span>
-                ) : null}
-              </span>
+              <span className="relative">{item.icon}</span>
               <span>{item.label}</span>
             </Link>
           );
@@ -1212,7 +1203,14 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           onClick={openMobileNav}
           aria-label="More navigation"
         >
-          <Menu className={NAV_ICON_CLASS} />
+          <span className="relative">
+            <Menu className={NAV_ICON_CLASS} />
+            {typeof attnIssues === "number" && attnIssues > 0 ? (
+              <span className="absolute -top-1.5 -right-2 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full border border-bb-status-warning-border bg-bb-status-warning-bg px-1 text-[9px] font-semibold text-bb-status-warning-fg">
+                {attnIssues}
+              </span>
+            ) : null}
+          </span>
           <span>More</span>
         </button>
       </nav>

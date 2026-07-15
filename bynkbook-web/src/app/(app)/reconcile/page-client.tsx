@@ -37,6 +37,7 @@ import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
+import { FinancialRecordRow } from "@/components/mobile/financial-record-row";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
 import { waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
@@ -3604,7 +3605,7 @@ const displayBankActiveList = useMemo(() => {
       : `/settings?businessId=${encodeURIComponent(selectedBusinessId)}&tab=accounts`;
 
     return (
-      <div className="flex flex-col gap-1.5 overflow-hidden" style={containerStyle}>
+      <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-1.5 overflow-visible lg:overflow-hidden" style={containerStyle}>
         <div className="bb-page-command-surface rounded-xl overflow-hidden">
           <div className="px-3 py-1.5">
             <PageHeader
@@ -3626,7 +3627,7 @@ const displayBankActiveList = useMemo(() => {
   }
 
   return (
-    <div className="flex flex-col gap-1.5 overflow-hidden" style={containerStyle}>
+    <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-2 overflow-visible lg:overflow-hidden lg:h-[calc(100vh-56px-48px)]">
       <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 py-1.5">
           <PageHeader
@@ -4415,7 +4416,109 @@ const displayBankActiveList = useMemo(() => {
         </AppDialog>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-hidden">
+      <section className="space-y-4 lg:hidden" aria-label="Reconciliation work queue">
+        <div className="space-y-2">
+          <div className="flex items-end justify-between px-1">
+            <div>
+              <h2 className="text-sm font-semibold text-bb-text">Bank transactions</h2>
+              <p className="text-xs text-bb-text-muted">Review the bank item first, then confirm its ledger match.</p>
+            </div>
+            <span className="text-xs font-semibold tabular-nums text-bb-text-muted">{displayBankActiveList.length}</span>
+          </div>
+          {bankPanelShowInitialLoading ? (
+            <Skeleton className="h-24 w-full rounded-xl" />
+          ) : displayBankActiveList.length === 0 ? (
+            <EmptyState label={bankEmptyStateLabel} />
+          ) : (
+            displayBankActiveList.slice(0, 50).map((transaction: any) => {
+              const transactionId = String(transaction.id ?? "");
+              const amount = toBigIntSafe(transaction.amount_cents);
+              const isMatched = isBankTxnFullyMatched(transaction);
+              const isPending = Boolean(transaction?.is_pending);
+              const suggestion = !isMatched && !isPending ? (bankMatchSuggestionById.get(transactionId) ?? null) : null;
+              const canOpen = canWriteReconcileEffective && !isMatched && !isPending && !pendingById[transactionId];
+              return (
+                <FinancialRecordRow
+                  key={transactionId}
+                  title={(transaction?.name ?? "Bank transaction").toString().trim() || "Bank transaction"}
+                  amount={formatUsdFromCents(amount)}
+                  date={ymdFromUnknownDate(transaction.posted_date)}
+                  category={directionLabel(amount)}
+                  status={isPending ? "Pending" : isMatched ? "Matched" : suggestion ? "Suggested match" : "Needs match"}
+                  direction={amount < 0n ? "negative" : "positive"}
+                  needsAttention={!isMatched && !isPending}
+                  actionLabel="Review bank transaction match"
+                  onClick={canOpen ? () => {
+                    setMatchBankTxnId(transaction.id);
+                    setMatchSearch("");
+                    setMatchSelectedEntryIds(suggestion ? new Set(suggestion.entryIds) : new Set());
+                    setMatchError(null);
+                    setMatchAiSuggestions([]);
+                    setMatchSuggestError(null);
+                    setOpenMatch(true);
+                    void runAiSuggestForBank(transaction);
+                  } : undefined}
+                />
+              );
+            })
+          )}
+          {displayBankActiveList.length > 50 ? (
+            <p className="px-2 text-xs text-bb-text-muted">Showing the first 50 items. Narrow the date range or search to continue.</p>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-end justify-between px-1">
+            <div>
+              <h2 className="text-sm font-semibold text-bb-text">Ledger entries</h2>
+              <p className="text-xs text-bb-text-muted">Expected entries waiting for a bank match.</p>
+            </div>
+            <span className="text-xs font-semibold tabular-nums text-bb-text-muted">{displayEntriesActiveList.length}</span>
+          </div>
+          {entriesTruthBlocking ? (
+            <Skeleton className="h-24 w-full rounded-xl" />
+          ) : displayEntriesActiveList.length === 0 ? (
+            <EmptyState label={entriesEmptyStateLabel} />
+          ) : (
+            displayEntriesActiveList.slice(0, 50).map((entry: any) => {
+              const amount = toBigIntSafe(entry.amount_cents);
+              const isSaving = Boolean(entry?.__optimistic_pending) || pendingById[String(entry.id)] === true;
+              const isMatched = !isSaving && matchedEntryIdSet.has(entry.id);
+              const isPostDated = String(entry?.date ?? "") > new Date().toISOString().slice(0, 10);
+              const suggestion = !isMatched && !isPostDated ? (entryMatchSuggestionById.get(String(entry.id)) ?? null) : null;
+              const canOpen = canWriteReconcileEffective && !isSaving && !isMatched && !isPostDated;
+              return (
+                <FinancialRecordRow
+                  key={entry.id}
+                  title={(entry.payee ?? "Ledger entry").toString().trim() || "Ledger entry"}
+                  amount={formatUsdFromCents(amount)}
+                  date={String(entry.date ?? "")}
+                  category={entryCategoryLabel(entry)}
+                  status={isSaving ? "Saving" : isMatched ? "Matched" : isPostDated ? "Post-dated" : suggestion ? "Suggested match" : "Expected"}
+                  direction={amount < 0n ? "negative" : "positive"}
+                  needsAttention={!isMatched && !isPostDated}
+                  actionLabel="Review ledger entry match"
+                  onClick={canOpen ? () => {
+                    setEntryMatchEntryId(entry.id);
+                    setEntryMatchSelectedBankTxnIds(suggestion ? new Set([suggestion.bankTxnId]) : new Set());
+                    setEntryMatchSearch("");
+                    setEntryMatchError(null);
+                    setEntryAiSuggestions([]);
+                    setEntrySuggestError(null);
+                    setOpenEntryMatch(true);
+                    void runAiSuggestForEntry(entry);
+                  } : undefined}
+                />
+              );
+            })
+          )}
+          {displayEntriesActiveList.length > 50 ? (
+            <p className="px-2 text-xs text-bb-text-muted">Showing the first 50 entries. Narrow the date range or search to continue.</p>
+          ) : null}
+        </div>
+      </section>
+
+      <div className="hidden lg:grid lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-hidden">
         {/* Expected Entries */}
         <div className="bb-spreadsheet-shell flex flex-col min-h-0 overflow-hidden rounded-lg">
           <div className="px-3 py-1.5">

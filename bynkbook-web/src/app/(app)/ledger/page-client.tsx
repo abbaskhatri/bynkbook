@@ -114,6 +114,7 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { LazyAppDialog as AppDialog } from "@/components/primitives/LazyAppDialog";
 import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
+import { FinancialRecordRow } from "@/components/mobile/financial-record-row";
 import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { PillToggle } from "@/components/primitives/PillToggle";
@@ -5214,6 +5215,47 @@ export default function LedgerPageClient() {
       ) : null}
 
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
+        <>
+          <section className="space-y-2 px-3 md:hidden" aria-label="Ledger entries">
+            {entriesQ.isLoading ? (
+              Array.from({ length: 6 }, (_, index) => (
+                <div key={index} className="h-[5.5rem] animate-pulse rounded-xl border border-bb-border bg-bb-surface-card" />
+              ))
+            ) : (
+              pageRows.map((row) => (
+                <FinancialRecordRow
+                  key={row.id}
+                  title={row.payee || "Untitled entry"}
+                  amount={row.amountStr}
+                  date={formatLedgerDateForDisplay(row.date)}
+                  category={row.category || row.typeDisplay || "Uncategorized"}
+                  status={row.status}
+                  direction={row.amountNeg ? "negative" : "positive"}
+                  needsAttention={row.hasDup || row.hasMissing || row.hasStale}
+                />
+              ))
+            )}
+            {!entriesQ.isLoading && pageRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-bb-border px-4 py-8 text-center text-sm text-bb-text-muted">
+                No ledger entries match these filters.
+              </div>
+            ) : null}
+            <details className="rounded-xl border border-bb-border bg-bb-surface-card">
+              <summary className="flex min-h-11 cursor-pointer items-center px-4 text-sm font-semibold text-bb-text">
+                Full ledger controls
+              </summary>
+              <div className="border-t border-bb-border">
+                <LedgerTableShell
+                  colgroup={cols}
+                  header={headerRow}
+                  addRow={addRow}
+                  body={entriesQ.isLoading ? skeletonBodyRows : bodyRows}
+                  footer={null}
+                />
+              </div>
+            </details>
+          </section>
+          <div className="hidden md:block">
         <LedgerTableShell
           colgroup={cols}
           header={headerRow}
@@ -5288,6 +5330,8 @@ export default function LedgerPageClient() {
             </tr>
           }
         />
+          </div>
+        </>
       ) : null}
 
       <FixIssueDialog
