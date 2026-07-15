@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { AccountsSummaryRow } from "@/lib/api/reports";
 import {
   calculateCashRunway,
+  isBankSnapshotComparable,
   sumLedgerCashCents,
   summarizeBankCash,
 } from "@/lib/dashboardMetrics";
@@ -23,6 +24,12 @@ function row(overrides: Partial<AccountsSummaryRow>): AccountsSummaryRow {
 }
 
 describe("dashboard balance metrics", () => {
+  test("compares bank and ledger balances only when their dates align", () => {
+    expect(isBankSnapshotComparable("2026-07-15T23:00:00.000Z", "2026-07-15")).toBe(true);
+    expect(isBankSnapshotComparable("2026-07-14T23:00:00.000Z", "2026-07-15")).toBe(false);
+    expect(isBankSnapshotComparable(null, "2026-07-15")).toBe(false);
+  });
+
   test("ledger cash includes cash accounts and excludes credit cards", () => {
     const total = sumLedgerCashCents([
       row({ type: "CHECKING", ledger_balance_cents: "10000" }),
