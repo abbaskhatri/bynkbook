@@ -40,6 +40,9 @@ async function loadHandler() {
         { id: "account-1", name: "Checking" },
       ]),
     },
+    bankConnection: {
+      findMany: vi.fn(async () => []),
+    },
     category: {
       findMany: vi.fn(async () => [
         { id: SALE_CATEGORY_ID, name: "Sale", archived_at: null },
@@ -115,6 +118,7 @@ async function loadHandler() {
         return { _sum: { amount_cents: 7500n }, _count: { _all: 2 } };
       }),
     },
+    $queryRaw: vi.fn(async () => []),
   };
 
   vi.doMock("./lib/db", () => ({
@@ -222,5 +226,56 @@ describe("reports category composition", () => {
       hasMore: true,
     });
     expect(typeof body.meta.next_cursor).toBe("string");
+  });
+
+  test("/reports/accounts/summary keeps ledger and latest bank balances separate", async () => {
+    const { handler, prisma } = await loadHandler();
+    (prisma.account.findMany as any).mockResolvedValueOnce([
+      {
+        id: "account-1",
+        name: "Checking",
+        type: "CHECKING",
+        opening_balance_cents: 10_000n,
+        opening_balance_date: new Date("2026-04-01T00:00:00Z"),
+      },
+    ]);
+    (prisma.$queryRaw as any).mockResolvedValueOnce([{ account_id: "account-1", sum_cents: 2_500n }]);
+    (prisma.bankConnection.findMany as any).mockResolvedValueOnce([
+      {
+        account_id: "account-1",
+        status: "CONNECTED",
+        last_sync_at: new Date("2026-04-30T13:00:00Z"),
+        last_known_balance_cents: 13_000n,
+        last_known_balance_at: new Date("2026-04-30T12:59:00Z"),
+      },
+    ]);
+
+    const res = await handler(reportsEvent("/reports/accounts/summary"));
+    const body = JSON.parse(res.body);
+
+    expect(res.statusCode).toBe(200);
+    expect(body.rows).toEqual([
+      {
+        account_id: "account-1",
+        name: "Checking",
+        type: "CHECKING",
+        balance_cents: "12500",
+        ledger_balance_cents: "12500",
+        bank_balance_cents: "13000",
+        bank_balance_at: "2026-04-30T12:59:00.000Z",
+        bank_last_sync_at: "2026-04-30T13:00:00.000Z",
+        bank_connection_status: "CONNECTED",
+      },
+    ]);
+    expect(prisma.bankConnection.findMany).toHaveBeenCalledWith({
+      where: { business_id: BUSINESS_ID, account_id: { in: ["account-1"] } },
+      select: {
+        account_id: true,
+        status: true,
+        last_sync_at: true,
+        last_known_balance_cents: true,
+        last_known_balance_at: true,
+      },
+    });
   });
 });

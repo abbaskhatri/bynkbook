@@ -794,26 +794,41 @@ export async function handler(event: any) {
 
     const ids = accounts.map((a: any) => String(a.id));
 
-    const sums: Array<{ account_id: string; sum_cents: bigint }> = await prisma.$queryRaw`
-      SELECT e.account_id::text as account_id, COALESCE(SUM(e.amount_cents), 0)::bigint as sum_cents
-      FROM entry e
-      JOIN account a ON a.id = e.account_id
-      WHERE e.business_id = ${biz}::uuid
-        AND e.deleted_at IS NULL
-        AND e.date <= ${asOfDate}::date
-        AND e.account_id = ANY(${ids}::uuid[])
-        AND (a.opening_balance_date IS NULL OR e.date >= a.opening_balance_date::date)
-        AND NOT (
-          UPPER(coalesce(e.type, '')) = 'OPENING'
-          OR lower(coalesce(e.payee, '')) = 'opening balance'
-          OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
-          OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
-        )
-      GROUP BY e.account_id
-    `;
+    const [sums, connections] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT e.account_id::text as account_id, COALESCE(SUM(e.amount_cents), 0)::bigint as sum_cents
+        FROM entry e
+        JOIN account a ON a.id = e.account_id
+        WHERE e.business_id = ${biz}::uuid
+          AND e.deleted_at IS NULL
+          AND e.date <= ${asOfDate}::date
+          AND e.account_id = ANY(${ids}::uuid[])
+          AND (a.opening_balance_date IS NULL OR e.date >= a.opening_balance_date::date)
+          AND NOT (
+            UPPER(coalesce(e.type, '')) = 'OPENING'
+            OR lower(coalesce(e.payee, '')) = 'opening balance'
+            OR lower(coalesce(e.payee, '')) = 'opening balance (estimated)'
+            OR lower(coalesce(e.payee, '')) LIKE 'opening balance%'
+          )
+        GROUP BY e.account_id
+      ` as Promise<Array<{ account_id: string; sum_cents: bigint }>>,
+      prisma.bankConnection.findMany({
+        where: { business_id: biz, account_id: { in: ids } },
+        select: {
+          account_id: true,
+          status: true,
+          last_sync_at: true,
+          last_known_balance_cents: true,
+          last_known_balance_at: true,
+        },
+      }),
+    ]);
 
     const sumByAccount = new Map<string, bigint>(
       sums.map((r: any) => [String(r.account_id), (r.sum_cents ?? 0n) as bigint])
+    );
+    const connectionByAccount = new Map<string, any>(
+      connections.map((connection: any) => [String(connection.account_id), connection])
     );
 
     const rows = accounts.map((a: any) => {
@@ -825,12 +840,25 @@ export async function handler(event: any) {
           : 0n;
 
       const balance = opening + movement;
+      const connection = connectionByAccount.get(String(a.id)) ?? null;
 
       return {
         account_id: String(a.id),
         name: String(a.name),
         type: String(a.type),
         balance_cents: balance.toString(),
+        ledger_balance_cents: balance.toString(),
+        bank_balance_cents:
+          connection?.last_known_balance_cents == null
+            ? null
+            : String(connection.last_known_balance_cents),
+        bank_balance_at: connection?.last_known_balance_at
+          ? new Date(connection.last_known_balance_at).toISOString()
+          : null,
+        bank_last_sync_at: connection?.last_sync_at
+          ? new Date(connection.last_sync_at).toISOString()
+          : null,
+        bank_connection_status: connection?.status == null ? null : String(connection.status),
       };
     });
 

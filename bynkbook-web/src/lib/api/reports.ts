@@ -79,18 +79,26 @@ export async function getCashflowSeries(businessId: string, r: ReportsMonthRange
   return apiFetch(`/v1/businesses/${businessId}/reports/cashflow/series?${q}`);
 }
 
+export type AccountsSummaryRow = {
+  account_id: string;
+  name: string;
+  type: string;
+  // `balance_cents` remains for backward compatibility with older clients.
+  balance_cents: string;
+  ledger_balance_cents: string;
+  bank_balance_cents: string | null;
+  bank_balance_at: string | null;
+  bank_last_sync_at: string | null;
+  bank_connection_status: string | null;
+};
+
 export type AccountsSummaryResponse = {
   ok: true;
   report: "accounts_summary";
   asOf: string; // YYYY-MM-DD
   includeArchived: boolean;
   accountId: string;
-  rows: Array<{
-    account_id: string;
-    name: string;
-    type: string;
-    balance_cents: string;
-  }>;
+  rows: AccountsSummaryRow[];
 };
 
 export async function getAccountsSummary(

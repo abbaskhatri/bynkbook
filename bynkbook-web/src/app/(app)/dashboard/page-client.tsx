@@ -14,6 +14,12 @@ import { usePreferredAccountId } from "@/lib/accountSelection";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
+import {
+  calculateCashRunway,
+  ledgerBalanceCents,
+  sumLedgerCashCents,
+  summarizeBankCash,
+} from "@/lib/dashboardMetrics";
 
 import { aiExplainReport, aiAnomalies, aiChatAggregates } from "@/lib/api/ai";
 
@@ -87,9 +93,6 @@ type Money = { text: string; isNeg: boolean };
 
 function isoYmd(d: Date) {
   return d.toISOString().slice(0, 10);
-}
-function ymOf(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 function firstOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -525,17 +528,14 @@ export default function DashboardPageClient() {
   const showAttentionLoading = dashboardInitialLoading || attentionLoading;
 
   // ---- Derivations (deterministic only) ----
-  const cashBalanceCents = useMemo(() => {
-    let s = 0n;
-    for (const r of accountsSummaryQ.data?.rows ?? []) {
-      try {
-        s += BigInt(String((r as any).balance_cents ?? "0"));
-      } catch {
-        // ignore
-      }
-    }
-    return String(s);
-  }, [accountsSummaryQ.data]);
+  const cashBalanceCents = useMemo(
+    () => sumLedgerCashCents(accountsSummaryQ.data?.rows ?? []),
+    [accountsSummaryQ.data]
+  );
+  const bankCash = useMemo(
+    () => summarizeBankCash(accountsSummaryQ.data?.rows ?? []),
+    [accountsSummaryQ.data]
+  );
 
   const revenueCents = pnlQ.data?.period?.income_cents ?? null;
   const expensesCents = pnlQ.data?.period?.expense_cents ?? null;
@@ -829,56 +829,15 @@ export default function DashboardPageClient() {
     return () => cancelAnimationFrame(raf);
   }, [cashMonthly]);
 
-  const runway = useMemo(() => {
-    // avg monthly expenses (last 3 full months) derived from pnl monthly buckets if present.
-    const monthly = (pnlQ.data?.monthly ?? []) as any[];
-    const sorted = [...monthly].map((r) => ({ ...r, month: String(r.month) })).sort((a, b) => (a.month > b.month ? 1 : -1));
-
-    // Use last 3 *full* months if possible. For simplicity, take last 3 buckets excluding current partial month when mode includes current month.
-    // Deterministic rule: if we have >=4 buckets and range includes current month, drop the last bucket from avg calc.
-    const nowYm = ymOf(new Date());
-    const includesCurrent = sorted.some((r) => String(r.month) === nowYm) && (range.mode === "THIS_MONTH" || range.mode === "LAST_3_MONTHS" || range.mode === "YTD" || range.mode === "CUSTOM");
-
-    const usable = includesCurrent && sorted.length >= 4 ? sorted.slice(0, -1) : sorted;
-    const last3 = usable.slice(-3);
-
-    let expSumAbs = 0n;
-    let n = 0n;
-
-    for (const r of last3) {
-      try {
-        const e = BigInt(String(r.expense_cents ?? "0"));
-        expSumAbs += absBig(e);
-        n += 1n;
-      } catch {
-        // ignore
-      }
-    }
-
-    if (n === 0n) return { display: "—", tooltip: null as string | null };
-
-    // average monthly expense in cents
-    const avg = expSumAbs / n;
-    if (avg <= 0n) return { display: "—", tooltip: null };
-
-    let cash: bigint;
-    try {
-      cash = BigInt(String(cashBalanceCents ?? "0"));
-    } catch {
-      cash = 0n;
-    }
-
-    if (cash <= 0n) return { display: "0.0", tooltip: "Runway: 0.0 months" };
-
-    const months = Number(cash) / Number(avg);
-    if (!Number.isFinite(months)) return { display: "—", tooltip: null };
-
-    const uncapped = Math.round(months * 10) / 10; // 1 decimal
-    const capped = uncapped > 24 ? "24+ months" : `${uncapped.toFixed(1)} months`;
-    const tip = uncapped > 24 ? `Runway: ${uncapped.toFixed(1)} months (display capped)` : `Runway: ${uncapped.toFixed(1)} months`;
-
-    return { display: capped, tooltip: tip };
-  }, [pnlQ.data, cashBalanceCents, range.mode]);
+  const runway = useMemo(
+    () =>
+      calculateCashRunway({
+        monthly: cashflowQ.data?.monthly ?? [],
+        cashBalanceCents,
+        asOf: range.to,
+      }),
+    [cashflowQ.data, cashBalanceCents, range.to]
+  );
 
   const topExpenseCats = useMemo(() => {
     const cats: any = categoriesQ.data;
@@ -1253,6 +1212,9 @@ export default function DashboardPageClient() {
         (() => {
           // Format each KPI once (was being called twice — once for .text, once for .isNeg).
           const cashKpi = fmtUsdAccountingFromCents(cashBalanceCents);
+          const bankCashKpi = fmtUsdAccountingFromCents(
+            bankCash.complete ? bankCash.totalCents : undefined
+          );
           const revenueKpi = fmtUsdAccountingFromCents(revenueCents ?? undefined);
           const expensesKpi = fmtUsdAccountingFromCents(expensesCents ?? undefined);
           const netKpi = fmtUsdAccountingFromCents(netCents ?? undefined);
@@ -1304,7 +1266,7 @@ export default function DashboardPageClient() {
       {/* Command Center */}
       <Card className="overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated shadow-sm !gap-0 !py-0">
         <CardContent className="p-0">
-          <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_300px]">
             <div className="min-w-0 p-4 md:p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
@@ -1367,7 +1329,7 @@ export default function DashboardPageClient() {
               </div>
             </div>
 
-            <div className="border-t border-bb-border bg-bb-surface-soft/80 p-4 md:p-5 lg:border-l lg:border-t-0">
+            <div className="border-t border-bb-border bg-bb-surface-soft/80 p-4 md:p-5 xl:border-l xl:border-t-0">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Period</div>
               <div className="mt-1 text-sm font-semibold text-foreground">{range.from} to {range.to}</div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -1396,7 +1358,7 @@ export default function DashboardPageClient() {
       </Card>
 
       {/* KPI Strip */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {[
           {
             label: "Ledger Cash Balance",
@@ -1410,10 +1372,33 @@ export default function DashboardPageClient() {
             iconFg: "text-bb-status-success-fg",
           },
           {
+            label: "Latest Bank Cash",
+            value: bankCashKpi.text,
+            isNeg: bankCashKpi.isNeg,
+            sub:
+              bankCash.eligibleCount === 0
+                ? "No connected bank cash accounts"
+                : bankCash.complete && bankCash.oldestSnapshotAt
+                  ? `Oldest snapshot ${new Date(bankCash.oldestSnapshotAt).toLocaleString([], {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}`
+                  : `${bankCash.snapshotCount} of ${bankCash.eligibleCount} bank snapshots`,
+            tooltip: bankCash.complete
+              ? "Latest signed balances reported by Plaid for checking and savings accounts."
+              : "Partial total. One or more checking or savings accounts has no current bank snapshot.",
+            icon: Landmark,
+            accent: "bg-primary",
+            iconBg: "bg-bb-status-success-bg",
+            iconFg: "text-bb-status-success-fg",
+          },
+          {
             label: "Cash Runway",
             value: runway.display,
             isNeg: false,
-            sub: "based on 3-mo avg expenses",
+            sub: "3 completed months of expenses",
             tooltip: runway.tooltip,
             icon: Timer,
             accent: "bg-primary",
@@ -1481,7 +1466,7 @@ export default function DashboardPageClient() {
                       )}
                     </div>
 
-                    <div className="mt-1 text-[11px] text-muted-foreground truncate">{k.sub}</div>
+                    <div className="mt-1 text-[11px] leading-tight text-muted-foreground">{k.sub}</div>
                   </div>
                 </div>
               </CardContent>
@@ -1491,9 +1476,9 @@ export default function DashboardPageClient() {
       </div>
 
       {/* Base44 layout: Left stack (same heights) + Right stack (same width) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {/* LEFT: charts stack */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-4 xl:col-span-2">
           <DashboardChartPanels
             cashflowLoading={dashboardInitialLoading || cashflowQ.isFetching}
             cashPositionLoading={dashboardInitialLoading || cashflowQ.isFetching || accountsSummaryQ.isFetching}
@@ -1516,10 +1501,10 @@ export default function DashboardPageClient() {
                   <div className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-bb-status-success-bg">
                     <Landmark className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                   </div>
-                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Ledger Account Balances</CardTitle>
+                  <CardTitle className="text-sm font-semibold text-foreground leading-none">Ledger vs Bank Balances</CardTitle>
                 </div>
 
-                <div className="text-[11px] text-muted-foreground leading-none">As of {range.to}</div>
+                <div className="text-[11px] text-muted-foreground leading-none">Ledger as of {range.to}</div>
               </div>
             </CHeader>
 
@@ -1533,28 +1518,63 @@ export default function DashboardPageClient() {
               ) : (accountsSummaryQ.data?.rows ?? []).length === 0 ? (
                 <div className="px-4 py-3 text-sm text-muted-foreground">No accounts found.</div>
               ) : (
-                <div className="-mt-1 divide-y divide-bb-border-muted">
+                <div className="divide-y divide-bb-border-muted">
                   {(accountsSummaryQ.data?.rows ?? []).slice(0, 6).map((r: any, idx: number) => (
-                    <div
-                      key={`${String(r.account_id ?? "")}-${String(r.name ?? "")}-${idx}`}
-                      className="flex items-center justify-between px-4 py-1.5"
-                    >
-                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                    (() => {
+                      const ledgerCents = ledgerBalanceCents(r);
+                      const bankCents = r.bank_balance_cents == null ? null : String(r.bank_balance_cents);
+                      const differenceCents = bankCents == null
+                        ? null
+                        : (BigInt(bankCents) - BigInt(ledgerCents)).toString();
+                      const cashBook = String(r.type ?? "").toUpperCase() === "CASH";
+                      const bankSnapshotLabel = r.bank_balance_at
+                        ? `Bank ${new Date(r.bank_balance_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}`
+                        : cashBook
+                          ? "Ledger-only cash account"
+                          : r.bank_connection_status
+                            ? "Bank snapshot unavailable"
+                            : "Bank not connected";
+
+                      return (
+                    <div key={`${String(r.account_id ?? "")}-${String(r.name ?? "")}-${idx}`} className="px-4 py-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <Landmark className="w-4 h-4 text-bb-text-subtle flex-shrink-0" />
                         <div className="min-w-0 leading-tight">
                           <div className="font-medium text-[13px] truncate text-foreground">
                             {String(r.name ?? "Account")}
                           </div>
                           <div className="text-[11px] text-muted-foreground">
-                            {String(r.type ?? "")}
+                            {String(r.type ?? "")} · {bankSnapshotLabel}
                           </div>
                         </div>
                       </div>
-
-                      <div className={`text-sm font-semibold tabular-nums ${moneyClassFromCents(String(r.balance_cents ?? "0"))}`}>
-                        {fmtUsdAccountingFromCents(String(r.balance_cents ?? "0")).text}
+                      <div className="mt-2 grid grid-cols-3 gap-2 pl-6">
+                        {[
+                          { label: "Ledger", cents: ledgerCents },
+                          { label: "Bank", cents: bankCents },
+                          { label: "Difference", cents: differenceCents },
+                        ].map((value) => (
+                          <div key={value.label} className="min-w-0">
+                            <div className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {value.label}
+                            </div>
+                            <div
+                              className={`mt-0.5 truncate text-xs font-semibold tabular-nums ${moneyClassFromCents(value.cents ?? undefined)}`}
+                              title={value.cents == null ? undefined : fmtUsdAccountingFromCents(value.cents).text}
+                            >
+                              {value.cents == null ? "—" : fmtUsdAccountingFromCents(value.cents).text}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                      );
+                    })()
                   ))}
                 </div>
               )}
