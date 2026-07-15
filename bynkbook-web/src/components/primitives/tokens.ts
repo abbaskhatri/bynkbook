@@ -18,7 +18,7 @@ export const motionFast =
 
 // Canonical input height + focus style (Ledger standard)
 export const inputH7 =
-  "h-7 w-full px-2 py-0 text-xs leading-tight bg-bb-input-bg border border-bb-input-border rounded-md " +
+  "h-11 md:h-7 w-full px-3 md:px-2 py-0 text-base md:text-xs leading-tight bg-bb-input-bg border border-bb-input-border rounded-md " +
   "text-bb-text placeholder:text-bb-input-placeholder " +
   ringFocus;
 
@@ -28,17 +28,17 @@ export const inputH7 =
 export const selectTriggerClass =
   inputH7 +
   " justify-between data-[placeholder]:text-bb-input-placeholder " +
-  "data-[size=default]:h-7 data-[size=sm]:h-7 " +
+  "data-[size=default]:h-11 data-[size=sm]:h-11 md:data-[size=default]:h-7 md:data-[size=sm]:h-7 " +
   "data-[size=default]:py-0 data-[size=sm]:py-0 " +
-  "data-[size=default]:px-2 data-[size=sm]:px-2 " +
-  "data-[size=default]:text-xs data-[size=sm]:text-xs";
+  "data-[size=default]:px-3 data-[size=sm]:px-3 md:data-[size=default]:px-2 md:data-[size=sm]:px-2 " +
+  "data-[size=default]:text-base data-[size=sm]:text-base md:data-[size=default]:text-xs md:data-[size=sm]:text-xs";
 
 export const iconButtonH7 =
-  "h-7 w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card " +
+  "h-11 w-11 md:h-7 md:w-8 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card " +
   ringFocus;
 
 export const tabButtonBase =
-  "h-7 px-3 rounded-md border text-xs font-medium transition";
+  "min-h-11 md:min-h-7 px-3 rounded-md border text-sm md:text-xs font-medium transition";
 
 export const tabButtonActive =
   "border-primary/25 bg-primary/10 text-primary shadow-sm";

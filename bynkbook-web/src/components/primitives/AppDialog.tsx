@@ -42,6 +42,7 @@ export function AppDialog({
   bodyClassName,
 }: AppDialogProps) {
   const widthClass = dialogWidthBySize[size] ?? dialogWidthBySize.md;
+  const isComplexDialog = size === "lg" || size === "xl";
   const toneClass =
     tone === "danger"
       ? "border-bb-status-danger-border"
@@ -58,7 +59,7 @@ export function AppDialog({
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bb-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden p-0 sm:items-center sm:p-4">
+        <div className={`pointer-events-none fixed inset-0 z-50 flex justify-center overflow-x-hidden p-0 sm:items-center sm:p-4 ${isComplexDialog ? "items-stretch" : "items-end"}`}>
           <DialogPrimitive.Content
           onEscapeKeyDown={(event) => {
             if (!onClose) event.preventDefault();
@@ -68,8 +69,9 @@ export function AppDialog({
           }}
           className={[
             "pointer-events-auto",
-            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] rounded-t-lg sm:rounded-lg border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.48)]",
-            "max-h-[calc(100dvh-0.75rem)] sm:max-h-[85vh] flex min-h-0 flex-col overflow-hidden",
+            "w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100vw-2rem)] border bg-bb-dialog-bg shadow-[0_24px_80px_rgba(15,23,42,0.24)] dark:shadow-[0_28px_90px_rgba(0,0,0,0.48)]",
+            isComplexDialog ? "h-dvh max-h-dvh rounded-none sm:h-auto sm:max-h-[85vh] sm:rounded-lg" : "max-h-[calc(100dvh-0.75rem)] rounded-t-lg sm:max-h-[85vh] sm:rounded-lg",
+            "flex min-h-0 flex-col overflow-hidden",
             "transition-all duration-200 ease-out",
             "animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 sm:slide-in-from-bottom-0",
             widthClass,

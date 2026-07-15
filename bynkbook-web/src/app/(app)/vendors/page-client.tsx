@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
-import { Building2, Loader2 } from "lucide-react";
+import { Building2, ChevronRight, Loader2 } from "lucide-react";
 
 import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
@@ -252,17 +252,17 @@ export default function VendorsPageClient() {
   }, [refresh]);
 
   return (
-    <div className="flex flex-col gap-2 overflow-hidden max-w-6xl">
+    <div className="flex max-w-6xl flex-col gap-3 overflow-hidden pb-4">
       <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Building2 className="h-4 w-4" />}
             title="Vendors"
             right={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
+                  className="min-h-11 px-3 text-sm md:min-h-7 md:px-2 md:text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
                   onClick={() => setOpenUpload(true)}
                   title="Upload invoices for review first; no ledger/payment entry is created until approval/posting."
                 >
@@ -271,7 +271,7 @@ export default function VendorsPageClient() {
 
                 <button
                   type="button"
-                  className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
+                  className="min-h-11 px-3 text-sm md:min-h-7 md:px-2 md:text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover disabled:opacity-50"
                   disabled={!canWrite}
                   title={!canWrite ? "Insufficient permissions" : "Add vendor"}
                   onClick={openCreateVendorDialog}
@@ -292,7 +292,7 @@ export default function VendorsPageClient() {
       <div className="space-y-1">
         <div className="text-[11px] text-bb-text-muted">Search</div>
         <Input
-          className="h-7 w-[260px] text-xs"
+          className="h-11 w-full min-w-[min(18rem,80vw)] text-base md:h-7 md:w-[260px] md:text-xs"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search vendors…"
@@ -304,7 +304,7 @@ export default function VendorsPageClient() {
         <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
           <SelectTrigger
             size="sm"
-            className="h-7 w-[180px] border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text"
+            className="h-11 w-[180px] border-bb-input-border bg-bb-input-bg px-3 text-base text-bb-text md:h-7 md:px-2 md:text-xs"
           >
             <SelectValue />
           </SelectTrigger>
@@ -316,7 +316,7 @@ export default function VendorsPageClient() {
         </Select>
       </div>
 
-      <Button variant="outline" className="h-7 px-3 text-xs" onClick={refresh} disabled={!businessId || vendorsLoading}>
+      <Button variant="outline" className="h-11 px-3 text-sm md:h-7 md:text-xs" onClick={refresh} disabled={!businessId || vendorsLoading}>
         <span className="inline-flex items-center gap-2">
           {vendorsLoading ? <Loader2 className="h-3 w-3 text-bb-text-subtle animate-spin" /> : null}
           <span>Refresh</span>
@@ -361,6 +361,42 @@ export default function VendorsPageClient() {
         <div className="relative">
           {vendorsLoading && vendors.length > 0 ? <UpdatingOverlay /> : null}
           <div className={vendorsLoading && vendors.length > 0 ? "pointer-events-none select-none blur-[1px]" : ""}>
+            <div className="space-y-2 md:hidden" aria-label="Vendors">
+              {vendors.map((v: any) => {
+                const summary = apByVendorId[String(v.id)];
+                const openAmount = formatOptionalUsdFromCents(summary?.total_open_cents);
+                const openCents = summary?.total_open_cents == null ? 0n : toBigIntSafe(summary.total_open_cents);
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    className="flex min-h-[5.5rem] w-full items-center gap-3 rounded-xl border border-bb-border bg-bb-surface-card px-4 py-3 text-left shadow-sm transition-colors hover:bg-bb-table-row-hover"
+                    onClick={() => {
+                      if (!businessId) return;
+                      router.push(`/vendors/${v.id}?businessId=${encodeURIComponent(businessId)}`);
+                    }}
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-bb-surface-soft text-primary">
+                      <Building2 className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-bb-text">{v.name}</span>
+                      <span className="mt-1 block text-xs text-bb-text-muted">
+                        {String(v.updated_at ?? v.created_at ?? "").slice(0, 10) || "No activity yet"}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className={`block text-sm font-semibold tabular-nums ${openCents > 0n ? "text-bb-text" : "text-bb-text-subtle"}`}>
+                        {openAmount ?? (apSummaryLoading ? "Loading…" : "—")}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-bb-text-muted">Open AP</span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-bb-text-subtle" />
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hidden md:block">
             <LedgerTableShell
           colgroup={
             <>
@@ -462,6 +498,7 @@ export default function VendorsPageClient() {
           }
           footer={null}
         />
+            </div>
           </div>
         </div>
       )}

@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  FileText,
+  Activity,
+  BookOpen,
+  GitMerge,
   Home,
-  ReceiptText,
-  Tags,
-  Users,
+  Menu,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -37,31 +37,31 @@ export function MobileShell({ children, businessId, accountId }: MobileShellProp
       active: pathname === "/dashboard",
     },
     {
-      label: "Review",
-      href: withBusiness("/category-review", businessId, accountId),
-      icon: <Tags className="h-5 w-5" />,
-      active: pathname === "/category-review",
+      label: "Transactions",
+      href: withBusiness("/operations", businessId, accountId),
+      icon: <Activity className="h-5 w-5" />,
+      active: pathname === "/operations",
+      disabled: !businessId,
+    },
+    {
+      label: "Reconcile",
+      href: withBusiness("/reconcile", businessId, accountId),
+      icon: <GitMerge className="h-5 w-5" />,
+      active: pathname === "/reconcile",
       disabled: !businessId || !accountId,
     },
     {
-      label: "Receipt",
-      href: withBusiness("/mobile/receipt", businessId, accountId),
-      icon: <ReceiptText className="h-5 w-5" />,
-      active: pathname === "/mobile/receipt",
-      disabled: !businessId,
+      label: "Ledger",
+      href: withBusiness("/ledger", businessId, accountId),
+      icon: <BookOpen className="h-5 w-5" />,
+      active: pathname === "/ledger",
+      disabled: !businessId || !accountId,
     },
     {
-      label: "Vendors",
-      href: withBusiness("/vendors", businessId, accountId),
-      icon: <Users className="h-5 w-5" />,
-      active: pathname === "/vendors",
-      disabled: !businessId,
-    },
-    {
-      label: "Invoice",
-      href: withBusiness("/mobile/invoice", businessId, accountId),
-      icon: <FileText className="h-5 w-5" />,
-      active: pathname === "/mobile/invoice",
+      label: "More",
+      href: withBusiness("/settings", businessId, accountId),
+      icon: <Menu className="h-5 w-5" />,
+      active: pathname === "/settings",
       disabled: !businessId,
     },
   ];
