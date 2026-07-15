@@ -5,6 +5,7 @@ import { actionableUncategorizedEntryWhere } from "./lib/uncategorizedEntries";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { logActivity } from "./lib/activityLog";
+import { acquireTransactionAdvisoryLock } from "./lib/advisoryLock";
 
 function json(statusCode: number, body: any) {
   return {
@@ -551,7 +552,7 @@ async function applyTransferPair(prisma: any, event: any, businessId: string, us
   try {
     await prisma.$transaction(async (tx: any) => {
       const pairLockKey = `operations-transfer-pair:${[outboundId, inboundId].sort().join(":")}`;
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${pairLockKey}))`;
+      await acquireTransactionAdvisoryLock(tx, pairLockKey);
       const matchesCreatedWhileWaiting: any[] = await tx.$queryRaw`
         SELECT bt.id
         FROM bank_transaction bt
