@@ -6,6 +6,7 @@ import { encryptAccessToken, decryptAccessToken } from "./plaidCrypto";
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { authorizeWrite } from "./authz";
 import { CASH_ACCOUNT_BANKING_ERROR, isCashAccountType } from "./accountCapabilities";
+import { acquireTransactionAdvisoryLock } from "./advisoryLock";
 
 function json(statusCode: number, body: any) {
   return {
@@ -2065,16 +2066,14 @@ export async function removeBankConnectionWithItemLifecycle(
     if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
 
     // Serialize lifecycle changes for every local mapping that shares an Item.
-    if (typeof tx.$queryRawUnsafe === "function") {
-      await tx.$queryRawUnsafe(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        `plaid-item:${businessId}:${conn.plaid_item_id}`,
-      );
-      conn = await tx.bankConnection.findFirst({
-        where: { business_id: businessId, account_id: accountId },
-      });
-      if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
-    }
+    await acquireTransactionAdvisoryLock(
+      tx,
+      `plaid-item:${businessId}:${conn.plaid_item_id}`,
+    );
+    conn = await tx.bankConnection.findFirst({
+      where: { business_id: businessId, account_id: accountId },
+    });
+    if (!conn) return { itemRemoved: false, remainingItemConnections: 0 };
 
     const itemConnections = await tx.bankConnection.count({
       where: { business_id: businessId, plaid_item_id: conn.plaid_item_id },

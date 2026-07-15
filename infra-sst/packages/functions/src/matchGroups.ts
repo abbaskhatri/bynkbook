@@ -2,6 +2,7 @@ import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
 import { assertNotClosedPeriodForEntryIds, normalizeToYmd, ymdToMonth } from "./lib/closedPeriods";
+import { acquireTransactionAdvisoryLock } from "./lib/advisoryLock";
 
 function json(statusCode: number, body: any) {
   return {
@@ -623,14 +624,12 @@ async function createGroupTx(tx: any, args: {
   // match requests cannot both pass the active-membership checks below.
   // Keeping the invariant in the database transaction also protects batch
   // and single-create callers without relying on frontend timing.
-  if (typeof tx.$queryRawUnsafe === "function") {
-    const claimKeys = [
-      ...bankIds.map((id) => `match-bank:${businessId}:${accountId}:${id}`),
-      ...entryIds.map((id) => `match-entry:${businessId}:${accountId}:${id}`),
-    ].sort();
-    for (const key of claimKeys) {
-      await tx.$queryRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", key);
-    }
+  const claimKeys = [
+    ...bankIds.map((id) => `match-bank:${businessId}:${accountId}:${id}`),
+    ...entryIds.map((id) => `match-entry:${businessId}:${accountId}:${id}`),
+  ].sort();
+  for (const key of claimKeys) {
+    await acquireTransactionAdvisoryLock(tx, key);
   }
 
   // Load bank txns (scoped)
