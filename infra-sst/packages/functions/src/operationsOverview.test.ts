@@ -1,8 +1,18 @@
 import { describe, expect, test } from "vitest";
 
-import { buildForecast, daysBetween, freshnessState } from "./operationsOverview";
+import { buildForecast, daysBetween, freshnessState, ledgerBalanceAt } from "./operationsOverview";
 
 describe("operations overview", () => {
+  test("includes the stored opening balance and excludes it before its effective date", () => {
+    const account = {
+      opening_balance_cents: 5_967_500n,
+      opening_balance_date: new Date("2026-04-01T00:00:00.000Z"),
+    };
+
+    expect(ledgerBalanceAt(account, 5_527_028n, "2026-07-15")).toBe(11_494_528n);
+    expect(ledgerBalanceAt(account, 0n, "2026-03-31")).toBe(0n);
+  });
+
   test("classifies bank connection freshness without treating an active sync as disconnected", () => {
     const now = new Date("2026-07-13T12:00:00.000Z");
 

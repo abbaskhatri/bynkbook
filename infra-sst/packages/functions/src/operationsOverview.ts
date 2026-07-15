@@ -45,6 +45,23 @@ function dateOnly(value: any) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
+function normalizedYmd(value: Date | string | null | undefined) {
+  return dateOnly(value instanceof Date ? value.toISOString() : value);
+}
+
+export function ledgerBalanceAt(
+  account: { opening_balance_cents?: bigint | number | string | null; opening_balance_date?: Date | string | null },
+  movementCents: bigint | number | string | null | undefined,
+  asOf: Date | string,
+) {
+  const asOfYmd = normalizedYmd(asOf);
+  const openingYmd = normalizedYmd(account.opening_balance_date);
+  const opening = openingYmd && openingYmd <= asOfYmd
+    ? BigInt(account.opening_balance_cents ?? 0)
+    : 0n;
+  return opening + BigInt(movementCents ?? 0);
+}
+
 export function daysBetween(left: any, right: any) {
   const a = new Date(`${dateOnly(left)}T00:00:00Z`).getTime();
   const b = new Date(`${dateOnly(right)}T00:00:00Z`).getTime();
@@ -286,6 +303,7 @@ export function buildForecast(entries: any[], startingCashCents: bigint, weeks =
 
 async function getOverview(prisma: any, businessId: string, weeks: number) {
   const now = new Date();
+  const reportDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const historyStart = addDays(now, -240);
   const [
     accounts,
@@ -293,6 +311,7 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     ledgerBalances,
     bankCounts,
     unmatchedRows,
+    expectedRows,
     issueCount,
     uncategorizedCount,
     categoryMemory,
@@ -301,7 +320,15 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
   ] = await Promise.all([
     prisma.account.findMany({
       where: { business_id: businessId, archived_at: null },
-      select: { id: true, name: true, type: true, institution_name: true, last4: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        institution_name: true,
+        last4: true,
+        opening_balance_cents: true,
+        opening_balance_date: true,
+      },
       orderBy: { name: "asc" },
     }),
     prisma.bankConnection.findMany({
@@ -321,18 +348,32 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
         sync_lock_expires_at: true,
       },
     }),
-    prisma.entry.groupBy({
-      by: ["account_id"],
-      where: { business_id: businessId, deleted_at: null },
-      _sum: { amount_cents: true },
-    }),
+    prisma.$queryRaw`
+      SELECT e.account_id::text AS account_id,
+             COALESCE(SUM(e.amount_cents), 0)::bigint AS movement_cents
+      FROM entry e
+      JOIN account a ON a.id = e.account_id AND a.business_id = e.business_id
+      WHERE e.business_id = ${businessId}::uuid
+        AND a.archived_at IS NULL
+        AND e.deleted_at IS NULL
+        AND e.date <= ${reportDate}::date
+        AND (a.opening_balance_date IS NULL OR e.date >= a.opening_balance_date::date)
+        AND NOT (
+          UPPER(COALESCE(e.type, '')) = 'OPENING'
+          OR LOWER(COALESCE(e.payee, '')) LIKE 'opening balance%'
+        )
+      GROUP BY e.account_id
+    `,
     prisma.bankTransaction.groupBy({
       by: ["account_id", "is_pending"],
       where: { business_id: businessId, is_removed: false },
       _count: { _all: true },
+      _sum: { amount_cents: true },
     }),
     prisma.$queryRaw`
-      SELECT bt.account_id, COUNT(*)::int AS count
+      SELECT bt.account_id::text AS account_id,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(bt.amount_cents), 0)::bigint AS amount_cents
       FROM bank_transaction bt
       WHERE bt.business_id = ${businessId}::uuid
         AND bt.is_removed = false
@@ -347,6 +388,32 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
           WHERE bm.business_id = bt.business_id AND bm.bank_transaction_id = bt.id AND bm.voided_at IS NULL
         )
       GROUP BY bt.account_id
+    `,
+    prisma.$queryRaw`
+      SELECT e.account_id::text AS account_id,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(e.amount_cents), 0)::bigint AS amount_cents
+      FROM entry e
+      JOIN account a ON a.id = e.account_id AND a.business_id = e.business_id
+      WHERE e.business_id = ${businessId}::uuid
+        AND a.archived_at IS NULL
+        AND e.deleted_at IS NULL
+        AND e.date <= ${reportDate}::date
+        AND (a.opening_balance_date IS NULL OR e.date >= a.opening_balance_date::date)
+        AND NOT (
+          UPPER(COALESCE(e.type, '')) = 'OPENING'
+          OR LOWER(COALESCE(e.payee, '')) LIKE 'opening balance%'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM match_group_entry mge
+          INNER JOIN match_group mg ON mg.id = mge.match_group_id AND mg.status = 'ACTIVE'
+          WHERE mge.business_id = e.business_id AND mge.entry_id = e.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM bank_match bm
+          WHERE bm.business_id = e.business_id AND bm.entry_id = e.id AND bm.voided_at IS NULL
+        )
+      GROUP BY e.account_id
     `,
     prisma.entryIssue.count({ where: { business_id: businessId, status: "OPEN" } }),
     prisma.entry.count({
@@ -375,27 +442,56 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
   const connectionByAccount = new Map<string, any>(
     (connections as any[]).map((connection: any) => [String(connection.account_id), connection] as [string, any])
   );
-  const balanceByAccount = new Map<string, bigint>(
-    (ledgerBalances as any[]).map(
-      (row: any) => [String(row.account_id), BigInt(row?._sum?.amount_cents ?? 0)] as [string, bigint]
-    )
+  const movementByAccount = new Map<string, bigint>(
+    (ledgerBalances as any[]).map((row: any) => [String(row.account_id), BigInt(row?.movement_cents ?? 0)])
   );
-  const countsByAccount = new Map<string, { pending: number; posted: number }>();
+  const balanceByAccount = new Map<string, bigint>(
+    (accounts as any[]).map((account: any) => [
+      String(account.id),
+      ledgerBalanceAt(account, movementByAccount.get(String(account.id)) ?? 0n, reportDate),
+    ])
+  );
+  const countsByAccount = new Map<string, { pending: number; posted: number; pendingAmount: bigint; postedAmount: bigint }>();
   for (const row of bankCounts as any[]) {
     const key = String(row.account_id);
-    const current = countsByAccount.get(key) ?? { pending: 0, posted: 0 };
-    if (row.is_pending) current.pending += Number(row?._count?._all ?? 0);
-    else current.posted += Number(row?._count?._all ?? 0);
+    const current = countsByAccount.get(key) ?? { pending: 0, posted: 0, pendingAmount: 0n, postedAmount: 0n };
+    if (row.is_pending) {
+      current.pending += Number(row?._count?._all ?? 0);
+      current.pendingAmount += BigInt(row?._sum?.amount_cents ?? 0);
+    } else {
+      current.posted += Number(row?._count?._all ?? 0);
+      current.postedAmount += BigInt(row?._sum?.amount_cents ?? 0);
+    }
     countsByAccount.set(key, current);
   }
-  const unmatchedByAccount = new Map((unmatchedRows as any[]).map((row) => [String(row.account_id), Number(row.count ?? 0)]));
+  const unmatchedByAccount = new Map((unmatchedRows as any[]).map((row) => [String(row.account_id), row]));
+  const expectedByAccount = new Map((expectedRows as any[]).map((row) => [String(row.account_id), row]));
 
   const accountRows: any[] = (accounts as any[]).map((account: any) => {
     const connection = connectionByAccount.get(String(account.id));
     const state = freshnessState(connection, now);
     const lastSyncAt = connection?.last_sync_at ? new Date(connection.last_sync_at) : null;
     const syncAgeHours = lastSyncAt ? Math.max(0, Math.round((now.getTime() - lastSyncAt.getTime()) / 3_600_000)) : null;
-    const counts = countsByAccount.get(String(account.id)) ?? { pending: 0, posted: 0 };
+    const counts = countsByAccount.get(String(account.id)) ?? { pending: 0, posted: 0, pendingAmount: 0n, postedAmount: 0n };
+    const unmatched = unmatchedByAccount.get(String(account.id)) as any;
+    const expected = expectedByAccount.get(String(account.id)) as any;
+    const ledgerBalance = balanceByAccount.get(String(account.id)) ?? 0n;
+    const bankBalance = connection?.last_known_balance_cents == null
+      ? null
+      : BigInt(connection.last_known_balance_cents);
+    const bankBalanceDate = connection?.last_known_balance_at
+      ? normalizedYmd(new Date(connection.last_known_balance_at))
+      : "";
+    const balanceComparable = bankBalance != null && bankBalanceDate === normalizedYmd(reportDate);
+    const difference = balanceComparable ? bankBalance - ledgerBalance : null;
+    const unmatchedCount = Number(unmatched?.count ?? 0);
+    const expectedCount = Number(expected?.count ?? 0);
+    let balanceStatus = "OPENING_OR_FEED_GAP";
+    if (bankBalance == null) balanceStatus = "UNAVAILABLE";
+    else if (!balanceComparable) balanceStatus = "STALE_SNAPSHOT";
+    else if (difference === 0n) balanceStatus = "BALANCED";
+    else if (unmatchedCount > 0 || expectedCount > 0) balanceStatus = "UNRECONCILED_ACTIVITY";
+    else if (counts.pending > 0) balanceStatus = "PENDING_ACTIVITY";
     return {
       account_id: String(account.id),
       account_name: String(account.name),
@@ -411,12 +507,21 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
       sync_age_hours: syncAgeHours,
       has_new_transactions: Boolean(connection?.has_new_transactions),
       new_accounts_available: Boolean(connection?.new_accounts_available),
-      ledger_balance_cents: String(balanceByAccount.get(String(account.id)) ?? 0n),
-      bank_balance_cents: connection?.last_known_balance_cents == null ? null : String(connection.last_known_balance_cents),
+      opening_balance_cents: String(account.opening_balance_cents ?? 0),
+      opening_balance_date: normalizedYmd(account.opening_balance_date) || null,
+      ledger_balance_cents: String(ledgerBalance),
+      bank_balance_cents: bankBalance == null ? null : String(bankBalance),
       bank_balance_at: connection?.last_known_balance_at ? new Date(connection.last_known_balance_at).toISOString() : null,
+      balance_comparable: balanceComparable,
+      balance_difference_cents: difference == null ? null : String(difference),
+      balance_status: balanceStatus,
       pending_count: counts.pending,
+      pending_amount_cents: String(counts.pendingAmount),
       posted_count: counts.posted,
-      unmatched_count: unmatchedByAccount.get(String(account.id)) ?? 0,
+      unmatched_count: unmatchedCount,
+      unmatched_amount_cents: String(unmatched?.amount_cents ?? 0),
+      expected_count: expectedCount,
+      expected_amount_cents: String(expected?.amount_cents ?? 0),
     };
   });
 

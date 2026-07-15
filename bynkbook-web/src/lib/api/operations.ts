@@ -17,12 +17,21 @@ export type OperationsBankAccount = {
   sync_age_hours: number | null;
   has_new_transactions: boolean;
   new_accounts_available: boolean;
+  opening_balance_cents: string;
+  opening_balance_date: string | null;
   ledger_balance_cents: string;
   bank_balance_cents: string | null;
   bank_balance_at: string | null;
+  balance_comparable: boolean;
+  balance_difference_cents: string | null;
+  balance_status: "UNAVAILABLE" | "STALE_SNAPSHOT" | "BALANCED" | "UNRECONCILED_ACTIVITY" | "PENDING_ACTIVITY" | "OPENING_OR_FEED_GAP";
   pending_count: number;
+  pending_amount_cents: string;
   posted_count: number;
   unmatched_count: number;
+  unmatched_amount_cents: string;
+  expected_count: number;
+  expected_amount_cents: string;
 };
 
 export type TransferCandidate = {

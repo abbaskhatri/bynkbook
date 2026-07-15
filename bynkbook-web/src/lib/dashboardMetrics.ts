@@ -32,6 +32,12 @@ export function ledgerBalanceCents(row: Pick<AccountsSummaryRow, "balance_cents"
   return String(row.ledger_balance_cents ?? row.balance_cents ?? "0");
 }
 
+export function isBankSnapshotComparable(bankBalanceAt: string | null | undefined, asOf: string) {
+  if (!bankBalanceAt || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return false;
+  const parsed = new Date(bankBalanceAt);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === asOf;
+}
+
 export function sumLedgerCashCents(rows: AccountsSummaryRow[]) {
   return rows.reduce(
     (sum, row) => sum + (isCashAccountType(row.type) ? toBigInt(ledgerBalanceCents(row)) : 0n),

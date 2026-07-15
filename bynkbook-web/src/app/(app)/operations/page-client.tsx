@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { applyTransferPair, getOperationsOverview, type OperationsBankAccount, type TransferCandidate } from "@/lib/api/operations";
 import { formatUsdSafe, toBigIntSafe } from "@/lib/money";
+import { describeOperationsBalance } from "@/lib/operationsBalance";
 
 function statusClasses(tone: "good" | "warning" | "danger" | "muted") {
   if (tone === "good") return "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg";
@@ -40,7 +41,7 @@ function StatusPill({ children, tone = "muted" }: { children: React.ReactNode; t
 
 function bankHealthLabel(account: OperationsBankAccount) {
   if (String(account.account_type ?? "").toUpperCase() === "CASH") return { label: "Cash book", tone: "muted" as const };
-  if (account.health === "HEALTHY") return { label: "Healthy", tone: "good" as const };
+  if (account.health === "HEALTHY") return { label: "Feed healthy", tone: "good" as const };
   if (account.health === "SYNCING") return { label: "Syncing", tone: "warning" as const };
   if (account.health === "STALE") return { label: "Sync stale", tone: "warning" as const };
   if (account.health === "NEVER_SYNCED") return { label: "Not synced", tone: "warning" as const };
@@ -199,23 +200,33 @@ export default function OperationsPageClient() {
                 {data.bank_health.accounts.map((account) => {
                   const status = bankHealthLabel(account);
                   const isCashBook = String(account.account_type ?? "").toUpperCase() === "CASH";
-                  const delta = account.bank_balance_cents == null ? null : toBigIntSafe(account.bank_balance_cents) - toBigIntSafe(account.ledger_balance_cents);
+                  const delta = account.balance_difference_cents == null ? null : toBigIntSafe(account.balance_difference_cents);
+                  const balanceReview = describeOperationsBalance(account);
                   return (
                     <div key={account.account_id} className="grid gap-3 rounded-lg border border-bb-border px-3 py-3 md:grid-cols-[minmax(0,1.35fr)_repeat(3,minmax(110px,0.65fr))_auto] md:items-center">
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <span className="truncate text-sm font-semibold text-bb-text">{account.account_name}</span>
                           <StatusPill tone={status.tone}>{status.label}</StatusPill>
+                          {!isCashBook ? <StatusPill tone={balanceReview.tone}>{balanceReview.label}</StatusPill> : null}
                         </div>
-                        <div className="mt-1 truncate text-xs text-bb-text-muted">
+                        <div className="mt-1 text-xs text-bb-text-muted">
                           {isCashBook
                             ? "Ledger-only account • Bank connection and reconciliation not applicable"
                             : [account.institution_name, account.mask ? `••••${account.mask}` : "", account.last_sync_at ? `Synced ${new Date(account.last_sync_at).toLocaleString()}` : "No completed sync", `${account.pending_count} pending`, `${account.unmatched_count} unmatched`].filter(Boolean).join(" • ")}
                         </div>
+                        {!isCashBook ? (
+                          <div className="mt-1 text-[11px] leading-4 text-bb-text-muted">
+                            {balanceReview.detail}
+                            {account.balance_status === "OPENING_OR_FEED_GAP" && account.opening_balance_date
+                              ? ` Opening is ${formatUsdSafe(account.opening_balance_cents)} on ${account.opening_balance_date}.`
+                              : ""}
+                          </div>
+                        ) : null}
                       </div>
                       <div><div className="text-[10px] font-semibold uppercase tracking-wide text-bb-text-muted">Ledger</div><div className="mt-1 text-sm font-medium tabular-nums">{formatUsdSafe(account.ledger_balance_cents)}</div></div>
                       <div><div className="text-[10px] font-semibold uppercase tracking-wide text-bb-text-muted">Bank</div><div className="mt-1 text-sm font-medium tabular-nums">{account.bank_balance_cents == null ? "—" : formatUsdSafe(account.bank_balance_cents)}</div></div>
-                      <div><div className="text-[10px] font-semibold uppercase tracking-wide text-bb-text-muted">Difference</div><div className={`mt-1 text-sm font-medium tabular-nums ${delta && delta !== 0n ? "text-bb-status-warning-fg" : ""}`}>{delta == null ? "—" : formatUsdSafe(delta)}</div></div>
+                      <div><div className="text-[10px] font-semibold uppercase tracking-wide text-bb-text-muted">Bank - ledger</div><div className={`mt-1 text-sm font-medium tabular-nums ${delta && delta !== 0n ? "text-bb-status-warning-fg" : ""}`}>{delta == null ? "—" : formatUsdSafe(delta)}</div></div>
                       <Button asChild variant="outline" className="h-9 justify-center md:w-auto">
                         <Link href={isCashBook
                           ? `/ledger?businessId=${encodeURIComponent(String(businessId))}&accountId=${encodeURIComponent(account.account_id)}`

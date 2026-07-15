@@ -16,6 +16,7 @@ import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import {
   calculateCashRunway,
+  isBankSnapshotComparable,
   ledgerBalanceCents,
   sumLedgerCashCents,
   summarizeBankCash,
@@ -1523,7 +1524,7 @@ export default function DashboardPageClient() {
                     (() => {
                       const ledgerCents = ledgerBalanceCents(r);
                       const bankCents = r.bank_balance_cents == null ? null : String(r.bank_balance_cents);
-                      const differenceCents = bankCents == null
+                      const differenceCents = bankCents == null || !isBankSnapshotComparable(r.bank_balance_at, range.to)
                         ? null
                         : (BigInt(bankCents) - BigInt(ledgerCents)).toString();
                       const cashBook = String(r.type ?? "").toUpperCase() === "CASH";
@@ -1557,7 +1558,7 @@ export default function DashboardPageClient() {
                         {[
                           { label: "Ledger", cents: ledgerCents },
                           { label: "Bank", cents: bankCents },
-                          { label: "Difference", cents: differenceCents },
+                          { label: "Bank - ledger", cents: differenceCents },
                         ].map((value) => (
                           <div key={value.label} className="min-w-0">
                             <div className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
