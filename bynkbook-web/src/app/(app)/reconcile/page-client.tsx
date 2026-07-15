@@ -82,7 +82,6 @@ import {
   compareBankDateDesc,
   compareEntryDateAsc,
   compareEntryDateDesc,
-  checkRefsMatch,
   directionLabel,
   duplicateReasonChips,
   entriesSignature,
@@ -116,6 +115,10 @@ import {
   isBulkSafeCategorySuggestion,
   safeTopCategorySuggestion,
 } from "@/lib/categorySuggestions";
+import {
+  buildOneToOneSuggestions,
+  type ReconcileSuggestion,
+} from "@/lib/reconcile/matchSuggestions";
 
 const WRITE_ALLOWLIST = new Set(["OWNER", "ADMIN", "BOOKKEEPER", "ACCOUNTANT"]);
 
@@ -2869,7 +2872,7 @@ export default function ReconcilePageClient() {
   const matchedCount = entriesMatchedAllList.length;
 
   // Tabs: Bank Transactions (Phase 2: cap rendered rows for instant tab switches)
-  const bankUnmatchedList = useMemo(() => {
+  const bankUnmatchedAllList = useMemo(() => {
     const out: any[] = [];
     for (const t of bankTxSorted) {
       const hay = `${String(t.posted_date ?? "")} ${String(t.name ?? "")} ${String(t.amount_cents ?? "")}`;
@@ -2881,10 +2884,14 @@ export default function ReconcilePageClient() {
       if (isBankTxnFullyMatched(t)) continue;
 
       out.push(t);
-      if (out.length >= bankUnmatchedVisibleN) break;
     }
     return out;
-  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, matchesRowSearch, bankUnmatchedVisibleN]);
+  }, [bankTxSorted, optimisticHiddenBankTxnIds, isBankTxnFullyMatched, matchesRowSearch]);
+
+  const bankUnmatchedList = useMemo(
+    () => bankUnmatchedAllList.slice(0, bankUnmatchedVisibleN),
+    [bankUnmatchedAllList, bankUnmatchedVisibleN]
+  );
 
   useEffect(() => {
     setSelectedBankTxnIds(new Set());
@@ -3090,81 +3097,43 @@ const displayBankActiveList = useMemo(() => {
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
 
-  // Auto-match badge: for each unmatched bank txn, find an unambiguous
-  // candidate entry — exact same amount, same direction, near date, and
-  // enough payee/reference/date signal to feel safe as a one-click action.
-  // More ambiguous suggestions stay in the review dialog.
-  //
-  // This is deterministic (no AI cost, no async). The dialog stays
-  // available for ambiguous cases.
-  const bankAutoMatchCandidateById = useMemo(() => {
-    const out = new Map<string, string>();
-    if (bankTab !== "unmatched") return out;
-    if (!Array.isArray(displayBankActiveList) || displayBankActiveList.length === 0) return out;
-    if (!Array.isArray(entriesExpectedList) || entriesExpectedList.length === 0) return out;
+  // One shared deterministic engine powers row badges, quick matching, and
+  // the Auto-match dialog. Delayed exact matches remain reviewable while only
+  // strong, unambiguous candidates unlock one-click matching.
+  const oneToOneMatchSuggestions = useMemo(
+    () => buildOneToOneSuggestions({
+      bankTransactions: bankUnmatchedAllList,
+      expectedEntries: entriesExpectedAllList,
+    }),
+    [bankUnmatchedAllList, entriesExpectedAllList]
+  );
 
-    for (const t of displayBankActiveList) {
-      const txnId = String(t?.id ?? "");
-      if (!txnId) continue;
-      // Skip pending bank txns — they can't be matched.
-      if (t?.is_pending) continue;
-      // Skip already-matched (defensive — unmatched tab should never include these).
-      if (isBankTxnFullyMatched(t)) continue;
-
-      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      if (bankAbs === 0n) continue;
-      const bankIsOutflow = toBigIntSafe(t.amount_cents) < 0n;
-
-      let onlyMatchId: string | null = null;
-      let count = 0;
-      let onlyRefMatchId: string | null = null;
-      let refMatchCount = 0;
-      let onlyStrongMatchId: string | null = null;
-
-      for (const e of entriesExpectedAllList) {
-        const entryId = String(e?.id ?? "");
-        if (!entryId) continue;
-        // Optimistic-pending entries are not stable candidates.
-        if (e?.__optimistic_pending) continue;
-
-        const entryAmt = toBigIntSafe(e?.amount_cents);
-        const entryAbs = absBig(entryAmt);
-        if (entryAbs !== bankAbs) continue; // exact amount only
-
-        // Same direction: bank outflow ⇔ entry expense (negative).
-        const entryIsOutflow = entryAmt < 0n;
-        if (entryIsOutflow !== bankIsOutflow) continue;
-
-        // Within 3 days of bank posted date.
-        const meta = scoreEntryCandidate(t, { ...e, date: String(e?.date ?? "").slice(0, 10) });
-        const dtDays = Number(meta.dtDays ?? 9999);
-        if (dtDays > 3) continue;
-
-        count++;
-        if (checkRefsMatch(t, e)) {
-          refMatchCount++;
-          if (refMatchCount === 1) onlyRefMatchId = entryId;
-          else onlyRefMatchId = null;
-        }
-        const hasStrongSignal = checkRefsMatch(t, e) || Number(meta.overlap ?? 0) > 0 || dtDays <= 1;
-        if (hasStrongSignal) {
-          if (onlyStrongMatchId === null) onlyStrongMatchId = entryId;
-          else onlyStrongMatchId = "";
-        }
-        if (count > 1) {
-          // Ambiguous by amount/date; a unique check-number match below can
-          // still safely disambiguate.
-          onlyMatchId = null;
-          continue;
-        }
-        onlyMatchId = entryId;
-      }
-
-      if (refMatchCount === 1 && onlyRefMatchId) out.set(txnId, onlyRefMatchId);
-      else if (count === 1 && onlyMatchId && onlyStrongMatchId === onlyMatchId) out.set(txnId, onlyMatchId);
+  const bankMatchSuggestionById = useMemo(() => {
+    const out = new Map<string, ReconcileSuggestion>();
+    for (const suggestion of oneToOneMatchSuggestions) {
+      out.set(suggestion.bankTxnId, suggestion);
     }
     return out;
-  }, [bankTab, displayBankActiveList, entriesExpectedAllList, entriesExpectedList, isBankTxnFullyMatched]);
+  }, [oneToOneMatchSuggestions]);
+
+  const entryMatchSuggestionById = useMemo(() => {
+    const out = new Map<string, ReconcileSuggestion>();
+    for (const suggestion of oneToOneMatchSuggestions) {
+      const entryId = suggestion.entryIds[0];
+      if (entryId) out.set(entryId, suggestion);
+    }
+    return out;
+  }, [oneToOneMatchSuggestions]);
+
+  const bankAutoMatchCandidateById = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const suggestion of oneToOneMatchSuggestions) {
+      if (suggestion.quality !== "READY") continue;
+      const entryId = suggestion.entryIds[0];
+      if (entryId) out.set(suggestion.bankTxnId, entryId);
+    }
+    return out;
+  }, [oneToOneMatchSuggestions]);
 
   // Row virtualization for the two reconcile tables. Both can grow large
   // (no pagination), so windowing the rendered <tr> set keeps scroll smooth
@@ -3418,15 +3387,15 @@ const displayBankActiveList = useMemo(() => {
           type="button"
           variant="outline"
           size="sm"
-          disabled={!canWriteReconcileEffective || !bankTruthReady || !entriesTruthReady || displayBankUnmatchedList.length === 0 || displayEntriesExpectedList.length === 0}
+          disabled={!canWriteReconcileEffective || !bankTruthReady || !entriesTruthReady || bankUnmatchedAllList.length === 0 || entriesExpectedAllList.length === 0}
           title={
             !canWriteReconcileEffective
               ? (reconcileWriteReason ?? noPermTitle)
               : !bankTruthReady || !entriesTruthReady
                 ? "Loading placement"
-              : displayBankUnmatchedList.length === 0
+              : bankUnmatchedAllList.length === 0
                 ? "No unmatched bank transactions"
-              : displayEntriesExpectedList.length === 0
+              : entriesExpectedAllList.length === 0
                   ? "No expected entries"
                   : "Review match suggestions"
           }
@@ -4639,7 +4608,7 @@ const displayBankActiveList = useMemo(() => {
                 <EmptyState label={entriesEmptyStateLabel} />
               ) : (
                 <>
-                  <table className="bb-spreadsheet-table w-full min-w-[656px] table-fixed border-collapse">
+                  <table className="bb-spreadsheet-table w-full min-w-[560px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 84 }} />
                     <col />
@@ -4667,6 +4636,10 @@ const displayBankActiveList = useMemo(() => {
 
                       const isMatched = !isOptimisticPending && matchedEntryIdSet.has(e.id);
                       const isPostDated = String(e?.date ?? "") > new Date().toISOString().slice(0, 10);
+                      const matchSuggestion = !isMatched && !isPostDated
+                        ? (entryMatchSuggestionById.get(String(e.id)) ?? null)
+                        : null;
+                      const isEntryRowPending = pendingById[String(e.id)] === true;
 
                       const g = !isOptimisticPending ? (activeGroupByEntryId.get(String(e.id)) ?? null) : null;
                       const hasAdjustment = g ? matchGroupHasAdjustment(g) : false;
@@ -4719,17 +4692,44 @@ const displayBankActiveList = useMemo(() => {
                           </td>
                           <td className={`${tdClass} text-right pr-2 tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}${deEmphasis}`}>{formatUsdFromCents(amt)}</td>
                           <td className={`${tdClass} text-right pr-2 overflow-hidden${deEmphasis}`}>
-                            <div className="inline-flex max-w-full items-center justify-end gap-1.5">
+                            <div
+                              className="inline-flex max-w-full items-center justify-end gap-1.5"
+                              title={matchSuggestion ? "A matching bank transaction is available to review." : undefined}
+                            >
                               <StatusChip
-                                label={isOptimisticPending ? "Saving" : isMatched ? "Matched" : isPostDated ? "Post-dated" : "No bank tx"}
-                                tone={isOptimisticPending ? "warning" : isMatched ? "success" : isPostDated ? "info" : "default"}
+                                label={
+                                  isOptimisticPending
+                                    ? "Saving"
+                                    : isMatched
+                                      ? "Matched"
+                                      : isPostDated
+                                        ? "Post-dated"
+                                        : matchSuggestion?.quality === "READY"
+                                          ? "Ready"
+                                          : matchSuggestion
+                                            ? "Review"
+                                            : "No bank tx"
+                                }
+                                tone={
+                                  isOptimisticPending
+                                    ? "warning"
+                                    : isMatched
+                                      ? "success"
+                                      : isPostDated
+                                        ? "info"
+                                        : matchSuggestion?.quality === "READY"
+                                          ? "success"
+                                          : matchSuggestion
+                                            ? "warning"
+                                            : "default"
+                                }
                               />
                               {hasAdjustment ? <StatusChip label="Adjustment" tone="info" /> : null}
                             </div>
                           </td>
                           <td className={`${tdClass} ${stickyActionCellClass} ${actionCellBg} text-right pr-2 overflow-hidden`}>
                             <div className="flex min-w-0 items-center justify-end gap-1">
-                              {pendingById[String(e.id)] || isOptimisticPending ? <TinySpinner /> : null}
+                              {isEntryRowPending || isOptimisticPending ? <TinySpinner /> : null}
 
                               {isOptimisticPending ? null : expectedTab === "matched" ? (
                                 <button
@@ -4746,17 +4746,33 @@ const displayBankActiveList = useMemo(() => {
                                 </button>
                               ) : (
                                 <>
-                                  <HintWrap disabled={!canWriteReconcileEffective} reason={!canWriteReconcileEffective ? reconcileWriteReason : null}>
+                                  {matchSuggestion?.quality === "READY" && canWriteReconcileEffective && !isEntryRowPending ? (
+                                    <AppTooltip content="Match with the only strong bank transaction candidate" side="left">
+                                      <button
+                                        type="button"
+                                        className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
+                                        aria-label="Auto-match ledger entry"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void quickMatchAt(matchSuggestion.bankTxnId, String(e.id));
+                                        }}
+                                      >
+                                        <Sparkles className="h-4 w-4" />
+                                      </button>
+                                    </AppTooltip>
+                                  ) : null}
+
+                                  <HintWrap disabled={!canWriteReconcileEffective || isEntryRowPending} reason={!canWriteReconcileEffective ? reconcileWriteReason : isEntryRowPending ? "Saving this match" : null}>
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
-                                      disabled={!canWriteReconcileEffective}
-                                      title={canWriteReconcileEffective ? "Review match suggestions for this ledger entry" : (reconcileWriteReason ?? noPermTitle)}
+                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isEntryRowPending ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
+                                      disabled={!canWriteReconcileEffective || isEntryRowPending}
+                                      title={canWriteReconcileEffective ? (matchSuggestion ? "Review the suggested bank match" : "Review match suggestions for this ledger entry") : (reconcileWriteReason ?? noPermTitle)}
                                       aria-label="Match entry"
                                       onClick={() => {
-                                        if (!canWriteReconcileEffective) return;
+                                        if (!canWriteReconcileEffective || isEntryRowPending) return;
                                         setEntryMatchEntryId(e.id);
-                                        setEntryMatchSelectedBankTxnIds(new Set());
+                                        setEntryMatchSelectedBankTxnIds(matchSuggestion ? new Set([matchSuggestion.bankTxnId]) : new Set());
                                         setEntryMatchSearch("");
                                         setEntryMatchError(null);
                                         setEntryAiSuggestions([]);
@@ -5256,7 +5272,7 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               ) : bankPanelShowRows ? (
                 <>
-                  <table className="bb-spreadsheet-table w-full min-w-[640px] table-fixed border-collapse">
+                  <table className="bb-spreadsheet-table w-full min-w-[560px] table-fixed border-collapse">
                   <colgroup>
                     <col style={{ width: 30 }} />
                     <col style={{ width: 84 }} />
@@ -5320,6 +5336,9 @@ const displayBankActiveList = useMemo(() => {
 
                       const isMatched = isBankTxnFullyMatched(t);
                       const isPendingBankTxn = Boolean(t?.is_pending);
+                      const matchSuggestion = !isMatched && !isPendingBankTxn
+                        ? (bankMatchSuggestionById.get(txnId) ?? null)
+                        : null;
                       const pendingLinkedEntry = isPendingBankTxn
                         ? entryBySourceBankTransactionId.get(txnId) ?? null
                         : null;
@@ -5440,8 +5459,8 @@ const displayBankActiveList = useMemo(() => {
                               {!isMatched && !isPendingBankTxn && bankTab === "unmatched" ? (
                                 <span className="shrink-0">
                                   <StatusChip
-                                    label={bankAutoMatchCandidateById.get(txnId) ? "Match found" : "No ledger entry"}
-                                    tone={bankAutoMatchCandidateById.get(txnId) ? "success" : "default"}
+                                    label={matchSuggestion?.quality === "READY" ? "Match found" : matchSuggestion ? "Review match" : "No ledger entry"}
+                                    tone={matchSuggestion?.quality === "READY" ? "success" : matchSuggestion ? "warning" : "default"}
                                   />
                                 </span>
                               ) : null}
@@ -5650,7 +5669,7 @@ const displayBankActiveList = useMemo(() => {
                                         if (!canWriteReconcileEffective) return;
                                         setMatchBankTxnId(t.id);
                                         setMatchSearch("");
-                                        setMatchSelectedEntryIds(new Set());
+                                        setMatchSelectedEntryIds(matchSuggestion ? new Set(matchSuggestion.entryIds) : new Set());
                                         setMatchError(null);
                                         setMatchAiSuggestions([]);
                                         setMatchSuggestError(null);
@@ -6314,7 +6333,8 @@ const displayBankActiveList = useMemo(() => {
                 .filter(Boolean) as any[];
               const bankAmt = toBigIntSafe(bank.amount_cents);
               const bankSign = bankAmt < 0n ? -1n : 1n;
-              const similarCandidateCount = allEntriesSorted
+              const engineSuggestion = bankMatchSuggestionById.get(String(bank.id)) ?? null;
+              const fallbackSimilarCandidateCount = allEntriesSorted
                 .filter((e: any) => {
                   if (matchByEntryId.has(e.id)) return false;
                   const entryAmt = toBigIntSafe(e.amount_cents);
@@ -6324,6 +6344,7 @@ const displayBankActiveList = useMemo(() => {
                 .map((e: any) => scoreEntryCandidate(bank, e))
                 .filter((meta: any) => meta.exactAmount && Number(meta.dtDays ?? 9999) <= 3)
                 .length;
+              const similarCandidateCount = engineSuggestion?.candidateCount ?? fallbackSimilarCandidateCount;
               const selectedEntryId = selectedEntries.length === 1 ? String(selectedEntries[0]?.id ?? "") : "";
               const aiConfidence = selectedEntryId
                 ? matchAiSuggestions.find((s) => String(s.entryId) === selectedEntryId)?.confidence ?? null
@@ -6869,7 +6890,8 @@ const displayBankActiveList = useMemo(() => {
                 .filter(Boolean) as any[];
               const entryAmt = toBigIntSafe(entry.amount_cents);
               const entrySign = entryAmt < 0n ? -1n : 1n;
-              const similarCandidateCount = bankTxSorted
+              const engineSuggestion = entryMatchSuggestionById.get(String(entry.id)) ?? null;
+              const fallbackSimilarCandidateCount = bankTxSorted
                 .filter((t: any) => {
                   const remaining = remainingAbsByBankTxnId.get(t.id) ?? 0n;
                   if (remaining <= 0n) return false;
@@ -6880,6 +6902,7 @@ const displayBankActiveList = useMemo(() => {
                 .map((t: any) => scoreBankCandidate(entry, t))
                 .filter((meta: any) => meta.exactAmount && Number(meta.dtDays ?? 9999) <= 3)
                 .length;
+              const similarCandidateCount = engineSuggestion?.candidateCount ?? fallbackSimilarCandidateCount;
               const selectedBankId = selectedBanks.length === 1 ? String(selectedBanks[0]?.id ?? "") : "";
               const aiConfidence = selectedBankId
                 ? entryAiSuggestions.find((s) => String(s.bankTransactionId) === selectedBankId)?.confidence ?? null
@@ -8002,8 +8025,8 @@ const displayBankActiveList = useMemo(() => {
           onOpenChange={setOpenAutoReconcile}
           businessId={selectedBusinessId ?? ""}
           accountId={selectedAccountId ?? ""}
-          bankTxns={bankUnmatchedList}
-          expectedEntries={entriesExpectedList}
+          bankTxns={bankUnmatchedAllList}
+          expectedEntries={entriesExpectedAllList}
           // existing helpers/state
           canWrite={canWriteReconcileEffective}
           canWriteReason={reconcileWriteReason ?? noPermTitle}

@@ -4,28 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { createMatchGroupsBatch } from "@/lib/api/match-groups";
-
-const DAY_WINDOW = 3;
-const SPLIT_MAX = 5;
-
-type Suggestion = {
-  id: string; // stable key
-  bankTxnId: string;
-  entryIds: string[]; // 1 for 1-to-1, many for split
-  kind: "ONE_TO_ONE" | "SPLIT" | "COMBINE";
-  confidence: number;
-  quality: "READY" | "REVIEW";
-  reasons: string[];
-  cautionReasons: string[];
-  bank: any;
-  entries: any[];
-};
+import {
+  buildReconcileSuggestions,
+  type ReconcileSuggestion as Suggestion,
+} from "@/lib/reconcile/matchSuggestions";
 
 import { toBigIntSafe } from "@/lib/money";
-
-function absBig(n: bigint) {
-  return n < 0n ? -n : n;
-}
 
 // BigInt-safe accounting currency formatting (cents -> $#,###.##, negatives in parentheses)
 function addCommas(intStr: string) {
@@ -60,121 +44,14 @@ function formatUsdAccountingFromCents(centsLike: any): { text: string; isNeg: bo
   return { text: isNeg ? `(${base})` : base, isNeg };
 }
 
-function parseYmd(ymd: string): { y: number; m: number; d: number } | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
-  return { y: Number(ymd.slice(0, 4)), m: Number(ymd.slice(5, 7)), d: Number(ymd.slice(8, 10)) };
-}
-
-function daysBetween(a: string, b: string): number | null {
-  const A = parseYmd(a);
-  const B = parseYmd(b);
-  if (!A || !B) return null;
-  const da = Date.UTC(A.y, A.m - 1, A.d);
-  const db = Date.UTC(B.y, B.m - 1, B.d);
-  return Math.round((db - da) / 86400000);
-}
-
-function withinWindow(entryDate: string, bankDate: string, win: number): boolean {
-  const diff = daysBetween(entryDate, bankDate);
-  if (diff === null) return false;
-  return Math.abs(diff) <= win;
-}
-
 function norm(s: any) {
   return String(s ?? "").trim().toLowerCase();
-}
-
-function sameDirectionAmount(a: any, b: any) {
-  const av = toBigIntSafe(a);
-  const bv = toBigIntSafe(b);
-  if (av === 0n || bv === 0n) return false;
-  return (av < 0n && bv < 0n) || (av > 0n && bv > 0n);
-}
-
-function tokenSet(s: any) {
-  return new Set(
-    norm(s)
-      .replace(/[0-9]/g, " ")
-      .replace(/[^a-z\s]/g, " ")
-      .split(/\s+/)
-      .filter((part) => part.length >= 3)
-  );
-}
-
-function textOverlap(a: any, b: any) {
-  const A = tokenSet(a);
-  const B = tokenSet(b);
-  if (A.size === 0 || B.size === 0) return 0;
-  let hits = 0;
-  for (const item of A) {
-    if (B.has(item)) hits += 1;
-  }
-  return hits;
-}
-
-function payeeMatchesBank(bank: any, entry: any) {
-  const bankDesc = norm(bank?.name ?? bank?.description ?? bank?.memo ?? "");
-  const payee = norm(entry?.payee ?? entry?.vendor_name ?? "");
-  if (!bankDesc || !payee) return false;
-  return bankDesc.includes(payee) || payee.includes(bankDesc) || textOverlap(bankDesc, payee) >= 2;
 }
 
 function suggestionKindLabel(kind: Suggestion["kind"]) {
   if (kind === "COMBINE") return "Many bank transactions to one entry";
   if (kind === "SPLIT") return "One bank transaction to several entries";
   return "One bank transaction to one entry";
-}
-
-function qualityForOneToOne(args: {
-  bank: any;
-  entry: any;
-  dateDiffAbs: number;
-  similarCandidateCount: number;
-  payeeHit: boolean;
-}) {
-  const { bank, entry, dateDiffAbs, similarCandidateCount, payeeHit } = args;
-  const refHit = checkSimpleRefMatch(bank, entry);
-  const reasons = ["Exact amount", dateDiffAbs === 0 ? "Same date" : `Date within ${dateDiffAbs}d`];
-  const cautionReasons: string[] = [];
-
-  if (refHit) reasons.push("Reference match");
-  else if (payeeHit) reasons.push("Similar payee");
-  else cautionReasons.push("Payee is not clearly similar");
-
-  if (similarCandidateCount > 1 && !refHit) cautionReasons.push(`${similarCandidateCount} possible entries`);
-
-  const strong = similarCandidateCount === 1 && (refHit || payeeHit || dateDiffAbs <= 1);
-  return {
-    quality: strong ? "READY" as const : "REVIEW" as const,
-    confidence: strong ? (refHit ? 0.98 : payeeHit ? 0.93 : 0.88) : 0.72,
-    reasons,
-    cautionReasons,
-  };
-}
-
-function checkSimpleRefMatch(bank: any, entry: any) {
-  const bankText = [
-    bank?.check_number,
-    bank?.checkNumber,
-    bank?.name,
-    bank?.description,
-    bank?.memo,
-  ].map((v) => String(v ?? "")).join(" ");
-  const entryText = [
-    entry?.ref,
-    entry?.reference,
-    entry?.reference_number,
-    entry?.referenceNumber,
-    entry?.memo,
-  ].map((v) => String(v ?? "")).join(" ");
-
-  const bankNums = new Set((bankText.match(/\b\d{2,8}\b/g) ?? []).map((x) => x.replace(/^0+/, "") || x));
-  if (bankNums.size === 0) return false;
-  for (const raw of entryText.match(/\b\d{2,8}\b/g) ?? []) {
-    const normalized = raw.replace(/^0+/, "") || raw;
-    if (bankNums.has(normalized)) return true;
-  }
-  return false;
 }
 
 // Deterministic "Why" line for suggestions.
@@ -262,243 +139,10 @@ export function AutoReconcileDialog(props: {
   // --------- Suggestion engine (deterministic) ----------
   const suggestions = useMemo<Suggestion[]>(() => {
     if (!open) return [];
-    if (!bankTxns?.length || !expectedEntries?.length) return [];
-
-    // Index every expected entry for exact one-to-one candidates. The previous
-    // first-250 slice made results depend on pagination/order and silently
-    // omitted otherwise exact matches.
-    const entries = expectedEntries;
-    const entriesByAmount = new Map<string, any[]>();
-
-    for (const e of entries) {
-      const amt = toBigIntSafe(e.amount_cents).toString();
-      if (amt === "0") continue;
-      const arr = entriesByAmount.get(amt) ?? [];
-      arr.push(e);
-      entriesByAmount.set(amt, arr);
-    }
-
-    const out: Suggestion[] = [];
-    const usedEntryIds = new Set<string>();
-
-    function tryOneToOne(t: any) {
-      if (t?.is_pending) return;
-      const bankAmount = toBigIntSafe(t.amount_cents);
-      if (bankAmount === 0n) return;
-      const candidates = entriesByAmount.get(bankAmount.toString()) ?? [];
-      if (!candidates.length) return;
-
-      const bankDate = String(t.posted_date ?? "").slice(0, 10);
-
-      const scored = candidates
-        .filter((e) => !usedEntryIds.has(e.id))
-        .map((e) => {
-          const entryDate = String(e.date ?? "").slice(0, 10);
-          const inWin = withinWindow(entryDate, bankDate, DAY_WINDOW);
-          const diff = daysBetween(entryDate, bankDate);
-          const diffAbs = diff === null ? 9999 : Math.abs(diff);
-          const payeeHit = payeeMatchesBank(t, e);
-          const refHit = checkSimpleRefMatch(t, e);
-          return { e, inWin, payeeHit, refHit, diffAbs };
-        })
-        .filter((x) => x.inWin)
-        .sort((a, b) => {
-          if (a.refHit !== b.refHit) return a.refHit ? -1 : 1;
-          if (a.payeeHit !== b.payeeHit) return a.payeeHit ? -1 : 1;
-          if (a.diffAbs !== b.diffAbs) return a.diffAbs - b.diffAbs;
-          return String(a.e.id).localeCompare(String(b.e.id));
-        });
-
-      if (!scored.length) return;
-      const bestMeta = scored[0];
-      const best = bestMeta.e;
-      const quality = qualityForOneToOne({
-        bank: t,
-        entry: best,
-        dateDiffAbs: bestMeta.diffAbs,
-        similarCandidateCount: scored.length,
-        payeeHit: bestMeta.payeeHit,
-      });
-
-      usedEntryIds.add(best.id);
-      out.push({
-        id: `1:${t.id}:${best.id}`,
-        bankTxnId: t.id,
-        entryIds: [best.id],
-        kind: "ONE_TO_ONE",
-        ...quality,
-        bank: t,
-        entries: [best],
-      });
-    }
-
-    function trySplit(t: any) {
-      if (t?.is_pending) return;
-      const bankAmount = toBigIntSafe(t.amount_cents);
-      const bankAbs = absBig(toBigIntSafe(t.amount_cents));
-      if (bankAbs <= 0n) return;
-
-      const bankDate = String(t.posted_date ?? "").slice(0, 10);
-
-      const candidates = entries
-        .filter((e) => !usedEntryIds.has(e.id))
-        .filter((e) => sameDirectionAmount(bankAmount, e.amount_cents))
-        .filter((e) => withinWindow(String(e.date ?? "").slice(0, 10), bankDate, DAY_WINDOW))
-        .map((e) => ({ e, abs: absBig(toBigIntSafe(e.amount_cents)) }))
-        .filter((x) => x.abs > 0n)
-        .sort((a, b) => {
-          if (a.abs !== b.abs) return a.abs > b.abs ? -1 : 1;
-          return String(a.e.id).localeCompare(String(b.e.id));
-        })
-        // Split matching is bounded independently because its subset search is
-        // combinatorial. Candidates are already date-window and direction
-        // filtered; one-to-one matching above remains complete.
-        .slice(0, 24);
-
-      if (candidates.length < 2) return;
-
-      const picked: any[] = [];
-      let found: any[] | null = null;
-
-      function dfs(i: number, sum: bigint) {
-        if (found) return;
-        if (picked.length > SPLIT_MAX) return;
-        if (sum === bankAbs && picked.length >= 2) {
-          found = [...picked];
-          return;
-        }
-        if (sum > bankAbs) return;
-        if (i >= candidates.length) return;
-
-        picked.push(candidates[i].e);
-        dfs(i + 1, sum + candidates[i].abs);
-        picked.pop();
-
-        dfs(i + 1, sum);
-      }
-
-      dfs(0, 0n);
-      if (!found) return;
-
-      const foundEntries = found as any[];
-
-      for (const e of foundEntries) usedEntryIds.add(e.id);
-      bankAlreadySuggested.add(String(t.id));
-
-      out.push({
-        id: `s:${t.id}:${foundEntries.map((e) => e.id).join(",")}`,
-        bankTxnId: t.id,
-        entryIds: foundEntries.map((e) => e.id),
-        kind: "SPLIT",
-        confidence: 0.78,
-        quality: "REVIEW",
-        reasons: [`Exact total`, `Dates within ${DAY_WINDOW}d`, `${foundEntries.length} entries`],
-        cautionReasons: ["Multiple ledger entries"],
-        bank: t,
-        entries: foundEntries,
-      });
-    }
-
-    const banks = bankTxns
-      .slice(0, 600)
-      .sort((a, b) => {
-        const da = String(a.posted_date ?? "");
-        const db = String(b.posted_date ?? "");
-        if (da !== db) return da.localeCompare(db);
-        return String(a.id).localeCompare(String(b.id));
-      });
-
-    let bankAlreadySuggested = new Set<string>();
-
-    function tryCombine(e: any) {
-      // COMBINE: multiple bank txns sum to one entry (≤5 txns), all within ±3d
-      const entryAbs = absBig(toBigIntSafe(e.amount_cents));
-      if (entryAbs <= 0n) return;
-
-      const entryDate = String(e.date ?? "").slice(0, 10);
-
-      const candidates = banks
-        .filter((t: any) => !bankAlreadySuggested.has(t.id)) // don't use banks already used by 1-to-1/split suggestions
-        .filter((t: any) => !t?.is_pending)
-        .filter((t: any) => sameDirectionAmount(e.amount_cents, t.amount_cents))
-        .filter((t: any) => withinWindow(entryDate, String(t.posted_date ?? "").slice(0, 10), DAY_WINDOW))
-        .map((t: any) => ({ t, abs: absBig(toBigIntSafe(t.amount_cents)) }))
-        .filter((x: any) => x.abs > 0n)
-        .sort((a: any, b: any) => {
-          if (a.abs !== b.abs) return a.abs > b.abs ? -1 : 1;
-          return String(a.t.id).localeCompare(String(b.t.id));
-        });
-
-      if (candidates.length < 2) return;
-
-      const picked: any[] = [];
-      let found: any[] | null = null;
-
-      function dfs(i: number, sum: bigint) {
-        if (found) return;
-        if (picked.length > 5) return;
-        if (sum === entryAbs && picked.length >= 2) {
-          found = [...picked];
-          return;
-        }
-        if (sum > entryAbs) return;
-        if (i >= candidates.length) return;
-
-        picked.push(candidates[i].t);
-        dfs(i + 1, sum + candidates[i].abs);
-        picked.pop();
-
-        dfs(i + 1, sum);
-      }
-
-      dfs(0, 0n);
-      if (!found) return;
-
-      const foundBanks = found as any[];
-
-      // mark these bank txns as used so we don't suggest them again in other combine suggestions
-      for (const t of foundBanks) bankAlreadySuggested.add(String(t.id));
-
-      out.push({
-        id: `c:${e.id}:${foundBanks.map((t) => t.id).join(",")}`,
-        bankTxnId: String(foundBanks[0].id), // anchor (display only)
-        entryIds: [String(e.id)],
-        kind: "COMBINE",
-        confidence: 0.76,
-        quality: "REVIEW",
-        reasons: [`Exact total`, `Dates within ${DAY_WINDOW}d`, `${foundBanks.length} bank transactions`],
-        cautionReasons: ["Multiple bank transactions"],
-        bank: foundBanks[0], // display anchor
-        entries: [e],
-        // We'll also attach banks list via a hidden field for apply below (we keep it in the object)
-      } as any);
-      (out[out.length - 1] as any).bankTxnIds = foundBanks.map((t) => String(t.id));
-    }
-
-    for (const t of banks) tryOneToOne(t);
-
-    bankAlreadySuggested = new Set(out.map((s) => s.bankTxnId));
-    for (const t of banks) {
-      if (bankAlreadySuggested.has(t.id)) continue;
-      trySplit(t);
-    }
-
-    // COMBINE pass (banks → 1 entry), deterministic and capped
-    const eligibleEntries = entries
-      .filter((e: any) => !usedEntryIds.has(e.id))
-      .slice()
-      .sort((a: any, b: any) => {
-        const da = String(a.date ?? "");
-        const db = String(b.date ?? "");
-        if (da !== db) return da.localeCompare(db);
-        return String(a.id).localeCompare(String(b.id));
-      });
-
-    for (const e of eligibleEntries) {
-      tryCombine(e);
-    }
-
-    return out;
+    return buildReconcileSuggestions({
+      bankTransactions: bankTxns,
+      expectedEntries,
+    });
   }, [open, bankTxns, expectedEntries]);
 
   const counts = useMemo(() => {
@@ -585,10 +229,9 @@ export function AutoReconcileDialog(props: {
         }
 
         // COMBINE: many bank txn ids (stored on suggestion), 1 entry id
-        const bankTxnIds = Array.isArray((s as any).bankTxnIds) ? (s as any).bankTxnIds : [String(s.bankTxnId)];
         return {
           client_id: s.id,
-          bankTransactionIds: bankTxnIds.map((x: any) => String(x)),
+          bankTransactionIds: s.bankTxnIds,
           entryIds: (s.entries ?? []).map((e: any) => String(e.id)),
         };
       });
@@ -775,7 +418,7 @@ export function AutoReconcileDialog(props: {
                         Match:{" "}
                         <span className="font-medium text-bb-text">
                           {s.kind === "COMBINE"
-                            ? `${(s as any).bankTxnIds?.length ?? 1} bank transactions`
+                            ? `${s.bankTxnIds.length} bank transactions`
                             : s.kind === "ONE_TO_ONE"
                               ? "1 entry"
                               : `${s.entryIds.length} entries`}
@@ -783,8 +426,8 @@ export function AutoReconcileDialog(props: {
                         {" · "}
                         <span className="text-bb-text">
                           {s.kind === "COMBINE"
-                            ? ((s as any).bankTxnIds ?? [s.bankTxnId])
-                                .map((id: any) => {
+                            ? s.bankTxnIds
+                                .map((id) => {
                                   const bt = (bankTxns ?? []).find((x: any) => String(x.id) === String(id));
                                   const name = String(bt?.name ?? "Bank txn");
                                   const f = formatUsdAccountingFromCents(bt?.amount_cents);
