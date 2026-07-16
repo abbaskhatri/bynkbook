@@ -259,7 +259,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
 
   const isMobileRoute = pathname === "/mobile" || pathname.startsWith("/mobile/");
   const showChrome = !isAuthRoute && !isMobileRoute;
-  const noPageScroll = pathname.startsWith("/ledger"); // ledger should not page-scroll
+  const noPageScroll = pathname.startsWith("/ledger"); // Desktop ledger owns its table scroll; mobile uses the page scroll.
 
   async function onSignOut() {
     try {
@@ -1160,9 +1160,9 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
           </div>
         </header>
 
-        {/* Content: ledger must not page-scroll. Extra bottom padding on
-            mobile reserves space for the fixed bottom tab bar. */}
-        <main className={(noPageScroll ? "p-3 pb-[5.25rem] md:p-4 md:pb-4 overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-5 md:pb-5 overflow-y-auto flex-1 min-h-0")}>
+        {/* Desktop Ledger owns its table scroll. Mobile pages scroll normally,
+            with extra bottom padding reserved for the fixed tab bar. */}
+        <main className={(noPageScroll ? "p-3 pb-[5.25rem] overflow-y-auto md:p-4 md:pb-4 md:overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-5 md:pb-5 overflow-y-auto flex-1 min-h-0")}>
           {children}
         </main>
       </div>

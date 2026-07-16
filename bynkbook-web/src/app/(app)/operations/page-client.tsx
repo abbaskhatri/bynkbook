@@ -136,8 +136,8 @@ export default function OperationsPageClient() {
       <div className="bb-page-command-surface rounded-xl px-3 py-3">
         <PageHeader
           icon={<TrendingUp className="h-4 w-4" />}
-          title="Transactions & operations"
-          subtitle="Review transaction health, close readiness, recurring cash expectations, category learning, and transfer pairs in one place."
+          title="Financial operations"
+          subtitle="One review surface for bank health, close readiness, recurring cash expectations, category learning, and transfer pairs."
           right={
             <Button variant="outline" className="h-9" onClick={() => void overviewQ.refetch()} disabled={!businessId || overviewQ.isFetching}>
               <RefreshCw className={`h-4 w-4 ${overviewQ.isFetching ? "animate-spin" : ""}`} />

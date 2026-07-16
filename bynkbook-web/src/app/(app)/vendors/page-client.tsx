@@ -252,14 +252,14 @@ export default function VendorsPageClient() {
   }, [refresh]);
 
   return (
-    <div className="flex max-w-6xl flex-col gap-3 overflow-hidden pb-4">
+    <div className="flex max-w-6xl flex-col gap-3 overflow-hidden pb-4 md:gap-2 md:pb-0">
       <div className="rounded-xl border border-bb-border bg-bb-surface-card shadow-sm overflow-hidden">
         <div className="px-3 pt-2">
           <PageHeader
             icon={<Building2 className="h-4 w-4" />}
             title="Vendors"
             right={
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 md:flex-nowrap md:justify-start">
                 <button
                   type="button"
                   className="min-h-11 px-3 text-sm md:min-h-7 md:px-2 md:text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover"
