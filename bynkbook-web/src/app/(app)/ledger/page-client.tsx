@@ -198,8 +198,6 @@ export default function LedgerPageClient() {
   const router = useRouter();
   const sp = useSearchParams();
   const qc = useQueryClient();
-  const containerStyle = { height: "calc(100vh - 56px - 48px)" as const };
-
   // Vendor payment suggestion (deterministic, no AI)
   // Vendor suggestion is shown post-save on the created row only.
   const [uploadType, setUploadType] = useState<"RECEIPT" | "BANK_STATEMENT">("RECEIPT");
@@ -5020,7 +5018,7 @@ export default function LedgerPageClient() {
       : "/reconcile";
 
   return (
-    <div className="flex flex-col gap-2 overflow-hidden" style={containerStyle}>
+    <div className="flex min-h-0 flex-col gap-2 overflow-visible md:h-[calc(100vh-56px-48px)] md:overflow-hidden">
       {/* Unified header + filters container (old app style) */}
       <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 pt-2">
@@ -5255,7 +5253,7 @@ export default function LedgerPageClient() {
               </div>
             </details>
           </section>
-          <div className="hidden md:block">
+          <div className="hidden md:contents">
         <LedgerTableShell
           colgroup={cols}
           header={headerRow}

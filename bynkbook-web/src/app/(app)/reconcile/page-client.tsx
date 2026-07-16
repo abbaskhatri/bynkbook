@@ -3625,7 +3625,7 @@ const displayBankActiveList = useMemo(() => {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-2 overflow-visible lg:overflow-hidden lg:h-[calc(100vh-56px-48px)]">
+    <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-2 overflow-visible lg:h-[calc(100vh-56px-48px)] lg:gap-1.5 lg:overflow-hidden">
       <div className="bb-page-command-surface rounded-xl overflow-visible">
         <div className="px-3 py-1.5">
           <PageHeader
