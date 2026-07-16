@@ -19,6 +19,7 @@ type AppDialogProps = {
   tone?: AppDialogTone;
   disableOverlayClose?: boolean;
   bodyClassName?: string;
+  contentClassName?: string;
 };
 
 const dialogWidthBySize: Record<AppDialogSize, string> = {
@@ -40,6 +41,7 @@ export function AppDialog({
   tone = "default",
   disableOverlayClose = false,
   bodyClassName,
+  contentClassName,
 }: AppDialogProps) {
   const widthClass = dialogWidthBySize[size] ?? dialogWidthBySize.md;
   const isComplexDialog = size === "lg" || size === "xl";
@@ -76,6 +78,7 @@ export function AppDialog({
             "animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 sm:slide-in-from-bottom-0",
             widthClass,
             toneClass,
+            contentClassName,
           ].join(" ")}
         >
           <div className="shrink-0 border-b border-bb-border-muted bg-bb-surface-card px-5 py-4 flex items-start justify-between gap-3">

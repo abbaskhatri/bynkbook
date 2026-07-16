@@ -277,8 +277,6 @@ export default function ReconcilePageClient() {
     "Possible existing ledger entry found. Review and match existing entry instead of creating a new one.";
   const matchedOrPendingCreateEntryMessage =
     "This bank transaction already appears matched or pending. Refresh before trying again.";
-  const createEntryAndMatchConfirmationCopy =
-    "This will create a new ledger entry from this bank transaction and mark it matched. Review the category, amount, and date before continuing.";
 
   function possibleDuplicateCreateEntryPayload(e: any) {
     const directPayload = e?.payload ?? e?.data ?? e?.response?.data ?? null;
@@ -3719,10 +3717,11 @@ const displayBankActiveList = useMemo(() => {
               ? "Possible duplicate ledger entry"
               : isPendingCreateEntry
                 ? "Create entry from pending transaction"
-                : "Create entry"
+                : "Create ledger entry"
           }
           size="lg"
-          bodyClassName="overflow-hidden sm:overflow-hidden"
+          contentClassName="h-fit"
+          bodyClassName="!flex-none overflow-hidden sm:overflow-hidden"
           footer={openCreateEntry ? (
             <DialogFooter
               left={
@@ -3732,8 +3731,7 @@ const displayBankActiveList = useMemo(() => {
                     <span>Entry stays unmatched until posted</span>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-bb-text-muted whitespace-nowrap">Auto-match</span>
+                  <div className="flex items-center gap-2.5">
                     <PillToggle
                       checked={createEntryAutoMatch}
                       onCheckedChange={(next) => setCreateEntryAutoMatch(next)}
@@ -3742,6 +3740,12 @@ const displayBankActiveList = useMemo(() => {
                         !!(createEntryBankTxnId && getCreateEntryActionBlockReason(String(createEntryBankTxnId)))
                       }
                     />
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-bb-text">Match bank transaction</div>
+                      <div className="hidden text-[11px] text-bb-text-muted sm:block">
+                        Keep the ledger entry linked to this bank activity
+                      </div>
+                    </div>
                   </div>
                 )
               }
@@ -3958,27 +3962,11 @@ const displayBankActiveList = useMemo(() => {
             const desc = (t?.name ?? "").toString().trim() || "—";
             const bankAccount = accountLabelFor(t, selectedAccountName);
             const extractedRef = t ? extractCheckRefFromBankTransaction(t) : "";
-            const suggestedMethod = t ? inferMethodFromBankTransaction(t) : "OTHER";
-            const selectedCategoryLabel =
-              createEntryCategoryName ||
-              compactText(categories.find((c: any) => String(c?.id ?? "") === createEntryCategoryId)?.name ?? "", "");
-            const newEntryPreview = {
-              date: dateStr,
-              payee: desc,
-              amount_cents: amt,
-              method: createEntryMethod || "OTHER",
-              suggestedMethod,
-              category: selectedCategoryLabel || "None selected",
-              suggestedCategory:
-                String(createEntrySuggestions?.[0]?.category_name ?? createEntrySuggestions?.[0]?.categoryName ?? "").trim() ||
-                "None",
-              ref: extractedRef,
-            };
 
             const createEntryBlockReason = bankId ? getCreateEntryActionBlockReason(bankId) : null;
 
             return (
-              <div className="flex h-[min(68vh,680px)] min-h-0 flex-col">
+              <div className="flex max-h-[min(64vh,620px)] min-h-0 flex-col">
                 <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
                   <div className="text-xs text-bb-text-muted">
                     {createEntryDuplicateCandidates.length
@@ -3988,8 +3976,8 @@ const displayBankActiveList = useMemo(() => {
                       : isPendingCreateEntry
                         ? "This creates an Expected ledger entry now, but it will remain unmatched until Plaid reports the bank transaction as posted."
                       : createEntryAutoMatch
-                        ? createEntryAndMatchConfirmationCopy
-                        : "This will create a new ledger entry from this bank transaction. Review the category, amount, and date before continuing."}
+                        ? "Create one ledger entry and link it to this bank transaction."
+                        : "Create one ledger entry and leave the bank transaction unmatched."}
                   </div>
 
                   {createEntryBlockReason ? (
@@ -4018,126 +4006,24 @@ const displayBankActiveList = useMemo(() => {
                     </div>
                   ) : null}
 
-                  <div className={`mt-3 grid grid-cols-1 gap-3 ${createEntryDuplicateCandidates.length ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
-                    <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">Bank transaction</div>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <div className="text-bb-text-muted">Date</div>
-                        <div className="font-semibold text-bb-text">{dateStr}</div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Description</div>
-                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={desc}>
+                  <div className="mt-3 rounded-md border border-bb-border bg-bb-surface-soft px-3 py-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-bb-text-muted">
+                          <span className="font-semibold uppercase tracking-wide">Bank transaction</span>
+                          <span>{dateStr}</span>
+                          <span aria-hidden="true">•</span>
+                          <span className="truncate" title={bankAccount}>{bankAccount}</span>
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-bb-text" title={desc}>
                           {desc}
                         </div>
+                        {extractedRef ? (
+                          <div className="mt-1 text-[11px] text-bb-text-muted">Ref {extractedRef}</div>
+                        ) : null}
                       </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Amount</div>
-                        <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
-                          {formatUsdFromCents(amt)}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Account</div>
-                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={bankAccount}>
-                          {bankAccount}
-                        </div>
-                      </div>
-                    </div>
-
-                    {createEntryDuplicateCandidates.length ? (
-                      <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">Possible existing ledger entry</div>
-                        <div className="mt-2 flex flex-col gap-2">
-                          {createEntryDuplicateCandidates.slice(0, 3).map((candidate: any) => {
-                            const id = String(candidate?.entry_id ?? candidate?.id ?? "");
-                            const localEntry = id ? entryByIdFast.get(id) : null;
-                            const entryForDisplay = { ...(candidate ?? {}), ...(localEntry ?? {}) };
-                            const cDate = ymdFromUnknownDate(entryForDisplay?.date ?? candidate?.date) || "—";
-                            const cPayee = compactText(entryForDisplay?.payee ?? entryForDisplay?.memo ?? "");
-                            const cAmount = toBigIntSafe(entryForDisplay?.amount_cents ?? candidate?.amount_cents);
-                            const cRef = compactText(entryForDisplay?.ref ?? candidate?.ref ?? "", "");
-                            const cCategory = compactText(
-                              entryCategoryLabel(entryForDisplay) !== "—"
-                                ? entryCategoryLabel(entryForDisplay)
-                                : categories.find((cat: any) => String(cat?.id ?? "") === String(entryForDisplay?.category_id ?? ""))?.name,
-                              ""
-                            );
-                            const matched = Boolean(
-                              (id && activeGroupByEntryId.has(id)) ||
-                                (id && matchByEntryId.has(id))
-                            );
-                            const matchStatus = matched ? "Matched" : "Unmatched";
-                            return (
-                              <div key={id || `${cDate}-${cPayee}-${cAmount}`} className="rounded border border-bb-border bg-bb-surface-card px-2 py-1.5 text-bb-text">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-semibold truncate" title={cPayee}>{cPayee}</span>
-                                  <span className={`tabular-nums whitespace-nowrap ${cAmount < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
-                                    {formatUsdFromCents(cAmount)}
-                                  </span>
-                                </div>
-                                <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-bb-text-muted">
-                                  <span>Date: {cDate}</span>
-                                  <span>Status: {matchStatus}</span>
-                                  <span className="truncate" title={cCategory}>Category: {cCategory || "—"}</span>
-                                  <span className="truncate" title={cRef}>Ref: {cRef || "—"}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="rounded-md border border-bb-border bg-bb-surface-soft px-3 py-2 text-xs">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-bb-text-muted">New entry preview</div>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <div className="text-bb-text-muted">Date</div>
-                        <div className="font-semibold text-bb-text">{newEntryPreview.date}</div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Payee</div>
-                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.payee}>{newEntryPreview.payee}</div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Amount</div>
-                        <div className={`font-semibold tabular-nums ${amt < 0n ? "!text-bb-amount-negative" : "text-bb-text"}`}>
-                          {formatUsdFromCents(newEntryPreview.amount_cents)}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Method</div>
-                        <div className="font-semibold text-bb-text">{newEntryPreview.method}</div>
-                      </div>
-                      {newEntryPreview.suggestedMethod &&
-                        String(newEntryPreview.suggestedMethod).trim() !== "" &&
-                        String(newEntryPreview.suggestedMethod) !== String(newEntryPreview.method) ? (
-                        <div className="flex items-center justify-between gap-2 mt-1">
-                          <div className="text-bb-text-muted">Suggested method</div>
-                          <div className="font-semibold text-bb-text">{newEntryPreview.suggestedMethod}</div>
-                        </div>
-                      ) : null}
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Category</div>
-                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.category}>
-                          {newEntryPreview.category}
-                        </div>
-                      </div>
-                      {newEntryPreview.suggestedCategory &&
-                        String(newEntryPreview.suggestedCategory).trim() !== "" &&
-                        String(newEntryPreview.suggestedCategory) !== String(newEntryPreview.category) ? (
-                        <div className="flex items-center justify-between gap-2 mt-1">
-                          <div className="text-bb-text-muted">Suggested category</div>
-                          <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.suggestedCategory}>
-                            {newEntryPreview.suggestedCategory}
-                          </div>
-                        </div>
-                      ) : null}
-                      <div className="flex items-center justify-between gap-2 mt-1">
-                        <div className="text-bb-text-muted">Ref</div>
-                        <div className="font-semibold text-bb-text truncate max-w-[220px]" title={newEntryPreview.ref || "—"}>
-                          {newEntryPreview.ref || "—"}
-                        </div>
+                      <div className={`shrink-0 text-base font-semibold tabular-nums ${amt < 0n ? "text-bb-amount-negative" : "text-bb-text"}`}>
+                        {formatUsdFromCents(amt)}
                       </div>
                     </div>
                   </div>
@@ -4218,34 +4104,52 @@ const displayBankActiveList = useMemo(() => {
                     </div>
                   ) : null}
 
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Method</div>
-                      <select
-                        className={[
-                          "h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card",
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                    <div className="min-w-0">
+                      <div className="mb-1.5 flex items-center justify-between gap-3">
+                        <div className="text-[11px] font-semibold text-bb-text-muted">Category</div>
+                        {createEntryCategoryName ? (
+                          <button
+                            type="button"
+                            className="text-[11px] font-medium text-primary hover:text-primary"
+                            onClick={() => {
+                              setCreateEntryCategoryId("");
+                              setCreateEntryCategoryName("");
+                              setCreateEntryCategoryTouched(true);
+                              setCategoryQuery("");
+                            }}
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <CategoryCombobox
+                        options={categories}
+                        value={categoryQuery || createEntryCategoryName}
+                        categoryId={createEntryCategoryId || null}
+                        placeholder={categoriesLoading ? "Loading categories…" : "Choose a category…"}
+                        inputClassName={[
+                          "h-9 w-full rounded-md border border-bb-border bg-bb-surface-card px-2.5 text-xs text-bb-text placeholder:text-bb-text-muted",
                           ringFocus,
                         ].join(" ")}
-                        value={createEntryMethod}
-                        onChange={(e) => setCreateEntryMethod(e.target.value)}
-                      >
-                        <option value="OTHER">Other</option>
-                        <option value="CASH">Cash</option>
-                        <option value="CARD">Card</option>
-                        <option value="ACH">ACH</option>
-                        <option value="WIRE">Wire</option>
-                        <option value="CHECK">Check</option>
-                        <option value="DIRECT_DEPOSIT">Direct Deposit</option>
-                        <option value="ZELLE">Zelle</option>
-                        <option value="TRANSFER">Transfer</option>
-                      </select>
-                    </div>
+                        onChange={(value, option) => {
+                          if (option) {
+                            setCreateEntryCategoryId(option.id ?? "");
+                            setCreateEntryCategoryName(option.name);
+                            setCreateEntryCategoryTouched(true);
+                            setCategoryQuery("");
+                            return;
+                          }
 
-                    <div>
-                      <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Category</div>
+                          setCreateEntryCategoryId("");
+                          setCreateEntryCategoryName("");
+                          setCreateEntryCategoryTouched(true);
+                          setCategoryQuery(value);
+                        }}
+                      />
 
-                      {/* Phase F1: suggestion-only category chips (top 3) */}
-                      <div className="mb-2">
+                      <div className="mt-2">
                         {createEntrySugLoading ? (
                           <div className="flex flex-wrap gap-2">
                             <div className="h-6 w-24 rounded-full bg-bb-border-muted animate-pulse" />
@@ -4253,8 +4157,9 @@ const displayBankActiveList = useMemo(() => {
                             <div className="h-6 w-20 rounded-full bg-bb-border-muted animate-pulse" />
                           </div>
                         ) : createEntrySuggestions.length ? (
-                          <div className="flex flex-col gap-2">
-                            <div className="flex flex-wrap gap-2">
+                          <div className="space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="mr-0.5 text-[11px] text-bb-text-muted">Suggestions</span>
                               {createEntrySuggestions.slice(0, 3).map((s: any, idx: number) => {
                                 const id = String(s?.category_id ?? s?.categoryId ?? "");
                                 const name = String(s?.category_name ?? s?.categoryName ?? "—");
@@ -4273,9 +4178,9 @@ const displayBankActiveList = useMemo(() => {
                                   <button
                                     key={id || name}
                                     type="button"
-                                    title={[tierLabel, sourceLabel, confLabel ? `Confidence: ${confLabel}` : "", reasonText, warningText, "Requires review before saving"].filter(Boolean).join(" • ")}
+                                    title={[tierLabel, sourceLabel, confLabel ? `Confidence: ${confLabel}` : "", reasonText, warningText].filter(Boolean).join(" • ")}
                                     className={[
-                                      "h-7 px-2.5 rounded-full border text-[11px] inline-flex items-center gap-2",
+                                      "h-7 max-w-full rounded-md border px-2 text-[11px] inline-flex items-center gap-1.5",
                                       selected
                                         ? "border-primary/20 bg-primary/10 text-primary"
                                         : requiresReview
@@ -4295,43 +4200,29 @@ const displayBankActiveList = useMemo(() => {
                                     >
                                       <span className="font-medium truncate max-w-[150px]">{name}</span>
                                       {autoSelected ? (
-                                        <span className="rounded-full border border-primary/20 bg-primary/10 px-1 text-[9px] font-semibold">
-                                          Auto
+                                        <span className="rounded border border-primary/20 bg-primary/10 px-1 text-[9px] font-semibold">
+                                          Selected
                                         </span>
-                                      ) : safeSuggestion ? (
-                                        <span className="rounded-full border border-primary/20 bg-background/40 px-1 text-[9px] font-semibold">
-                                          Safe
+                                      ) : safeSuggestion && idx === 0 ? (
+                                        <span className="rounded border border-primary/20 bg-background/40 px-1 text-[9px] font-semibold">
+                                          Recommended
                                         </span>
                                       ) : null}
                                       <span
                                         className={[
-                                          "inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-semibold",
+                                          "inline-flex h-4 items-center rounded px-1 text-[10px] font-medium",
                                           selected ? "bg-primary/10 text-primary" : "bg-bb-border-muted text-bb-text-muted",
                                       ].join(" ")}
                                     >
                                       {confLabel || `${conf}%`}
                                     </span>
-                                    {requiresReview ? (
-                                      <span className="rounded-full border border-bb-status-warning-border bg-background/40 px-1 text-[9px] font-semibold">
-                                        Review
-                                      </span>
-                                    ) : null}
                                   </button>
                                 );
                               })}
                             </div>
 
-                            <div className="text-[11px] text-bb-text-muted">
-                              {categorySuggestionTierLabel(createEntrySuggestions?.[0]?.confidence_tier)}
-                              {" • "}
-                              {categorySuggestionSourceLabel(createEntrySuggestions?.[0]?.source)}
-                              {" • "}
-                              {String(createEntrySuggestions?.[0]?.confidence_label ?? "").trim() ||
-                                `${categorySuggestionConfidence(createEntrySuggestions?.[0]?.confidence)}%`}
-                            </div>
-
                             <div
-                              className="text-[11px] text-bb-text-muted truncate"
+                              className="line-clamp-2 text-[11px] leading-4 text-bb-text-muted"
                               title={[
                                 String(createEntrySuggestions?.[0]?.reason ?? "Review this entry before saving"),
                                 String(createEntrySuggestions?.[0]?.warning ?? ""),
@@ -4340,72 +4231,61 @@ const displayBankActiveList = useMemo(() => {
                               {String(createEntrySuggestions?.[0]?.warning ?? "").trim() ||
                                 (String(createEntrySuggestions?.[0]?.reason ?? "").trim()
                                   ? String(createEntrySuggestions?.[0]?.reason ?? "")
-                                  : "Review this entry before saving")}
+                                  : "Review the suggested category before creating the entry.")}
                             </div>
                           </div>
                         ) : createEntrySugErr ? (
                           <div className="text-[11px] text-bb-text-muted">Suggestions unavailable</div>
                         ) : (
-                          <div className="text-[11px] text-bb-text-muted">No safe suggestion yet. You can still choose a category below.</div>
+                          <div className="text-[11px] text-bb-text-muted">No category suggestions available.</div>
                         )}
                       </div>
+                    </div>
 
-                      <CategoryCombobox
-                        options={categories}
-                        value={categoryQuery || createEntryCategoryName}
-                        categoryId={createEntryCategoryId || null}
-                        placeholder={categoriesLoading ? "Loading categories…" : "Search categories…"}
-                        inputClassName={[
-                          "h-8 w-full px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card text-bb-text placeholder:text-bb-text-muted",
+                    <div>
+                      <div className="mb-1.5 text-[11px] font-semibold text-bb-text-muted">Method</div>
+                      <select
+                        className={[
+                          "h-9 w-full rounded-md border border-bb-border bg-bb-surface-card px-2.5 text-xs",
                           ringFocus,
                         ].join(" ")}
-                        onChange={(value, option) => {
-                          if (option) {
-                            setCreateEntryCategoryId(option.id ?? "");
-                            setCreateEntryCategoryName(option.name);
-                            setCreateEntryCategoryTouched(true);
-                            setCategoryQuery("");
-                            return;
-                          }
-
-                          setCreateEntryCategoryId("");
-                          setCreateEntryCategoryName("");
-                          setCreateEntryCategoryTouched(true);
-                          setCategoryQuery(value);
-                        }}
-                      />
-
-                      {createEntryCategoryName ? (
-                        <div className="mt-1 text-[11px] text-bb-text-muted">
-                          Selected: <span className="font-medium">{createEntryCategoryName}</span>{" "}
-                          <button
-                            type="button"
-                            className="ml-2 text-primary hover:text-primary"
-                            onClick={() => {
-                              setCreateEntryCategoryId("");
-                              setCreateEntryCategoryName("");
-                              setCreateEntryCategoryTouched(true);
-                              setCategoryQuery("");
-                            }}
-                          >
-                            Clear
-                          </button>
-                        </div>
-                      ) : null}
+                        value={createEntryMethod}
+                        onChange={(e) => setCreateEntryMethod(e.target.value)}
+                      >
+                        <option value="OTHER">Other</option>
+                        <option value="CASH">Cash</option>
+                        <option value="CARD">Card</option>
+                        <option value="ACH">ACH</option>
+                        <option value="WIRE">Wire</option>
+                        <option value="CHECK">Check</option>
+                        <option value="DIRECT_DEPOSIT">Direct Deposit</option>
+                        <option value="ZELLE">Zelle</option>
+                        <option value="TRANSFER">Transfer</option>
+                      </select>
                     </div>
                   </div>
 
-                  <div className="mt-3">
-                    <div className="text-[11px] font-semibold text-bb-text-muted mb-1">Memo</div>
-                    <textarea
-                      className={[
-                        "min-h-[70px] w-full px-2 py-1 text-xs rounded-md border border-bb-border bg-bb-surface-card",
-                        ringFocus,
-                      ].join(" ")}
-                      value={createEntryMemo}
-                      onChange={(e) => setCreateEntryMemo(e.target.value)}
-                    />
-                  </div>
+                  <details className="group mt-3 rounded-md border border-bb-border bg-bb-surface-soft">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-medium text-bb-text marker:hidden">
+                      <span>Memo and bank details</span>
+                      <span className="text-[11px] font-normal text-bb-text-muted group-open:hidden">Optional</span>
+                      <span className="hidden text-[11px] font-normal text-bb-text-muted group-open:inline">Hide</span>
+                    </summary>
+                    <div className="border-t border-bb-border-muted px-3 py-2.5">
+                      <label className="mb-1 block text-[11px] font-semibold text-bb-text-muted" htmlFor="reconcile-create-entry-memo">
+                        Memo
+                      </label>
+                      <textarea
+                        id="reconcile-create-entry-memo"
+                        className={[
+                          "min-h-[64px] w-full rounded-md border border-bb-border bg-bb-surface-card px-2.5 py-2 text-xs",
+                          ringFocus,
+                        ].join(" ")}
+                        value={createEntryMemo}
+                        onChange={(e) => setCreateEntryMemo(e.target.value)}
+                      />
+                    </div>
+                  </details>
 
                 </div>
 
