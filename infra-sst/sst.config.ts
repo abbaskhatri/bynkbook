@@ -642,6 +642,11 @@ const vendorsHandler = {
   handler: "packages/functions/src/vendors.handler",
 } satisfies ApiHandler;
 
+const checksHandler = {
+  ...bizHandler,
+  handler: "packages/functions/src/checks.handler",
+} satisfies ApiHandler;
+
 // ---------- Phase F: AI (heuristics-only) + Insights + Search ----------
 const stagePrefix = resourcePrefix;
 
@@ -796,6 +801,12 @@ api.route("POST /v1/businesses/{businessId}/vendors", vendorsHandler, { auth: { 
 api.route("GET /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("PATCH /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 api.route("DELETE /v1/businesses/{businessId}/vendors/{vendorId}", vendorsHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+
+api.route("GET /v1/businesses/{businessId}/checks", checksHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/checks", checksHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("PUT /v1/businesses/{businessId}/checks/settings/{accountId}", checksHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/checks/{checkId}/confirm-print", checksHandler, { auth: { jwt: { authorizer: authorizer.id } } });
+api.route("POST /v1/businesses/{businessId}/checks/{checkId}/void", checksHandler, { auth: { jwt: { authorizer: authorizer.id } } });
 
 // ---------- Accounts Payable (Bills) ----------
 const apHandler = {

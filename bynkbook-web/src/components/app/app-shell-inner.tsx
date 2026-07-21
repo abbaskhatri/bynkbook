@@ -24,6 +24,7 @@ import {
   PieChart,
   Settings,
   FileText,
+  FileCheck2,
   Activity,
 } from "lucide-react";
 
@@ -121,6 +122,7 @@ const NAV_GROUPS = [
     group: "Business",
     items: [
       { label: "Vendors", path: "/vendors", needsAccountId: false, icon: <Users className={NAV_ICON_CLASS} /> },
+      { label: "Checks", path: "/checks", needsAccountId: false, icon: <FileCheck2 className={NAV_ICON_CLASS} /> },
       { label: "Settings", path: "/settings", needsAccountId: false, icon: <Settings className={NAV_ICON_CLASS} /> },
     ],
   },

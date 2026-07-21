@@ -132,6 +132,8 @@ export async function handler(event: any) {
       vendors,
       bills,
       billPaymentApplications,
+      checkPayments,
+      checkPrintSettings,
       transfers,
       budgets,
       goals,
@@ -338,6 +340,16 @@ export async function handler(event: any) {
         []
       ),
       safeQuery(
+        "checkPayments",
+        () => p.checkPayment.findMany({ where: { business_id: businessId }, orderBy: [{ issued_date: "asc" }, { created_at: "asc" }] }),
+        []
+      ),
+      safeQuery(
+        "checkPrintSettings",
+        () => p.checkPrintSetting.findMany({ where: { business_id: businessId }, orderBy: [{ created_at: "asc" }] }),
+        []
+      ),
+      safeQuery(
         "transfers",
         () =>
           p.transfer.findMany({
@@ -406,6 +418,8 @@ export async function handler(event: any) {
           vendors,
           bills,
           bill_payment_applications: billPaymentApplications,
+          check_payments: checkPayments,
+          check_print_settings: checkPrintSettings,
           transfers,
           budgets,
           goals,
@@ -437,6 +451,7 @@ export async function handler(event: any) {
 
     const summary = await prisma.$transaction(async (tx: any) => {
       const [
+        checkPayments,
         billPaymentApplications,
         bills,
         vendors,
@@ -456,6 +471,7 @@ export async function handler(event: any) {
         goals,
         activityLogs,
       ] = await Promise.all([
+        tx.checkPayment.deleteMany({ where: { business_id: businessId } }),
         tx.billPaymentApplication.deleteMany({ where: { business_id: businessId } }),
         tx.bill.deleteMany({ where: { business_id: businessId } }),
         tx.vendor.deleteMany({ where: { business_id: businessId } }),
@@ -484,6 +500,7 @@ export async function handler(event: any) {
           business_name: authz.business.name,
           cleared: {
             bill_payment_applications: billPaymentApplications.count,
+            check_payments: checkPayments.count,
             bills: bills.count,
             vendors: vendors.count,
             closed_periods: closedPeriods.count,
@@ -502,12 +519,13 @@ export async function handler(event: any) {
             goals: goals.count,
             prior_activity_logs: activityLogs.count,
           },
-          preserved: ["business", "members", "accounts", "categories", "preferences", "role_policies", "invites"],
+          preserved: ["business", "members", "accounts", "categories", "preferences", "role_policies", "invites", "check_print_settings"],
         },
       });
 
       return {
         bill_payment_applications: billPaymentApplications.count,
+        check_payments: checkPayments.count,
         bills: bills.count,
         vendors: vendors.count,
         closed_periods: closedPeriods.count,
@@ -533,7 +551,7 @@ export async function handler(event: any) {
       reset: {
         business_id: businessId,
         business_name: authz.business.name,
-        preserved: ["business", "members", "accounts", "categories", "preferences", "role_policies", "invites"],
+        preserved: ["business", "members", "accounts", "categories", "preferences", "role_policies", "invites", "check_print_settings"],
         cleared: summary,
       },
     });
