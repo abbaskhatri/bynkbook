@@ -47,6 +47,8 @@ model Business {
   closedPeriods           ClosedPeriod[]
   vendors                 Vendor[]
   categoryMemories        CategoryMemory[]
+  checkPayments           CheckPayment[]
+  checkPrintSettings      CheckPrintSetting[]
 
   // Accounts Payable
   bills                   Bill[]
@@ -106,6 +108,8 @@ model Account {
 
   // Accounts Payable: applications scoped to this account via Entry.account_id
   billPaymentApplications BillPaymentApplication[]
+  checkPayments           CheckPayment[]
+  checkPrintSettings      CheckPrintSetting[]
 
   @@index([business_id, archived_at], map: "idx_account_business_archived")
   @@index([business_id, name], map: "idx_account_business_name")
@@ -170,6 +174,7 @@ model Entry {
 
   // Accounts Payable: payment allocations
   billPaymentApplications BillPaymentApplication[]
+  checkPayment            CheckPayment?
 
   transfer_id String? @db.Uuid
 
@@ -228,6 +233,7 @@ model Category {
   entries               Entry[]
   vendorDefaultVendors  Vendor[]         @relation("VendorDefaultCategory")
   categoryMemories      CategoryMemory[]
+  checkPayments         CheckPayment[]
 
   budgets Budget[]
   goals   Goal[]
@@ -654,6 +660,7 @@ model Vendor {
   id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   business_id         String    @db.Uuid
   name                String
+  address             String?
   notes               String?
   default_category_id String?   @db.Uuid
   created_at          DateTime  @default(now()) @db.Timestamptz(6)
@@ -667,11 +674,72 @@ model Vendor {
 
   // Accounts Payable
   bills Bill[]
+  checkPayments CheckPayment[]
 
   @@unique([business_id, name], map: "u_vendor_scope_name")
   @@index([business_id, updated_at(sort: Desc)], map: "i_vendor_scope_updated_desc")
   @@index([business_id, default_category_id], map: "i_vendor_scope_default_category")
   @@map("vendor")
+}
+
+model CheckPrintSetting {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id         String   @db.Uuid
+  account_id          String   @db.Uuid
+  template_code       String   @default("SSLT104")
+  next_check_number   String   @db.VarChar(32)
+  offset_x_mils       Int      @default(0)
+  offset_y_mils       Int      @default(0)
+  created_by_user_id  String
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([business_id, account_id], map: "u_check_print_setting_scope_account")
+  @@index([business_id, updated_at(sort: Desc)], map: "i_check_print_setting_scope_updated")
+  @@map("check_print_setting")
+}
+
+model CheckPayment {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_id         String    @db.Uuid
+  account_id          String    @db.Uuid
+  entry_id            String?   @unique(map: "u_check_payment_entry") @db.Uuid
+  vendor_id           String?   @db.Uuid
+  category_id         String?   @db.Uuid
+  check_number        String    @db.VarChar(32)
+  issued_date         DateTime  @db.Date
+  payee_name          String
+  payee_address       String?
+  amount_cents        BigInt
+  memo                String?
+  purpose             String    @default("GENERAL")
+  bill_allocations    Json?
+  template_code       String    @default("SSLT104")
+  status              String    @default("DRAFT")
+  print_count         Int       @default(0)
+  last_printed_at     DateTime? @db.Timestamptz(6)
+  confirmed_at        DateTime? @db.Timestamptz(6)
+  voided_at           DateTime? @db.Timestamptz(6)
+  voided_by_user_id   String?
+  void_reason         String?
+  created_by_user_id  String
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  business Business  @relation(fields: [business_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  account  Account   @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  entry    Entry?    @relation(fields: [entry_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  vendor   Vendor?   @relation(fields: [vendor_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  category Category? @relation(fields: [category_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([business_id, account_id, check_number], map: "u_check_payment_scope_number")
+  @@index([business_id, status, issued_date(sort: Desc)], map: "i_check_payment_scope_status_date")
+  @@index([business_id, account_id, issued_date(sort: Desc)], map: "i_check_payment_scope_account_date")
+  @@index([business_id, vendor_id, issued_date(sort: Desc)], map: "i_check_payment_scope_vendor_date")
+  @@map("check_payment")
 }
 
 model Bill {

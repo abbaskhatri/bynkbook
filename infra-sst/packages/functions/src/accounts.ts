@@ -394,6 +394,9 @@ export async function handler(event: any) {
         where: { business_id: businessId, OR: [{ from_account_id: accountId }, { to_account_id: accountId }] },
       }),
     ]);
+    const checkPaymentCount = typeof prisma.checkPayment?.count === "function"
+      ? await prisma.checkPayment.count({ where: { business_id: businessId, account_id: accountId } })
+      : 0;
 
     const total =
       (counts[0] ?? 0) +
@@ -402,7 +405,8 @@ export async function handler(event: any) {
       (counts[3] ?? 0) +
       (counts[4] ?? 0) +
       (counts[5] ?? 0) +
-      (counts[6] ?? 0);
+      (counts[6] ?? 0) +
+      checkPaymentCount;
 
     return json(200, { ok: true, eligible: total === 0, related_total: total });
   }
@@ -430,6 +434,9 @@ export async function handler(event: any) {
           where: { business_id: businessId, OR: [{ from_account_id: accountId }, { to_account_id: accountId }] },
         }),
       ]);
+      const checkPaymentCount = typeof prisma.checkPayment?.count === "function"
+        ? await prisma.checkPayment.count({ where: { business_id: businessId, account_id: accountId } })
+        : 0;
       const total =
         (counts[0] ?? 0) +
         (counts[1] ?? 0) +
@@ -437,7 +444,8 @@ export async function handler(event: any) {
         (counts[3] ?? 0) +
         (counts[4] ?? 0) +
         (counts[5] ?? 0) +
-        (counts[6] ?? 0);
+        (counts[6] ?? 0) +
+        checkPaymentCount;
       return { eligible: total === 0, total };
     })();
 

@@ -401,6 +401,7 @@ export default function VendorDetailPageClient() {
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
 
@@ -460,6 +461,7 @@ export default function VendorDetailPageClient() {
 
         setVendor(vRes.vendor);
         setName(String(vRes.vendor?.name ?? ""));
+        setAddress(String(vRes.vendor?.address ?? ""));
         setNotes(String(vRes.vendor?.notes ?? ""));
         setDefaultCategoryId(String(vRes.vendor?.default_category_id ?? ""));
         setCategoryRows(Array.isArray(catsRes.rows) ? catsRes.rows : []);
@@ -539,6 +541,7 @@ export default function VendorDetailPageClient() {
     // Server runs in background; rollback + reopen on error.
     const prevVendor = vendor;
     const trimmedName = name.trim();
+    const trimmedAddress = address.trim();
     const trimmedNotes = notes.trim();
     const nextCategoryId = defaultCategoryId || null;
 
@@ -547,6 +550,7 @@ export default function VendorDetailPageClient() {
         ? {
             ...current,
             name: trimmedName,
+            address: trimmedAddress,
             notes: trimmedNotes,
             default_category_id: nextCategoryId,
           }
@@ -559,6 +563,7 @@ export default function VendorDetailPageClient() {
         businessId,
         vendorId,
         name: trimmedName,
+        address: trimmedAddress,
         notes: trimmedNotes,
         default_category_id: nextCategoryId,
       });
@@ -2553,6 +2558,11 @@ export default function VendorDetailPageClient() {
             <div className="space-y-1">
               <div className="text-[11px] text-bb-text-muted">Name</div>
               <Input className="h-7 text-xs" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[11px] text-bb-text-muted">Mailing address</div>
+              <Input className="h-7 text-xs" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Used when printing checks" />
             </div>
 
             <div className="space-y-1">

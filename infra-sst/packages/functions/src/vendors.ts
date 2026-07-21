@@ -99,6 +99,7 @@ export async function handler(event: any) {
         id: true,
         business_id: true,
         name: true,
+        address: true,
         notes: true,
         default_category_id: true,
         created_at: true,
@@ -122,6 +123,7 @@ export async function handler(event: any) {
 
     const body = readBody(event);
     const name = String(body?.name ?? "").trim();
+    const address = body?.address === undefined ? null : String(body.address ?? "").trim();
     const notes = body?.notes === undefined ? null : String(body.notes ?? "").trim();
 
     const defaultCategoryRaw = body?.default_category_id ?? body?.defaultCategoryId ?? null;
@@ -141,6 +143,7 @@ export async function handler(event: any) {
       data: {
         business_id: biz,
         name,
+        address: address && address.length ? address : null,
         notes: notes && notes.length ? notes : null,
         default_category_id,
       },
@@ -148,6 +151,7 @@ export async function handler(event: any) {
         id: true,
         business_id: true,
         name: true,
+        address: true,
         notes: true,
         default_category_id: true,
         created_at: true,
@@ -167,6 +171,7 @@ export async function handler(event: any) {
         id: true,
         business_id: true,
         name: true,
+        address: true,
         notes: true,
         default_category_id: true,
         created_at: true,
@@ -201,6 +206,10 @@ export async function handler(event: any) {
       const nt = String(body.notes ?? "").trim();
       data.notes = nt ? nt : null;
     }
+    if (body.address !== undefined) {
+      const addr = String(body.address ?? "").trim();
+      data.address = addr ? addr : null;
+    }
     if (body.default_category_id !== undefined || body.defaultCategoryId !== undefined) {
       const raw = body.default_category_id ?? body.defaultCategoryId;
 
@@ -234,6 +243,7 @@ export async function handler(event: any) {
         id: true,
         business_id: true,
         name: true,
+        address: true,
         notes: true,
         default_category_id: true,
         created_at: true,

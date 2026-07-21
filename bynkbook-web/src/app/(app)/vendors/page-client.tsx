@@ -92,6 +92,7 @@ export default function VendorsPageClient() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [categoryRows, setCategoryRows] = useState<CategoryRow[]>([]);
@@ -220,11 +221,13 @@ export default function VendorsPageClient() {
       const res = await createVendor({
         businessId,
         name: name.trim(),
+        address: address.trim() || undefined,
         notes: notes.trim() || undefined,
         default_category_id: defaultCategoryId || null,
       });
       setCreateOpen(false);
       setName("");
+      setAddress("");
       setNotes("");
       setDefaultCategoryId("");
       await refresh();
@@ -538,6 +541,11 @@ export default function VendorsPageClient() {
           <div className="space-y-1.5">
             <div className="text-xs font-medium text-bb-text-muted">Name</div>
             <Input className="h-9 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-bb-text-muted">Mailing address (optional)</div>
+            <Input className="h-9 text-sm" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Used when printing checks" />
           </div>
 
           <div className="space-y-1.5">
