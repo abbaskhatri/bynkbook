@@ -24,6 +24,7 @@ import {
 import { listVendors, type Vendor } from "@/lib/api/vendors";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { openSslt104PrintWindow, reserveSslt104PrintWindow } from "@/lib/checks/sslt104";
+import { formatDateOnlyShort, isFutureDateOnly, localTodayDateOnly } from "@/lib/dateOnly";
 import { formatUsd, parseMoneyToCents, toBigIntSafe } from "@/lib/money";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
@@ -31,17 +32,15 @@ import { useBusinesses } from "@/lib/queries/useBusinesses";
 const fieldClass = "h-10 w-full rounded-md border border-bb-input-border bg-bb-input-bg px-3 text-sm text-bb-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/15";
 const labelClass = "mb-1 block text-xs font-medium text-bb-text-muted";
 
-function todayLocal() {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
-
 function statusClasses(status: CheckPayment["status"]) {
   if (status === "CLEARED") return "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg";
   if (status === "VOIDED") return "border-bb-status-danger-border bg-bb-status-danger-bg text-bb-status-danger-fg";
   if (status === "DRAFT") return "border-bb-status-warning-border bg-bb-status-warning-bg text-bb-status-warning-fg";
   return "border-bb-border bg-bb-surface-soft text-bb-text";
+}
+
+function PostDatedBadge() {
+  return <span className="inline-flex rounded-full border border-bb-status-warning-border bg-bb-status-warning-bg px-2 py-0.5 text-[11px] font-medium text-bb-status-warning-fg">Post-dated</span>;
 }
 
 function outstandingCents(bill: Bill) {
@@ -79,7 +78,7 @@ export default function ChecksPageClient() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [checkNumber, setCheckNumber] = useState("");
-  const [issuedDate, setIssuedDate] = useState(todayLocal());
+  const [issuedDate, setIssuedDate] = useState(localTodayDateOnly());
   const [vendorId, setVendorId] = useState("");
   const [payeeName, setPayeeName] = useState("");
   const [payeeAddress, setPayeeAddress] = useState("");
@@ -158,7 +157,7 @@ export default function ChecksPageClient() {
     const setting = settingByAccount.get(targetAccountId);
     setAccountId(targetAccountId);
     setCheckNumber(setting?.next_check_number ?? "");
-    setIssuedDate(todayLocal());
+    setIssuedDate(localTodayDateOnly());
     setVendorId("");
     setPayeeName("");
     setPayeeAddress("");
@@ -218,7 +217,7 @@ export default function ChecksPageClient() {
       account_id: setupAccountId,
       account_name: selectedAccount?.name ?? "Checking account",
       check_number: setupNumber,
-      issued_date: todayLocal(),
+      issued_date: localTodayDateOnly(),
       payee_name: "SAMPLE PAYEE — ALIGNMENT TEST",
       payee_address: "123 Sample Street\nYour City, ST 00000",
       amount_cents: "123456",
@@ -363,6 +362,8 @@ export default function ChecksPageClient() {
   }
 
   const inputAmountCents = BigInt(Math.max(0, parseMoneyToCents(amount)));
+  const composerIsPostDated = isFutureDateOnly(issuedDate);
+  const pendingIsPostDated = isFutureDateOnly(pendingPrintedCheck?.issued_date);
 
   return (
     <div className="flex max-w-6xl flex-col gap-3 pb-6">
@@ -396,9 +397,9 @@ export default function ChecksPageClient() {
         <section className="overflow-hidden rounded-xl border border-bb-border bg-bb-surface-card shadow-sm">
           <div className="flex items-center justify-between border-b border-bb-border px-4 py-3"><div><h2 className="text-sm font-semibold text-bb-text">Check register</h2><p className="mt-0.5 text-xs text-bb-text-muted">Outstanding checks reconcile through the normal bank workflow.</p></div><Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}</Button></div>
           <div className="divide-y divide-bb-border md:hidden">
-            {checks.map((check) => <div key={check.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold text-bb-text">#{check.check_number} · {check.payee_name}</div><div className="mt-1 text-xs text-bb-text-muted">{check.issued_date} · {check.account_name}</div></div><div className="text-right"><div className="text-sm font-semibold text-bb-text">{formatUsd(toBigIntSafe(check.amount_cents))}</div><span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClasses(check.status)}`}>{check.status.toLowerCase()}</span></div></div><div className="mt-3 flex gap-2"><Button variant="outline" size="sm" onClick={() => printExisting(check)} disabled={check.status === "VOIDED" || check.status === "CLEARED"}><Printer className="h-3.5 w-3.5" /> {check.status === "DRAFT" ? "Print" : "Reprint"}</Button>{check.status !== "VOIDED" && check.status !== "CLEARED" ? <Button variant="ghost" size="sm" onClick={() => { setVoidTarget(check); setVoidReason(check.status === "DRAFT" ? "Physical check not used" : "Void requested"); }}>Void</Button> : null}</div></div>)}
+            {checks.map((check) => <div key={check.id} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold text-bb-text">#{check.check_number} · {check.payee_name}</div><div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-bb-text-muted"><span>{check.issued_date}</span>{isFutureDateOnly(check.issued_date) && check.status !== "VOIDED" ? <PostDatedBadge /> : null}<span>· {check.account_name}</span></div></div><div className="text-right"><div className="text-sm font-semibold text-bb-text">{formatUsd(toBigIntSafe(check.amount_cents))}</div><span className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClasses(check.status)}`}>{check.status.toLowerCase()}</span></div></div><div className="mt-3 flex gap-2"><Button variant="outline" size="sm" onClick={() => printExisting(check)} disabled={check.status === "VOIDED" || check.status === "CLEARED"}><Printer className="h-3.5 w-3.5" /> {check.status === "DRAFT" ? "Print" : "Reprint"}</Button>{check.status !== "VOIDED" && check.status !== "CLEARED" ? <Button variant="ghost" size="sm" onClick={() => { setVoidTarget(check); setVoidReason(check.status === "DRAFT" ? "Physical check not used" : "Void requested"); }}>Void</Button> : null}</div></div>)}
           </div>
-          <div className="hidden overflow-x-auto md:block"><table className="w-full text-left text-sm"><thead className="bg-bb-table-header text-xs text-bb-text-muted"><tr><th className="px-4 py-2.5 font-medium">Check</th><th className="px-4 py-2.5 font-medium">Date</th><th className="px-4 py-2.5 font-medium">Payee</th><th className="px-4 py-2.5 font-medium">Account</th><th className="px-4 py-2.5 text-right font-medium">Amount</th><th className="px-4 py-2.5 font-medium">Status</th><th className="w-32 px-4 py-2.5"><span className="sr-only">Actions</span></th></tr></thead><tbody className="divide-y divide-bb-border">{checks.map((check) => <tr key={check.id} className="hover:bg-bb-table-row-hover"><td className="px-4 py-3 font-medium text-bb-text">#{check.check_number}</td><td className="px-4 py-3 text-bb-text-muted">{check.issued_date}</td><td className="max-w-64 truncate px-4 py-3 text-bb-text"><div className="font-medium">{check.payee_name}</div><div className="truncate text-xs text-bb-text-muted">{check.memo || check.purpose.replaceAll("_", " ").toLowerCase()}</div></td><td className="px-4 py-3 text-bb-text-muted">{check.account_name}</td><td className="px-4 py-3 text-right font-semibold text-bb-text">{formatUsd(toBigIntSafe(check.amount_cents))}</td><td className="px-4 py-3"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClasses(check.status)}`}>{check.status.toLowerCase()}</span></td><td className="px-4 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" onClick={() => printExisting(check)} disabled={check.status === "VOIDED" || check.status === "CLEARED"} title={check.status === "DRAFT" ? "Print check" : "Reprint check"}><Printer className="h-4 w-4" /></Button>{check.status !== "VOIDED" && check.status !== "CLEARED" ? <Button variant="ghost" size="sm" onClick={() => { setVoidTarget(check); setVoidReason(check.status === "DRAFT" ? "Physical check not used" : "Void requested"); }} title="Void check"><XCircle className="h-4 w-4" /></Button> : <Button variant="ghost" size="sm" disabled><MoreHorizontal className="h-4 w-4" /></Button>}</div></td></tr>)}</tbody></table></div>
+          <div className="hidden overflow-x-auto md:block"><table className="w-full text-left text-sm"><thead className="bg-bb-table-header text-xs text-bb-text-muted"><tr><th className="px-4 py-2.5 font-medium">Check</th><th className="px-4 py-2.5 font-medium">Date</th><th className="px-4 py-2.5 font-medium">Payee</th><th className="px-4 py-2.5 font-medium">Account</th><th className="px-4 py-2.5 text-right font-medium">Amount</th><th className="px-4 py-2.5 font-medium">Status</th><th className="w-32 px-4 py-2.5"><span className="sr-only">Actions</span></th></tr></thead><tbody className="divide-y divide-bb-border">{checks.map((check) => <tr key={check.id} className="hover:bg-bb-table-row-hover"><td className="px-4 py-3 font-medium text-bb-text">#{check.check_number}</td><td className="px-4 py-3 text-bb-text-muted"><div className="flex flex-col items-start gap-1"><span>{check.issued_date}</span>{isFutureDateOnly(check.issued_date) && check.status !== "VOIDED" ? <PostDatedBadge /> : null}</div></td><td className="max-w-64 truncate px-4 py-3 text-bb-text"><div className="font-medium">{check.payee_name}</div><div className="truncate text-xs text-bb-text-muted">{check.memo || check.purpose.replaceAll("_", " ").toLowerCase()}</div></td><td className="px-4 py-3 text-bb-text-muted">{check.account_name}</td><td className="px-4 py-3 text-right font-semibold text-bb-text">{formatUsd(toBigIntSafe(check.amount_cents))}</td><td className="px-4 py-3"><span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusClasses(check.status)}`}>{check.status.toLowerCase()}</span></td><td className="px-4 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" onClick={() => printExisting(check)} disabled={check.status === "VOIDED" || check.status === "CLEARED"} title={check.status === "DRAFT" ? "Print check" : "Reprint check"}><Printer className="h-4 w-4" /></Button>{check.status !== "VOIDED" && check.status !== "CLEARED" ? <Button variant="ghost" size="sm" onClick={() => { setVoidTarget(check); setVoidReason(check.status === "DRAFT" ? "Physical check not used" : "Void requested"); }} title="Void check"><XCircle className="h-4 w-4" /></Button> : <Button variant="ghost" size="sm" disabled><MoreHorizontal className="h-4 w-4" /></Button>}</div></td></tr>)}</tbody></table></div>
         </section>
       )}
 
@@ -415,7 +416,8 @@ export default function ChecksPageClient() {
       <AppDialog open={composerOpen} onClose={() => !busy && setComposerOpen(false)} title="Create check" description="Pay anyone. Vendor and bill links are optional." size="xl" footer={<div className="flex w-full items-center justify-between"><div className="text-xs text-bb-text-muted">Print at 100% / Actual Size</div><div className="flex gap-2"><Button variant="outline" onClick={() => setComposerOpen(false)} disabled={busy}>Cancel</Button><Button onClick={() => void createAndPrint()} disabled={busy || !selectedSetting || !payeeName.trim() || parseMoneyToCents(amount) <= 0}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Preview & print</Button></div></div>}>
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-3"><div className="sm:col-span-2"><label className={labelClass}>Checking account</label><select className={fieldClass} value={accountId} onChange={(event) => { const next = event.target.value; setAccountId(next); const setting = settingByAccount.get(next); if (!setting) { setComposerOpen(false); openSetup(next); } else setCheckNumber(setting.next_check_number); }}>{checkingAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></div><div><label className={labelClass}>Physical check number</label><Input className={fieldClass} inputMode="numeric" value={checkNumber} onChange={(event) => setCheckNumber(event.target.value.replace(/\D/g, ""))} /></div></div>
-          <div className="grid gap-3 sm:grid-cols-2"><div><label className={labelClass}>Link to vendor (optional)</label><select className={fieldClass} value={vendorId} onChange={(event) => handleVendorChange(event.target.value)}><option value="">No vendor — pay anyone</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></div><div><label className={labelClass}>Check date</label><Input className={fieldClass} type="date" value={issuedDate} onChange={(event) => setIssuedDate(event.target.value)} /></div></div>
+          <div className="grid gap-3 sm:grid-cols-2"><div><label className={labelClass}>Link to vendor (optional)</label><select className={fieldClass} value={vendorId} onChange={(event) => handleVendorChange(event.target.value)}><option value="">No vendor — pay anyone</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></div><div><label className={labelClass}><span className="flex items-center gap-2">Check date {composerIsPostDated ? <PostDatedBadge /> : null}</span></label><Input className={fieldClass} type="date" value={issuedDate} onChange={(event) => setIssuedDate(event.target.value)} /></div></div>
+          {composerIsPostDated ? <DialogNotice tone="warning"><strong>Post-dated check for {formatDateOnlyShort(issuedDate)}.</strong> After you confirm printing, Bynkbook will create the ledger entry with this future date.</DialogNotice> : null}
           <div className="grid gap-3 sm:grid-cols-2"><div><label className={labelClass}>Pay to the order of</label><Input className={fieldClass} value={payeeName} onChange={(event) => setPayeeName(event.target.value)} placeholder="Person or business name" /></div><div><label className={labelClass}>Amount</label><Input className={fieldClass} inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></div>
           <div><label className={labelClass}>Payee address (optional)</label><textarea className={`${fieldClass} h-20 resize-none py-2`} value={payeeAddress} onChange={(event) => setPayeeAddress(event.target.value)} placeholder="Printed beneath the payee name" /></div>
           <div className="grid gap-3 sm:grid-cols-2"><div><label className={labelClass}>Category (optional)</label><select className={fieldClass} value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">Categorize later</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div><div><label className={labelClass}>Memo (optional)</label><Input className={fieldClass} value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="Reason for payment" /></div></div>
@@ -424,7 +426,7 @@ export default function ChecksPageClient() {
       </AppDialog>
 
       <AppDialog open={printConfirmOpen} onClose={() => !busy && setPrintConfirmOpen(false)} title="Did the check print correctly?" description={`Check #${pendingPrintedCheck?.check_number ?? ""} is not finalized until you confirm.`} size="sm" disableOverlayClose footer={<div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end"><Button variant="outline" onClick={() => { setPrintConfirmOpen(false); setPendingPrintedCheck(null); }} disabled={busy}>Decide later</Button><Button variant="outline" onClick={() => { if (pendingPrintedCheck) { setVoidTarget(pendingPrintedCheck); setVoidReason("Physical check misprinted"); } }} disabled={busy}>Misprinted — void it</Button><Button onClick={() => void confirmPrinted()} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Printed correctly</Button></div>}>
-        <DialogNotice tone="warning">Confirm only after checking the physical page. Confirmation records the ledger payment; this physical check number is already reserved and will not be reused.</DialogNotice>
+        <div className="space-y-3"><DialogNotice tone="warning">Confirm only after checking the physical page. Confirmation records the ledger payment; this physical check number is already reserved and will not be reused.</DialogNotice>{pendingIsPostDated ? <DialogNotice tone="warning"><strong>This check is post-dated for {formatDateOnlyShort(pendingPrintedCheck?.issued_date)}.</strong> Confirming creates the ledger entry with that future date.</DialogNotice> : null}</div>
       </AppDialog>
 
       <AppDialog open={!!voidTarget} onClose={() => !busy && setVoidTarget(null)} title={`Void check #${voidTarget?.check_number ?? ""}?`} description="The number remains in the register and will never be reused." size="sm" tone="danger" footer={<div className="flex w-full justify-end gap-2"><Button variant="outline" onClick={() => setVoidTarget(null)} disabled={busy}>Cancel</Button><Button variant="destructive" onClick={() => void submitVoid()} disabled={busy || voidReason.trim().length < 3}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Void check</Button></div>}>

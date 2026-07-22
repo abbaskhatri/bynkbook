@@ -24,3 +24,14 @@ export function formatDateOnlyShort(input: unknown): string {
 
   return `${m[2]}/${m[3]}/${m[1].slice(-2)}`;
 }
+
+export function localTodayDateOnly(now = new Date()): string {
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+export function isFutureDateOnly(input: unknown, today = localTodayDateOnly()): boolean {
+  const value = normalizeDateOnly(input);
+  const comparison = normalizeDateOnly(today);
+  return Boolean(value && comparison && value > comparison);
+}
