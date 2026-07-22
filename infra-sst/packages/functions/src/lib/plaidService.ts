@@ -2109,14 +2109,30 @@ export async function syncTransactions(params: {
   accountId: string;
   userId: string;
   requestRefresh?: boolean;
+  requestBalanceRefresh?: boolean;
+  balanceMode?: "cached" | "realtime" | "skip";
   afterReconnect?: boolean;
   system?: boolean;
 }) {
-  const { businessId, accountId, userId, requestRefresh, afterReconnect, system = false } = params;
+  const {
+    businessId,
+    accountId,
+    userId,
+    requestRefresh,
+    requestBalanceRefresh,
+    afterReconnect,
+    system = false,
+  } = params;
+  const requestedBalanceMode = params.balanceMode ?? (requestBalanceRefresh ? "realtime" : "cached");
 
   const prisma = await getPrisma();
   if (!system) {
-    const role = await requirePlaidCapability(prisma, businessId, userId, requestRefresh ? "MANAGE" : "SYNC");
+    const role = await requirePlaidCapability(
+      prisma,
+      businessId,
+      userId,
+      requestRefresh ? "MANAGE" : "SYNC",
+    );
     if (!role) return json(403, { ok: false, error: "Forbidden" });
   }
 
@@ -2133,6 +2149,16 @@ export async function syncTransactions(params: {
     where: { business_id: businessId, account_id: accountId },
   });
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
+
+  const lastBalanceSnapshotAt = conn.last_known_balance_at
+    ? new Date(conn.last_known_balance_at)
+    : null;
+  const realtimeBalanceCoolingDown =
+    requestedBalanceMode === "realtime" &&
+    lastBalanceSnapshotAt != null &&
+    !Number.isNaN(lastBalanceSnapshotAt.getTime()) &&
+    Date.now() - lastBalanceSnapshotAt.getTime() < 5 * 60_000;
+  const balanceMode = realtimeBalanceCoolingDown ? "cached" : requestedBalanceMode;
 
   const syncLeaseToken = (await import("node:crypto")).randomUUID();
   const syncLeaseExpiresAt = new Date(Date.now() + 6 * 60_000);
@@ -2279,6 +2305,13 @@ export async function syncTransactions(params: {
       }
     }
 
+    // A cached balance returned by /accounts/get is only as current as the
+    // provider's latest Item update. Keep that provider timestamp so the UI
+    // never labels an old cached value as a real-time snapshot.
+    if (balanceMode === "cached" && !requestRefresh) {
+      plaidItemFreshness = await getPlaidItemFreshness(plaid, accessToken);
+    }
+
     const refreshUnavailable = refreshRequested && !refreshSucceeded && isTransactionsRefreshUnavailable(refreshErrorCode);
     const transactionsRefreshProductActive = refreshRequested
       ? refreshSucceeded
@@ -2294,27 +2327,97 @@ export async function syncTransactions(params: {
     let balanceLookupSucceeded = false;
     let balanceErrorCode: string | null = null;
     let balanceErrorMessage: string | null = null;
+    let balanceSnapshotAt: Date | null = null;
+    let balanceUpdatedAccountIds: string[] = [];
 
-    // Balance is helpful UI metadata, but it must never block transaction sync.
-    // Plaid can return NO_ACCOUNTS for balance/account lookups while transaction
-    // sync is still the authoritative source for new bank rows.
-    try {
-      const balRes = await plaid.accountsBalanceGet({ access_token: accessToken });
-      const acct = balRes.data.accounts.find((a) => a.account_id === plaidAccountId);
-      const currentBalance = acct?.balances?.current ?? null;
-      if (currentBalance != null) {
-        currentBalanceCents = normalizePlaidCurrentBalanceCents(currentBalance, localAccount.type);
-        balanceLookupSucceeded = true;
+    if (balanceMode !== "skip") {
+      // Balance is helpful UI metadata, but it must never block transaction
+      // sync. Routine webhook/scheduled drains use the free cached endpoint;
+      // only an explicit user-present refresh uses paid real-time Balance.
+      try {
+        const balRes = balanceMode === "realtime"
+          ? await plaid.accountsBalanceGet({ access_token: accessToken })
+          : await plaid.accountsGet({ access_token: accessToken });
+        const liveAccounts = Array.isArray(balRes?.data?.accounts) ? balRes.data.accounts : [];
+        const selectedPlaidAccount = liveAccounts.find((account: any) => account?.account_id === plaidAccountId);
+        const currentBalance = selectedPlaidAccount?.balances?.current ?? null;
+        if (currentBalance != null) {
+          currentBalanceCents = normalizePlaidCurrentBalanceCents(currentBalance, localAccount.type);
+          balanceLookupSucceeded = true;
+        }
+
+        balanceSnapshotAt = balanceMode === "realtime"
+          ? new Date()
+          : plaidItemFreshness.lastSuccessfulUpdateAt
+            ? new Date(plaidItemFreshness.lastSuccessfulUpdateAt)
+            : null;
+
+        if (balanceSnapshotAt && !Number.isNaN(balanceSnapshotAt.getTime())) {
+          const itemMappings = await prisma.bankConnection.findMany({
+            where: { business_id: businessId, plaid_item_id: conn.plaid_item_id },
+            select: {
+              account_id: true,
+              plaid_account_id: true,
+              last_known_balance_at: true,
+              account: { select: { type: true } },
+            },
+          });
+          const mappings = itemMappings.length > 0
+            ? itemMappings
+            : [{
+                account_id: accountId,
+                plaid_account_id: plaidAccountId,
+                last_known_balance_at: conn.last_known_balance_at ?? null,
+                account: { type: localAccount.type },
+              }];
+          const updatedAccountIds: string[] = [];
+
+          for (const mapping of mappings) {
+            const liveAccount = liveAccounts.find(
+              (account: any) => String(account?.account_id ?? "") === String(mapping.plaid_account_id ?? ""),
+            );
+            const liveBalance = liveAccount?.balances?.current ?? null;
+            if (liveBalance == null) continue;
+            const previousSnapshotAt = mapping.last_known_balance_at
+              ? new Date(mapping.last_known_balance_at)
+              : null;
+            if (previousSnapshotAt && previousSnapshotAt.getTime() > balanceSnapshotAt.getTime()) continue;
+
+            const normalizedBalance = normalizePlaidCurrentBalanceCents(
+              liveBalance,
+              mapping.account?.type ?? accountTypeFromPlaidValue({
+                type: liveAccount?.type == null ? undefined : String(liveAccount.type),
+                subtype: liveAccount?.subtype == null ? undefined : String(liveAccount.subtype),
+              }, "OTHER"),
+            );
+            const persisted = await prisma.bankConnection.updateMany({
+              where: {
+                business_id: businessId,
+                account_id: String(mapping.account_id),
+                plaid_item_id: conn.plaid_item_id,
+                plaid_account_id: String(mapping.plaid_account_id),
+              },
+              data: {
+                last_known_balance_cents: normalizedBalance,
+                last_known_balance_at: balanceSnapshotAt,
+                updated_at: new Date(),
+              },
+            });
+            if (Number(persisted?.count ?? 0) > 0) updatedAccountIds.push(String(mapping.account_id));
+          }
+          balanceUpdatedAccountIds = Array.from(new Set(updatedAccountIds));
+        }
+      } catch (balanceError: any) {
+        balanceErrorCode = plaidErrorCode(balanceError);
+        balanceErrorMessage = plaidErrorMessage(balanceError);
+        console.warn("Plaid balance lookup skipped during transaction sync", {
+          businessId,
+          accountId,
+          balanceMode,
+          errorCode: balanceErrorCode,
+          errorMessage: balanceErrorMessage,
+        });
       }
-    } catch (balanceError: any) {
-      balanceErrorCode = plaidErrorCode(balanceError);
-      balanceErrorMessage = plaidErrorMessage(balanceError);
-      console.warn("Plaid balance lookup skipped during transaction sync", {
-        businessId,
-        accountId,
-        errorCode: balanceErrorCode,
-        errorMessage: balanceErrorMessage,
-      });
     }
 
     const initialCursorInfo = unpackAccountCursor(conn.sync_cursor ?? null, plaidAccountId);
@@ -3008,11 +3111,6 @@ export async function syncTransactions(params: {
     updated_at: now,
   };
 
-  if (balanceLookupSucceeded) {
-    connectionUpdateData.last_known_balance_cents = currentBalanceCents;
-    connectionUpdateData.last_known_balance_at = now;
-  }
-
   await prisma.bankConnection.updateMany({
     where: { business_id: businessId, account_id: accountId },
     data: connectionUpdateData,
@@ -3042,7 +3140,11 @@ export async function syncTransactions(params: {
     plaidLastFailedUpdateAt: plaidItemFreshness.lastFailedUpdateAt,
     plaidFreshnessErrorCode: plaidItemFreshness.lookupErrorCode,
     transactionsRefreshProductActive,
+    balanceMode,
+    balanceRefreshDeferred: realtimeBalanceCoolingDown,
     balanceLookupSucceeded,
+    balanceSnapshotAt: balanceSnapshotAt?.toISOString() ?? null,
+    balanceUpdatedAccountIds,
     balanceErrorCode,
     balanceErrorMessage,
     webhookConfigured: webhookRepair.configured,

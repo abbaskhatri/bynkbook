@@ -46,4 +46,12 @@ describe("plaidSync handler cost controls", () => {
       requestRefresh: true,
     }));
   });
+
+  test("passes real-time balance refresh only through the explicit balance contract", async () => {
+    await handler(event({ forceBalanceRefresh: true }));
+
+    expect(mocks.syncTransactions).toHaveBeenCalledWith(expect.objectContaining({
+      requestBalanceRefresh: true,
+    }));
+  });
 });

@@ -381,6 +381,47 @@ plaidSyncQueue.subscribe(
   { batch: { size: 5, partialResponses: true } },
 );
 
+// Webhooks remain the fast path. This sweep is the durable safety net for a
+// delayed/dropped webhook or a transient queue delivery failure. It only asks
+// for Plaid's cached subscription data; paid real-time Balance remains tied to
+// a user-present refresh in the Operations page.
+const plaidSyncCatchupCron = new sst.aws.Cron("PlaidSyncCatchupCron", {
+  schedule: "rate(15 minutes)",
+  function: {
+    ...bizHandler,
+    handler: "packages/functions/src/plaidSyncSweep.handler",
+    timeout: "2 minutes",
+    memory: "512 MB",
+    environment: {
+      ...bizHandler.environment,
+      PLAID_SYNC_QUEUE_URL: plaidSyncQueue.url,
+    },
+    permissions: [
+      ...(bizHandler as any).permissions,
+      {
+        actions: ["sqs:SendMessage"],
+        resources: [plaidSyncQueue.arn],
+      },
+    ],
+  },
+});
+
+new aws.cloudwatch.MetricAlarm("PlaidSyncCatchupFailuresAlarm", {
+  alarmDescription: "The scheduled Plaid webhook safety-net sweep failed.",
+  namespace: "AWS/Lambda",
+  metricName: "Errors",
+  dimensions: {
+    FunctionName: (plaidSyncCatchupCron as any).nodes.function.apply((fn: any) => fn.name),
+  },
+  statistic: "Sum",
+  period: 300,
+  evaluationPeriods: 1,
+  threshold: 0,
+  comparisonOperator: "GreaterThanThreshold",
+  treatMissingData: "notBreaching",
+  alarmActions,
+});
+
 // Protected Plaid routes (Cognito)
 api.route(
   "POST /v1/businesses/{businessId}/accounts/{accountId}/plaid/link-token",

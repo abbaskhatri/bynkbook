@@ -105,11 +105,33 @@ function toNumber(value: any) {
 export function freshnessState(connection: any, now: Date) {
   if (!connection) return "NOT_CONNECTED";
   const status = String(connection.status ?? "CONNECTED").toUpperCase();
-  if (["ERROR", "DISCONNECTED", "ITEM_LOGIN_REQUIRED", "NEEDS_ATTENTION"].includes(status)) return "NEEDS_ATTENTION";
-  if (status === "SYNCING" || status === "PENDING_SYNC" || connection.sync_lock_expires_at) return "SYNCING";
+  if ([
+    "ERROR",
+    "SYNC_ERROR",
+    "DISCONNECTED",
+    "INACTIVE",
+    "EXPIRED",
+    "REAUTH_REQUIRED",
+    "LOGIN_REQUIRED",
+    "ITEM_LOGIN_REQUIRED",
+    "ENV_MISMATCH_RECONNECT_REQUIRED",
+    "PLAID_ACCOUNT_MISSING",
+    "NEEDS_ATTENTION",
+  ].includes(status)) return "NEEDS_ATTENTION";
+  const syncLockExpiresAt = connection.sync_lock_expires_at
+    ? new Date(connection.sync_lock_expires_at)
+    : null;
+  const activeSyncLease =
+    syncLockExpiresAt != null &&
+    !Number.isNaN(syncLockExpiresAt.getTime()) &&
+    syncLockExpiresAt.getTime() > now.getTime();
+  if (status === "SYNCING" || status === "PENDING_SYNC" || activeSyncLease) return "SYNCING";
   if (!connection.last_sync_at) return "NEVER_SYNCED";
   const ageHours = Math.max(0, (now.getTime() - new Date(connection.last_sync_at).getTime()) / 3_600_000);
-  return ageHours > 48 ? "STALE" : "HEALTHY";
+  if (ageHours > 12) return "STALE";
+  const balanceSnapshotDate = normalizedYmd(connection.last_known_balance_at);
+  if (balanceSnapshotDate && balanceSnapshotDate !== normalizedYmd(now)) return "STALE";
+  return "HEALTHY";
 }
 
 function transferLanguage(left: any, right: any) {

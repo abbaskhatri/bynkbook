@@ -9,6 +9,9 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
       const body = JSON.parse(record.body ?? "{}");
       const businessId = String(body?.businessId ?? "").trim();
       const accountId = String(body?.accountId ?? "").trim();
+      const balanceMode = body?.balanceMode === "skip" || body?.balanceMode === "realtime"
+        ? body.balanceMode
+        : "cached";
       if (!businessId || !accountId) throw new Error("Invalid Plaid sync queue message");
 
       let complete = false;
@@ -18,6 +21,7 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
           accountId,
           userId: "system:plaid-webhook",
           system: true,
+          balanceMode,
         });
         const statusCode = Number(response?.statusCode ?? 500);
         const result = JSON.parse(response?.body ?? "{}");

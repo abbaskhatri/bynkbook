@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -25,8 +25,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { applyTransferPair, getOperationsOverview, type OperationsBankAccount, type TransferCandidate } from "@/lib/api/operations";
+import { plaidSync } from "@/lib/api/plaid";
 import { formatUsdSafe, toBigIntSafe } from "@/lib/money";
 import { describeOperationsBalance } from "@/lib/operationsBalance";
+import { waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
 
 function statusClasses(tone: "good" | "warning" | "danger" | "muted") {
   if (tone === "good") return "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg";
@@ -96,14 +98,80 @@ export default function OperationsPageClient() {
   const businessId = businessIdFromUrl ?? businessesQ.data?.[0]?.id ?? null;
   const [selectedCandidate, setSelectedCandidate] = useState<TransferCandidate | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [bankRefreshMessage, setBankRefreshMessage] = useState<string | null>(null);
+  const autoRefreshScopesRef = useRef(new Set<string>());
 
   const overviewQ = useQuery({
     queryKey: ["operationsOverview", businessId],
     enabled: !!businessId,
     queryFn: () => getOperationsOverview(String(businessId)),
     staleTime: 30_000,
-    refetchOnWindowFocus: false,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: true,
   });
+
+  const refreshBankDataMutation = useMutation({
+    mutationFn: async (options: { automatic: boolean; refreshTransactions: boolean }) => {
+      if (!businessId) throw new Error("Choose a business first.");
+      let latest = overviewQ.data ?? await getOperationsOverview(String(businessId));
+      const attemptedAccountIds = new Set<string>();
+      let refreshedAccounts = 0;
+
+      while (true) {
+        const target = latest.bank_health.accounts.find((account) =>
+          account.connected &&
+          String(account.account_type ?? "").toUpperCase() !== "CASH" &&
+          (!options.automatic ||
+            account.balance_status === "STALE_SNAPSHOT" ||
+            account.health === "STALE" ||
+            account.has_new_transactions) &&
+          !attemptedAccountIds.has(account.account_id)
+        );
+        if (!target) break;
+        attemptedAccountIds.add(target.account_id);
+
+        let result = await plaidSync(String(businessId), target.account_id, {
+          refreshBalance: !options.automatic || target.balance_status === "STALE_SNAPSHOT",
+          refreshTransactions: options.refreshTransactions,
+        });
+        if (result?.syncInProgress) {
+          const outcome = await waitForPlaidSyncCompletion({
+            sync: () => plaidSync(String(businessId), target.account_id),
+            maxAttempts: 30,
+          });
+          if (outcome.kind === "error") throw outcome.error;
+          if (outcome.kind === "timed_out") throw new Error("The active bank sync did not finish in time.");
+          if (outcome.kind === "cancelled") throw new Error("The bank refresh was cancelled.");
+          result = await plaidSync(String(businessId), target.account_id, {
+            refreshBalance: !options.automatic || target.balance_status === "STALE_SNAPSHOT",
+            refreshTransactions: options.refreshTransactions,
+          });
+        }
+        if (result?.ok === false) throw new Error(result?.message ?? result?.error ?? "Bank refresh failed.");
+        refreshedAccounts += Number(result?.balanceUpdatedAccountIds?.length ?? 0) || 1;
+
+        await queryClient.invalidateQueries({ queryKey: ["operationsOverview", businessId] });
+        latest = await queryClient.fetchQuery({
+          queryKey: ["operationsOverview", businessId],
+          queryFn: () => getOperationsOverview(String(businessId)),
+          staleTime: 0,
+        });
+      }
+
+      return { ...options, refreshedAccounts };
+    },
+    onSuccess: ({ automatic, refreshedAccounts }) => {
+      setBankRefreshMessage(
+        refreshedAccounts > 0
+          ? automatic
+            ? "Bank balances and all available transaction updates were refreshed automatically."
+            : "Bank balances were refreshed now and the latest available transactions were checked."
+          : "Bank data is already current.",
+      );
+    },
+  });
+  const refreshBankData = refreshBankDataMutation.mutate;
 
   const pairMutation = useMutation({
     mutationFn: async (candidate: TransferCandidate) => {
@@ -122,6 +190,23 @@ export default function OperationsPageClient() {
   });
 
   const data = overviewQ.data;
+
+  useEffect(() => {
+    if (!businessId || !data || refreshBankDataMutation.isPending) return;
+    const hasBankRefreshWork = data.bank_health.accounts.some((account) =>
+      account.connected &&
+      String(account.account_type ?? "").toUpperCase() !== "CASH" &&
+      (account.balance_status === "STALE_SNAPSHOT" ||
+        account.health === "STALE" ||
+        account.has_new_transactions)
+    );
+    if (!hasBankRefreshWork) return;
+
+    const scope = `${businessId}:${new Date().toISOString().slice(0, 10)}`;
+    if (autoRefreshScopesRef.current.has(scope)) return;
+    autoRefreshScopesRef.current.add(scope);
+    refreshBankData({ automatic: true, refreshTransactions: false });
+  }, [businessId, data, refreshBankDataMutation.isPending, refreshBankData]);
   const closeBlockerTotal = data
     ? Object.values(data.close_readiness.blockers).reduce((sum, count) => sum + Number(count ?? 0), 0)
     : 0;
@@ -139,9 +224,14 @@ export default function OperationsPageClient() {
           title="Financial operations"
           subtitle="One review surface for bank health, close readiness, recurring cash expectations, category learning, and transfer pairs."
           right={
-            <Button variant="outline" className="h-9" onClick={() => void overviewQ.refetch()} disabled={!businessId || overviewQ.isFetching}>
-              <RefreshCw className={`h-4 w-4 ${overviewQ.isFetching ? "animate-spin" : ""}`} />
-              Refresh
+            <Button
+              variant="outline"
+              className="h-9"
+              onClick={() => refreshBankDataMutation.mutate({ automatic: false, refreshTransactions: false })}
+              disabled={!businessId || overviewQ.isFetching || refreshBankDataMutation.isPending}
+            >
+              <RefreshCw className={`h-4 w-4 ${overviewQ.isFetching || refreshBankDataMutation.isPending ? "animate-spin" : ""}`} />
+              {refreshBankDataMutation.isPending ? "Refreshing bank…" : "Refresh bank data"}
             </Button>
           }
         />
@@ -151,6 +241,14 @@ export default function OperationsPageClient() {
         <InlineBanner title="Financial operations did not load" message="The underlying books were not changed. Retry this read-only overview." onRetry={() => void overviewQ.refetch()} />
       ) : null}
       {actionMessage ? <InlineBanner title="Transfer completed" message={actionMessage} /> : null}
+      {bankRefreshMessage ? <InlineBanner title="Bank data current" message={bankRefreshMessage} /> : null}
+      {refreshBankDataMutation.error ? (
+        <InlineBanner
+          title="Bank refresh did not finish"
+          message={refreshBankDataMutation.error instanceof Error ? refreshBankDataMutation.error.message : "The existing snapshot remains visible. Try again shortly."}
+          onRetry={() => refreshBankDataMutation.mutate({ automatic: false, refreshTransactions: false })}
+        />
+      ) : null}
       {pairMutation.error ? <InlineBanner title="Transfer was not created" message={pairMutation.error instanceof Error ? pairMutation.error.message : "Review the pair and try again."} /> : null}
 
       {!data && overviewQ.isLoading ? (

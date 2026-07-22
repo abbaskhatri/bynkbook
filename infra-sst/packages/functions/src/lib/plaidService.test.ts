@@ -1800,6 +1800,137 @@ describe("syncTransactions", () => {
     expect(calls[2]).toMatchObject({ cursor: "cursor-start", options: { account_id: "plaid-acct-1" } });
   });
 
+  test("uses cached balances and the provider update timestamp for routine syncs", async () => {
+    const providerUpdatedAt = new Date("2026-07-14T14:30:00.000Z");
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: { accounts: [{ account_id: "plaid-acct-1", balances: { current: 125.5 } }] },
+        })),
+      },
+      prisma: {
+        bankConnection: {
+          findFirst: vi.fn(async () => ({ ...baseConn })),
+          findMany: vi.fn(async () => [{
+            account_id: "acct-1",
+            plaid_account_id: "plaid-acct-1",
+            last_known_balance_at: null,
+            account: { type: "CHECKING" },
+          }]),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+      },
+    });
+
+    const response = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1" });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      balanceMode: "cached",
+      balanceLookupSucceeded: true,
+      balanceSnapshotAt: providerUpdatedAt.toISOString(),
+      balanceUpdatedAccountIds: ["acct-1"],
+    });
+    expect(plaid.accountsBalanceGet).not.toHaveBeenCalled();
+    expect(plaid.accountsGet).toHaveBeenCalledWith({ access_token: "access-token-redacted" });
+    expect(prisma.bankConnection.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ account_id: "acct-1", plaid_account_id: "plaid-acct-1" }),
+      data: expect.objectContaining({
+        last_known_balance_cents: 12_550n,
+        last_known_balance_at: providerUpdatedAt,
+      }),
+    }));
+  });
+
+  test("one real-time Item balance call refreshes every mapped sibling account", async () => {
+    const { syncTransactions, plaid, prisma } = await loadSyncTransactions({
+      plaid: {
+        accountsBalanceGet: vi.fn(async () => ({
+          data: {
+            accounts: [
+              { account_id: "plaid-acct-1", balances: { current: 100 } },
+              { account_id: "plaid-acct-2", balances: { current: 25 } },
+            ],
+          },
+        })),
+      },
+      prisma: {
+        bankConnection: {
+          findFirst: vi.fn(async () => ({ ...baseConn })),
+          findMany: vi.fn(async () => [
+            {
+              account_id: "acct-1",
+              plaid_account_id: "plaid-acct-1",
+              last_known_balance_at: null,
+              account: { type: "CHECKING" },
+            },
+            {
+              account_id: "acct-2",
+              plaid_account_id: "plaid-acct-2",
+              last_known_balance_at: null,
+              account: { type: "CREDIT_CARD" },
+            },
+          ]),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+        },
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestBalanceRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      balanceMode: "realtime",
+      balanceLookupSucceeded: true,
+      balanceRefreshDeferred: false,
+      balanceUpdatedAccountIds: ["acct-1", "acct-2"],
+    });
+    expect(plaid.accountsBalanceGet).toHaveBeenCalledTimes(1);
+    const balanceUpdates = bankConnectionUpdateCalls(prisma).filter(
+      (args) => args?.data?.last_known_balance_at,
+    );
+    expect(balanceUpdates.map((args) => ({
+      accountId: args.where.account_id,
+      cents: args.data.last_known_balance_cents,
+    }))).toEqual([
+      { accountId: "acct-1", cents: 10_000n },
+      { accountId: "acct-2", cents: -2_500n },
+    ]);
+  });
+
+  test("coalesces repeated real-time balance requests during the cooldown", async () => {
+    const recentBalanceAt = new Date();
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      conn: { last_known_balance_at: recentBalanceAt },
+      plaid: {
+        accountsGet: vi.fn(async () => ({
+          data: { accounts: [{ account_id: "plaid-acct-1", balances: { current: 100 } }] },
+        })),
+      },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestBalanceRefresh: true,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      balanceMode: "cached",
+      balanceRefreshDeferred: true,
+    });
+    expect(plaid.accountsBalanceGet).not.toHaveBeenCalled();
+  });
+
   test("does not fail transaction sync when Plaid balance lookup returns NO_ACCOUNTS", async () => {
     const { syncTransactions, prisma } = await loadSyncTransactions({
       plaid: {
@@ -1825,7 +1956,13 @@ describe("syncTransactions", () => {
       },
     });
 
-    const res = await syncTransactions({ businessId: "biz-1", accountId: "acct-1", userId: "user-1", requestRefresh: true });
+    const res = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+      requestBalanceRefresh: true,
+    });
     const body = JSON.parse(res.body);
 
     expect(res.statusCode).toBe(200);

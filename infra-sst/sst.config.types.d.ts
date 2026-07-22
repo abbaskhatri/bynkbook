@@ -29,6 +29,14 @@ declare global {
         url: any;
         subscribe(subscriber: any, args?: any, options?: any): unknown;
       };
+      Cron: new (
+        name: string,
+        args: {
+          schedule: `rate(${string})` | `cron(${string})`;
+          function: any;
+          enabled?: boolean;
+        },
+      ) => unknown;
     };
   };
 

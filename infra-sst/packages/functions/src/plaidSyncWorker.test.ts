@@ -28,7 +28,25 @@ describe("Plaid sync worker", () => {
       businessId: "biz-1",
       accountId: "acct-1",
       system: true,
+      balanceMode: "cached",
     }));
+  });
+
+  test("honors an explicit queue balance mode", async () => {
+    const syncTransactions = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      body: JSON.stringify({ ok: true, hasMore: false }),
+    });
+    vi.doMock("./lib/plaidService", () => ({ syncTransactions }));
+
+    const { handler } = await import("./plaidSyncWorker");
+    await handler(sqsEvent([{ id: "m-skip", body: {
+      businessId: "biz-1",
+      accountId: "acct-1",
+      balanceMode: "skip",
+    } }]));
+
+    expect(syncTransactions).toHaveBeenCalledWith(expect.objectContaining({ balanceMode: "skip" }));
   });
 
   test("returns only failed records for SQS partial retry", async () => {

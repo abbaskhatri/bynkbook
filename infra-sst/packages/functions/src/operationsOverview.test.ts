@@ -18,13 +18,35 @@ describe("operations overview", () => {
 
     expect(freshnessState(null, now)).toBe("NOT_CONNECTED");
     expect(freshnessState({ status: "PENDING_SYNC" }, now)).toBe("SYNCING");
+    expect(freshnessState({
+      status: "CONNECTED",
+      sync_lock_expires_at: "2026-07-13T12:05:00.000Z",
+      last_sync_at: "2026-07-13T08:00:00.000Z",
+    }, now)).toBe("SYNCING");
+    expect(freshnessState({
+      status: "CONNECTED",
+      sync_lock_expires_at: "2026-07-13T11:55:00.000Z",
+      last_sync_at: "2026-07-13T08:00:00.000Z",
+    }, now)).toBe("HEALTHY");
     expect(
-      freshnessState({ status: "CONNECTED", last_sync_at: "2026-07-13T08:00:00.000Z" }, now)
+      freshnessState({
+        status: "CONNECTED",
+        last_sync_at: "2026-07-13T08:00:00.000Z",
+        last_known_balance_at: "2026-07-13T08:00:00.000Z",
+      }, now)
     ).toBe("HEALTHY");
+    expect(
+      freshnessState({
+        status: "CONNECTED",
+        last_sync_at: "2026-07-13T11:55:00.000Z",
+        last_known_balance_at: "2026-07-12T23:59:00.000Z",
+      }, now)
+    ).toBe("STALE");
     expect(
       freshnessState({ status: "CONNECTED", last_sync_at: "2026-07-10T08:00:00.000Z" }, now)
     ).toBe("STALE");
     expect(freshnessState({ status: "ITEM_LOGIN_REQUIRED" }, now)).toBe("NEEDS_ATTENTION");
+    expect(freshnessState({ status: "SYNC_ERROR", last_sync_at: now }, now)).toBe("NEEDS_ATTENTION");
   });
 
   test("measures posting distance for transfer candidates", () => {

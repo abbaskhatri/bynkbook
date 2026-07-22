@@ -80,7 +80,11 @@ export async function plaidDisconnect(businessId: string, accountId: string) {
   });
 }
 
-export async function plaidSync(businessId: string, accountId: string, options?: { afterReconnect?: boolean }) {
+export async function plaidSync(
+  businessId: string,
+  accountId: string,
+  options?: { afterReconnect?: boolean; refreshBalance?: boolean; refreshTransactions?: boolean },
+) {
   const totals = {
     newCount: 0,
     upgradedCount: 0,
@@ -100,8 +104,13 @@ export async function plaidSync(businessId: string, accountId: string, options?:
   for (let pass = 0; pass < maxContinuationCalls; pass += 1) {
     result = await apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/sync`, {
       method: "POST",
+      // The Lambda has a 45-second ceiling and a real-time institution balance
+      // check can legitimately take more than the API client's 30-second default.
+      timeoutMs: 55_000,
       body: JSON.stringify({
         afterReconnect: pass === 0 && options?.afterReconnect === true,
+        forceBalanceRefresh: pass === 0 && options?.refreshBalance === true,
+        forceRefresh: pass === 0 && options?.refreshTransactions === true,
       }),
     });
 
