@@ -1437,6 +1437,7 @@ export default function ReconcilePageClient() {
     const pendingCount = Number(res?.pendingCount ?? 0);
     const refreshRequested = Boolean(res?.refreshRequested);
     const refreshSucceeded = Boolean(res?.refreshSucceeded);
+    const refreshDeferred = Boolean(res?.refreshDeferred);
     const refreshErrorCode = String(res?.refreshErrorCode ?? "").trim();
     const refreshUnavailable = Boolean(res?.refreshUnavailable) ||
       refreshErrorCode === "INVALID_PRODUCT" ||
@@ -1494,6 +1495,9 @@ export default function ReconcilePageClient() {
     } else if (refreshSucceeded) {
       setPendingMsgTone("muted");
       setPendingMsg(newCount === 0 ? "The fresh bank check completed; no newer Plaid transactions were available." : null);
+    } else if (refreshDeferred) {
+      setPendingMsgTone("muted");
+      setPendingMsg("The bank was checked recently, so BynkBook reused the existing five-minute provider cooldown.");
     } else if (refreshErrorCode) {
       setPendingMsgTone("warning");
       setPendingMsg("Instant Plaid refresh is temporarily unavailable; showing the latest synced data.");
@@ -1530,13 +1534,13 @@ export default function ReconcilePageClient() {
         if (outcome.kind === "timed_out") {
           setSyncMsg("The bank sync is taking longer than expected.");
           setPendingMsgTone("warning");
-          setPendingMsg("Automatic monitoring stopped after several minutes. You can safely try Sync again.");
+          setPendingMsg("Automatic monitoring stopped after several minutes. You can safely use Refresh bank now again.");
           return;
         }
         if (outcome.kind === "error") {
           setSyncMsg((outcome.error as any)?.message ?? "Unable to confirm the bank sync result");
           setPendingMsgTone("warning");
-          setPendingMsg("Automatic monitoring stopped. You can safely try Sync again.");
+          setPendingMsg("Automatic monitoring stopped. You can safely use Refresh bank now again.");
           return;
         }
 
@@ -4935,23 +4939,22 @@ const displayBankActiveList = useMemo(() => {
                     <button
                       type="button"
                       className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
-                      disabled={plaidSyncing || !bankUpdatesAvailable}
-                      title={
-                        bankUpdatesAvailable
-                          ? "Import transaction updates Plaid has reported as ready"
-                          : "No Plaid transaction updates are waiting to sync"
-                      }
+                      disabled={plaidSyncing}
+                      title="Contact the bank now and import the latest available balance and transactions"
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId || plaidSyncRequestRef.current) return;
 
                         plaidSyncRequestRef.current = true;
                         setPlaidSyncing(true);
-                        setSyncMsg("Importing available Plaid transaction updates...");
+                        setSyncMsg("Contacting the bank for the latest balance and transactions...");
                         setPendingMsg(null);
                         let monitoringActiveSync = false;
 
                         try {
-                          const res = await plaidSync(selectedBusinessId, selectedAccountId);
+                          const res = await plaidSync(selectedBusinessId, selectedAccountId, {
+                            refreshBalance: true,
+                            refreshTransactions: true,
+                          });
 
                           if (res?.syncInProgress) {
                             monitoringActiveSync = true;
@@ -5008,8 +5011,8 @@ const displayBankActiveList = useMemo(() => {
                         }
                       }}
                     >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      {plaidSyncing ? "Syncing…" : bankUpdatesAvailable ? "Sync available" : "Up to date"}
+                      <RefreshCw className={`h-3.5 w-3.5 ${plaidSyncing ? "animate-spin" : ""}`} />
+                      {plaidSyncing ? "Contacting bank…" : "Refresh bank now"}
                     </button>
 
                     <button
@@ -5150,7 +5153,7 @@ const displayBankActiveList = useMemo(() => {
                     if (initialSyncFailed) {
                       setSyncMsg(`Initial transaction sync failed: ${syncResult?.error ?? "Unable to refresh transactions"}`);
                       setPendingMsgTone("warning");
-                      setPendingMsg("Connected bank, but the transaction list may be stale. Try Sync.");
+                      setPendingMsg("Connected bank, but the transaction list may be stale. Try Refresh bank now.");
                     } else if (syncResult) {
                       const newCount = Number(syncResult?.newCount ?? 0);
                       const upgradedCount = Number(syncResult?.upgradedCount ?? 0);
