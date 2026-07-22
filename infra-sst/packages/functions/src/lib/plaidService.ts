@@ -88,6 +88,8 @@ function isTransactionsRefreshUnavailable(code: string | null | undefined) {
   return normalized === "INVALID_PRODUCT" || normalized === "PRODUCT_NOT_ENABLED";
 }
 
+const PLAID_TRANSACTIONS_REFRESH_COOLDOWN_MS = 5 * 60_000;
+
 function plaidWebhookUrl() {
   const url = String(process.env.PLAID_WEBHOOK_URL ?? "").trim();
   return url || undefined;
@@ -2150,6 +2152,26 @@ export async function syncTransactions(params: {
   });
   if (!conn) return json(400, { ok: false, error: "No bank connection for this account" });
 
+  // Transactions Refresh is billed and operates at the Plaid Item level. A
+  // business can map several local accounts to one Item, so use the newest
+  // sibling balance snapshot as a shared server-side cooldown marker. Manual
+  // Operations refreshes also request real-time balance and persist that
+  // timestamp for every sibling. A routine cursor sync cannot therefore block
+  // a user-requested bank contact, while the next sibling avoids a duplicate
+  // provider refresh charge.
+  const recentItemRefresh = requestRefresh
+    ? await prisma.bankConnection.findFirst({
+        where: {
+          business_id: businessId,
+          plaid_item_id: conn.plaid_item_id,
+          last_known_balance_at: { gte: new Date(Date.now() - PLAID_TRANSACTIONS_REFRESH_COOLDOWN_MS) },
+        },
+        select: { last_known_balance_at: true },
+        orderBy: { last_known_balance_at: "desc" },
+      })
+    : null;
+  const transactionRefreshCoolingDown = Boolean(recentItemRefresh?.last_known_balance_at);
+
   const lastBalanceSnapshotAt = conn.last_known_balance_at
     ? new Date(conn.last_known_balance_at)
     : null;
@@ -2275,6 +2297,7 @@ export async function syncTransactions(params: {
     }
     let refreshRequested = false;
     let refreshSucceeded = false;
+    const refreshDeferred = Boolean(requestRefresh && transactionRefreshCoolingDown);
     let refreshErrorCode: string | null = null;
     let refreshErrorMessage: string | null = null;
     let plaidItemFreshness: PlaidItemFreshness = {
@@ -2284,7 +2307,7 @@ export async function syncTransactions(params: {
       lookupErrorCode: null,
     };
 
-    if (requestRefresh) {
+    if (requestRefresh && !transactionRefreshCoolingDown) {
       refreshRequested = true;
       try {
         await plaid.transactionsRefresh({ access_token: accessToken });
@@ -2303,6 +2326,10 @@ export async function syncTransactions(params: {
           lastSuccessfulUpdateAt: plaidItemFreshness.lastSuccessfulUpdateAt,
         });
       }
+    }
+
+    if (requestRefresh && transactionRefreshCoolingDown) {
+      plaidItemFreshness = await getPlaidItemFreshness(plaid, accessToken);
     }
 
     // A cached balance returned by /accounts/get is only as current as the
@@ -3133,6 +3160,7 @@ export async function syncTransactions(params: {
     lastSyncAt: now.toISOString(),
     refreshRequested,
     refreshSucceeded,
+    refreshDeferred,
     refreshUnavailable,
     refreshErrorCode,
     refreshErrorMessage,

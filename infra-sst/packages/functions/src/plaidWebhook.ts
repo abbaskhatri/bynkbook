@@ -16,7 +16,8 @@ export async function handler(event: any) {
   }
 
   const queueUrl = String(process.env.PLAID_SYNC_QUEUE_URL ?? "").trim();
-  return handleWebhook({
+  let enqueuedConnections = 0;
+  const response = await handleWebhook({
     body,
     rawBody,
     headers: event?.headers ?? {},
@@ -26,7 +27,19 @@ export async function handler(event: any) {
             QueueUrl: queueUrl,
             MessageBody: JSON.stringify(target),
           }));
+          enqueuedConnections += 1;
         }
       : undefined,
   });
+
+  // Keep webhook telemetry useful without recording Item IDs, account IDs,
+  // request bodies, or credentials.
+  console.info("Plaid webhook handled", {
+    webhookType: String(body?.webhook_type ?? "").trim().toUpperCase().slice(0, 80),
+    webhookCode: String(body?.webhook_code ?? "").trim().toUpperCase().slice(0, 80),
+    environment: String(body?.environment ?? "").trim().toLowerCase().slice(0, 20),
+    statusCode: Number(response?.statusCode ?? 500),
+    enqueuedConnections,
+  });
+  return response;
 }

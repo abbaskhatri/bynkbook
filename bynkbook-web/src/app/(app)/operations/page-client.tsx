@@ -117,6 +117,9 @@ export default function OperationsPageClient() {
       let latest = overviewQ.data ?? await getOperationsOverview(String(businessId));
       const attemptedAccountIds = new Set<string>();
       let refreshedAccounts = 0;
+      let transactionRefreshSucceeded = false;
+      let transactionRefreshUnavailable = false;
+      let transactionRefreshDeferred = false;
 
       while (true) {
         const target = latest.bank_health.accounts.find((account) =>
@@ -150,6 +153,9 @@ export default function OperationsPageClient() {
         }
         if (result?.ok === false) throw new Error(result?.message ?? result?.error ?? "Bank refresh failed.");
         refreshedAccounts += Number(result?.balanceUpdatedAccountIds?.length ?? 0) || 1;
+        transactionRefreshSucceeded ||= result?.refreshSucceeded === true;
+        transactionRefreshUnavailable ||= result?.refreshUnavailable === true;
+        transactionRefreshDeferred ||= result?.refreshDeferred === true;
 
         await queryClient.invalidateQueries({ queryKey: ["operationsOverview", businessId] });
         latest = await queryClient.fetchQuery({
@@ -159,14 +165,32 @@ export default function OperationsPageClient() {
         });
       }
 
-      return { ...options, refreshedAccounts };
+      return {
+        ...options,
+        refreshedAccounts,
+        transactionRefreshSucceeded,
+        transactionRefreshUnavailable,
+        transactionRefreshDeferred,
+      };
     },
-    onSuccess: ({ automatic, refreshedAccounts }) => {
+    onSuccess: ({
+      automatic,
+      refreshedAccounts,
+      transactionRefreshSucceeded,
+      transactionRefreshUnavailable,
+      transactionRefreshDeferred,
+    }) => {
       setBankRefreshMessage(
         refreshedAccounts > 0
           ? automatic
             ? "Bank balances and all available transaction updates were refreshed automatically."
-            : "Bank balances were refreshed now and the latest available transactions were checked."
+            : transactionRefreshSucceeded
+              ? "The bank was contacted now, balances were refreshed, and all available transaction updates were checked."
+              : transactionRefreshUnavailable
+                ? "Balances and available transactions were checked. Instant transaction refresh is not enabled for this Plaid account."
+                : transactionRefreshDeferred
+                  ? "Bank data was refreshed recently, so the existing five-minute provider cooldown was reused."
+                  : "Bank balances were refreshed now and the latest available transactions were checked."
           : "Bank data is already current.",
       );
     },
@@ -227,11 +251,11 @@ export default function OperationsPageClient() {
             <Button
               variant="outline"
               className="h-9"
-              onClick={() => refreshBankDataMutation.mutate({ automatic: false, refreshTransactions: false })}
+              onClick={() => refreshBankDataMutation.mutate({ automatic: false, refreshTransactions: true })}
               disabled={!businessId || overviewQ.isFetching || refreshBankDataMutation.isPending}
             >
               <RefreshCw className={`h-4 w-4 ${overviewQ.isFetching || refreshBankDataMutation.isPending ? "animate-spin" : ""}`} />
-              {refreshBankDataMutation.isPending ? "Refreshing bank…" : "Refresh bank data"}
+              {refreshBankDataMutation.isPending ? "Contacting bank…" : "Refresh bank now"}
             </Button>
           }
         />

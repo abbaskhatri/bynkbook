@@ -2306,6 +2306,71 @@ describe("syncTransactions", () => {
     );
   });
 
+  test("coalesces repeated Transactions Refresh requests across one Plaid Item", async () => {
+    const recentBalanceAt = new Date(Date.now() - 60_000);
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({ ...baseConn, last_known_balance_at: null })
+      .mockResolvedValueOnce({ last_known_balance_at: recentBalanceAt });
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      prisma: { bankConnection: { findFirst } },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-2",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+    const body = JSON.parse(response.body);
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      refreshRequested: false,
+      refreshSucceeded: false,
+      refreshDeferred: true,
+    });
+    expect(findFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({
+        business_id: "biz-1",
+        plaid_item_id: "item-1",
+        last_known_balance_at: { gte: expect.any(Date) },
+      }),
+      orderBy: { last_known_balance_at: "desc" },
+    }));
+    expect(plaid.transactionsRefresh).not.toHaveBeenCalled();
+    expect(plaid.transactionsGet).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not let a recent background cursor sync suppress manual Transactions Refresh", async () => {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...baseConn,
+        last_sync_at: new Date(Date.now() - 30_000),
+        last_known_balance_at: new Date(Date.now() - 30 * 60_000),
+      })
+      .mockResolvedValueOnce(null);
+    const { syncTransactions, plaid } = await loadSyncTransactions({
+      prisma: { bankConnection: { findFirst } },
+    });
+
+    const response = await syncTransactions({
+      businessId: "biz-1",
+      accountId: "acct-1",
+      userId: "user-1",
+      requestRefresh: true,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      refreshRequested: true,
+      refreshSucceeded: true,
+      refreshDeferred: false,
+    });
+    expect(plaid.transactionsRefresh).toHaveBeenCalledTimes(1);
+  });
+
   test("repairs a missing recent transaction from an account snapshot when the cursor is empty", async () => {
     const transactionDate = new Date().toISOString().slice(0, 10);
     const missingTransaction = makeTransaction({
