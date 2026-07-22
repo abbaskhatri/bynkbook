@@ -65,6 +65,29 @@ describe("Plaid sync worker", () => {
     expect(result.batchItemFailures).toEqual([{ itemIdentifier: "m-fail" }]);
   });
 
+  test("acknowledges a terminal reconnect-required result after it is recorded", async () => {
+    const syncTransactions = vi.fn().mockResolvedValue({
+      statusCode: 502,
+      body: JSON.stringify({
+        ok: false,
+        error: "Plaid sync failed",
+        errorCode: "INVALID_ACCESS_TOKEN",
+        status: "ENV_MISMATCH_RECONNECT_REQUIRED",
+        reconnectRequired: true,
+      }),
+    });
+    vi.doMock("./lib/plaidService", () => ({ syncTransactions }));
+
+    const { handler } = await import("./plaidSyncWorker");
+    const result = await handler(sqsEvent([{ id: "m-reconnect", body: {
+      businessId: "biz-1",
+      accountId: "acct-1",
+    } }]));
+
+    expect(result.batchItemFailures).toEqual([]);
+    expect(syncTransactions).toHaveBeenCalledTimes(1);
+  });
+
   test("retries a queue message when another caller owns the account sync lease", async () => {
     const syncTransactions = vi.fn().mockResolvedValue({
       statusCode: 202,

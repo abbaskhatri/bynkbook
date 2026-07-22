@@ -26,6 +26,13 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
         const statusCode = Number(response?.statusCode ?? 500);
         const result = JSON.parse(response?.body ?? "{}");
         if (statusCode >= 400 || result?.ok === false) {
+          // The sync service has already persisted the reconnect state. Retrying
+          // a permanently invalid Item only creates queue churn and a false DLQ
+          // alarm; the next useful action belongs to the user in Plaid Link.
+          if (result?.reconnectRequired === true) {
+            complete = true;
+            break;
+          }
           throw new Error(result?.error ?? result?.message ?? `Plaid sync failed with ${statusCode}`);
         }
         if (result?.syncInProgress) {
