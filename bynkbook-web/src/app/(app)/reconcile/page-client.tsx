@@ -1446,18 +1446,11 @@ export default function ReconcilePageClient() {
     const snapshotAuditSucceeded = Boolean(res?.snapshotAuditSucceeded);
     const snapshotAuditSeen = Number(res?.snapshotAuditSeen ?? 0);
     const snapshotAuditRecoveredCount = Number(res?.snapshotAuditRecoveredCount ?? 0);
-    const snapshotAuditNewestDate = String(res?.snapshotAuditNewestDate ?? "").trim();
+    const regularNewCount = Math.max(0, newCount - snapshotAuditRecoveredCount);
     const snapshotAuditErrorCode = String(res?.snapshotAuditErrorCode ?? "").trim();
-    const plaidLastSuccessfulUpdateAt = String(res?.plaidLastSuccessfulUpdateAt ?? "").trim();
-    const plaidLastSuccessfulUpdateText = plaidLastSuccessfulUpdateAt
-      ? new Date(plaidLastSuccessfulUpdateAt).toLocaleString()
-      : "";
 
-    const syncParts = [
-      refreshSucceeded
-        ? `Bank checked: ${newCount} new`
-        : `Plaid updates synced: ${newCount} new`,
-    ];
+    const syncParts = [refreshSucceeded ? "Bank checked now" : "Plaid synced"];
+    if (regularNewCount > 0) syncParts.push(`${regularNewCount} new`);
     if (postedUpgradeCount > 0) syncParts.push(`${postedUpgradeCount} posted`);
     if (replacementUpgradeCount > 0) syncParts.push(`${replacementUpgradeCount} Plaid replacement merged`);
     if (accountReplayMergedCount > 0) syncParts.push(`${accountReplayMergedCount} reconnect replay merged`);
@@ -1465,13 +1458,12 @@ export default function ReconcilePageClient() {
     if (skippedHistoricalCount > 0) syncParts.push(`${skippedHistoricalCount} overlap skipped`);
     if (pendingCount > 0) syncParts.push(`${pendingCount} pending`);
     if (snapshotAuditRecoveredCount > 0) {
-      syncParts.push(`${snapshotAuditRecoveredCount} missed ${snapshotAuditRecoveredCount === 1 ? "transaction" : "transactions"} recovered`);
+      syncParts.push(`${snapshotAuditRecoveredCount} recovered`);
     }
-    else if (snapshotAuditSucceeded) syncParts.push(`recent snapshot checked (${snapshotAuditSeen})`);
+    else if (snapshotAuditSucceeded && !refreshSucceeded) syncParts.push(`snapshot checked (${snapshotAuditSeen})`);
     if (refreshRequested) {
-      if (refreshSucceeded) syncParts.push("fresh bank check completed");
-      else if (refreshUnavailable) syncParts.push("instant bank refresh unavailable");
-      else syncParts.push("latest available Plaid data checked");
+      if (refreshUnavailable) syncParts.push("instant refresh unavailable");
+      else if (!refreshSucceeded) syncParts.push("available data checked");
     }
 
     setSyncMsg(syncParts.join(" • "));
@@ -1480,24 +1472,17 @@ export default function ReconcilePageClient() {
       setPendingMsg("Pending shown read-only until posted.");
     } else if (refreshUnavailable) {
       setPendingMsgTone("warning");
-      const snapshotDetail = snapshotAuditSucceeded
-        ? snapshotAuditNewestDate
-          ? ` BynkBook also checked Plaid's recent account snapshot through ${new Date(`${snapshotAuditNewestDate}T00:00:00`).toLocaleDateString()} and found ${snapshotAuditRecoveredCount} missing transaction ${snapshotAuditRecoveredCount === 1 ? "record" : "records"}.`
-          : " BynkBook also checked Plaid's recent account snapshot, but Plaid returned no posted transactions in the audit window."
-        : snapshotAuditRequested && snapshotAuditErrorCode
-          ? " The recent Plaid snapshot consistency check could not complete."
-          : "";
       setPendingMsg(
-        plaidLastSuccessfulUpdateText
-          ? `Plaid last received bank data ${plaidLastSuccessfulUpdateText}.${snapshotDetail} Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update.`
-          : `${snapshotDetail.trim() ? `${snapshotDetail.trim()} ` : ""}Instant bank refresh is not enabled, so recent bank activity may arrive after Plaid's next scheduled update.`
+        snapshotAuditRequested && !snapshotAuditSucceeded && snapshotAuditErrorCode
+          ? "Scheduled updates; recent snapshot check could not finish."
+          : "Scheduled updates; latest available bank data checked."
       );
     } else if (refreshSucceeded) {
       setPendingMsgTone("muted");
-      setPendingMsg(newCount === 0 ? "The fresh bank check completed; no newer Plaid transactions were available." : null);
+      setPendingMsg(newCount === 0 ? "No newer transactions." : null);
     } else if (refreshDeferred) {
       setPendingMsgTone("muted");
-      setPendingMsg("The bank was checked recently, so BynkBook reused the existing five-minute provider cooldown.");
+      setPendingMsg("Checked recently; five-minute bank cooldown active.");
     } else if (refreshErrorCode) {
       setPendingMsgTone("warning");
       setPendingMsg("Instant Plaid refresh is temporarily unavailable; showing the latest synced data.");
@@ -1534,13 +1519,13 @@ export default function ReconcilePageClient() {
         if (outcome.kind === "timed_out") {
           setSyncMsg("The bank sync is taking longer than expected.");
           setPendingMsgTone("warning");
-          setPendingMsg("Automatic monitoring stopped after several minutes. You can safely use Refresh bank now again.");
+          setPendingMsg("Monitoring stopped. You can safely use Refresh again.");
           return;
         }
         if (outcome.kind === "error") {
           setSyncMsg((outcome.error as any)?.message ?? "Unable to confirm the bank sync result");
           setPendingMsgTone("warning");
-          setPendingMsg("Automatic monitoring stopped. You can safely use Refresh bank now again.");
+          setPendingMsg("Monitoring stopped. You can safely use Refresh again.");
           return;
         }
 
@@ -4854,15 +4839,15 @@ const displayBankActiveList = useMemo(() => {
 
         {/* Bank Transactions */}
         <div className="bb-spreadsheet-shell flex flex-col min-h-0 overflow-hidden rounded-lg">
-          <div className="px-3 py-2.5">
-            <div className="grid gap-x-4 gap-y-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-              <div className="min-w-0 space-y-1.5">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <div className="px-3 py-2">
+            <div className="grid gap-x-2 gap-y-1 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                   <div className="text-sm font-semibold text-bb-text">Bank transactions</div>
                   <StatusChip label="Source: Bank" tone="info" />
-                  {connectedPill}
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-bb-text-muted">
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-4 text-bb-text-muted">
+                  {connectedPill}
                   {plaidHasConnection ? (
                     <>
                       {plaid?.institutionName ? <span className="text-bb-text">{plaid.institutionName}</span> : <span>—</span>}
@@ -4917,28 +4902,30 @@ const displayBankActiveList = useMemo(() => {
                 </div>
               </div>
 
-              <div className="flex shrink-0 flex-wrap items-center gap-1.5 xl:justify-end [&>button]:whitespace-nowrap">
+              <div className="flex shrink-0 flex-wrap items-center gap-1 xl:justify-end [&>button]:whitespace-nowrap">
                 {!plaidHealthyConnected ? (
                   <button
                     type="button"
-                    className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                    className="h-7 px-1.5 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                     onClick={() => setOpenUpload(true)}
+                    title="Upload bank transactions from CSV"
                   >
-                    <Upload className="h-3.5 w-3.5" /> Upload CSV
+                    <Upload className="h-3.5 w-3.5" /> Upload
                   </button>
                 ) : (
                   <>
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                      className="h-7 px-1.5 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       onClick={() => setOpenUpload(true)}
+                      title="Upload bank transactions from CSV"
                     >
-                      <Upload className="h-3.5 w-3.5" /> Upload CSV
+                      <Upload className="h-3.5 w-3.5" /> Upload
                     </button>
 
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                      className="h-7 px-1.5 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       disabled={plaidSyncing}
                       title="Contact the bank now and import the latest available balance and transactions"
                       onClick={async () => {
@@ -4946,7 +4933,7 @@ const displayBankActiveList = useMemo(() => {
 
                         plaidSyncRequestRef.current = true;
                         setPlaidSyncing(true);
-                        setSyncMsg("Contacting the bank for the latest balance and transactions...");
+                        setSyncMsg("Contacting bank…");
                         setPendingMsg(null);
                         let monitoringActiveSync = false;
 
@@ -5012,12 +4999,12 @@ const displayBankActiveList = useMemo(() => {
                       }}
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${plaidSyncing ? "animate-spin" : ""}`} />
-                      {plaidSyncing ? "Contacting bank…" : "Refresh bank now"}
+                      {plaidSyncing ? "Contacting…" : "Refresh"}
                     </button>
 
                     <button
                       type="button"
-                      className="h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
+                      className="h-7 px-1.5 text-xs rounded-md border border-bb-border bg-bb-surface-card inline-flex items-center gap-1 hover:bg-bb-table-row-hover"
                       disabled={plaidSyncing || plaidCleanupBusy}
                       onClick={async () => {
                         if (!selectedBusinessId || !selectedAccountId) return;
@@ -5054,7 +5041,7 @@ const displayBankActiveList = useMemo(() => {
                       }}
                       title="Remove Plaid rows already represented by imported CSV transactions"
                     >
-                      <Wrench className="h-3.5 w-3.5" /> {plaidCleanupBusy ? "Cleaning..." : "CSV overlap"}
+                      <Wrench className="h-3.5 w-3.5" /> {plaidCleanupBusy ? "Cleaning…" : "Overlap"}
                     </button>
                     {plaidNewAccountsAvailable ? (
                       <PlaidConnectButton
@@ -5153,7 +5140,7 @@ const displayBankActiveList = useMemo(() => {
                     if (initialSyncFailed) {
                       setSyncMsg(`Initial transaction sync failed: ${syncResult?.error ?? "Unable to refresh transactions"}`);
                       setPendingMsgTone("warning");
-                      setPendingMsg("Connected bank, but the transaction list may be stale. Try Refresh bank now.");
+                      setPendingMsg("Connected, but transactions may be stale. Try Refresh.");
                     } else if (syncResult) {
                       const newCount = Number(syncResult?.newCount ?? 0);
                       const upgradedCount = Number(syncResult?.upgradedCount ?? 0);
