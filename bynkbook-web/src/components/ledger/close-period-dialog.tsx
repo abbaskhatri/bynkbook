@@ -4,6 +4,8 @@ import { type ReactNode, useMemo, useState } from "react";
 import { AppDialog } from "@/components/primitives/AppDialog";
 import { Button } from "@/components/ui/button";
 import { previewClosedPeriods, closeThroughDate } from "@/lib/api/closedPeriods";
+import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+import { latestCompletedMonth, monthToRange } from "@/lib/closed-periods/date-range";
 
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { DialogFooter } from "@/components/primitives/DialogFooter";
@@ -17,32 +19,6 @@ function todayYmdLocal() {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function monthNow() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${yyyy}-${mm}`;
-}
-
-// String-only days-in-month (no Date.UTC)
-function isLeapYear(y: number) {
-  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-}
-
-function lastDayOfMonth(yyyyMm: string) {
-  const y = Number(yyyyMm.slice(0, 4));
-  const m = Number(yyyyMm.slice(5, 7)); // 1-12
-  const days = [31, isLeapYear(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  const d = days[m - 1] ?? 30;
-  return String(d).padStart(2, "0");
-}
-
-function monthToRange(yyyyMm: string) {
-  const from = `${yyyyMm}-01`;
-  const to = `${yyyyMm}-${lastDayOfMonth(yyyyMm)}`;
-  return { from, to };
 }
 
 // Week helper: day math for +6 is acceptable (does not compute month ends)
@@ -75,12 +51,13 @@ export function ClosePeriodDialog(props: {
   accountName?: string | null;
 }) {
   const { open, onOpenChange, businessId, accountId, accountName } = props;
+  const todayYmd = useMemo(todayYmdLocal, []);
 
   const [mode, setMode] = useState<RangeMode>("MONTH");
-  const [month, setMonth] = useState(monthNow());
-  const [weekStart, setWeekStart] = useState(todayYmdLocal());
-  const [from, setFrom] = useState(todayYmdLocal());
-  const [to, setTo] = useState(todayYmdLocal());
+  const [month, setMonth] = useState(() => latestCompletedMonth(todayYmd));
+  const [weekStart, setWeekStart] = useState(todayYmd);
+  const [from, setFrom] = useState(todayYmd);
+  const [to, setTo] = useState(todayYmd);
 
   const effective = useMemo(() => {
     if (mode === "MONTH") return monthToRange(month);
@@ -98,8 +75,18 @@ export function ClosePeriodDialog(props: {
   const monthsAffected: string[] = preview?.months_affected ?? [];
   const isClean = !!stats?.is_clean;
   const uncategorizedCount = Number(stats?.entries_uncategorized ?? 0);
+  const rangeInvalid = effective.from > effective.to;
+  const endsInIncompleteMonth = effective.to.slice(0, 7) > latestCompletedMonth(todayYmd);
+
+  const invalidatePreview = () => {
+    setPreview(null);
+    setOverride(false);
+    setConfirmOverride(false);
+    setErr(null);
+  };
 
   async function runPreview() {
+    if (rangeInvalid || endsInIncompleteMonth) return;
     setLoading(true);
     setErr(null);
     setPreview(null);
@@ -117,7 +104,7 @@ export function ClosePeriodDialog(props: {
       });
       setPreview(res);
     } catch (e: any) {
-      setErr(e?.message ?? "Preview failed");
+      setErr(appErrorMessageOrNull(e) ?? "Preview failed");
     } finally {
       setLoading(false);
     }
@@ -143,7 +130,7 @@ export function ClosePeriodDialog(props: {
       await closeThroughDate(businessId, effective.to);
       onOpenChange(false);
     } catch (e: any) {
-      setErr(e?.message ?? "Close failed");
+      setErr(appErrorMessageOrNull(e) ?? "Close failed");
     } finally {
       setLoading(false);
     }
@@ -155,6 +142,8 @@ export function ClosePeriodDialog(props: {
     !preview ||
     monthsAffected.length === 0 ||
     loading ||
+    rangeInvalid ||
+    endsInIncompleteMonth ||
     (!isClean && !override);
 
   return (
@@ -201,9 +190,7 @@ export function ClosePeriodDialog(props: {
               type="button"
               onClick={() => {
                 setMode(t.k as RangeMode);
-                setPreview(null);
-                setErr(null);
-                setConfirmOverride(false);
+                invalidatePreview();
               }}
               className={tabButtonClass(mode === t.k)}
             >
@@ -221,9 +208,14 @@ export function ClosePeriodDialog(props: {
 
                 <AppDatePicker
                   value={month ? `${month}-01` : ""}
-                  onChange={(next) => setMonth(next ? next.slice(0, 7) : "")}
+                  onChange={(next) => {
+                    setMonth(next ? next.slice(0, 7) : "");
+                    invalidatePreview();
+                  }}
                   placeholder="Select month"
-                  allowClear
+                  allowClear={false}
+                  selectionMode="month"
+                  ariaLabel="Select month to close"
                   buttonClassName="h-9 text-sm"
                 />
               </div>
@@ -231,7 +223,15 @@ export function ClosePeriodDialog(props: {
               <>
               <div className="space-y-1.5">
                 <div className="text-xs font-medium text-bb-text-muted">Week start</div>
-                <AppDatePicker value={weekStart} onChange={(next) => setWeekStart(next)} allowClear={false} buttonClassName="h-9 text-sm" />
+                <AppDatePicker
+                  value={weekStart}
+                  onChange={(next) => {
+                    setWeekStart(next);
+                    invalidatePreview();
+                  }}
+                  allowClear={false}
+                  buttonClassName="h-9 text-sm"
+                />
               </div>
 
               <div className="space-y-1.5">
@@ -243,23 +243,53 @@ export function ClosePeriodDialog(props: {
               <>
               <div className="space-y-1.5">
                 <div className="text-xs font-medium text-bb-text-muted">From</div>
-                <AppDatePicker value={from} onChange={(next) => setFrom(next)} allowClear={false} buttonClassName="h-9 text-sm" />
+                <AppDatePicker
+                  value={from}
+                  onChange={(next) => {
+                    setFrom(next);
+                    invalidatePreview();
+                  }}
+                  allowClear={false}
+                  buttonClassName="h-9 text-sm"
+                />
               </div>
 
               <div className="space-y-1.5">
                 <div className="text-xs font-medium text-bb-text-muted">To</div>
-                <AppDatePicker value={to} onChange={(next) => setTo(next)} allowClear={false} buttonClassName="h-9 text-sm" />
+                <AppDatePicker
+                  value={to}
+                  onChange={(next) => {
+                    setTo(next);
+                    invalidatePreview();
+                  }}
+                  allowClear={false}
+                  buttonClassName="h-9 text-sm"
+                />
               </div>
               </>
             )}
           </div>
 
-          <Button variant="outline" size="sm" className="h-9 px-4" onClick={runPreview} disabled={loading}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-4 sm:self-end"
+            onClick={runPreview}
+            disabled={loading || rangeInvalid || endsInIncompleteMonth}
+          >
             {loading ? "Loading…" : "Preview"}
           </Button>
 
           {err ? <div className="sm:col-span-2 text-sm text-bb-status-danger-fg">{err}</div> : null}
         </div>
+
+        {rangeInvalid ? (
+          <div className="text-sm text-bb-status-warning-fg">The start date must be on or before the end date.</div>
+        ) : endsInIncompleteMonth ? (
+          <div className="text-sm text-bb-status-warning-fg">
+            Only completed months can be closed. Choose {latestCompletedMonth(todayYmd)} or earlier.
+          </div>
+        ) : null}
 
         {/* Stats */}
         <div className="overflow-hidden rounded-md border border-bb-border">

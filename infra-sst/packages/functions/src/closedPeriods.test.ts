@@ -157,4 +157,19 @@ describe("closed period preview", () => {
     expect(res.statusCode).toBe(403);
     expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled();
   });
+
+  test("binds contiguous SQL parameters for an all-accounts preview", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(previewEvent({ accountId: "all" }));
+
+    expect(res.statusCode).toBe(200);
+    for (const call of (prisma.$queryRawUnsafe as any).mock.calls) {
+      const [query, ...params] = call;
+      expect(String(query)).not.toContain("$4::date");
+      expect(String(query)).toContain("$2::date");
+      expect(String(query)).toContain("$3::date");
+      expect(params).toEqual([BUSINESS_ID, "2026-01-01", "2026-01-31"]);
+    }
+  });
 });

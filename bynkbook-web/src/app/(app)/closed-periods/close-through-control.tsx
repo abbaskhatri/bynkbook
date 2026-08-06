@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
 import { tabButtonClass } from "@/components/primitives/tokens";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
+import { latestCompletedMonth, monthEndYmd } from "@/lib/closed-periods/date-range";
 
 import { closeThroughDate, previewClosedPeriods } from "@/lib/api/closedPeriods";
 
@@ -21,15 +22,6 @@ function addDays(ymd: string, n: number) {
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const dd = String(dt.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function monthEndYmd(month: string) {
-  const y = Number(month.slice(0, 4));
-  const m = Number(month.slice(5, 7));
-  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  const d = days[Math.max(1, Math.min(12, m)) - 1] ?? 30;
-  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
 function MetricTile({ label, value }: { label: string; value: ReactNode }) {
@@ -63,7 +55,7 @@ export function CloseThroughControl({
   refresh,
 }: CloseThroughControlProps) {
   const [mode, setMode] = useState<RangeMode>("MONTH");
-  const [monthMode, setMonthMode] = useState<string>(""); // YYYY-MM
+  const [monthMode, setMonthMode] = useState<string>(() => latestCompletedMonth(todayYmd)); // YYYY-MM
   const [weekStart, setWeekStart] = useState<string>(todayYmd);
   const [customFrom, setCustomFrom] = useState<string>(todayYmd);
   const [customTo, setCustomTo] = useState<string>(todayYmd);
@@ -83,13 +75,22 @@ export function CloseThroughControl({
   const [previewBusy, setPreviewBusy] = useState(false);
   const [override, setOverride] = useState(false);
   const [confirmOverride, setConfirmOverride] = useState(false);
+  const rangeInvalid = effective.from > effective.to;
+  const endsInIncompleteMonth = monthEndYmd(effective.to.slice(0, 7)) > todayYmd;
 
   const monthsAffected: string[] = preview?.months_affected ?? [];
   const stats = preview?.stats ?? null;
   const isClean = !!stats?.is_clean;
 
+  const invalidatePreview = () => {
+    setPreview(null);
+    setOverride(false);
+    setConfirmOverride(false);
+  };
+
   const runPreview = async () => {
     if (!businessId) return;
+    if (rangeInvalid || endsInIncompleteMonth) return;
 
     setPreviewBusy(true);
     onError(null);
@@ -158,9 +159,7 @@ export function CloseThroughControl({
                 type="button"
                 onClick={() => {
                   setMode(t.k);
-                  setPreview(null);
-                  setConfirmOverride(false);
-                  setOverride(false);
+                  invalidatePreview();
                 }}
                 className={tabButtonClass(mode === t.k)}
               >
@@ -181,10 +180,13 @@ export function CloseThroughControl({
                   onChange={(next) => {
                     // Store as YYYY-MM (month selector), derived from picked date
                     setMonthMode(next ? next.slice(0, 7) : "");
+                    invalidatePreview();
                   }}
                   placeholder="Select month"
                   disabled={loading || !businessId || !canClose}
-                  allowClear
+                  allowClear={false}
+                  selectionMode="month"
+                  ariaLabel="Select month to close"
                   buttonClassName="h-9 text-sm"
                 />
               </div>
@@ -194,7 +196,10 @@ export function CloseThroughControl({
                   <div className="text-xs font-medium text-bb-text-muted">Week start</div>
                   <AppDatePicker
                     value={weekStart}
-                    onChange={(next) => setWeekStart(next)}
+                    onChange={(next) => {
+                      setWeekStart(next);
+                      invalidatePreview();
+                    }}
                     disabled={loading || !businessId || !canClose}
                     allowClear={false}
                     buttonClassName="h-9 text-sm"
@@ -220,7 +225,10 @@ export function CloseThroughControl({
                   <div className="text-xs font-medium text-bb-text-muted">From</div>
                   <AppDatePicker
                     value={customFrom}
-                    onChange={(next) => setCustomFrom(next)}
+                    onChange={(next) => {
+                      setCustomFrom(next);
+                      invalidatePreview();
+                    }}
                     disabled={loading || !businessId || !canClose}
                     allowClear={false}
                     buttonClassName="h-9 text-sm"
@@ -231,7 +239,10 @@ export function CloseThroughControl({
                   <div className="text-xs font-medium text-bb-text-muted">To</div>
                   <AppDatePicker
                     value={customTo}
-                    onChange={(next) => setCustomTo(next)}
+                    onChange={(next) => {
+                      setCustomTo(next);
+                      invalidatePreview();
+                    }}
                     disabled={loading || !businessId || !canClose}
                     allowClear={false}
                     buttonClassName="h-9 text-sm"
@@ -246,7 +257,7 @@ export function CloseThroughControl({
               size="sm"
               className="h-9 px-4"
               onClick={runPreview}
-              disabled={loading || previewBusy || !businessId || !canClose}
+              disabled={loading || previewBusy || !businessId || !canClose || rangeInvalid || endsInIncompleteMonth}
             >
               {previewBusy ? "Loading…" : "Preview"}
             </Button>
@@ -259,9 +270,13 @@ export function CloseThroughControl({
             {"  "}•{"  "}Today: <span className="font-medium tabular-nums">{todayYmd}</span>
           </div>
 
-          {effective.to > todayYmd ? (
+          {rangeInvalid ? (
             <div className="text-[11px] text-bb-status-warning-fg">
-              <span className="font-semibold">Can&rsquo;t close beyond today.</span> Choose an end date on or before today.
+              <span className="font-semibold">The start date must be on or before the end date.</span>
+            </div>
+          ) : endsInIncompleteMonth ? (
+            <div className="text-[11px] text-bb-status-warning-fg">
+              <span className="font-semibold">Only completed months can be closed.</span> Choose a period ending in {latestCompletedMonth(todayYmd)} or earlier.
             </div>
           ) : null}
         </div>
@@ -338,7 +353,8 @@ export function CloseThroughControl({
                 loading ||
                 !preview ||
                 !monthsAffected.length ||
-                effective.to > todayYmd ||
+                rangeInvalid ||
+                endsInIncompleteMonth ||
                 (!isClean && !override)
               }
               onClick={doClose}

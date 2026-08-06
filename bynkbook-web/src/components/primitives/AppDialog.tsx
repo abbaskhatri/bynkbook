@@ -66,8 +66,11 @@ export function AppDialog({
           onEscapeKeyDown={(event) => {
             if (!onClose) event.preventDefault();
           }}
-          onPointerDownOutside={(event) => {
-            if (disableOverlayClose || !onClose) event.preventDefault();
+          onInteractOutside={(event) => {
+            const target = event.target;
+            const isDatePickerInteraction =
+              target instanceof Element && !!target.closest("[data-app-date-picker-popover]");
+            if (isDatePickerInteraction || disableOverlayClose || !onClose) event.preventDefault();
           }}
           className={[
             "pointer-events-auto",

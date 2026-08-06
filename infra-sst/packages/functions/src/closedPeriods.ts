@@ -108,7 +108,9 @@ export async function handler(event: any) {
 
     // Stats via SQL to avoid heavy client loops and avoid missing relations
     const whereAcctSql = accountId ? `AND e.account_id = $2::uuid` : "";
-    const acctParam = accountId ?? biz; // placeholder when null; not used if whereAcctSql empty
+    const fromParam = accountId ? "$3" : "$2";
+    const toParam = accountId ? "$4" : "$3";
+    const queryParams = accountId ? [biz, accountId, from, to] : [biz, from, to];
 
     const totalRows: any[] = await prisma.$queryRawUnsafe(
       `
@@ -119,13 +121,10 @@ export async function handler(event: any) {
         AND e.deleted_at IS NULL
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
-        AND e.date >= $3::date
-        AND e.date <= $4::date
+        AND e.date >= ${fromParam}::date
+        AND e.date <= ${toParam}::date
       `,
-      biz,
-      acctParam,
-      from,
-      to
+      ...queryParams
     );
 
     const reconciliationExemptRows: any[] = await prisma.$queryRawUnsafe(
@@ -141,13 +140,10 @@ export async function handler(event: any) {
         AND e.deleted_at IS NULL
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
-        AND e.date >= $3::date
-        AND e.date <= $4::date
+        AND e.date >= ${fromParam}::date
+        AND e.date <= ${toParam}::date
       `,
-      biz,
-      acctParam,
-      from,
-      to
+      ...queryParams
     );
 
     const reconciledRows: any[] = await prisma.$queryRawUnsafe(
@@ -199,18 +195,15 @@ export async function handler(event: any) {
         AND e.deleted_at IS NULL
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
-        AND e.date >= $3::date
-        AND e.date <= $4::date
+        AND e.date >= ${fromParam}::date
+        AND e.date <= ${toParam}::date
         AND (
           UPPER(COALESCE(e.type, '')) = 'ADJUSTMENT'
           OR COALESCE(mgm.matched_abs_cents, 0) >= ABS(e.amount_cents)
           OR COALESCE(lbm.matched_abs_cents, 0) >= ABS(e.amount_cents)
         )
       `,
-      biz,
-      acctParam,
-      from,
-      to
+      ...queryParams
     );
 
     const issuesRows: any[] = await prisma.$queryRawUnsafe(
@@ -227,13 +220,10 @@ export async function handler(event: any) {
         AND e.deleted_at IS NULL
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
-        AND e.date >= $3::date
-        AND e.date <= $4::date
+        AND e.date >= ${fromParam}::date
+        AND e.date <= ${toParam}::date
       `,
-      biz,
-      acctParam,
-      from,
-      to
+      ...queryParams
     );
 
     const uncategorizedRows: any[] = await prisma.$queryRawUnsafe(
@@ -247,13 +237,10 @@ export async function handler(event: any) {
         AND UPPER(COALESCE(e.status, '')) NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
         AND e.category_id IS NULL
-        AND e.date >= $3::date
-        AND e.date <= $4::date
+        AND e.date >= ${fromParam}::date
+        AND e.date <= ${toParam}::date
       `,
-      biz,
-      acctParam,
-      from,
-      to
+      ...queryParams
     );
 
     const entries_total = Number(totalRows?.[0]?.n ?? 0);
