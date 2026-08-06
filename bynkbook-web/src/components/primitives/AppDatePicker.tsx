@@ -20,6 +20,7 @@ export type AppDatePickerProps = {
     showIcon?: boolean;
 
     allowClear?: boolean;
+    selectionMode?: "date" | "month";
 };
 
 function pad2(n: number) {
@@ -41,9 +42,21 @@ function dateToYmdLocal(dt: Date): string {
     return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
 
-function formatPlaceholderOrPretty(ymd: string, placeholder: string, displayFormat: "pretty" | "numeric") {
+function formatPlaceholderOrPretty(
+    ymd: string,
+    placeholder: string,
+    displayFormat: "pretty" | "numeric",
+    selectionMode: "date" | "month"
+) {
     const dt = ymdToDateLocal(ymd);
     if (!dt) return placeholder;
+    if (selectionMode === "month") {
+        try {
+            return dt.toLocaleDateString(undefined, { year: "numeric", month: "long" });
+        } catch {
+            return ymd.slice(0, 7);
+        }
+    }
     if (displayFormat === "numeric") {
         return `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())}/${String(dt.getFullYear()).slice(-2)}`;
     }
@@ -89,6 +102,7 @@ export function AppDatePicker({
     displayFormat = "pretty",
     showIcon = true,
     allowClear = true,
+    selectionMode = "date",
 }: AppDatePickerProps) {
     const [open, setOpen] = React.useState(false);
 
@@ -96,7 +110,7 @@ export function AppDatePicker({
     const today = clampToDateOnly(new Date());
 
     const anchorRef = React.useRef<HTMLButtonElement | null>(null);
-    const [popoverPos, setPopoverPos] = React.useState<{ left: number; top: number }>({ left: 0, top: 0 });
+    const [popoverPos, setPopoverPos] = React.useState<{ left: number; top: number; width: number } | null>(null);
 
     const [viewMonth, setViewMonth] = React.useState<Date>(() => {
         return selected ? startOfMonth(selected) : startOfMonth(today);
@@ -112,6 +126,38 @@ export function AppDatePicker({
     // Close on outside click / escape
     const rootRef = React.useRef<HTMLDivElement | null>(null);
     const popoverRef = React.useRef<HTMLDivElement | null>(null);
+
+    const updatePopoverPosition = React.useCallback(() => {
+        const el = anchorRef.current;
+        if (!el) return;
+
+        const r = el.getBoundingClientRect();
+        const popoverWidth = Math.min(320, Math.max(0, window.innerWidth - 16));
+        const popoverHeight = selectionMode === "month" ? 300 : 380;
+        const left = Math.max(8, Math.min(r.left, window.innerWidth - popoverWidth - 8));
+        const spaceBelow = window.innerHeight - r.bottom;
+        const spaceAbove = r.top;
+        const top =
+            spaceBelow >= popoverHeight + 8
+                ? r.bottom + 8
+                : spaceAbove >= popoverHeight + 8
+                    ? r.top - popoverHeight - 8
+                    : Math.max(8, Math.min(r.bottom + 8, window.innerHeight - popoverHeight - 8));
+
+        setPopoverPos((current) =>
+            current?.left === left && current?.top === top && current?.width === popoverWidth
+                ? current
+                : { left, top, width: popoverWidth }
+        );
+    }, [selectionMode]);
+
+    React.useLayoutEffect(() => {
+        if (!open) {
+            setPopoverPos(null);
+            return;
+        }
+        updatePopoverPosition();
+    }, [open, updatePopoverPosition]);
 
     React.useEffect(() => {
         if (!open) return;
@@ -135,19 +181,20 @@ export function AppDatePicker({
             if (e.key === "Escape") setOpen(false);
         };
 
-        const onScroll = () => {
-            setOpen(false);
-        };
+        const onScroll = () => setOpen(false);
+        const onResize = () => updatePopoverPosition();
 
         document.addEventListener("mousedown", onDocMouseDown);
         document.addEventListener("keydown", onKeyDown);
         window.addEventListener("scroll", onScroll, true);
+        window.addEventListener("resize", onResize);
         return () => {
             document.removeEventListener("mousedown", onDocMouseDown);
             document.removeEventListener("keydown", onKeyDown);
             window.removeEventListener("scroll", onScroll, true);
+            window.removeEventListener("resize", onResize);
         };
-    }, [open]);
+    }, [open, updatePopoverPosition]);
 
     const monthLabel = React.useMemo(() => {
         try {
@@ -193,6 +240,8 @@ export function AppDatePicker({
             <button
                 type="button"
                 aria-label={ariaLabel}
+                aria-haspopup="dialog"
+                aria-expanded={open}
                 disabled={disabled}
                 onClick={() => {
                     if (disabled) return;
@@ -201,8 +250,8 @@ export function AppDatePicker({
                 ref={anchorRef}
                 className={[
                     inputH7,
-                    showIcon ? "pl-8" : "pl-2",
-                    allowClear ? "pr-8" : "pr-2",
+                    showIcon ? "!pl-9" : "!pl-2",
+                    allowClear ? "!pr-9" : "!pr-2",
                     "relative text-left flex items-center whitespace-nowrap",
                     disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-bb-table-row-hover",
                     buttonClassName,
@@ -212,7 +261,7 @@ export function AppDatePicker({
                     <CalendarDays className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-bb-text-subtle" />
                 ) : null}
                 <span className={[value ? "text-bb-text" : "text-bb-input-placeholder", "min-w-0 truncate whitespace-nowrap"].join(" ")}>
-                    {formatPlaceholderOrPretty(value, placeholder, displayFormat)}
+                    {formatPlaceholderOrPretty(value, placeholder, displayFormat, selectionMode)}
                 </span>
             </button>
 
@@ -240,40 +289,19 @@ export function AppDatePicker({
               </AppTooltip>
             ) : null}
 
-            {open && typeof document !== "undefined"
-                ? (() => {
-                    const el = anchorRef.current;
-                    if (el) {
-                        const r = el.getBoundingClientRect();
-                        const popoverWidth = 320;
-                        const popoverHeight = 340;
-
-                        const left = Math.max(8, Math.min(r.left, window.innerWidth - popoverWidth - 8));
-
-                        const spaceBelow = window.innerHeight - r.bottom;
-                        const spaceAbove = r.top;
-
-                        const top =
-                            spaceBelow >= popoverHeight + 8
-                                ? r.bottom + 8
-                                : spaceAbove >= popoverHeight + 8
-                                    ? r.top - popoverHeight - 8
-                                    : Math.max(8, Math.min(r.bottom + 8, window.innerHeight - popoverHeight - 8));
-
-                        if (popoverPos.left !== left || popoverPos.top !== top) {
-                            setTimeout(() => setPopoverPos({ left, top }), 0);
-                        }
-                    }
-
-                    return createPortal(
+            {open && popoverPos && typeof document !== "undefined"
+                ? createPortal(
                         <div
                             ref={popoverRef}
-                            style={{ position: "fixed", left: popoverPos.left, top: popoverPos.top, width: 320, zIndex: 60 }}
-                            className="rounded-2xl border border-bb-border bg-bb-dialog-bg text-bb-text shadow-xl p-3"
+                            style={{ position: "fixed", left: popoverPos.left, top: popoverPos.top, width: popoverPos.width, zIndex: 60 }}
+                            className="pointer-events-auto rounded-xl border border-bb-border bg-bb-dialog-bg p-3 text-bb-text shadow-xl"
+                            data-app-date-picker-popover
+                            role="dialog"
+                            aria-label={selectionMode === "month" ? "Choose month" : "Choose date"}
                         >
                             {/* Header */}
                             <div className="grid grid-cols-[40px_1fr_40px] items-center mb-2">
-                                <AppTooltip content="Previous month" side="bottom">
+                                <AppTooltip content={selectionMode === "month" ? "Previous year" : "Previous month"} side="bottom">
                                     <button
                                         type="button"
                                         className={[
@@ -281,16 +309,18 @@ export function AppDatePicker({
                                             "inline-flex items-center justify-center",
                                             ringFocus,
                                         ].join(" ")}
-                                        onClick={() => setViewMonth((m) => addMonths(m, -1))}
-                                        aria-label="Previous month"
+                                        onClick={() => setViewMonth((m) => addMonths(m, selectionMode === "month" ? -12 : -1))}
+                                        aria-label={selectionMode === "month" ? "Previous year" : "Previous month"}
                                     >
                                         <ChevronLeft className="h-5 w-5 text-bb-text-muted" />
                                     </button>
                                 </AppTooltip>
 
-                                <div className="text-base font-semibold text-bb-text text-center">{monthLabel}</div>
+                                <div className="text-center text-base font-semibold text-bb-text">
+                                    {selectionMode === "month" ? viewMonth.getFullYear() : monthLabel}
+                                </div>
 
-                                <AppTooltip content="Next month" side="bottom">
+                                <AppTooltip content={selectionMode === "month" ? "Next year" : "Next month"} side="bottom">
                                     <button
                                         type="button"
                                         className={[
@@ -298,89 +328,128 @@ export function AppDatePicker({
                                             "inline-flex items-center justify-center",
                                             ringFocus,
                                         ].join(" ")}
-                                        onClick={() => setViewMonth((m) => addMonths(m, 1))}
-                                        aria-label="Next month"
+                                        onClick={() => setViewMonth((m) => addMonths(m, selectionMode === "month" ? 12 : 1))}
+                                        aria-label={selectionMode === "month" ? "Next year" : "Next month"}
                                     >
                                         <ChevronRight className="h-5 w-5 text-bb-text-muted" />
                                     </button>
                                 </AppTooltip>
                             </div>
 
-                            {/* Weekdays */}
-                            <div className="grid grid-cols-7 text-[11px] font-medium text-bb-text-muted mb-1">
-                                <div className="text-center">Su</div>
-                                <div className="text-center">Mo</div>
-                                <div className="text-center">Tu</div>
-                                <div className="text-center">We</div>
-                                <div className="text-center">Th</div>
-                                <div className="text-center">Fr</div>
-                                <div className="text-center">Sa</div>
-                            </div>
+                            {selectionMode === "date" ? (
+                                <>
+                                    {/* Weekdays */}
+                                    <div className="mb-1 grid grid-cols-7 text-[11px] font-medium text-bb-text-muted">
+                                        <div className="text-center">Su</div>
+                                        <div className="text-center">Mo</div>
+                                        <div className="text-center">Tu</div>
+                                        <div className="text-center">We</div>
+                                        <div className="text-center">Th</div>
+                                        <div className="text-center">Fr</div>
+                                        <div className="text-center">Sa</div>
+                                    </div>
 
-                            {/* Grid */}
-                            <div className="grid grid-cols-7 gap-1">
-                                {grid.flat().map(({ date, inMonth }) => {
-                                    const isToday = sameDay(date, today);
-                                    const isSelected = selected ? sameDay(date, selected) : false;
+                                    {/* Grid */}
+                                    <div className="grid grid-cols-7 gap-1">
+                                        {grid.flat().map(({ date, inMonth }) => {
+                                            const isToday = sameDay(date, today);
+                                            const isSelected = selected ? sameDay(date, selected) : false;
 
-                                    return (
-                                        <button
-                                            key={dateToYmdLocal(date)}
-                                            type="button"
-                                            className={[
-                                                "h-10 w-10 rounded-xl text-sm flex items-center justify-center",
-                                                inMonth ? "text-bb-text" : "text-bb-text-subtle",
-                                                !disabled ? "hover:bg-primary/10" : "",
-                                                isToday ? "bg-primary/10 ring-1 ring-primary/25" : "",
-                                                isSelected ? "bg-primary text-primary-foreground hover:bg-primary" : "",
-                                                ringFocus,
-                                            ].join(" ")}
-                                            disabled={disabled}
-                                            onClick={() => {
-                                                if (disabled) return;
-                                                onChange(dateToYmdLocal(date));
-                                                setOpen(false);
-                                            }}
-                                            aria-label={date.toDateString()}
-                                            title={date.toDateString()}
-                                        >
-                                            {date.getDate()}
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                                            return (
+                                                <button
+                                                    key={dateToYmdLocal(date)}
+                                                    type="button"
+                                                    className={[
+                                                        "h-10 w-10 rounded-xl text-sm flex items-center justify-center",
+                                                        inMonth ? "text-bb-text" : "text-bb-text-subtle",
+                                                        !disabled ? "hover:bg-primary/10" : "",
+                                                        isToday ? "bg-primary/10 ring-1 ring-primary/25" : "",
+                                                        isSelected ? "bg-primary text-primary-foreground hover:bg-primary" : "",
+                                                        ringFocus,
+                                                    ].join(" ")}
+                                                    disabled={disabled}
+                                                    onClick={() => {
+                                                        if (disabled) return;
+                                                        onChange(dateToYmdLocal(date));
+                                                        setOpen(false);
+                                                    }}
+                                                    aria-label={date.toDateString()}
+                                                    title={date.toDateString()}
+                                                >
+                                                    {date.getDate()}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="grid grid-cols-3 gap-2 py-1">
+                                    {Array.from({ length: 12 }, (_, monthIndex) => {
+                                        const monthDate = new Date(viewMonth.getFullYear(), monthIndex, 1);
+                                        const isSelected = selected
+                                            ? selected.getFullYear() === monthDate.getFullYear() && selected.getMonth() === monthIndex
+                                            : false;
+                                        const isCurrent = today.getFullYear() === monthDate.getFullYear() && today.getMonth() === monthIndex;
+                                        return (
+                                            <button
+                                                key={monthIndex}
+                                                type="button"
+                                                className={[
+                                                    "h-10 rounded-lg text-sm font-medium",
+                                                    "hover:bg-primary/10",
+                                                    isCurrent ? "bg-primary/10 ring-1 ring-primary/25" : "",
+                                                    isSelected ? "bg-primary text-primary-foreground hover:bg-primary" : "text-bb-text",
+                                                    ringFocus,
+                                                ].join(" ")}
+                                                onClick={() => {
+                                                    onChange(dateToYmdLocal(monthDate));
+                                                    setOpen(false);
+                                                }}
+                                                aria-label={monthDate.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                                            >
+                                                {monthDate.toLocaleDateString(undefined, { month: "short" })}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
 
                             {/* Footer */}
                             <div className="mt-2 flex items-center justify-between">
-                                <button
-                                    type="button"
-                                    className={["h-8 px-2 text-xs rounded-md text-bb-text-muted hover:bg-bb-table-row-hover", ringFocus].join(" ")}
-                                    onClick={() => {
-                                        onChange("");
-                                        setOpen(false);
-                                    }}
-                                    disabled={disabled}
-                                >
-                                    Clear
-                                </button>
+                                {allowClear ? (
+                                    <button
+                                        type="button"
+                                        className={["h-8 px-2 text-xs rounded-md text-bb-text-muted hover:bg-bb-table-row-hover", ringFocus].join(" ")}
+                                        onClick={() => {
+                                            onChange("");
+                                            setOpen(false);
+                                        }}
+                                        disabled={disabled}
+                                    >
+                                        Clear
+                                    </button>
+                                ) : <span />}
 
                                 <button
                                     type="button"
                                     className={["h-8 px-2 text-xs rounded-md text-bb-text-muted hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                                     onClick={() => {
-                                        onChange(dateToYmdLocal(today));
+                                        onChange(
+                                            selectionMode === "month"
+                                                ? dateToYmdLocal(startOfMonth(today))
+                                                : dateToYmdLocal(today)
+                                        );
                                         setViewMonth(startOfMonth(today));
                                         setOpen(false);
                                     }}
                                     disabled={disabled}
                                 >
-                                    Today
+                                    {selectionMode === "month" ? "This month" : "Today"}
                                 </button>
                             </div>
                         </div>,
                         document.body
-                    );
-                })()
+                    )
                 : null}
         </div>
     );

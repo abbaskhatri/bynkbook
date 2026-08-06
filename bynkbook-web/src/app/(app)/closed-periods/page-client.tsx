@@ -47,6 +47,7 @@ export default function ClosedPeriodsPageClient() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [errSource, setErrSource] = useState<"load" | "action">("load");
 
   const bannerMsg = err || appErrorMessageOrNull(businessesQ.error) || null;
 
@@ -94,6 +95,7 @@ export default function ClosedPeriodsPageClient() {
       }
 
     } catch (e: any) {
+      setErrSource("load");
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
@@ -110,6 +112,7 @@ export default function ClosedPeriodsPageClient() {
       setReopenMonth("");
       await refresh();
     } catch (e: any) {
+      setErrSource("action");
       setErr(appErrorMessageOrNull(e) ?? "Something went wrong. Try again.");
     } finally {
       setLoading(false);
@@ -156,7 +159,11 @@ export default function ClosedPeriodsPageClient() {
 
         {bannerMsg ? (
           <div className="px-3 pb-2">
-            <InlineBanner title="Can’t load closed periods" message={bannerMsg} onRetry={businessId ? refresh : () => { }} />
+            <InlineBanner
+              title={errSource === "action" ? "Couldn’t update closed periods" : "Can’t load closed periods"}
+              message={bannerMsg}
+              onRetry={errSource === "load" && businessId ? refresh : null}
+            />
           </div>
         ) : null}
 
@@ -201,7 +208,10 @@ export default function ClosedPeriodsPageClient() {
               loading={loading}
               canClose={canClose}
               canReopen={canReopen}
-              onError={setErr}
+              onError={(message) => {
+                setErr(message);
+                if (message) setErrSource("action");
+              }}
               onLoadingChange={setLoading}
               refresh={refresh}
             />
