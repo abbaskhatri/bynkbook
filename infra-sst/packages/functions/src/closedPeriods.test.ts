@@ -40,8 +40,8 @@ async function loadHandler(options: {
       ),
     },
     $queryRawUnsafe: vi.fn(async (query: string) => {
-      if (query.includes('INNER JOIN "account" a')) return [{ n: options.reconciliationExempt ?? 0 }];
       if (query.includes("active_match_group_amounts")) return [{ n: options.reconciled ?? 0 }];
+      if (query.includes('INNER JOIN "account" a')) return [{ n: options.reconciliationExempt ?? 0 }];
       if (query.includes("FROM \"entry_issues\"")) return [{ n: options.issuesOpen ?? 0 }];
       if (query.includes("e.category_id IS NULL")) return [{ n: options.uncategorized ?? 0 }];
       return [{ n: options.total ?? 0 }];
@@ -108,7 +108,7 @@ describe("closed period preview", () => {
     expect(reconciledQuery).not.toContain("category_id IS NULL");
   });
 
-  test("does not require cash book entries to be bank reconciled", async () => {
+  test("does not require exempt entries to be bank reconciled", async () => {
     const { handler, prisma } = await loadHandler({
       total: 4,
       reconciled: 1,
@@ -131,6 +131,13 @@ describe("closed period preview", () => {
 
     const exemptQuery = rawQueryTexts(prisma).find((query) => query.includes('INNER JOIN "account" a'));
     expect(exemptQuery).toContain("UPPER(COALESCE(a.type, '')) = 'CASH'");
+    expect(exemptQuery).toContain("COALESCE(e.is_adjustment, false) = true");
+    expect(exemptQuery).toContain("NOT IN ('INCOME', 'EXPENSE')");
+
+    const reconciledQuery = rawQueryTexts(prisma).find((query) => query.includes("active_match_group_amounts"));
+    expect(reconciledQuery).toContain("UPPER(COALESCE(a.type, '')) <> 'CASH'");
+    expect(reconciledQuery).toContain("COALESCE(e.is_adjustment, false) = false");
+    expect(reconciledQuery).toContain("IN ('INCOME', 'EXPENSE')");
   });
 
   test("excludes opening balance rows from period totals and issue counts", async () => {
@@ -156,6 +163,31 @@ describe("closed period preview", () => {
 
     expect(res.statusCode).toBe(403);
     expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  test("uses the same actionable issue scope as the Issues attention count", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(previewEvent());
+    expect(res.statusCode).toBe(200);
+
+    const issuesQuery = rawQueryTexts(prisma).find((query) => query.includes('FROM "entry_issues"'));
+    expect(issuesQuery).toContain("ei.issue_type IN ('DUPLICATE', 'STALE_CHECK')");
+    expect(issuesQuery).toContain("COUNT(*) FILTER (WHERE ei.issue_type = 'DUPLICATE')");
+    expect(issuesQuery).toContain("NULLIF(TRIM(group_key), '') IS NOT NULL");
+    expect(issuesQuery).toContain("duplicate_group_count >= 2");
+    expect(issuesQuery).not.toContain("MISSING_CATEGORY");
+  });
+
+  test("excludes inactive entries from every close-readiness count", async () => {
+    const { handler, prisma } = await loadHandler();
+
+    const res = await handler(previewEvent());
+    expect(res.statusCode).toBe(200);
+
+    for (const queryText of rawQueryTexts(prisma)) {
+      expect(queryText).toContain("NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')");
+    }
   });
 
   test("binds contiguous SQL parameters for an all-accounts preview", async () => {

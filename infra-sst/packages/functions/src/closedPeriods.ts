@@ -119,6 +119,7 @@ export async function handler(event: any) {
       WHERE e.business_id = $1::uuid
         ${whereAcctSql}
         AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.status, '')) NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
         AND e.date >= ${fromParam}::date
@@ -136,12 +137,17 @@ export async function handler(event: any) {
        AND a.business_id = e.business_id
       WHERE e.business_id = $1::uuid
         ${whereAcctSql}
-        AND UPPER(COALESCE(a.type, '')) = 'CASH'
         AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.status, '')) NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
         AND e.date >= ${fromParam}::date
         AND e.date <= ${toParam}::date
+        AND (
+          UPPER(COALESCE(a.type, '')) = 'CASH'
+          OR COALESCE(e.is_adjustment, false) = true
+          OR UPPER(COALESCE(e.type, '')) NOT IN ('INCOME', 'EXPENSE')
+        )
       `,
       ...queryParams
     );
@@ -182,6 +188,9 @@ export async function handler(event: any) {
       )
       SELECT COUNT(DISTINCT e.id)::int AS n
       FROM "entry" e
+      INNER JOIN "account" a
+        ON a.id = e.account_id
+       AND a.business_id = e.business_id
       LEFT JOIN active_match_group_amounts mgm
         ON mgm.entry_id = e.id
        AND mgm.business_id = e.business_id
@@ -193,13 +202,16 @@ export async function handler(event: any) {
       WHERE e.business_id = $1::uuid
         ${whereAcctSql}
         AND e.deleted_at IS NULL
+        AND UPPER(COALESCE(e.status, '')) NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')
         AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
         AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
         AND e.date >= ${fromParam}::date
         AND e.date <= ${toParam}::date
+        AND UPPER(COALESCE(a.type, '')) <> 'CASH'
+        AND COALESCE(e.is_adjustment, false) = false
+        AND UPPER(COALESCE(e.type, '')) IN ('INCOME', 'EXPENSE')
         AND (
-          UPPER(COALESCE(e.type, '')) = 'ADJUSTMENT'
-          OR COALESCE(mgm.matched_abs_cents, 0) >= ABS(e.amount_cents)
+          COALESCE(mgm.matched_abs_cents, 0) >= ABS(e.amount_cents)
           OR COALESCE(lbm.matched_abs_cents, 0) >= ABS(e.amount_cents)
         )
       `,
@@ -208,20 +220,37 @@ export async function handler(event: any) {
 
     const issuesRows: any[] = await prisma.$queryRawUnsafe(
       `
+      WITH active_issue_rows AS (
+        SELECT
+          ei.id,
+          ei.issue_type,
+          ei.group_key,
+          e.date,
+          COUNT(*) FILTER (WHERE ei.issue_type = 'DUPLICATE') OVER (
+            PARTITION BY ei.business_id, ei.account_id, COALESCE(ei.group_key, '')
+          ) AS duplicate_group_count
+        FROM "entry_issues" ei
+        JOIN "entry" e
+          ON e.id = ei.entry_id
+         AND e.business_id = ei.business_id
+         AND e.account_id = ei.account_id
+        WHERE ei.business_id = $1::uuid
+          ${accountId ? "AND ei.account_id = $2::uuid" : ""}
+          AND ei.status = 'OPEN'
+          AND ei.issue_type IN ('DUPLICATE', 'STALE_CHECK')
+          AND e.deleted_at IS NULL
+          AND UPPER(COALESCE(e.status, '')) NOT IN ('VOIDED', 'DELETED', 'SOFT_DELETED', 'REMOVED')
+          AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
+          AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
+      )
       SELECT COUNT(*)::int AS n
-      FROM "entry_issues" ei
-      JOIN "entry" e
-        ON e.id = ei.entry_id
-       AND e.business_id = ei.business_id
-       AND e.account_id = ei.account_id
-      WHERE ei.business_id = $1::uuid
-        ${accountId ? "AND ei.account_id = $2::uuid" : ""}
-        AND ei.status = 'OPEN'
-        AND e.deleted_at IS NULL
-        AND UPPER(COALESCE(e.type, '')) <> 'OPENING'
-        AND COALESCE(LOWER(TRIM(e.payee)), '') NOT LIKE 'opening balance%'
-        AND e.date >= ${fromParam}::date
-        AND e.date <= ${toParam}::date
+      FROM active_issue_rows
+      WHERE date >= ${fromParam}::date
+        AND date <= ${toParam}::date
+        AND (
+          issue_type <> 'DUPLICATE'
+          OR (NULLIF(TRIM(group_key), '') IS NOT NULL AND duplicate_group_count >= 2)
+        )
       `,
       ...queryParams
     );
