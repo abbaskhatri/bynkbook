@@ -304,10 +304,11 @@ export function ClosePeriodDialog(props: {
             {!preview ? (
               <div className="text-sm text-bb-text-muted">Preview to see totals and recommendation.</div>
             ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <MetricTile label="Total" value={stats.entries_total} />
                 <MetricTile label="Reconciled" value={stats.entries_reconciled} />
                 <MetricTile label="Unreconciled" value={stats.entries_unreconciled} />
+                <MetricTile label="No match needed" value={stats.entries_reconciliation_exempt ?? 0} />
                 <MetricTile label="Open issues" value={stats.issues_open} />
                 <MetricTile label="Uncategorized" value={uncategorizedCount} />
               </div>
