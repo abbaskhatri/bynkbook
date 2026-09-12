@@ -279,3 +279,12 @@ describe("reports category composition", () => {
     });
   });
 });
+
+test("setup facts remain complete in an empty reporting period", async () => {
+  const { handler, prisma } = await loadHandler();
+  (prisma.category as any).count = vi.fn(async () => 12);
+  (prisma.entry as any).findFirst = vi.fn(async () => ({ id: "historical-entry" }));
+  const response = JSON.parse((await handler(reportsEvent("/reports/accounts/summary", { includeSetup: "1", from: "2026-09-01", to: "2026-09-30" }))).body);
+  expect(response.setup).toEqual({ categories_count: 12, has_entries: true });
+  expect((prisma.entry as any).findFirst).toHaveBeenCalledWith({ where: { business_id: BUSINESS_ID, deleted_at: null, type: { not: "OPENING" } }, select: { id: true } });
+});

@@ -4,7 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool, type PoolConfig } from "pg";
 
 let prisma: PrismaClient | null = null;
-let pool: Pool | null = null;
+let initializing: Promise<PrismaClient> | null = null;
 let cachedDatabaseUrl: string | null = null;
 let cachedDatabaseCa: string | null = null;
 
@@ -32,10 +32,19 @@ export function stripConnectionStringSslParams(databaseUrl: string) {
   return url.toString();
 }
 
+function positiveBudget(value: string | undefined, fallback: number, maximum: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+}
+
 export function buildPgPoolConfig(args: { databaseUrl: string; ssl: DbSslConfig }): PoolConfig {
   return {
     connectionString: stripConnectionStringSslParams(args.databaseUrl),
     ssl: args.ssl,
+    max: positiveBudget(process.env.DB_POOL_MAX, 4, 20),
+    connectionTimeoutMillis: positiveBudget(process.env.DB_CONNECT_TIMEOUT_MS, 5_000, 30_000),
+    idleTimeoutMillis: 30_000,
+    statement_timeout: positiveBudget(process.env.DB_STATEMENT_TIMEOUT_MS, 30_000, 240_000),
   };
 }
 
@@ -79,15 +88,22 @@ async function getSslConfig(): Promise<DbSslConfig> {
 
 export async function getPrisma() {
   if (prisma) return prisma;
-
-  const url = await getDatabaseUrl();
-
-  pool = new Pool(buildPgPoolConfig({
-    databaseUrl: url,
-    ssl: await getSslConfig(),
-  }));
-
-  const adapter = new PrismaPg(pool);
-  prisma = new PrismaClient({ adapter });
-  return prisma;
+  if (initializing) return initializing;
+  initializing = (async () => {
+    const [url, ssl] = await Promise.all([getDatabaseUrl(), getSslConfig()]);
+    const pool = new Pool(buildPgPoolConfig({ databaseUrl: url, ssl }));
+    try {
+      prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+      return prisma;
+    } catch (error) {
+      await pool.end();
+      throw error;
+    }
+  })();
+  try {
+    return await initializing;
+  } finally {
+    // A transient secret/config failure must not poison a warm runtime.
+    initializing = null;
+  }
 }

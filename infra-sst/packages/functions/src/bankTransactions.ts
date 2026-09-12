@@ -1,3 +1,4 @@
+import { canReadFeatures } from "./lib/authz";
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
@@ -1824,6 +1825,7 @@ export async function handler(event: any) {
   // -------------------------
   // GET list
   // -------------------------
+  if (!await canReadFeatures(prisma, businessId, String(role), ["reconcile"])) return json(403, { ok: false, error: "This role cannot view bank transactions." });
   const q = event?.queryStringParameters ?? {};
   const limit = parseLimit(q);
   const status = parseStatusParam(q);
@@ -1870,6 +1872,8 @@ export async function handler(event: any) {
       whereBase.amount_cents = { not: 0n };
     }
   }
+
+  if (q.transactionId) whereBase.AND = [...(whereBase.AND ?? []), { id: String(q.transactionId) }];
 
   const where: any = cursor
     ? { ...whereBase, AND: [...(whereBase.AND ?? []), cursorWhere(cursor)] }

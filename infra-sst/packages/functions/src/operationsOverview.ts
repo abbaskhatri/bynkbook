@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { getPrisma } from "./lib/db";
 import { actionableUncategorizedEntryWhere } from "./lib/uncategorizedEntries";
-import { authorizeWrite } from "./lib/authz";
+import { authorizeWrite, canReadFeatures } from "./lib/authz";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
 import { logActivity } from "./lib/activityLog";
 import { acquireTransactionAdvisoryLock } from "./lib/advisoryLock";
@@ -323,7 +323,7 @@ export function buildForecast(entries: any[], startingCashCents: bigint, weeks =
   };
 }
 
-async function getOverview(prisma: any, businessId: string, weeks: number) {
+export async function getOverview(prisma: any, businessId: string, weeks: number) {
   const now = new Date();
   const reportDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const historyStart = addDays(now, -240);
@@ -336,7 +336,7 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     expectedRows,
     issueCount,
     uncategorizedCount,
-    categoryMemory,
+    categoryLearning,
     recentEntries,
     transferCandidates,
   ] = await Promise.all([
@@ -441,22 +441,21 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     prisma.entry.count({
       where: actionableUncategorizedEntryWhere({ businessId, activeAccountsOnly: true }),
     }),
-    prisma.categoryMemory.findMany({
-      where: { business_id: businessId },
-      select: { confidence_score: true, accept_count: true, override_count: true },
-      take: 5000,
-    }),
+    Promise.all([
+      prisma.categoryMemory.aggregate({ where: { business_id: businessId }, _count: { _all: true }, _sum: { accept_count: true, override_count: true } }),
+      prisma.categoryMemory.count({ where: { business_id: businessId, confidence_score: { gte: 0.9 }, accept_count: { gte: 2 } } }),
+    ]),
     prisma.entry.findMany({
       where: {
         business_id: businessId,
         deleted_at: null,
         type: { in: ["INCOME", "EXPENSE"] },
         status: "CLEARED",
-        date: { gte: historyStart },
+        date: { gte: historyStart, lte: now },
       },
       select: { account_id: true, date: true, payee: true, amount_cents: true, type: true },
-      orderBy: { date: "asc" },
-      take: 5000,
+      orderBy: [{ date: "desc" }, { id: "desc" }],
+      take: 5001,
     }),
     loadTransferCandidates(prisma, businessId).catch(() => []),
   ]);
@@ -556,7 +555,7 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     (sum, accountId) => sum + (balanceByAccount.get(accountId) ?? 0n),
     0n
   );
-  const cashEntries = (recentEntries as any[]).filter((entry: any) => cashAccountIds.has(String(entry.account_id)));
+  const cashEntries = (recentEntries as any[]).slice(0, 5000).filter((entry: any) => cashAccountIds.has(String(entry.account_id)));
   const pendingCount = accountRows.reduce((sum: number, account: any) => sum + Number(account.pending_count ?? 0), 0);
   const unmatchedCount = accountRows.reduce((sum: number, account: any) => sum + Number(account.unmatched_count ?? 0), 0);
   // A deliberately manual ledger is not a broken bank connection and must not
@@ -565,9 +564,9 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     (account) => account.connected && !["HEALTHY", "SYNCING"].includes(account.health)
   ).length;
   const notConnectedCount = accountRows.filter((account) => !account.connected).length;
-  const accepted = categoryMemory.reduce((sum: number, row: any) => sum + Number(row.accept_count ?? 0), 0);
-  const overridden = categoryMemory.reduce((sum: number, row: any) => sum + Number(row.override_count ?? 0), 0);
-  const safeRules = categoryMemory.filter((row: any) => Number(row.confidence_score ?? 0) >= 0.9 && Number(row.accept_count ?? 0) >= 2).length;
+  const [learningTotals, safeRules] = categoryLearning;
+  const accepted = Number(learningTotals._sum.accept_count ?? 0);
+  const overridden = Number(learningTotals._sum.override_count ?? 0);
 
   const closeBlockers = {
     open_issues: Number(issueCount),
@@ -591,14 +590,15 @@ async function getOverview(prisma: any, businessId: string, weeks: number) {
     close_readiness: { ready: closeReady, blockers: closeBlockers },
     categorization: {
       uncategorized_count: Number(uncategorizedCount),
-      learned_merchant_rules: categoryMemory.length,
+      sample_complete: true,
+      learned_merchant_rules: learningTotals._count._all,
       safe_reuse_rules: safeRules,
       accepted_feedback: accepted,
       overridden_feedback: overridden,
       acceptance_rate: accepted + overridden > 0 ? Math.round((accepted / (accepted + overridden)) * 100) : null,
     },
     transfer_candidates: transferCandidates,
-    forecast: buildForecast(cashEntries, totalLedgerCash, weeks),
+    forecast: { ...buildForecast(cashEntries, totalLedgerCash, weeks), history_complete: recentEntries.length <= 5000 },
   };
 }
 
@@ -828,6 +828,7 @@ export async function handler(event: any) {
     const method = getMethod(event);
     const path = getPath(event);
     if (method === "GET" && path.endsWith("/operations/overview")) {
+      if (!await canReadFeatures(prisma, businessId, String(role), ["dashboard", "ledger", "reconcile"])) return json(403, { ok: false, error: "This role cannot view financial operations." });
       const rawWeeks = Number(event?.queryStringParameters?.weeks ?? 13);
       const weeks = Number.isFinite(rawWeeks) ? Math.max(4, Math.min(13, Math.floor(rawWeeks))) : 13;
       return json(200, await getOverview(prisma, businessId, weeks));

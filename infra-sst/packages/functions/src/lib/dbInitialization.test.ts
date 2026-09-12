@@ -1,0 +1,21 @@
+import { afterEach, expect, test, vi } from "vitest";
+afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
+test("concurrent cold reads initialize one database pool", async () => {
+  vi.resetModules();
+  vi.stubEnv("DB_URL_SECRET_ID", "synthetic-secret");
+  vi.stubEnv("DB_SSL", "disable");
+  const send = vi.fn(async () => ({ SecretString: "postgresql://user:pass@localhost/test" }));
+  const pools = vi.fn();
+  const clients = vi.fn();
+  vi.doMock("@aws-sdk/client-secrets-manager", () => ({ SecretsManagerClient: class { send = send; }, GetSecretValueCommand: class {} }));
+  vi.doMock("pg", () => ({ Pool: class { constructor(config: any) { pools(config); } async end() {} } }));
+  vi.doMock("@prisma/adapter-pg", () => ({ PrismaPg: class {} }));
+  vi.doMock("@prisma/client", () => ({ PrismaClient: class { constructor() { clients(); } } }));
+  const { getPrisma } = await import("./db");
+  const results = await Promise.all(Array.from({ length: 12 }, () => getPrisma()));
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(pools).toHaveBeenCalledTimes(1);
+  expect(clients).toHaveBeenCalledTimes(1);
+  expect(results.every((result) => result === results[0])).toBe(true);
+  expect(pools.mock.calls[0][0]).toMatchObject({ max: 4, connectionTimeoutMillis: 5000, statement_timeout: 30000 });
+});

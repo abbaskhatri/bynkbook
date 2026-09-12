@@ -160,7 +160,7 @@ async function loadHandler(rowsInput: any[]) {
 
   vi.doMock("./lib/db", () => ({ getPrisma: vi.fn(async () => prisma) }));
   vi.doMock("./lib/activityLog", () => ({ logActivity: vi.fn() }));
-  vi.doMock("./lib/authz", () => ({ authorizeWrite: vi.fn(async () => ({ allowed: true })) }));
+  vi.doMock("./lib/authz", async (importOriginal) => ({ ...(await importOriginal<typeof import("./lib/authz")>()), authorizeWrite: vi.fn(async () => ({ allowed: true })) }));
   vi.doMock("./lib/categoryMemoryWriteback", () => ({ writeCategoryMemoryFeedback: vi.fn() }));
   vi.doMock("./aiCategorySuggestions", () => ({ computeCategorySuggestionsForItems: vi.fn(async () => ({ suggestionsById: {} })) }));
   vi.doMock("./lib/categorySuggestionScoring", () => ({ isBulkSafeCategorySuggestion: vi.fn(() => false) }));
@@ -325,4 +325,15 @@ describe("entries list pagination and canonical balances", () => {
       }),
     });
   });
+});
+
+test("targeted entry lookup finds an older row without exposing another scope", async () => {
+  const target = "11111111-1111-4111-8111-111111111111";
+  const { handler, prisma } = await loadHandler([
+    entry({ id: target, date: "2020-01-01", created_at: "2020-01-01T10:00:00Z", amount_cents: "-100" }),
+    entry({ id: "22222222-2222-4222-8222-222222222222", date: "2026-01-01", created_at: "2026-01-01T10:00:00Z", amount_cents: "-200" }),
+  ]);
+  const result = JSON.parse((await handler(event({ entryId: target, limit: "1" }))).body);
+  expect(result.entries.map((row: any) => row.id)).toEqual([target]);
+  expect(prisma.entry.count).toHaveBeenCalledWith({ where: expect.objectContaining({ id: target, business_id: businessId, account_id: accountId }) });
 });

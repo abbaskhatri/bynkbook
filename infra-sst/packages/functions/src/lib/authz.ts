@@ -422,3 +422,9 @@ export async function authorizeWrite(prisma: any, args: {
   // Allowed under enforcement (no log to avoid noise)
   return { mode, enforced: true, allowed: true as const };
 }
+
+/** Data visibility is enforced independently of write-rollout settings. */
+export async function canReadFeatures(prisma: any, businessId: string, role: string, features: string[]) {
+  const policy = await getPolicyForRole(prisma, businessId, role);
+  return features.every((feature) => policyAllows(policy[feature] ?? "NONE", "VIEW"));
+}

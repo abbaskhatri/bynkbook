@@ -1,3 +1,4 @@
+import { canReadFeatures } from "./lib/authz";
 import { getPrisma } from "./lib/db";
 import { logActivity } from "./lib/activityLog";
 import { authorizeWrite } from "./lib/authz";
@@ -1031,6 +1032,8 @@ export async function handler(event: any) {
     });
   }
 
+  if (method === "GET" && !await canReadFeatures(prisma, biz, String(role), ["ledger"])) return json(403, { ok: false, error: "This role cannot view the ledger." });
+
   // GET /entries
   if (method === "GET" && path?.includes(`/v1/businesses/${biz}/accounts/${acct}/entries`)) {
     const q = qs(event);
@@ -1065,6 +1068,7 @@ export async function handler(event: any) {
 
     const whereBase: any = {
       business_id: biz,
+      ...(q.entryId ? { id: String(q.entryId) } : {}),
       account_id: acct,
       ...(includeDeleted ? {} : { deleted_at: null }),
 

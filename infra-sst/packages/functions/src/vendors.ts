@@ -1,3 +1,4 @@
+import { canReadFeatures } from "./lib/authz";
 import { getPrisma } from "./lib/db";
 import { authorizeWrite } from "./lib/authz";
 
@@ -72,6 +73,7 @@ export async function handler(event: any) {
   });
   const myRole = myRoleRow?.role ?? null;
   if (!myRole) return json(403, { ok: false, error: "Forbidden" });
+  if (method === "GET" && !await canReadFeatures(prisma, businessId, String(myRole), ["vendors"])) return json(403, { ok: false, error: "This role cannot view vendors." });
 
   // LIST
   if (method === "GET" && path === `/v1/businesses/${biz}/vendors`) {

@@ -1,3 +1,4 @@
+import { canReadFeatures } from "./lib/authz";
 import { getPrisma } from "./lib/db";
 
 function getClaims(event: any) {
@@ -19,16 +20,6 @@ async function requireMembership(prisma: any, businessId: string, userId: string
     select: { role: true },
   });
   return row?.role ?? null;
-}
-
-function parseMoneyCents(s: string): number | null {
-  const t = String(s ?? "").trim();
-  if (!t) return null;
-  const m = t.match(/(\d+(\.\d{1,2})?)/);
-  if (!m) return null;
-  const n = Number(m[1]);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100);
 }
 
 function ymd(d: Date) {
@@ -80,27 +71,20 @@ function parseTimeRange(q: string): { from: Date; to: Date } {
   return { from, to };
 }
 
+const amountPhrase = /(?:\b(over|above|under|below)\b|([<>]))\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\d.])/i;
 function extractAmountFilter(q: string): { op: "GT" | "LT"; cents: number } | null {
-  const lower = q.toLowerCase();
-  if (lower.includes("over $") || lower.includes("above $") || lower.match(/>\s*\$/)) {
-    const cents = parseMoneyCents(lower);
-    if (cents !== null) return { op: "GT", cents };
-  }
-  if (lower.includes("under $") || lower.includes("below $") || lower.match(/<\s*\$/)) {
-    const cents = parseMoneyCents(lower);
-    if (cents !== null) return { op: "LT", cents };
-  }
-  return null;
+  const match = q.match(amountPhrase);
+  if (!match) return null;
+  const cents = Math.round(Number(`${match[3].replaceAll(",", "")}.${match[4] ?? "0"}`) * 100);
+  if (!Number.isSafeInteger(cents)) return null;
+  return { op: ["over", "above", ">"].includes((match[1] || match[2]).toLowerCase()) ? "GT" : "LT", cents };
 }
 
 function cleanQueryText(q: string): string {
-  return q
-    .toLowerCase()
+  return q.toLowerCase()
     .replace(/this week|last week|this month|last month/g, " ")
-    .replace(/over\s*\$[0-9.]+|under\s*\$[0-9.]+|above\s*\$[0-9.]+|below\s*\$[0-9.]+/g, " ")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(amountPhrase, " ")
+    .replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -136,6 +120,12 @@ export async function handler(event: any) {
   const role = await requireMembership(prisma, businessId, sub);
   if (!role) return json(403, { ok: false, error: "Forbidden" });
 
+  const [readEntries, readBank] = await Promise.all([
+    canReadFeatures(prisma, businessId, String(role), ["ledger"]),
+    canReadFeatures(prisma, businessId, String(role), ["reconcile"]),
+  ]);
+  if (!readEntries && !readBank) return json(403, { ok: false, error: "This role cannot search financial records." });
+
   const range = parseTimeRange(qRaw);
   const amt = extractAmountFilter(qRaw);
   const text = cleanQueryText(qRaw);
@@ -164,15 +154,15 @@ export async function handler(event: any) {
     // NOTE: Prisma doesn't do ABS easily; we bound by both directions.
     if (amt.op === "GT") {
       entryWhere.OR = [
-        { amount_cents: { gte: BigInt(amt.cents) } },
-        { amount_cents: { lte: BigInt(-amt.cents) } },
+        { amount_cents: { gt: BigInt(amt.cents) } },
+        { amount_cents: { lt: BigInt(-amt.cents) } },
       ];
     } else {
       entryWhere.AND = [
         {
-          OR: [
-            { amount_cents: { lte: BigInt(amt.cents) } },
-            { amount_cents: { gte: BigInt(-amt.cents) } },
+          AND: [
+            { amount_cents: { lt: BigInt(amt.cents) } },
+            { amount_cents: { gt: BigInt(-amt.cents) } },
           ],
         },
       ];
@@ -191,13 +181,6 @@ export async function handler(event: any) {
     ];
   }
 
-  const entries = await prisma.entry.findMany({
-    where: entryWhere,
-    select: { id: true, account_id: true, date: true, payee: true, memo: true, amount_cents: true, category_id: true },
-    orderBy: [{ date: "desc" }, { created_at: "desc" }],
-    take: limit,
-  });
-
   const bankWhere: any = {
     business_id: businessId,
     is_removed: false,
@@ -211,15 +194,15 @@ export async function handler(event: any) {
   if (amt) {
     if (amt.op === "GT") {
       bankWhere.OR = [
-        { amount_cents: { gte: BigInt(amt.cents) } },
-        { amount_cents: { lte: BigInt(-amt.cents) } },
+        { amount_cents: { gt: BigInt(amt.cents) } },
+        { amount_cents: { lt: BigInt(-amt.cents) } },
       ];
     } else {
       bankWhere.AND = [
         {
-          OR: [
-            { amount_cents: { lte: BigInt(amt.cents) } },
-            { amount_cents: { gte: BigInt(-amt.cents) } },
+          AND: [
+            { amount_cents: { lt: BigInt(amt.cents) } },
+            { amount_cents: { gt: BigInt(-amt.cents) } },
           ],
         },
       ];
@@ -230,12 +213,20 @@ export async function handler(event: any) {
     bankWhere.name = { contains: text, mode: "insensitive" };
   }
 
-  const bankTxns = await prisma.bankTransaction.findMany({
-    where: bankWhere,
-    select: { id: true, account_id: true, posted_date: true, name: true, amount_cents: true },
-    orderBy: [{ posted_date: "desc" }, { created_at: "desc" }],
-    take: limit,
-  });
+  const [entries, bankTxns] = await Promise.all([
+    readEntries ? prisma.entry.findMany({
+      where: entryWhere,
+      select: { id: true, account_id: true, date: true, payee: true, memo: true, amount_cents: true, category_id: true },
+      orderBy: [{ date: "desc" }, { created_at: "desc" }],
+      take: limit,
+    }) : Promise.resolve([]),
+    readBank ? prisma.bankTransaction.findMany({
+      where: bankWhere,
+      select: { id: true, account_id: true, posted_date: true, name: true, amount_cents: true },
+      orderBy: [{ posted_date: "desc" }, { created_at: "desc" }],
+      take: limit,
+    }) : Promise.resolve([]),
+  ]);
 
   return json(200, {
     ok: true,
@@ -248,7 +239,7 @@ export async function handler(event: any) {
         payee: e.payee ?? "",
         memo: e.memo ?? "",
         amount_cents: e.amount_cents,
-        link: `/ledger?focusEntryId=${encodeURIComponent(String(e.id))}`,
+        link: `/ledger?businessId=${encodeURIComponent(businessId)}&accountId=${encodeURIComponent(String(e.account_id))}&focusEntryId=${encodeURIComponent(String(e.id))}`,
       })),
       bankTxns: bankTxns.map((t: any) => ({
         id: t.id,
@@ -256,7 +247,7 @@ export async function handler(event: any) {
         posted_date: new Date(t.posted_date).toISOString(),
         name: t.name ?? "",
         amount_cents: t.amount_cents,
-        link: `/reconcile?focusBankTxnId=${encodeURIComponent(String(t.id))}`,
+        link: `/reconcile?businessId=${encodeURIComponent(businessId)}&accountId=${encodeURIComponent(String(t.account_id))}&focusBankTxnId=${encodeURIComponent(String(t.id))}`,
       })),
       issues: [],
     },

@@ -299,7 +299,7 @@ async function loadHandler(options: {
   vi.doMock("./lib/db", () => ({
     getPrisma: vi.fn(async () => prisma),
   }));
-  vi.doMock("./lib/authz", () => ({
+  vi.doMock("./lib/authz", async (importOriginal) => ({ ...(await importOriginal<typeof import("./lib/authz")>()),
     authorizeWrite: vi.fn(async () => ({ allowed: true })),
   }));
   vi.doMock("./lib/closedPeriods", () => ({
@@ -1224,4 +1224,14 @@ describe("bank transaction create-entry method inference", () => {
     expect(res.statusCode).toBe(201);
     expect(prisma.entry.create.mock.calls[0][0].data.method).toBe("CARD");
   });
+});
+
+test("targeted bank lookup finds older records while retaining scope and removal guards", async () => {
+  const { handler, prisma } = await loadHandler({ rows: [
+    tx("older", "2020-01-01", "2020-01-01T10:00:00Z"),
+    tx("newer", "2026-01-01", "2026-01-01T10:00:00Z"),
+  ] });
+  const result = JSON.parse((await handler(event({ transactionId: "older", limit: "1", status: "all" }))).body);
+  expect(result.items.map((row: any) => row.id)).toEqual(["older"]);
+  expect(prisma.bankTransaction.count).toHaveBeenCalledWith({ where: expect.objectContaining({ business_id: "biz-1", account_id: "acct-1", is_removed: false, AND: [{ id: "older" }] }) });
 });

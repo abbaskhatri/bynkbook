@@ -1,3 +1,4 @@
+import { canReadFeatures } from "./lib/authz";
 import { getPrisma } from "./lib/db";
 
 function json(statusCode: number, body: any) {
@@ -107,6 +108,8 @@ export async function handler(event: any) {
 
   const myRole = await requireMembership(prisma, biz, sub);
   if (!myRole) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+
+  if (!await canReadFeatures(prisma, biz, String(myRole), ["reports", "ledger", ...(path.includes("/ap/") ? ["invoices"] : [])])) return json(403, { ok: false, error: "This role cannot view these reports." });
 
   if (method !== "GET") return json(405, { ok: false, error: "Method not allowed" });
 
@@ -781,10 +784,20 @@ export async function handler(event: any) {
       orderBy: [{ name: "asc" }],
     });
 
+    // Setup facts deliberately ignore report dates and account filters.
+    const setup = parseBool(q.includeSetup) ? await (async () => {
+      const [categoriesCount, entry] = await Promise.all([
+        prisma.category.count({ where: { business_id: biz, archived_at: null } }),
+        prisma.entry.findFirst({ where: { business_id: biz, deleted_at: null, type: { not: "OPENING" } }, select: { id: true } }),
+      ]);
+      return { categories_count: categoriesCount, has_entries: !!entry };
+    })() : undefined;
+
     if (accounts.length === 0) {
       return json(200, {
         ok: true,
         report: "accounts_summary",
+        setup,
         asOf: asOfYmd,
         includeArchived,
         accountId,
@@ -865,6 +878,7 @@ export async function handler(event: any) {
     return json(200, {
       ok: true,
       report: "accounts_summary",
+        setup,
       asOf: asOfYmd,
       includeArchived,
       accountId,

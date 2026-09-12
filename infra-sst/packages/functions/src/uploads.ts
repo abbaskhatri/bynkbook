@@ -1,3 +1,4 @@
+import { canReadFeatures } from "./lib/authz";
 import { randomUUID } from "node:crypto";
 import { getPrisma } from "./lib/db";
 import { assertNotClosedPeriod } from "./lib/closedPeriods";
@@ -166,6 +167,7 @@ export async function handler(event: any) {
 
   const role = await requireMembership(prisma, biz, sub);
   if (!role) return json(403, { ok: false, error: "Forbidden (not a member of this business)" });
+  if (method === "GET" && !await canReadFeatures(prisma, biz, String(role), ["ledger"])) return json(403, { ok: false, error: "This role cannot view uploads." });
   const requireWrite = async () => {
     if (!canWrite(role)) return json(403, { ok: false, error: "Insufficient permissions" });
 
