@@ -459,6 +459,7 @@ export default function PlanningPageClient() {
                           <td className="px-3 text-sm text-right tabular-nums">
                             <input
                               value={draft}
+                              aria-label={`Monthly budget for ${r.category_name}, in USD`}
                               onChange={(e) => setDraftByCatId((m) => ({ ...m, [r.category_id]: e.target.value }))}
                               className={inputH7 + " w-[120px] text-right tabular-nums"}
                               inputMode="decimal"

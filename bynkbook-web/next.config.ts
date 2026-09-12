@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       "frame-src https://cdn.plaid.com https://*.plaid.com",
-      `connect-src 'self'${isDevelopment ? " ws: wss:" : ""} https://*.execute-api.us-east-1.amazonaws.com https://*.amazoncognito.com https://cognito-idp.us-east-1.amazonaws.com https://*.plaid.com`,
+      `connect-src 'self'${isDevelopment ? " ws: wss:" : ""} https://*.execute-api.us-east-1.amazonaws.com https://*.amazoncognito.com https://cognito-idp.us-east-1.amazonaws.com https://*.plaid.com https://ledrigo-dev-uploads-116846786465-us-east-1.s3.us-east-1.amazonaws.com`,
       ...(isDevelopment ? [] : ["upgrade-insecure-requests"]),
     ].join("; ");
 

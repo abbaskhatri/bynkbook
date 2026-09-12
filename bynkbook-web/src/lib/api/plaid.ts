@@ -44,9 +44,10 @@ export async function plaidExchange(
   });
 }
 
-export async function plaidStatus(businessId: string, accountId: string) {
+export async function plaidStatus(businessId: string, accountId: string, signal?: AbortSignal) {
   return apiFetch(`/v1/businesses/${businessId}/accounts/${accountId}/plaid/status`, {
     method: "GET",
+    signal,
   });
 }
 
@@ -83,7 +84,7 @@ export async function plaidDisconnect(businessId: string, accountId: string) {
 export async function plaidSync(
   businessId: string,
   accountId: string,
-  options?: { afterReconnect?: boolean; refreshBalance?: boolean; refreshTransactions?: boolean },
+  options?: { afterReconnect?: boolean; refreshBalance?: boolean; refreshTransactions?: boolean; signal?: AbortSignal },
 ) {
   const totals = {
     newCount: 0,
@@ -107,6 +108,7 @@ export async function plaidSync(
       // The Lambda has a 45-second ceiling and a real-time institution balance
       // check can legitimately take more than the API client's 30-second default.
       timeoutMs: 55_000,
+      signal: options?.signal,
       body: JSON.stringify({
         afterReconnect: pass === 0 && options?.afterReconnect === true,
         forceBalanceRefresh: pass === 0 && options?.refreshBalance === true,
@@ -114,6 +116,7 @@ export async function plaidSync(
       }),
     });
 
+    if (!result || result.ok === false) throw new Error(result?.message ?? result?.error ?? "Bank sync returned no confirmation");
     for (const key of Object.keys(totals) as Array<keyof typeof totals>) {
       totals[key] += Number(result?.[key] ?? 0);
     }

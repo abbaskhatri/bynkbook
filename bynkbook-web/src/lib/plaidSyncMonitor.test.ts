@@ -52,3 +52,20 @@ describe("waitForPlaidSyncCompletion", () => {
     expect(sync).not.toHaveBeenCalled();
   });
 });
+
+for (const pending of ["hasMore", "drainIncomplete", "pendingSync"]) {
+  test(`does not finish while ${pending} is true`, async () => {
+    const sync = vi.fn().mockResolvedValueOnce({ ok: true, [pending]: true }).mockResolvedValueOnce({ ok: true });
+    expect((await waitForPlaidSyncCompletion({ sync, wait: async () => {}, maxAttempts: 2 })).kind).toBe("complete");
+    expect(sync).toHaveBeenCalledTimes(2);
+  });
+}
+test("failed confirmation is an error, not completion", async () => {
+  const outcome = await waitForPlaidSyncCompletion({ sync: async () => ({ ok: false, error: "Bank unavailable" }), wait: async () => {} });
+  expect(outcome.kind).toBe("error");
+});
+test("permission failures stop immediately", async () => {
+  const sync = vi.fn().mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+  expect((await waitForPlaidSyncCompletion({ sync, wait: async () => {} })).kind).toBe("error");
+  expect(sync).toHaveBeenCalledTimes(1);
+});

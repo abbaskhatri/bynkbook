@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadPlaidLink } from "@/lib/plaid/loadLink";
+import { isPlaidSyncPending } from "@/lib/plaidSyncMonitor";
 import { Landmark } from "lucide-react";
 import {
   plaidApplyOpening,
@@ -35,37 +37,6 @@ declare global {
       create: (config: any) => { open: () => void; exit: (opts?: any) => void; destroy?: () => void };
     };
   }
-}
-
-let plaidScriptPromise: Promise<void> | null = null;
-
-function loadPlaidScriptOnce(): Promise<void> {
-  if (typeof window === "undefined") return Promise.resolve();
-
-  if (plaidScriptPromise) return plaidScriptPromise;
-
-  plaidScriptPromise = new Promise<void>((resolve, reject) => {
-    // If already present, resolve immediately
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"]'
-    );
-    if (existing) {
-      // If it already loaded, resolve now; otherwise wait for load
-      if ((window as any).Plaid?.create) return resolve();
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Plaid script failed to load")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Plaid script failed to load"));
-    document.head.appendChild(script);
-  });
-
-  return plaidScriptPromise;
 }
 
 type Props = {
@@ -145,6 +116,10 @@ function accountTypeFromPlaid(account?: PlaidAccountMeta, fallback = "CHECKING")
 }
 
 export function PlaidConnectButton(props: Props) {
+  return <ScopedPlaidConnectButton key={`${props.businessId}:${props.accountId}:${props.mode ?? "connect"}`} {...props} />;
+}
+
+function ScopedPlaidConnectButton(props: Props) {
   const {
     businessId,
     accountId,
@@ -155,8 +130,23 @@ export function PlaidConnectButton(props: Props) {
     buttonClassName,
     disabled,
     mode = "connect",
-    onConnected,
+    onConnected: onConnectedProp,
   } = props;
+
+  const activeRef = useRef(false);
+  const syncController = useRef<AbortController | null>(null);
+  const onConnected = useCallback((result?: any) => {
+    if (activeRef.current) onConnectedProp(result);
+  }, [onConnectedProp]);
+  useEffect(() => {
+    activeRef.current = true;
+    syncController.current = new AbortController();
+    return () => {
+      activeRef.current = false;
+      syncController.current?.abort();
+      try { handlerRef.current?.exit(); handlerRef.current?.destroy?.(); } catch {}
+    };
+  }, []);
 
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -234,17 +224,19 @@ export function PlaidConnectButton(props: Props) {
   }, [accountId, businessId, mode, resetPendingSelection]);
 
   const runInitialSync = useCallback(async (options?: { afterReconnect?: boolean }) => {
+    if (!activeRef.current) return { cancelled: true };
     setOpenSyncing(true);
     setSyncInfo(null);
     setSyncErrorMsg(null);
 
     try {
-      const syncResult: any = await plaidSync(businessId, accountId, { afterReconnect: options?.afterReconnect === true });
+      const syncResult: any = await plaidSync(businessId, accountId, { afterReconnect: options?.afterReconnect === true, signal: syncController.current?.signal });
+      if (!activeRef.current) return { cancelled: true };
       setSyncInfo({
         newCount: Number(syncResult?.newCount ?? 0),
         pendingCount: Number(syncResult?.pendingCount ?? 0),
       });
-      if (syncResult?.pendingSync) {
+      if (isPlaidSyncPending(syncResult)) {
         setSyncErrorMsg(syncResult?.message ?? "Bank reconnected. Transactions will sync shortly.");
       }
       return syncResult;
@@ -284,24 +276,28 @@ export function PlaidConnectButton(props: Props) {
         })),
       });
 
+      if (!activeRef.current) return;
       if (!res?.ok) throw new Error(res?.error ?? "Exchange failed");
 
       setOpenSelect(false);
       resetPendingSelection();
 
       const syncRes = await runInitialSync();
+      if (!activeRef.current) return;
       const connectedSiblingAccounts = [
         ...(Array.isArray(res?.repairedExistingAccounts) ? res.repairedExistingAccounts : []),
         ...(Array.isArray(res?.additionalAccounts) ? res.additionalAccounts : []),
       ];
       for (const connectedSibling of connectedSiblingAccounts) {
+        if (!activeRef.current) return;
         if (!connectedSibling?.accountId) continue;
         try {
-          await plaidSync(businessId, String(connectedSibling.accountId));
+          await plaidSync(businessId, String(connectedSibling.accountId), { signal: syncController.current?.signal });
         } catch {
           // Additional accounts can be synced manually later; do not fail the primary connection.
         }
       }
+      if (!activeRef.current) return;
       const retainedStartDate = String(res?.effectiveStartDate ?? effectiveStartDate ?? "").slice(0, 10);
       const reviewStartDate = retainedStartDate || new Date().toISOString().slice(0, 10);
 
@@ -358,20 +354,23 @@ export function PlaidConnectButton(props: Props) {
           effectiveStartDate,
         })),
       });
+      if (!activeRef.current) return;
       if (!repaired?.ok) throw new Error(repaired?.error ?? "Bank account repair failed");
 
       setOpenSelect(false);
       resetPendingSelection();
 
       const syncRes = await runInitialSync({ afterReconnect: true });
+      if (!activeRef.current) return;
       const connectedSiblingAccounts = [
         ...(Array.isArray(repaired?.repairedExistingAccounts) ? repaired.repairedExistingAccounts : []),
         ...(Array.isArray(repaired?.additionalAccounts) ? repaired.additionalAccounts : []),
       ];
       for (const connectedSibling of connectedSiblingAccounts) {
+        if (!activeRef.current) return;
         if (!connectedSibling?.accountId) continue;
         try {
-          await plaidSync(businessId, String(connectedSibling.accountId));
+          await plaidSync(businessId, String(connectedSibling.accountId), { signal: syncController.current?.signal });
         } catch {
           // The sibling remains connected and can be retried from Reconcile.
         }
@@ -438,7 +437,8 @@ export function PlaidConnectButton(props: Props) {
       if (!linkToken) throw new Error("Failed to create link token");
 
       // 2) Load Plaid script (once)
-      await loadPlaidScriptOnce();
+      await loadPlaidLink();
+      if (!activeRef.current) return;
 
       // 3) Verify Plaid exists
       if (!window.Plaid?.create) {
@@ -456,6 +456,7 @@ export function PlaidConnectButton(props: Props) {
       const handler = window.Plaid.create({
         token: linkToken,
         onSuccess: async (public_token: string, metadata: any) => {
+          if (!activeRef.current) return;
           try {
             const accountsRaw = Array.isArray(metadata?.accounts) ? metadata.accounts : [];
             const accounts: PlaidAccountMeta[] = accountsRaw

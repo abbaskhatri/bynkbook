@@ -100,7 +100,7 @@ export default function DashboardChartPanels({
     <>
       <ChartContainer
         title="Cash Flow"
-        subtitle="Cash In vs Cash Out by month"
+        subtitle={`Cash in and out · ${monthAbbr(cashBarsData[0]?.ym ?? "")} – ${monthAbbr(cashBarsData.at(-1)?.ym ?? "")}`}
         right={
           <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-bb-status-success-bg">
             <BarChart3 className="h-7 w-7 text-bb-status-success-fg" strokeWidth={2} />

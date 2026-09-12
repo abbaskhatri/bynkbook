@@ -20,6 +20,7 @@ type AppDialogProps = {
   disableOverlayClose?: boolean;
   bodyClassName?: string;
   contentClassName?: string;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
 };
 
 const dialogWidthBySize: Record<AppDialogSize, string> = {
@@ -42,6 +43,7 @@ export function AppDialog({
   disableOverlayClose = false,
   bodyClassName,
   contentClassName,
+  returnFocusRef,
 }: AppDialogProps) {
   const widthClass = dialogWidthBySize[size] ?? dialogWidthBySize.md;
   const isComplexDialog = size === "lg" || size === "xl";
@@ -63,6 +65,12 @@ export function AppDialog({
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bb-overlay backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
         <div className={`pointer-events-none fixed inset-0 z-50 flex justify-center overflow-x-hidden p-0 sm:items-center sm:p-4 ${isComplexDialog ? "items-stretch" : "items-end"}`}>
           <DialogPrimitive.Content
+          onCloseAutoFocus={(event) => {
+            if (returnFocusRef?.current?.isConnected) {
+              event.preventDefault();
+              returnFocusRef.current.focus({ preventScroll: true });
+            }
+          }}
           onEscapeKeyDown={(event) => {
             if (!onClose) event.preventDefault();
           }}
@@ -100,7 +108,7 @@ export function AppDialog({
               <button
                 type="button"
                 className={[
-                  "h-9 w-9 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
+                  "h-11 w-11 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-elevated text-bb-text-muted shadow-sm transition-colors duration-200",
                   "hover:bg-bb-table-row-hover hover:text-bb-text",
                   ringFocus,
                 ].join(" ")}
@@ -124,7 +132,7 @@ export function AppDialog({
           </div>
 
           {footer ? (
-            <div className="min-w-0 shrink-0 border-t border-bb-border-muted bg-bb-surface-soft px-5 py-4 [&>div]:flex-wrap [&>div]:gap-2 [&_button]:min-h-8 [&_button]:shrink-0">
+            <div className="min-w-0 shrink-0 border-t border-bb-border-muted bg-bb-surface-soft px-5 py-4 [&>div]:flex-wrap [&>div]:gap-2 [&_button]:min-h-11 sm:[&_button]:min-h-8 [&_button]:shrink-0">
               {footer}
             </div>
           ) : null}

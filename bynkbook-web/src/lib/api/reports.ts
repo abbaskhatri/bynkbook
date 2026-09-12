@@ -95,6 +95,7 @@ export type AccountsSummaryRow = {
 export type AccountsSummaryResponse = {
   ok: true;
   report: "accounts_summary";
+  setup?: { categories_count: number; has_entries: boolean };
   asOf: string; // YYYY-MM-DD
   includeArchived: boolean;
   accountId: string;
@@ -103,7 +104,7 @@ export type AccountsSummaryResponse = {
 
 export async function getAccountsSummary(
   businessId: string,
-  args: { asOf: string; accountId: string; includeArchived?: boolean }
+  args: { asOf: string; accountId: string; includeArchived?: boolean; includeSetup?: boolean }
 ): Promise<AccountsSummaryResponse> {
   // NOTE: backend uses standard from/to, but accounts summary only cares about `to` for asOf.
   const q = qs({
@@ -111,6 +112,7 @@ export async function getAccountsSummary(
     to: args.asOf,
     accountId: args.accountId ?? "all",
     includeArchived: args.includeArchived ? "1" : "0",
+    includeSetup: args.includeSetup ? "1" : "0",
   });
   return apiFetch(`/v1/businesses/${businessId}/reports/accounts/summary?${q}`);
 }

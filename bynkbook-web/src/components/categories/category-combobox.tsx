@@ -80,6 +80,7 @@ type CategoryComboboxProps = {
   onChange?: (value: string, option: CategoryComboboxOption | null) => void;
   onSelect?: (option: CategoryComboboxOption) => void;
   placeholder?: string;
+  ariaLabel?: string;
   inputClassName?: string;
   allowCreate?: boolean;
   onCreate?: (name: string) => void | Promise<void>;
@@ -102,6 +103,7 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
     onChange,
     onSelect,
     placeholder,
+    ariaLabel = "Category",
     inputClassName,
     allowCreate,
     onCreate,
@@ -309,6 +311,7 @@ export const CategoryCombobox = forwardRef<HTMLInputElement, CategoryComboboxPro
         value={resolvedValue}
         disabled={disabled}
         role="combobox"
+        aria-label={ariaLabel}
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={listboxId}

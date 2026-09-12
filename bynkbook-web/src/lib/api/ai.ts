@@ -1,12 +1,13 @@
 import { apiFetch } from "./client";
 import { notifyEntryCategoriesChanged } from "@/lib/categoryRefreshEvent";
 
-export async function queryGlobalSearch(args: { businessId: string; accountId?: string; q: string; limit?: number }) {
+export async function queryGlobalSearch(args: { businessId: string; accountId?: string; q: string; limit?: number; signal?: AbortSignal }) {
   const { businessId, accountId, q, limit } = args;
 
   return apiFetch(`/v1/businesses/${encodeURIComponent(businessId)}/search/query`, {
     method: "POST",
     body: JSON.stringify({ q, accountId, limit }),
+    signal: args.signal,
   });
 }
 

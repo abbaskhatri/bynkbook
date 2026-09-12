@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { queryGlobalSearch } from "@/lib/api/ai";
 import { Input } from "@/components/ui/input";
 import { Command, Search } from "lucide-react";
+import { extractHttpStatus } from "@/lib/errors/app-error";
 
 type SearchItem = {
   key: string;
@@ -31,6 +32,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
   const router = useRouter();
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const resultsId = useId();
 
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -45,14 +47,6 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
   const trimmed = q.trim();
   const canSearch = !!businessId && trimmed.length >= 3;
   const keyHint = useMemo(() => shortcutLabel(), []);
-
-  function extractStatus(e: any): number | null {
-    const msg = String(e?.message ?? "");
-    const m = msg.match(/API\s+(\d+):/);
-    if (!m) return null;
-    const n = Number(m[1]);
-    return Number.isFinite(n) ? n : null;
-  }
 
   function onSelect(link: string) {
     setOpen(false);
@@ -98,6 +92,10 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
 
   useEffect(() => {
     if (tRef.current) clearTimeout(tRef.current);
+    const myReqId = ++reqIdRef.current;
+    const controller = new AbortController();
+    setRes(null);
+    setActiveIndex(-1);
 
     if (!canSearch) {
       setRes(null);
@@ -107,28 +105,27 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
       return;
     }
 
-    const myReqId = ++reqIdRef.current;
+    setBusy(true);
+    setErrMsg(null);
 
     tRef.current = setTimeout(async () => {
       setBusy(true);
       setErrMsg(null);
 
       try {
-        const r: any = await queryGlobalSearch({ businessId, accountId, q: trimmed, limit: 20 });
+        const r: any = await queryGlobalSearch({ businessId, accountId, q: trimmed, limit: 20, signal: controller.signal });
         if (myReqId !== reqIdRef.current) return;
 
         setRes(r);
-        setOpen(true);
       } catch (e: any) {
         if (myReqId !== reqIdRef.current) return;
 
-        const status = extractStatus(e);
+        const status = extractHttpStatus(e);
         if (status === 401) setErrMsg("Session expired. Please sign in again.");
         else if (status === 403) setErrMsg("You don’t have access to this business.");
         else setErrMsg("Search failed. Try again.");
 
         setRes(null);
-        setOpen(true);
       } finally {
         if (myReqId === reqIdRef.current) setBusy(false);
       }
@@ -136,6 +133,8 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
 
     return () => {
       if (tRef.current) clearTimeout(tRef.current);
+      reqIdRef.current += 1;
+      controller.abort();
     };
   }, [trimmed, canSearch, businessId, accountId]);
 
@@ -167,9 +166,15 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
         <Input
           ref={inputRef}
           className="h-8 w-full sm:w-[320px] rounded-md border-bb-input-border bg-bb-input-bg pl-9 pr-16 text-sm shadow-sm"
-          placeholder="Search entries, bank txns, payees…"
+          placeholder="Search entries, bank transactions…"
+          aria-label="Search entries and bank transactions"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={open ? resultsId : undefined}
+          aria-activedescendant={open && activeIndex >= 0 && items[activeIndex] ? `${resultsId}-${activeIndex}` : undefined}
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={(ev) => {
             if (!canSearch) {
@@ -226,13 +231,15 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
             <div>
               <div className="text-xs font-semibold tracking-wide text-foreground/80">Global search</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                {canSearch ? "Scoped to the current business." : "Type at least 3 characters to search."}
+                {canSearch ? "Current business · last 90 days unless you specify a period." : "Type at least 3 characters to search."}
               </div>
             </div>
-            <div className="text-[11px] text-bb-text-subtle">{busy ? "Searching…" : totalVisible ? `${totalVisible} shown` : ""}</div>
+            <div role="status" className="text-[11px] text-bb-text-subtle">{busy ? "Searching…" : totalVisible ? `${totalVisible} shown` : ""}</div>
           </div>
 
-          {errMsg ? <div className="px-4 py-3 text-sm text-bb-status-danger-fg">{errMsg}</div> : null}
+          {errMsg ? <div role="alert" className="px-4 py-3 text-sm text-bb-status-danger-fg">{errMsg}</div> : null}
+
+          <div id={resultsId} role="listbox" aria-label="Search results" aria-busy={busy}>
 
           {!canSearch ? (
             <div className="px-3 py-3">
@@ -241,11 +248,11 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
                   <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Uber</span>
                   <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Office supplies</span>
-                  <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Expenses over 500</span>
+                  <span className="rounded-md border border-bb-border bg-bb-surface-card px-2 py-1">Over $500</span>
                 </div>
               </div>
             </div>
-          ) : (
+          ) : busy || errMsg ? null : (
             <>
               <div className="px-3 py-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Entries</div>
@@ -259,6 +266,11 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                         <button
                           key={String(e.id)}
                           type="button"
+                          id={`${resultsId}-${rowIndex}`}
+                          role="option"
+                          aria-selected={isActive}
+                          tabIndex={-1}
+                          onMouseDown={(event) => event.preventDefault()}
                           className={[
                             "rounded-md border px-3 py-2 text-left transition",
                             isActive ? "border-bb-border bg-bb-surface-soft" : "border-transparent hover:border-bb-border hover:bg-bb-table-row-hover",
@@ -304,6 +316,11 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                         <button
                           key={String(t.id)}
                           type="button"
+                          id={`${resultsId}-${rowIndex}`}
+                          role="option"
+                          aria-selected={isActive}
+                          tabIndex={-1}
+                          onMouseDown={(event) => event.preventDefault()}
                           className={[
                             "rounded-md border px-3 py-2 text-left transition",
                             isActive ? "border-bb-border bg-bb-surface-soft" : "border-transparent hover:border-bb-border hover:bg-bb-table-row-hover",
@@ -314,14 +331,14 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-foreground">
-                                {String(t.description ?? "Bank transaction")}
+                                {String(t.name ?? t.description ?? "Bank transaction")}
                               </div>
                               <div className="mt-0.5 truncate text-xs text-muted-foreground">
                                 {t.memo ? String(t.memo).slice(0, 60) : "Bank transaction result"}
                               </div>
                             </div>
                             <div className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                              {String(t.date ?? "")}
+                              {String(t.posted_date ?? t.date ?? "").slice(0, 10)}
                             </div>
                           </div>
                         </button>
@@ -336,6 +353,7 @@ export default function GlobalSearch(props: { businessId: string; accountId?: st
               </div>
             </>
           )}
+          </div>
         </div>
       ) : null}
     </div>

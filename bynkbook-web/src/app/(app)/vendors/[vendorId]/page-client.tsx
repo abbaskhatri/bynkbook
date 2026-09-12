@@ -751,7 +751,7 @@ export default function VendorDetailPageClient() {
                   className={["h-7 px-2 text-xs rounded-md border border-bb-border bg-bb-surface-card hover:bg-bb-table-row-hover", ringFocus].join(" ")}
                   onClick={() => {
                     if (!businessId) return;
-                    window.location.href = `/vendors?businessId=${encodeURIComponent(businessId)}`;
+                    router.push(`/vendors?businessId=${encodeURIComponent(businessId)}`);
                   }}
                 >
                   Back

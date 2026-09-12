@@ -876,6 +876,7 @@ export default function ReportsPageClient() {
                   <div className="text-[11px] text-bb-text-muted">Range</div>
                   <Select value={rangeMode} onValueChange={(value) => setRangeMode(value as RangeMode)}>
                     <SelectTrigger
+                      aria-label="Report range"
                       size="sm"
                       className="h-7 w-[140px] border-bb-input-border bg-bb-input-bg px-2 text-xs text-bb-text"
                     >
@@ -909,6 +910,7 @@ export default function ReportsPageClient() {
                   <div className="space-y-1">
                     <div className="text-[11px] text-bb-text-muted">Year</div>
                     <Input
+                      aria-label="Report year"
                       type="number"
                       className="h-7 w-[110px] text-xs"
                       value={year}

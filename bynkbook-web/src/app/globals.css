@@ -605,3 +605,15 @@
 
 /* BynkBook: use full width workspace */
 .max-w-6xl { max-width: none !important; }
+
+/* Respect the user's motion preference across dialogs, charts, and loading states. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

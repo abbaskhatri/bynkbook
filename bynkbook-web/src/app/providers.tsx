@@ -25,10 +25,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
             staleTime: 5 * 60_000,
             gcTime: 60 * 60_000,
 
-            // Kill refetch storms:
+            // Refresh stale data on return or reconnect; avoid focus polling.
             refetchOnWindowFocus: false,
-            refetchOnReconnect: false,
-            refetchOnMount: false,
+            refetchOnReconnect: true,
+            refetchOnMount: true,
 
             // Fail fast; UI stays responsive via optimistic updates.
             retry: 0,

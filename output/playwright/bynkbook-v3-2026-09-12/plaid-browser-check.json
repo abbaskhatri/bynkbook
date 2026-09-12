@@ -1,0 +1,20 @@
+{
+  "reviewRequired": true,
+  "syncCalls": 2,
+  "exchangeAccount": "synthetic-primary",
+  "openingWritesBeforeConfirmation": 0,
+  "reviewText": "Review opening balance\n\nDialog\n\nInstitution\nTest Bank\nBank account\nTest Checking \u2022 ****1234\nLedger starts\n2026-01-01\nBank balance now\n$0.00\nSynced activity\n$0.00\nSuggested opening\n$100.00\nPlaid can estimate the opening balance as current bank balance minus posted bank activity retained in BynkBook. For an existing ledger, keeping the current opening is safest unless the current ledger opening is missing or wrong.\nNo conflicting ledger activity was found. Applying the Plaid estimate can add the opening balance entry for this connected account.\nKeep current opening\nAdd opening entry",
+  "openingChoice": "KEEP_MANUAL",
+  "forceFlags": [
+    {
+      "afterReconnect": false,
+      "forceBalanceRefresh": false,
+      "forceRefresh": false
+    },
+    {
+      "afterReconnect": false,
+      "forceBalanceRefresh": false,
+      "forceRefresh": false
+    }
+  ]
+}

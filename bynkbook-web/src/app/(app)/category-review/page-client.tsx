@@ -531,6 +531,9 @@ export default function CategoryReviewPageClient() {
     // IMPORTANT: includeArchived must be part of the cache key so we never reuse an archived-inclusive cache.
     queryKey: ["categories", selectedBusinessId, false],
     enabled: !!selectedBusinessId,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     queryFn: async () => {
       if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
       return listCategories(selectedBusinessId, { includeArchived: false });
@@ -1898,6 +1901,7 @@ export default function CategoryReviewPageClient() {
                   <select
                     className="h-7 w-[180px] rounded-md border border-border bg-card px-2 text-xs"
                     value={bulkCategoryId}
+                    aria-label="Category for selected transactions"
                     onChange={(e) => setBulkCategoryId(e.target.value)}
                   >
                     <option value="__NONE__">Choose category…</option>
@@ -2030,6 +2034,7 @@ export default function CategoryReviewPageClient() {
                               type="checkbox"
                               className="h-4 w-4"
                               checked={allVisibleSelected}
+                              aria-label="Select all visible transactions"
                               onChange={toggleSelectAllVisible}
                             />
                           </div>
@@ -2064,6 +2069,7 @@ export default function CategoryReviewPageClient() {
                                     type="checkbox"
                                     className="h-4 w-4"
                                     checked={allGroupSelected}
+                                    aria-label={`Select all transactions in ${group.categoryName}`}
                                     ref={(el) => {
                                       if (el) el.indeterminate = someGroupSelected;
                                     }}
@@ -2135,6 +2141,7 @@ export default function CategoryReviewPageClient() {
                                   type="checkbox"
                                   className="h-4 w-4"
                                   checked={isSelected}
+                                  aria-label={`Select ${payee || "transaction"} on ${dateYmd}`}
                                   onChange={() => toggleRow(id)}
                                 />
                               </div>
@@ -2164,6 +2171,7 @@ export default function CategoryReviewPageClient() {
                               <div className="grid min-w-0 grid-cols-[minmax(128px,170px)_minmax(180px,1fr)] items-start gap-1">
                                 <div className="flex min-w-[128px] max-w-[170px] flex-col gap-0.5">
                                   <CategoryCombobox
+                                    ariaLabel={`Category for ${payee || "transaction"} on ${dateYmd}`}
                                     options={categoryComboboxOptions}
                                     value={isOpening ? "" : categoryComboboxValue}
                                     placeholder="Uncategorized"

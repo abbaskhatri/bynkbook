@@ -43,7 +43,7 @@ export function CapsuleSelect(props: {
 
   return (
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className={capsuleTriggerClass}>
+      <SelectTrigger aria-label={placeholder} className={capsuleTriggerClass}>
         <div className="flex items-center gap-2 min-w-0">
           {variant === "flat" ? <Wallet className="h-4 w-4 text-primary shrink-0" /> : null}
           <div className="min-w-0">

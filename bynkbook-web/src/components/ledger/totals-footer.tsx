@@ -122,7 +122,7 @@ export function TotalsFooter(props: {
             setPage(1);
           }}
         >
-          <SelectTrigger className={`${inputH7} !h-7 !py-0 w-16`}>
+          <SelectTrigger aria-label="Rows per page" className={`${inputH7} !h-7 !py-0 w-16`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent side="top" align="start">

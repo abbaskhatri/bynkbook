@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { loadPlaidLink } from "@/lib/plaid/loadLink";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchAuthSession } from "aws-amplify/auth";
@@ -268,9 +269,19 @@ export default function SettingsPageClient() {
 
   // Phase 1 Stabilization: epoch guard for tab-scoped async loaders
   const tabEpochRef = useRef(0);
+  const newPlaidHandler = useRef<any>(null);
+  const plaidLaunchingRef = useRef(false);
+  const [plaidLaunching, setPlaidLaunching] = useState(false);
   useEffect(() => {
     // bump epoch whenever tab/business changes (stale async completions must not commit)
     tabEpochRef.current += 1;
+    plaidLaunchingRef.current = false;
+    setPlaidLaunching(false);
+    return () => {
+      tabEpochRef.current += 1;
+      try { newPlaidHandler.current?.exit(); newPlaidHandler.current?.destroy?.(); } catch {}
+      newPlaidHandler.current = null;
+    };
   }, [activeTab, selectedBusinessId]);
   useEffect(() => {
     if (didSyncBizRef.current) return;
@@ -377,6 +388,17 @@ export default function SettingsPageClient() {
   const [catError, setCatError] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [catShowArchived, setCatShowArchived] = useState(false);
+
+  const refreshCategoriesAfterMutation = useCallback(async (businessId: string, includeArchived: boolean) => {
+    await qc.invalidateQueries({
+      queryKey: ["categories", businessId],
+      exact: false,
+      refetchType: "all",
+    });
+    void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", businessId], exact: false });
+    const res: any = await listCategories(businessId, { includeArchived });
+    setCategories(res?.rows ?? res?.items ?? []);
+  }, [qc]);
   const [catNewName, setCatNewName] = useState("");
 
   // Load bookkeeping preferences when Bookkeeping tab is active
@@ -1444,8 +1466,8 @@ export default function SettingsPageClient() {
 
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
                     <div className="md:col-span-2">
-                      <Label className="text-[11px]">Email</Label>
-                      <Input className={inputH7} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" aria-label="Invite email address" />
+                      <Label htmlFor="settings-field-1" className="text-[11px]">Email</Label>
+                      <Input id="settings-field-1" className={inputH7} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@example.com" aria-label="Invite email address" />
                     </div>
                     <div>
                       <Label className="text-[11px]">Role</Label>
@@ -1637,7 +1659,7 @@ export default function SettingsPageClient() {
                                   }}
                                   disabled={!!roleChangeRestriction}
                                 >
-                                  <SelectTrigger className={`${selectTriggerClass} w-40`} title={roleChangeRestriction ?? undefined}>
+                                  <SelectTrigger aria-label={`Role for ${shownEmail || "member"}`} className={`${selectTriggerClass} w-40`} title={roleChangeRestriction ?? undefined}>
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -1869,26 +1891,26 @@ export default function SettingsPageClient() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Label className="text-[11px]">Amount tolerance ($)</Label>
-                  <Input className={inputH7} value={bkAmountTol} onChange={(e) => setBkAmountTol(e.target.value)} />
+                  <Label htmlFor="settings-field-2" className="text-[11px]">Amount tolerance ($)</Label>
+                  <Input id="settings-field-2" className={inputH7} value={bkAmountTol} onChange={(e) => setBkAmountTol(e.target.value)} />
                   <div className="text-[11px] text-muted-foreground">Maximum difference allowed when matching ledger entries to bank transactions.</div>
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-[11px]">Days tolerance</Label>
-                  <Input className={inputH7} value={bkDaysTol} onChange={(e) => setBkDaysTol(e.target.value.replace(/[^0-9]/g, ""))} />
+                  <Label htmlFor="settings-field-3" className="text-[11px]">Days tolerance</Label>
+                  <Input id="settings-field-3" className={inputH7} value={bkDaysTol} onChange={(e) => setBkDaysTol(e.target.value.replace(/[^0-9]/g, ""))} />
                   <div className="text-[11px] text-muted-foreground">Maximum days difference between ledger and bank transaction dates.</div>
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-[11px]">Duplicate detection window (days)</Label>
-                  <Input className={inputH7} value={bkDupWindow} onChange={(e) => setBkDupWindow(e.target.value.replace(/[^0-9]/g, ""))} />
+                  <Label htmlFor="settings-field-4" className="text-[11px]">Duplicate detection window (days)</Label>
+                  <Input id="settings-field-4" className={inputH7} value={bkDupWindow} onChange={(e) => setBkDupWindow(e.target.value.replace(/[^0-9]/g, ""))} />
                   <div className="text-[11px] text-muted-foreground">Time window to check for potential duplicate entries.</div>
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-[11px]">Stale check threshold (days)</Label>
-                  <Input className={inputH7} value={bkStaleDays} onChange={(e) => setBkStaleDays(e.target.value.replace(/[^0-9]/g, ""))} />
+                  <Label htmlFor="settings-field-5" className="text-[11px]">Stale check threshold (days)</Label>
+                  <Input id="settings-field-5" className={inputH7} value={bkStaleDays} onChange={(e) => setBkStaleDays(e.target.value.replace(/[^0-9]/g, ""))} />
                   <div className="text-[11px] text-muted-foreground">Days before an uncleared check is flagged as stale.</div>
                 </div>
               </div>
@@ -1995,8 +2017,8 @@ export default function SettingsPageClient() {
 
               <div className="flex items-end gap-2">
                 <div className="flex-1 space-y-1">
-                  <Label className="text-[11px]">Add category</Label>
-                  <Input
+                  <Label htmlFor="settings-field-6" className="text-[11px]">Add category</Label>
+                  <Input id="settings-field-6"
                     className={inputH7}
                     aria-label="New category name"
                     value={catNewName}
@@ -2013,9 +2035,7 @@ export default function SettingsPageClient() {
                       try {
                         await createCategory(selectedBusinessId, name);
                         setCatNewName("");
-                        void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
-                        const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                        setCategories(res?.rows ?? res?.items ?? []);
+                        await refreshCategoriesAfterMutation(selectedBusinessId, catShowArchived);
                       } catch (err: any) {
                         setCatError(uiErrorMessage(err, "Failed to create category."));
                       }
@@ -2034,9 +2054,7 @@ export default function SettingsPageClient() {
                     try {
                       await createCategory(selectedBusinessId, name);
                       setCatNewName("");
-                      void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
-                      const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                      setCategories(res?.rows ?? res?.items ?? []);
+                      await refreshCategoriesAfterMutation(selectedBusinessId, catShowArchived);
                     } catch (e: any) {
                       setCatError(uiErrorMessage(e, "Failed to create category."));
                     }
@@ -2075,9 +2093,7 @@ export default function SettingsPageClient() {
                               setCatError(null);
                               try {
                                 await updateCategory(selectedBusinessId, c.id, { archived: true });
-                                void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
-                                const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                                setCategories(res?.rows ?? res?.items ?? []);
+                                await refreshCategoriesAfterMutation(selectedBusinessId, catShowArchived);
                               } catch (e: any) {
                                 setCatError(uiErrorMessage(e, "Cannot archive category."));
                               }
@@ -2096,9 +2112,7 @@ export default function SettingsPageClient() {
                                 setCatError(null);
                                 try {
                                   await updateCategory(selectedBusinessId, c.id, { archived: false });
-                                  void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
-                                  const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                                  setCategories(res?.rows ?? res?.items ?? []);
+                                  await refreshCategoriesAfterMutation(selectedBusinessId, catShowArchived);
                                 } catch (e: any) {
                                   setCatError(uiErrorMessage(e, "Cannot unarchive category."));
                                 }
@@ -2260,8 +2274,8 @@ export default function SettingsPageClient() {
                       <>
 
                         <div className="space-y-1">
-                          <Label>Name</Label>
-                          <Input className={inputH7} value={name} onChange={(e) => setName(e.target.value)} />
+                          <Label htmlFor="settings-field-7">Name</Label>
+                          <Input id="settings-field-7" className={inputH7} value={name} onChange={(e) => setName(e.target.value)} />
                         </div>
 
                         <div className="space-y-1">
@@ -2277,7 +2291,7 @@ export default function SettingsPageClient() {
                               }
                             }}
                           >
-                            <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
+                            <SelectTrigger aria-label="Select type" className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="CHECKING">Checking</SelectItem>
                               <SelectItem value="SAVINGS">Savings</SelectItem>
@@ -2315,8 +2329,8 @@ export default function SettingsPageClient() {
                           {!isManualCash ? (
                             <>
                               <div className="space-y-1">
-                                <Label>Last 4 digits</Label>
-                                <Input
+                                <Label htmlFor="settings-field-8">Last 4 digits</Label>
+                                <Input id="settings-field-8"
                                   className={inputH7}
                                   value={manualLast4}
                                   onChange={(e) => setManualLast4(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
@@ -2325,8 +2339,8 @@ export default function SettingsPageClient() {
                               </div>
 
                               <div className="col-span-2 space-y-1">
-                                <Label>Institution name</Label>
-                                <Input
+                                <Label htmlFor="settings-field-9">Institution name</Label>
+                                <Input id="settings-field-9"
                                   className={inputH7}
                                   value={manualInstitution}
                                   onChange={(e) => setManualInstitution(e.target.value)}
@@ -2345,8 +2359,8 @@ export default function SettingsPageClient() {
 
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <Label>{isManualCash ? "Opening cash balance" : "Opening balance"}</Label>
-                            <Input className={inputH7} value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+                            <Label htmlFor="settings-field-10">{isManualCash ? "Opening cash balance" : "Opening balance"}</Label>
+                            <Input id="settings-field-10" className={inputH7} value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
                           </div>
                           <div className="space-y-1">
                             <Label>{isManualCash ? "Cash book start date" : "Opening date"}</Label>
@@ -2371,32 +2385,30 @@ export default function SettingsPageClient() {
                         <Button
                           className="h-8 px-3 text-xs"
                           onClick={async () => {
-                            if (!selectedBusinessId) return;
+                            if (!selectedBusinessId || plaidLaunchingRef.current) return;
+                            const launchEpoch = tabEpochRef.current;
+                            try { newPlaidHandler.current?.destroy?.(); } catch {}
+                            newPlaidHandler.current = null;
+                            plaidLaunchingRef.current = true;
+                            setPlaidLaunching(true);
+                            const releaseLaunch = () => {
+                              if (launchEpoch === tabEpochRef.current) { plaidLaunchingRef.current = false; setPlaidLaunching(false); }
+                            };
                             try {
                               // Open Plaid Link using business-level token; PlaidConnectButton is account-scoped, so we do it here.
                               const lt: any = await plaidLinkTokenBusiness(selectedBusinessId);
                               const linkToken = lt?.link_token;
                               if (!linkToken) throw new Error("Failed to create link token");
 
-                              // Load Plaid script (same approach as PlaidConnectButton)
-                              const scriptSrc = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
-                              const existing = document.querySelector(`script[src="${scriptSrc}"]`) as HTMLScriptElement | null;
-                              if (!existing) {
-                                const s = document.createElement("script");
-                                s.src = scriptSrc;
-                                s.async = true;
-                                document.head.appendChild(s);
-                                await new Promise<void>((resolve, reject) => {
-                                  s.onload = () => resolve();
-                                  s.onerror = () => reject(new Error("Plaid script failed to load"));
-                                });
-                              }
-
-                              if (!(window as any).Plaid?.create) throw new Error("Plaid failed to load");
+                              await loadPlaidLink();
+                              if (launchEpoch !== tabEpochRef.current) return;
 
                               const handler = (window as any).Plaid.create({
                                 token: linkToken,
+                                onExit: releaseLaunch,
                                 onSuccess: (public_token: string, metadata: any) => {
+                                  if (launchEpoch !== tabEpochRef.current) return;
+                                  releaseLaunch();
                                   const institution = metadata?.institution
                                     ? { name: metadata.institution.name, institution_id: metadata.institution.institution_id }
                                     : undefined;
@@ -2434,12 +2446,19 @@ export default function SettingsPageClient() {
                                 },
                               });
 
+                              newPlaidHandler.current = handler;
                               handler.open();
                             } catch (e: any) {
-                              setErr(uiErrorMessage(e, "Plaid failed."));
+                              if (launchEpoch === tabEpochRef.current) {
+                                try { newPlaidHandler.current?.destroy?.(); } catch {}
+                                newPlaidHandler.current = null;
+                              }
+                              if (launchEpoch === tabEpochRef.current) setErr(uiErrorMessage(e, "Plaid failed."));
+                            } finally {
+                              if (!newPlaidHandler.current) releaseLaunch();
                             }
                           }}
-                          disabled={!selectedBusinessId}
+                          disabled={!selectedBusinessId || plaidLaunching}
                         >
                           Continue to Plaid
                         </Button>
@@ -2611,8 +2630,8 @@ export default function SettingsPageClient() {
                     ) : null}
 
                     <div className="space-y-1">
-                      <Label>Name</Label>
-                      <Input
+                      <Label htmlFor="settings-field-11">Name</Label>
+                      <Input id="settings-field-11"
                         className={inputH7}
                         value={plaidDraft?.name ?? ""}
                         onChange={(e) => setPlaidDraft((cur) => (cur ? { ...cur, name: e.target.value } : cur))}
@@ -2637,12 +2656,12 @@ export default function SettingsPageClient() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label>Institution</Label>
-                        <Input className={inputH7} value={plaidDraft?.institution?.name ?? ""} disabled />
+                        <Label htmlFor="settings-field-12">Institution</Label>
+                        <Input id="settings-field-12" className={inputH7} value={plaidDraft?.institution?.name ?? ""} disabled />
                       </div>
                       <div className="space-y-1">
-                        <Label>Last 4</Label>
-                        <Input className={inputH7} value={plaidDraft?.mask ?? ""} disabled />
+                        <Label htmlFor="settings-field-13">Last 4</Label>
+                        <Input id="settings-field-13" className={inputH7} value={plaidDraft?.mask ?? ""} disabled />
                       </div>
                     </div>
 
@@ -2846,14 +2865,14 @@ export default function SettingsPageClient() {
                     {editErr ? <div className="text-sm text-bb-status-danger-fg">{editErr}</div> : null}
 
                     <div className="space-y-1">
-                      <Label>Name</Label>
-                      <Input className={inputH7} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                      <Label htmlFor="settings-field-14">Name</Label>
+                      <Input id="settings-field-14" className={inputH7} value={editName} onChange={(e) => setEditName(e.target.value)} />
                     </div>
 
                     <div className="space-y-1">
                       <Label>Type</Label>
                       <Select value={editType} onValueChange={(v) => setEditType(v as AccountType)}>
-                        <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
+                        <SelectTrigger aria-label="Select type" className={selectTriggerClass}><SelectValue placeholder="Select type" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="CHECKING">Checking</SelectItem>
                           <SelectItem value="SAVINGS">Savings</SelectItem>
@@ -2877,8 +2896,8 @@ export default function SettingsPageClient() {
                       return (
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <Label>Opening balance</Label>
-                            <Input
+                            <Label htmlFor="settings-field-15">Opening balance</Label>
+                            <Input id="settings-field-15"
                               className={inputH7}
                               value={editOpeningBalance}
                               onChange={(e) => setEditOpeningBalance(e.target.value)}
@@ -3407,30 +3426,30 @@ export default function SettingsPageClient() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label>Business name</Label>
-                  <Input className={inputH7} disabled value={selectedBusiness?.name ?? ""} />
+                  <Label htmlFor="settings-field-16">Business name</Label>
+                  <Input id="settings-field-16" className={inputH7} disabled value={selectedBusiness?.name ?? ""} />
                 </div>
 
                 <div className="space-y-1">
-                  <Label>Role</Label>
-                  <Input className={inputH7} disabled value={roleLabel(selectedBusinessRole)} />
+                  <Label htmlFor="settings-field-17">Role</Label>
+                  <Input id="settings-field-17" className={inputH7} disabled value={roleLabel(selectedBusinessRole)} />
                 </div>
 
                 <div className="space-y-1">
-                  <Label>Address</Label>
-                  <Input className={inputH7} value={bpAddress} onChange={(e) => setBpAddress(e.target.value)} disabled={!canEditBusinessProfile || bpSaving} />
+                  <Label htmlFor="settings-field-18">Address</Label>
+                  <Input id="settings-field-18" className={inputH7} value={bpAddress} onChange={(e) => setBpAddress(e.target.value)} disabled={!canEditBusinessProfile || bpSaving} />
                 </div>
 
                 <div className="space-y-1">
-                  <Label>Phone</Label>
-                  <Input className={inputH7} value={bpPhone} onChange={(e) => setBpPhone(e.target.value)} disabled={!canEditBusinessProfile || bpSaving} />
+                  <Label htmlFor="settings-field-19">Phone</Label>
+                  <Input id="settings-field-19" className={inputH7} value={bpPhone} onChange={(e) => setBpPhone(e.target.value)} disabled={!canEditBusinessProfile || bpSaving} />
                 </div>
 
                 <div className="space-y-1">
                   <Label>Industry</Label>
 
                   <Select value={bpIndustry} onValueChange={(v) => { setBpIndustry(v); if (v !== "Other") setBpIndustryOther(""); }} disabled={!canEditBusinessProfile || bpSaving}>
-                    <SelectTrigger className={selectTriggerClass}>
+                    <SelectTrigger aria-label="Industry" className={selectTriggerClass}>
                       <SelectValue placeholder="Select industry" />
                     </SelectTrigger>
                     <SelectContent>
@@ -3452,7 +3471,7 @@ export default function SettingsPageClient() {
                   </Select>
 
                   {bpIndustry === "Other" ? (
-                    <Input className={inputH7} value={bpIndustryOther} onChange={(e) => setBpIndustryOther(e.target.value)} disabled={!canEditBusinessProfile || bpSaving} placeholder="Enter industry…" />
+                    <Input aria-label="Other industry" className={inputH7} value={bpIndustryOther} onChange={(e) => setBpIndustryOther(e.target.value)} disabled={!canEditBusinessProfile || bpSaving} placeholder="Enter industry…" />
                   ) : null}
                 </div>
 
@@ -3494,7 +3513,7 @@ export default function SettingsPageClient() {
                 <div className="space-y-1">
                   <Label>Currency</Label>
                   <Select value={bpCurrency} onValueChange={(v) => setBpCurrency(v)} disabled={!canEditBusinessProfile || bpSaving}>
-                    <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Currency" /></SelectTrigger>
+                    <SelectTrigger aria-label="Currency" className={selectTriggerClass}><SelectValue placeholder="Currency" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="USD">USD — US Dollar</SelectItem>
                       <SelectItem value="CAD">CAD — Canadian Dollar</SelectItem>
@@ -3508,7 +3527,7 @@ export default function SettingsPageClient() {
                 <div className="space-y-1">
                   <Label>Fiscal year start month</Label>
                   <Select value={bpFiscalMonth} onValueChange={(v) => setBpFiscalMonth(v)} disabled={!canEditBusinessProfile || bpSaving}>
-                    <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Month" /></SelectTrigger>
+                    <SelectTrigger aria-label="Fiscal year start month" className={selectTriggerClass}><SelectValue placeholder="Month" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="1">January</SelectItem>
                       <SelectItem value="2">February</SelectItem>
@@ -3529,7 +3548,7 @@ export default function SettingsPageClient() {
                 <div className="space-y-1 md:col-span-2">
                   <Label>Timezone</Label>
                   <Select value={bpTimezone} onValueChange={(v) => setBpTimezone(v)} disabled={!canEditBusinessProfile || bpSaving}>
-                    <SelectTrigger className={selectTriggerClass}><SelectValue placeholder="Timezone" /></SelectTrigger>
+                    <SelectTrigger aria-label="Timezone" className={selectTriggerClass}><SelectValue placeholder="Timezone" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="America/New_York">America/New_York (ET)</SelectItem>
                       <SelectItem value="America/Chicago">America/Chicago (CT)</SelectItem>
@@ -3744,9 +3763,7 @@ export default function SettingsPageClient() {
                 setCatError(null);
                 try {
                   await deleteCategory(selectedBusinessId, categoryDeleteTarget.id);
-                  void qc.invalidateQueries({ queryKey: ["aiCategorySuggestions", selectedBusinessId], exact: false });
-                  const res: any = await listCategories(selectedBusinessId, { includeArchived: catShowArchived });
-                  setCategories(res?.rows ?? res?.items ?? []);
+                  await refreshCategoriesAfterMutation(selectedBusinessId, catShowArchived);
                   setCategoryDeleteOpen(false);
                   setCategoryDeleteTarget(null);
                 } catch (e: any) {

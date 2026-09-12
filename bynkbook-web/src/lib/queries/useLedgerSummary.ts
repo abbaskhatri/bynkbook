@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getLedgerSummary } from "@/lib/api/ledgerSummary";
+import { keepScopedData } from "./keepScopedData";
 
 export function useLedgerSummary(params: {
   businessId: string | null;
@@ -24,9 +25,9 @@ export function useLedgerSummary(params: {
     // refetch aggressively while row-level changes settle in the background.
     staleTime: 30_000,
     gcTime: 10 * 60_000,
-    refetchOnMount: false,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    placeholderData: (prev) => prev,
+    refetchOnReconnect: true,
+    placeholderData: keepScopedData({ 1: businessId, 2: accountId }),
   });
 }

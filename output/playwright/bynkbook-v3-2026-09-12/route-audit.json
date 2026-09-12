@@ -1,0 +1,697 @@
+[
+  {
+    "path": "/dashboard",
+    "viewport": "mobile",
+    "settledMs": 1334,
+    "heading": [
+      "Dashboard",
+      "Your next step"
+    ],
+    "overflow": 0,
+    "buttons": 4,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 68,
+    "scripts": 23,
+    "failures": []
+  },
+  {
+    "path": "/operations",
+    "viewport": "mobile",
+    "settledMs": 1477,
+    "heading": [
+      "Financial operations"
+    ],
+    "overflow": 0,
+    "buttons": 1,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 56,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/ledger",
+    "viewport": "mobile",
+    "settledMs": 1139,
+    "heading": [
+      "Ledger"
+    ],
+    "overflow": 0,
+    "buttons": 36,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 67,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/reconcile",
+    "viewport": "mobile",
+    "settledMs": 1143,
+    "heading": [
+      "Reconcile",
+      "Bank transactions"
+    ],
+    "overflow": 0,
+    "buttons": 8,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 68,
+    "scripts": 21,
+    "failures": []
+  },
+  {
+    "path": "/issues",
+    "viewport": "mobile",
+    "settledMs": 1348,
+    "heading": [
+      "Issues"
+    ],
+    "overflow": 0,
+    "buttons": 74,
+    "inputs": 37,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 71,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/category-review",
+    "viewport": "mobile",
+    "settledMs": 879,
+    "heading": [
+      "Categorize transactions"
+    ],
+    "overflow": 0,
+    "buttons": 8,
+    "inputs": 203,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 68,
+    "scripts": 20,
+    "failures": [
+      {
+        "path": "/v1/businesses/a05b0683-1216-4459-820a-6da84e57e929/ai/category-suggestions",
+        "status": 409,
+        "method": "POST"
+      }
+    ]
+  },
+  {
+    "path": "/closed-periods",
+    "viewport": "mobile",
+    "settledMs": 1021,
+    "heading": [
+      "Closed periods"
+    ],
+    "overflow": 0,
+    "buttons": 6,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 71,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/planning",
+    "viewport": "mobile",
+    "settledMs": 978,
+    "heading": [
+      "Planning"
+    ],
+    "overflow": 0,
+    "buttons": 5,
+    "inputs": 20,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 64,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/reports",
+    "viewport": "mobile",
+    "settledMs": 2916,
+    "heading": [
+      "Reports"
+    ],
+    "overflow": 0,
+    "buttons": 9,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 73,
+    "scripts": 21,
+    "failures": []
+  },
+  {
+    "path": "/vendors",
+    "viewport": "mobile",
+    "settledMs": 755,
+    "heading": [
+      "Vendors"
+    ],
+    "overflow": 0,
+    "buttons": 5,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 67,
+    "scripts": 19,
+    "failures": []
+  },
+  {
+    "path": "/checks",
+    "viewport": "mobile",
+    "settledMs": 1175,
+    "heading": [
+      "Checks"
+    ],
+    "overflow": 0,
+    "buttons": 4,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 66,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/settings",
+    "viewport": "mobile",
+    "settledMs": 1111,
+    "heading": [
+      "Settings"
+    ],
+    "overflow": 0,
+    "buttons": 19,
+    "inputs": 9,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 69,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/mobile/receipt",
+    "viewport": "mobile",
+    "settledMs": 659,
+    "heading": [
+      "Receipt Upload"
+    ],
+    "overflow": 0,
+    "buttons": 2,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 61,
+    "scripts": 16,
+    "failures": []
+  },
+  {
+    "path": "/mobile/invoice",
+    "viewport": "mobile",
+    "settledMs": 714,
+    "heading": [
+      "Invoice Upload"
+    ],
+    "overflow": 0,
+    "buttons": 2,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 62,
+    "scripts": 16,
+    "failures": []
+  },
+  {
+    "path": "/dashboard",
+    "viewport": "tablet",
+    "settledMs": 1583,
+    "heading": [
+      "Dashboard",
+      "Your next step"
+    ],
+    "overflow": 0,
+    "buttons": 4,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 72,
+    "scripts": 23,
+    "failures": []
+  },
+  {
+    "path": "/operations",
+    "viewport": "tablet",
+    "settledMs": 1842,
+    "heading": [
+      "Financial operations"
+    ],
+    "overflow": 0,
+    "buttons": 1,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 54,
+    "scripts": 22,
+    "failures": []
+  },
+  {
+    "path": "/ledger",
+    "viewport": "tablet",
+    "settledMs": 1595,
+    "heading": [
+      "Ledger"
+    ],
+    "overflow": 0,
+    "buttons": 337,
+    "inputs": 113,
+    "unnamedInputs": 6,
+    "alerts": [],
+    "navigationMs": 58,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/reconcile",
+    "viewport": "tablet",
+    "settledMs": 2159,
+    "heading": [
+      "Reconcile",
+      "Bank transactions"
+    ],
+    "overflow": 0,
+    "buttons": 35,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 95,
+    "scripts": 21,
+    "failures": []
+  },
+  {
+    "path": "/issues",
+    "viewport": "tablet",
+    "settledMs": 894,
+    "heading": [
+      "Issues"
+    ],
+    "overflow": 0,
+    "buttons": 74,
+    "inputs": 37,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 61,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/category-review",
+    "viewport": "tablet",
+    "settledMs": 815,
+    "heading": [
+      "Categorize transactions"
+    ],
+    "overflow": 0,
+    "buttons": 8,
+    "inputs": 203,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 66,
+    "scripts": 20,
+    "failures": [
+      {
+        "path": "/v1/businesses/a05b0683-1216-4459-820a-6da84e57e929/ai/category-suggestions",
+        "status": 409,
+        "method": "POST"
+      }
+    ]
+  },
+  {
+    "path": "/closed-periods",
+    "viewport": "tablet",
+    "settledMs": 1254,
+    "heading": [
+      "Closed periods"
+    ],
+    "overflow": 0,
+    "buttons": 6,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 63,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/planning",
+    "viewport": "tablet",
+    "settledMs": 1122,
+    "heading": [
+      "Planning"
+    ],
+    "overflow": 0,
+    "buttons": 5,
+    "inputs": 20,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 76,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/reports",
+    "viewport": "tablet",
+    "settledMs": 1331,
+    "heading": [
+      "Reports"
+    ],
+    "overflow": 0,
+    "buttons": 9,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 69,
+    "scripts": 21,
+    "failures": []
+  },
+  {
+    "path": "/vendors",
+    "viewport": "tablet",
+    "settledMs": 769,
+    "heading": [
+      "Vendors"
+    ],
+    "overflow": 0,
+    "buttons": 5,
+    "inputs": 2,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 78,
+    "scripts": 19,
+    "failures": []
+  },
+  {
+    "path": "/checks",
+    "viewport": "tablet",
+    "settledMs": 1489,
+    "heading": [
+      "Checks"
+    ],
+    "overflow": 0,
+    "buttons": 4,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 64,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/settings",
+    "viewport": "tablet",
+    "settledMs": 1345,
+    "heading": [
+      "Settings"
+    ],
+    "overflow": 0,
+    "buttons": 19,
+    "inputs": 9,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 66,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/mobile/receipt",
+    "viewport": "tablet",
+    "settledMs": 710,
+    "heading": [
+      "Receipt Upload"
+    ],
+    "overflow": 0,
+    "buttons": 2,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 52,
+    "scripts": 16,
+    "failures": []
+  },
+  {
+    "path": "/mobile/invoice",
+    "viewport": "tablet",
+    "settledMs": 697,
+    "heading": [
+      "Invoice Upload"
+    ],
+    "overflow": 0,
+    "buttons": 2,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 63,
+    "scripts": 16,
+    "failures": []
+  },
+  {
+    "path": "/dashboard",
+    "viewport": "desktop",
+    "settledMs": 1461,
+    "heading": [
+      "Dashboard",
+      "Your next step"
+    ],
+    "overflow": 0,
+    "buttons": 4,
+    "inputs": 3,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 76,
+    "scripts": 23,
+    "failures": []
+  },
+  {
+    "path": "/operations",
+    "viewport": "desktop",
+    "settledMs": 1597,
+    "heading": [
+      "Financial operations"
+    ],
+    "overflow": 0,
+    "buttons": 1,
+    "inputs": 1,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 55,
+    "scripts": 25,
+    "failures": []
+  },
+  {
+    "path": "/ledger",
+    "viewport": "desktop",
+    "settledMs": 1635,
+    "heading": [
+      "Ledger"
+    ],
+    "overflow": 0,
+    "buttons": 337,
+    "inputs": 114,
+    "unnamedInputs": 6,
+    "alerts": [],
+    "navigationMs": 68,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/reconcile",
+    "viewport": "desktop",
+    "settledMs": 1861,
+    "heading": [
+      "Reconcile"
+    ],
+    "overflow": 0,
+    "buttons": 200,
+    "inputs": 62,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 91,
+    "scripts": 21,
+    "failures": []
+  },
+  {
+    "path": "/issues",
+    "viewport": "desktop",
+    "settledMs": 1241,
+    "heading": [
+      "Issues"
+    ],
+    "overflow": 0,
+    "buttons": 74,
+    "inputs": 38,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 54,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/category-review",
+    "viewport": "desktop",
+    "settledMs": 864,
+    "heading": [
+      "Categorize transactions"
+    ],
+    "overflow": 0,
+    "buttons": 8,
+    "inputs": 204,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 71,
+    "scripts": 20,
+    "failures": [
+      {
+        "path": "/v1/businesses/a05b0683-1216-4459-820a-6da84e57e929/ai/category-suggestions",
+        "status": 409,
+        "method": "POST"
+      }
+    ]
+  },
+  {
+    "path": "/closed-periods",
+    "viewport": "desktop",
+    "settledMs": 1207,
+    "heading": [
+      "Closed periods"
+    ],
+    "overflow": 0,
+    "buttons": 6,
+    "inputs": 1,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 71,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/planning",
+    "viewport": "desktop",
+    "settledMs": 1066,
+    "heading": [
+      "Planning"
+    ],
+    "overflow": 0,
+    "buttons": 5,
+    "inputs": 21,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 55,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/reports",
+    "viewport": "desktop",
+    "settledMs": 1160,
+    "heading": [
+      "Reports"
+    ],
+    "overflow": 0,
+    "buttons": 9,
+    "inputs": 3,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 59,
+    "scripts": 21,
+    "failures": []
+  },
+  {
+    "path": "/vendors",
+    "viewport": "desktop",
+    "settledMs": 712,
+    "heading": [
+      "Vendors"
+    ],
+    "overflow": 0,
+    "buttons": 5,
+    "inputs": 3,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 50,
+    "scripts": 19,
+    "failures": []
+  },
+  {
+    "path": "/checks",
+    "viewport": "desktop",
+    "settledMs": 1352,
+    "heading": [
+      "Checks"
+    ],
+    "overflow": 0,
+    "buttons": 4,
+    "inputs": 1,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 58,
+    "scripts": 17,
+    "failures": []
+  },
+  {
+    "path": "/settings",
+    "viewport": "desktop",
+    "settledMs": 1335,
+    "heading": [
+      "Settings"
+    ],
+    "overflow": 0,
+    "buttons": 19,
+    "inputs": 10,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 59,
+    "scripts": 20,
+    "failures": []
+  },
+  {
+    "path": "/mobile/receipt",
+    "viewport": "desktop",
+    "settledMs": 718,
+    "heading": [
+      "Receipt Upload"
+    ],
+    "overflow": 0,
+    "buttons": 2,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 59,
+    "scripts": 16,
+    "failures": []
+  },
+  {
+    "path": "/mobile/invoice",
+    "viewport": "desktop",
+    "settledMs": 703,
+    "heading": [
+      "Invoice Upload"
+    ],
+    "overflow": 0,
+    "buttons": 2,
+    "inputs": 0,
+    "unnamedInputs": 0,
+    "alerts": [],
+    "navigationMs": 52,
+    "scripts": 16,
+    "failures": []
+  }
+]

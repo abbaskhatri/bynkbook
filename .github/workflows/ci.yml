@@ -35,6 +35,18 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Frontend regression tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install browser
+        run: npm exec playwright -- install --with-deps chromium
+
+      - name: Public browser checks
+        run: npm run test:e2e
+
   infra:
     name: Infra
     runs-on: ubuntu-latest
@@ -66,7 +78,7 @@ jobs:
         run: npm run --workspace @infra-sst/functions typecheck
 
   backend-critical-tests:
-    name: Backend critical tests
+    name: Backend regression tests
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bynkbook_ci
@@ -86,6 +98,6 @@ jobs:
         working-directory: infra-sst
         run: npm ci
 
-      - name: Run critical tests
+      - name: Run backend regression tests
         working-directory: infra-sst/packages/functions
-        run: npm exec vitest -- run src/authorizationGaps.test.ts src/entriesApplyCategoryBatch.test.ts src/lib/db.test.ts
+        run: npm exec vitest -- run

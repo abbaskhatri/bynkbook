@@ -110,25 +110,6 @@ async function refreshAuthToken(): Promise<string | null> {
   return token;
 }
 
-function joinSignals(signals: Array<AbortSignal | null | undefined>) {
-  const activeSignals = signals.filter((signal): signal is AbortSignal => !!signal);
-  if (activeSignals.length === 0) return null;
-  if (activeSignals.length === 1) return activeSignals[0];
-
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-
-  for (const signal of activeSignals) {
-    if (signal.aborted) {
-      controller.abort();
-      break;
-    }
-    signal.addEventListener("abort", abort, { once: true });
-  }
-
-  return controller.signal;
-}
-
 function apiError(status: number, message: string, payload?: any) {
   const err: any = new Error(message);
   err.status = status;
@@ -163,8 +144,10 @@ function plaidSyncFailureMessage(payload: any) {
 
 export async function apiFetch(path: string, init?: ApiFetchInit) {
   const t0 = performance.now();
+  init?.signal?.throwIfAborted();
 
   const token = await getAuthToken();
+  init?.signal?.throwIfAborted();
   if (!token) {
     const err: any = new Error("Auth session unavailable. Please sign in again.");
     err.status = 401;
@@ -176,32 +159,44 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const timeoutMs = Math.max(Number(init?.timeoutMs ?? DEFAULT_TIMEOUT_MS), 1);
+  const requestedTimeout = Number(init?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(requestedTimeout) ? Math.max(requestedTimeout, 1) : DEFAULT_TIMEOUT_MS;
   const runFetch = async (requestHeaders: Headers) => {
+    init?.signal?.throwIfAborted();
     const timeoutController = new AbortController();
-    const timeout = globalThis.setTimeout(() => timeoutController.abort(), timeoutMs);
+    const abortFromCaller = () => timeoutController.abort(init?.signal?.reason);
+    init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timeout = globalThis.setTimeout(() => timeoutController.abort(timeoutError("Request", timeoutMs)), timeoutMs);
 
     try {
-      return await fetch(`${API_BASE ?? ""}${path}`, {
+      const response = await fetch(`${API_BASE ?? ""}${path}`, {
         ...init,
         headers: requestHeaders,
-        signal: joinSignals([init?.signal, timeoutController.signal]) ?? undefined,
+        signal: timeoutController.signal,
         cache: "no-store",
       });
+      // Keep the deadline active until the body arrives, not just the headers.
+      const body = await response.text();
+      return { response, body };
+    } catch (error) {
+      if (timeoutController.signal.aborted) throw timeoutController.signal.reason;
+      throw error;
     } finally {
       globalThis.clearTimeout(timeout);
+      init?.signal?.removeEventListener("abort", abortFromCaller);
     }
   };
 
-  let res = await runFetch(headers);
+  let { response: res, body } = await runFetch(headers);
 
   if (res.status === 401) {
+    init?.signal?.throwIfAborted();
     const refreshedToken = await refreshAuthToken();
     if (refreshedToken) {
       const retryHeaders = new Headers(init?.headers);
       retryHeaders.set("Content-Type", "application/json");
       retryHeaders.set("Authorization", `Bearer ${refreshedToken}`);
-      res = await runFetch(retryHeaders);
+      ({ response: res, body } = await runFetch(retryHeaders));
     }
   }
 
@@ -216,9 +211,9 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
     let text = "";
 
     if (contentType.includes("application/json")) {
-      payload = await res.json().catch(() => null);
+      try { payload = JSON.parse(body); } catch { payload = null; }
     } else {
-      text = await res.text().catch(() => "");
+      text = body;
     }
 
     if (res.status === 409 && payload?.code === "CLOSED_PERIOD") {
@@ -278,10 +273,10 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
       text = payload ? JSON.stringify(payload) : res.statusText;
     }
 
-    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+    throw apiError(res.status, `API ${res.status}: ${text || res.statusText}`, payload);
   }
 
   const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) return res.json();
-  return res.text();
+  if (contentType.includes("application/json")) return JSON.parse(body);
+  return body;
 }

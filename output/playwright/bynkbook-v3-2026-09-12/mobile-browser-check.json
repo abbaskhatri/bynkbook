@@ -1,0 +1,10 @@
+{
+  "initialCards": 25,
+  "horizontalOverflow": false,
+  "nextPageChanged": true,
+  "detailOpened": true,
+  "editFields": 5,
+  "addEntryFields": 6,
+  "reconcileCards": 25,
+  "reconcileOverflow": false
+}

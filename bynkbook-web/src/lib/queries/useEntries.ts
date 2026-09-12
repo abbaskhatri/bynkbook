@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { listEntries } from "@/lib/api/entries";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { loadEntriesForQuery, type EntryList } from "@/lib/api/entries";
+import { keepScopedData } from "./keepScopedData";
 
 export function useEntries(params: {
   businessId: string | null;
@@ -16,33 +18,33 @@ export function useEntries(params: {
 }) {
   const { businessId, accountId, limit, pageCount, includeDeleted, search, date_from, date_to, uncategorized, excludeOpening, unmatchedOnly } = params;
 
-  return useQuery({
-    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, search ?? "", date_from ?? "", date_to ?? "", pageCount ?? 1, !!uncategorized, !!excludeOpening, !!unmatchedOnly],
-    queryFn: () =>
-      listEntries({
-        businessId: businessId as string,
-        accountId: accountId as string,
-        limit,
-        pageCount: pageCount ?? 1,
-        includeDeleted: !!includeDeleted,
-        search,
-        date_from,
-        date_to,
-        uncategorized,
-        excludeOpening,
-        unmatchedOnly,
-      }),
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: ["entries", businessId, accountId, limit, !!includeDeleted, search ?? "", date_from ?? "", date_to ?? "", 1, !!uncategorized, !!excludeOpening, !!unmatchedOnly],
+    queryFn: async ({ signal, queryKey }) => {
+      const state = client.getQueryState<EntryList>(queryKey);
+      return loadEntriesForQuery({ businessId: businessId!, accountId: accountId!, limit,
+        pageCount, includeDeleted: !!includeDeleted, search, date_from, date_to,
+        uncategorized, excludeOpening, unmatchedOnly, signal }, state?.data, state?.isInvalidated);
+    },
     enabled: !!businessId && !!accountId,
 
     // Align entries with app-wide query discipline so page revisits,
     // focus changes, and small follow-up refreshes do not feel heavy.
     staleTime: 30_000,
     gcTime: 10 * 60_000,
-    refetchOnMount: false,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnReconnect: true,
 
     // Keep last-good rows visible while a background refresh resolves.
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 1: businessId, 2: accountId }),
   });
+  const loadedPages = query.data?.meta?.loadedPages ?? 1;
+  const hasMore = query.data?.meta?.hasMore;
+  const { refetch } = query;
+  useEffect(() => {
+    if ((pageCount ?? 1) > loadedPages && hasMore) void refetch({ cancelRefetch: false });
+  }, [pageCount, loadedPages, hasMore, refetch, query.dataUpdatedAt]);
+  return query;
 }

@@ -41,6 +41,7 @@ export type Entry = {
 };
 
 export type ListEntriesMeta = {
+  loadedPages?: number;
   totalCount?: number;
   hasMore?: boolean;
   nextCursor?: string | null;
@@ -201,6 +202,8 @@ export async function listEntriesPage(params: {
   businessId: string;
   accountId: string;
   limit: number;
+  signal?: AbortSignal;
+  entryId?: string;
   cursor?: string | null;
   includeDeleted?: boolean;
   type?: string; // e.g. "EXPENSE" or "EXPENSE,INCOME"
@@ -219,6 +222,7 @@ export async function listEntriesPage(params: {
   const qs = new URLSearchParams();
   qs.set("limit", String(Math.max(1, Math.min(200, limit))));
   if (cursor) qs.set("cursor", cursor);
+  if (params.entryId) qs.set("entryId", params.entryId);
   if (includeDeleted) qs.set("include_deleted", "true");
   if (params.type) qs.set("type", params.type);
   if (params.vendorId) qs.set("vendorId", params.vendorId);
@@ -233,7 +237,7 @@ export async function listEntriesPage(params: {
 
   const url = `/v1/businesses/${businessId}/accounts/${accountId}/entries?${qs.toString()}`;
 
-  const res: any = await apiFetch(url);
+  const res: any = await apiFetch(url, { signal: params.signal });
 
   const rows = res?.items ?? res?.entries ?? [];
   const items = Array.isArray(rows) ? rows.map(normalizeEntry) : [];
@@ -253,6 +257,7 @@ export async function listEntries(params: {
   businessId: string;
   accountId: string;
   limit: number;
+  signal?: AbortSignal;
   pageCount?: number;
   includeDeleted?: boolean;
   type?: string; // e.g. "EXPENSE" or "EXPENSE,INCOME"
@@ -282,12 +287,32 @@ export async function listEntries(params: {
 
   all.meta = {
     ...meta,
+    loadedPages: pageCount,
     hasMore: !!meta.hasMore,
     nextCursor: cursor,
     limit: perPageLimit,
   };
 
   return all;
+}
+
+/** Extends one scoped flat cache; invalidation revalidates every loaded page. */
+export async function loadEntriesForQuery(params: Parameters<typeof listEntries>[0], cached?: EntryList, invalidated = false): Promise<EntryList> {
+  const requestedPages = Math.max(1, cached ? params.pageCount ?? 1 : 1);
+  const loadedPages = cached?.meta?.loadedPages ?? 1;
+  if (cached?.meta?.hasMore && requestedPages > loadedPages && !invalidated) {
+    const rows = [...cached] as EntryList;
+    let meta = cached.meta;
+    for (let page = loadedPages; page < requestedPages && meta.hasMore && meta.nextCursor; page++) {
+      const next = await listEntriesPage({ ...params, cursor: meta.nextCursor });
+      const seen = new Set(rows.map((row) => row.id));
+      rows.push(...next.items.filter((row) => !seen.has(row.id)));
+      meta = { ...next.meta, loadedPages: page + 1 };
+    }
+    rows.meta = meta;
+    return rows;
+  }
+  return listEntries({ ...params, pageCount: Math.max(requestedPages, loadedPages) });
 }
 
 export async function listAllEntries(params: {

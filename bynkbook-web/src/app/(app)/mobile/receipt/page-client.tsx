@@ -78,6 +78,7 @@ function statusLabel(item: {
   parsedStatus?: string | null;
   error?: string;
 }) {
+  if (item.status === "CANCELED") return "Canceled";
   if (item.status === "FAILED") return item.error ?? "Upload failed";
   if (item.status === "UPLOADING") return `Uploading - ${item.progress}%`;
   if (item.status === "UPLOADED") return "Uploaded - processing";
@@ -387,13 +388,14 @@ export default function MobileReceiptPageClient() {
 
           {uploader.items.length === 0 ? (
             <div className="rounded-md border border-border bg-card p-4 text-sm leading-5 text-muted-foreground shadow-sm">
-              Uploaded receipts will appear here during this session. The desktop ledger upload history is unchanged.
+              Uploaded receipts will appear here during this session. Find saved files in your ledger upload history.
             </div>
           ) : (
             uploader.items.map((item) => {
               const summary = parsedSummary(item.parsed);
               const isActive = item.status === "QUEUED" || item.status === "UPLOADING" || item.status === "UPLOADED";
               const failed = item.status === "FAILED";
+              const canceled = item.status === "CANCELED";
 
               return (
                 <article
@@ -404,6 +406,8 @@ export default function MobileReceiptPageClient() {
                     <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-muted/50 text-muted-foreground">
                       {isActive ? (
                         <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : canceled ? (
+                        <FileText className="h-5 w-5" />
                       ) : failed ? (
                         <AlertTriangle className="h-5 w-5 text-bb-status-danger-fg" />
                       ) : (
@@ -429,7 +433,10 @@ export default function MobileReceiptPageClient() {
                         </div>
                       ) : null}
                     </div>
-                    {failed ? (
+                    {item.status === "QUEUED" || item.status === "UPLOADING" ? (
+                      <button type="button" onClick={() => uploader.cancel(item.id)} className="min-h-11 shrink-0 rounded-md border border-border px-3 text-sm" aria-label={`Cancel ${item.file.name}`}>Cancel</button>
+                    ) : null}
+                    {failed || canceled ? (
                       <button
                         type="button"
                         onClick={() => uploader.retry(item.id)}
@@ -449,7 +456,7 @@ export default function MobileReceiptPageClient() {
         <section className="rounded-md border border-border bg-card p-4 text-sm leading-5 text-muted-foreground shadow-sm">
           Need the full ledger workflow?{" "}
           <Link href={ledgerHref} prefetch={false} className="font-medium text-foreground underline underline-offset-4">
-            Open desktop ledger
+            Open ledger
           </Link>
           .
         </section>

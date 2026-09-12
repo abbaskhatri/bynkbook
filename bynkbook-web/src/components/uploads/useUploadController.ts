@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UploadType, UploadContext } from "./uploadTypes";
 import { apiFetch } from "@/lib/api/client";
 import { completeUpload, type CompleteUploadOptions } from "@/lib/api/uploads";
@@ -54,6 +54,25 @@ export function useUploadController(args: {
   const { type, ctx, meta, completeOptions } = args;
 
   const [items, setItems] = useState<UploadItem[]>([]);
+  const active = useRef<Record<string, AbortController>>({});
+  const alive = useRef(false);
+  const queueGeneration = useRef(0);
+  const canceledIds = useRef(new Set<string>());
+  const scope = `${ctx?.businessId ?? ""}:${ctx?.accountId ?? ""}:${type}`;
+  const currentScope = useRef(scope);
+  useEffect(() => {
+    alive.current = true;
+    currentScope.current = scope;
+    setItems([]);
+    return () => {
+      alive.current = false;
+      queueGeneration.current += 1;
+      Object.values(active.current).forEach((controller) => controller.abort());
+      Object.values(xhrs.current).forEach((xhr) => xhr.abort());
+      active.current = {};
+      xhrs.current = {};
+    };
+  }, [scope]);
   const xhrs = useRef<Record<string, XMLHttpRequest>>({});
 
   const hasActiveUploads = useMemo(() => {
@@ -67,7 +86,7 @@ export function useUploadController(args: {
   }, [ctx?.businessId]);
 
   const initOne = useCallback(
-    async (file: File) => {
+    async (file: File, signal: AbortSignal) => {
       const businessId = requireBusinessId();
       const accountId = ctx?.accountId?.trim() || null;
 
@@ -83,6 +102,7 @@ export function useUploadController(args: {
       try {
         const res = (await apiFetch(`/v1/businesses/${businessId}/uploads/init`, {
           method: "POST",
+          signal,
           body: JSON.stringify(body),
         })) as InitResponse;
 
@@ -126,6 +146,8 @@ export function useUploadController(args: {
         xhrs.current[localId] = xhr;
 
         xhr.open("PUT", url, true);
+        xhr.timeout = 120_000;
+        xhr.ontimeout = () => reject(new Error("Upload timed out. Check your connection and retry."));
 
         // Apply any signed headers
         if (headers) {
@@ -163,10 +185,15 @@ export function useUploadController(args: {
 
   const startUpload = useCallback(
   async (localId: string, file: File) => {
+      if (!alive.current || currentScope.current !== scope || canceledIds.current.has(localId) || active.current[localId]) return;
+      const controller = new AbortController();
+      active.current[localId] = controller;
+      const checkActive = () => controller.signal.throwIfAborted();
       setItems((prev) => prev.map((i) => (i.id === localId ? { ...i, status: "UPLOADING", progress: 1 } : i)));
 
       try {
-        const init = await initOne(file);
+        const init = await initOne(file, controller.signal);
+        checkActive();
 
         // Duplicate upload guard: reuse visible active upload if present.
         // If backend points at a hidden/deleted row, surface a clear duplicate error
@@ -181,6 +208,7 @@ export function useUploadController(args: {
           qs.set("limit", "50");
 
           const listRes: any = await apiFetch(`/v1/businesses/${businessId}/uploads?${qs.toString()}`, { method: "GET" });
+          checkActive();
           const items = Array.isArray(listRes?.items) ? listRes.items : [];
           const hit = items.find((u: any) => String(u?.id) === String(init.id)) ?? null;
 
@@ -236,6 +264,7 @@ export function useUploadController(args: {
         );
 
         const putRes = await uploadPutWithProgress(localId, init.url as string, file, init.headers);
+        checkActive();
 
         setItems((prev) =>
   prev.map((i) =>
@@ -254,7 +283,9 @@ try {
   // Non-fatal; continue to complete
 }
 
+checkActive();
 const completeRes: any = await completeOne(init.id);
+checkActive();
 
         setItems((prev) =>
           prev.map((i) =>
@@ -273,12 +304,15 @@ const completeRes: any = await completeOne(init.id);
 
         delete xhrs.current[localId];
       } catch (e: any) {
+        if (controller.signal.aborted) return;
         const msg = e?.message || "Upload failed";
         setItems((prev) => prev.map((i) => (i.id === localId ? { ...i, status: "FAILED", error: msg } : i)));
         delete xhrs.current[localId];
+      } finally {
+        if (active.current[localId] === controller) delete active.current[localId];
       }
     },
-    [completeOne, ctx?.accountId, initOne, requireBusinessId, type, uploadPutWithProgress],
+    [scope, completeOne, ctx?.accountId, initOne, requireBusinessId, type, uploadPutWithProgress],
   );
 
   const enqueueAndStart = useCallback(
@@ -297,7 +331,9 @@ const completeRes: any = await completeOne(init.id);
       setItems((prev) => [...newItems, ...prev]);
 
       // Start async immediately (instant-fast)
+      const generation = queueGeneration.current;
       window.setTimeout(() => {
+        if (generation !== queueGeneration.current) return;
         newItems.forEach((i) => startUpload(i.id, i.file));
       }, 0);
     },
@@ -305,6 +341,8 @@ const completeRes: any = await completeOne(init.id);
   );
 
   const cancel = useCallback((localId: string) => {
+    canceledIds.current.add(localId);
+    active.current[localId]?.abort();
     const xhr = xhrs.current[localId];
     if (xhr) {
       try {
@@ -316,6 +354,8 @@ const completeRes: any = await completeOne(init.id);
   }, []);
 
   const remove = useCallback((localId: string) => {
+    canceledIds.current.add(localId);
+    active.current[localId]?.abort();
     const xhr = xhrs.current[localId];
     if (xhr) {
       try {
@@ -327,6 +367,9 @@ const completeRes: any = await completeOne(init.id);
   }, []);
 
   const clearAll = useCallback(() => {
+    queueGeneration.current += 1;
+    canceledIds.current.clear();
+    Object.values(active.current).forEach((controller) => controller.abort());
     Object.values(xhrs.current).forEach((xhr) => {
       try {
         xhr.abort();
@@ -338,6 +381,7 @@ const completeRes: any = await completeOne(init.id);
 
   const retry = useCallback(
     (localId: string) => {
+      canceledIds.current.delete(localId);
       setItems((prev) =>
         prev.map((i) => (i.id === localId ? { ...i, status: "QUEUED", progress: 0, error: undefined } : i)),
       );
@@ -350,7 +394,7 @@ const completeRes: any = await completeOne(init.id);
 
   return {
     type,
-    items,
+    items: currentScope.current === scope ? items : [],
     hasActiveUploads,
     enqueueAndStart,
     cancel,

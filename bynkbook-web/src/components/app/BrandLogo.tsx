@@ -54,6 +54,7 @@ function LightFullLogo({
         alt=""
         width={icon.width}
         height={icon.height}
+        style={{ width: icon.width, height: "auto" }}
         priority={priority}
         className="h-auto w-auto max-w-full select-none object-contain"
         aria-hidden="true"
@@ -101,6 +102,7 @@ export function BrandLogo({
             alt="BynkBook"
             width={asset.width}
             height={asset.height}
+            style={{ width: asset.width, height: "auto" }}
             priority={priority}
             className={cn(imageClass, "dark:hidden")}
           />
@@ -116,6 +118,7 @@ export function BrandLogo({
           alt="BynkBook"
           width={asset.width}
           height={asset.height}
+          style={{ width: asset.width, height: "auto" }}
           priority={priority}
           className={imageClass}
         />

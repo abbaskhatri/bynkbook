@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+const MobileEntryDialog = dynamic(() => import("@/components/ledger/mobile-entry-dialog"), { ssr: false });
 import { downloadCsv, slugifyFilenamePart } from "@/lib/csv";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -114,6 +115,7 @@ import { FilterBar } from "@/components/primitives/FilterBar";
 import { LazyAppDialog as AppDialog } from "@/components/primitives/LazyAppDialog";
 import { AppActionMenu } from "@/components/primitives/AppActionMenu";
 import { LedgerTableShell } from "@/components/ledger/ledger-table-shell";
+import { MobileRecordList } from "@/components/mobile/mobile-record-list";
 import { FinancialRecordRow } from "@/components/mobile/financial-record-row";
 import { StatusChip } from "@/components/primitives/StatusChip";
 import { AppDatePicker } from "@/components/primitives/AppDatePicker";
@@ -578,12 +580,12 @@ export default function LedgerPageClient() {
         serverSearch,
         serverDateFrom,
         serverDateTo,
-        loadedPageCount,
+        1,
         false,
         false,
         serverUnmatchedOnly,
       ] as const,
-    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, serverSearch, serverDateFrom, serverDateTo, loadedPageCount, serverUnmatchedOnly]
+    [selectedBusinessId, selectedAccountId, fetchLimit, showDeleted, serverSearch, serverDateFrom, serverDateTo, serverUnmatchedOnly]
   );
 
   const entriesQ = useEntries({
@@ -642,7 +644,8 @@ export default function LedgerPageClient() {
     queryKey: ["matchPlacement", selectedBusinessId, selectedAccountId, issueEntryIdsSignature],
     enabled: !!selectedBusinessId && !!selectedAccountId && issueEntryIds.length > 0,
     staleTime: 15_000,
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, previousQuery) =>
+      previousQuery?.queryKey[1] === selectedBusinessId && previousQuery.queryKey[2] === selectedAccountId ? prev : undefined,
     queryFn: async () => {
       if (!selectedBusinessId || !selectedAccountId || issueEntryIds.length === 0) {
         return { activeEntryLinks: [] as any[] };
@@ -683,7 +686,8 @@ export default function LedgerPageClient() {
       }
       return getAttentionSummary({ businessId: selectedBusinessId, accountId: selectedAccountId });
     },
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, previousQuery) =>
+      previousQuery?.queryKey[1] === (selectedBusinessId || "") && previousQuery.queryKey[2] === (selectedAccountId || "all") ? prev : undefined,
   });
 
   const issuesListQ = useQuery({
@@ -820,6 +824,9 @@ export default function LedgerPageClient() {
   const categoriesQ = useQuery({
     queryKey: ["categories", selectedBusinessId],
     enabled: !!selectedBusinessId,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     queryFn: async () => {
       if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
       // IMPORTANT: include archived for DISPLAY so historical entries still show their category name.
@@ -1995,6 +2002,11 @@ export default function LedgerPageClient() {
   const [aiExplainBusy, setAiExplainBusy] = useState(false);
   const [aiExplainErr, setAiExplainErr] = useState<string | null>(null);
 
+  const mobileAddButtonRef = useRef<HTMLButtonElement>(null);
+  const [mobileAddScope, setMobileAddScope] = useState<string | null>(null);
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
+  const [mobileRecordId, setMobileRecordId] = useState<string | null>(null);
+  const mobileRecord = rowModels.find((row) => row.id === mobileRecordId);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editedIds, setEditedIds] = useState<Record<string, boolean>>({});
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -2888,6 +2900,7 @@ export default function LedgerPageClient() {
       <td className={td}>
         <input
           className={inputH7 + " tabular-nums"}
+          aria-label="Entry reference"
           placeholder="Ref"
           value={draftRef}
           onChange={(e) => setDraftRef(e.target.value)}
@@ -2928,7 +2941,7 @@ export default function LedgerPageClient() {
             if (next === "ADJUSTMENT") setDraftMethod("OTHER");
           }}
         >
-          <SelectTrigger className={selectTriggerClass}>
+          <SelectTrigger aria-label="Entry type" className={selectTriggerClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent side="bottom" align="start">
@@ -2951,7 +2964,7 @@ export default function LedgerPageClient() {
             value={draftMethod}
             onValueChange={(v) => setDraftMethod(v as UiMethod)}
           >
-            <SelectTrigger className={selectTriggerClass}>
+            <SelectTrigger aria-label="Payment method" className={selectTriggerClass}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent side="bottom" align="start">
@@ -3038,6 +3051,7 @@ export default function LedgerPageClient() {
       {/* Amount */}
       <td className={td + " " + num}>
         <input
+          aria-label="Entry amount"
           ref={amountInputRef}
           className={inputH7 + " text-right tabular-nums"}
           value={draftAmount}
@@ -3073,7 +3087,7 @@ export default function LedgerPageClient() {
       {/* Top row: compact main strip */}
       <div className="flex items-center gap-2 min-w-0">
         {/* Left cluster: search + filters (can shrink) */}
-        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto whitespace-nowrap pr-2 py-1 pl-1">
+        <div className="flex flex-wrap md:flex-nowrap items-center gap-2 min-w-0 flex-1 md:overflow-x-auto pr-1 py-1">
           {isCashAccount ? (
             <span className="inline-flex h-7 shrink-0 items-center rounded-md border border-bb-border bg-bb-table-header px-2 text-xs font-medium text-bb-text">
               Cash book
@@ -3107,16 +3121,17 @@ export default function LedgerPageClient() {
 
           <input
             ref={searchInputRef}
-            className={[inputH7, "w-[220px] min-w-0"].join(" ")}
+            className={[inputH7, "w-full md:w-[220px] min-w-[160px] md:min-w-[180px]"].join(" ")}
             placeholder="Search all entries — payee or memo (press /)"
             aria-label="Search by payee"
             value={searchPayee}
             onChange={(e) => setSearchPayee(e.target.value)}
           />
 
+          <div className={showAdvancedFilters ? "contents" : "hidden md:contents"}>
           {/* Type */}
           <Select value={filterType} onValueChange={(v) => { setFilterType(v as any); setPage(1); }}>
-            <SelectTrigger className={[selectTriggerClass, "w-[120px]"].join(" ")}>
+            <SelectTrigger aria-label="Filter by type" className={[selectTriggerClass, "w-[120px]"].join(" ")}>
               <SelectValue placeholder="Type" />
             </SelectTrigger>
             <SelectContent align="start">
@@ -3130,7 +3145,7 @@ export default function LedgerPageClient() {
 
           {/* Method */}
           <Select value={filterMethod} onValueChange={(v) => { setFilterMethod(v); setPage(1); }}>
-            <SelectTrigger className={[selectTriggerClass, "w-[140px]"].join(" ")}>
+            <SelectTrigger aria-label="Filter by method" className={[selectTriggerClass, "w-[140px]"].join(" ")}>
               <SelectValue placeholder="Method" />
             </SelectTrigger>
             <SelectContent align="start">
@@ -3149,7 +3164,7 @@ export default function LedgerPageClient() {
 
           {/* Category */}
           <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v); setPage(1); }}>
-            <SelectTrigger className={[selectTriggerClass, "w-[160px]"].join(" ")}>
+            <SelectTrigger aria-label="Filter by category" className={[selectTriggerClass, "w-[160px]"].join(" ")}>
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent align="start">
@@ -3169,7 +3184,8 @@ export default function LedgerPageClient() {
             </SelectContent>
           </Select>
 
-          <div className="flex items-center gap-1.5 pl-2 border-l border-bb-border shrink-0">
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 md:pl-2 md:border-l border-bb-border min-w-0">
             {/* Advanced toggle */}
             <button
               type="button"
@@ -3238,6 +3254,7 @@ export default function LedgerPageClient() {
               </div>
             ) : null}
 
+            <div className={showAdvancedFilters ? "contents" : "hidden md:contents"}>
             {/* Divider after Reset area (like old app) */}
             <div className="h-6 w-px bg-bb-border mx-1 shrink-0" />
 
@@ -3268,6 +3285,7 @@ export default function LedgerPageClient() {
               }}
             />
 
+            </div>
             {err ? (
               <div className="text-sm text-bb-status-danger-fg whitespace-nowrap shrink-0" role="alert">
                 {err}
@@ -5215,14 +5233,26 @@ export default function LedgerPageClient() {
       {selectedBusinessId && (accountsQ.data ?? []).length > 0 ? (
         <>
           <section className="space-y-2 px-3 md:hidden" aria-label="Ledger entries">
+            <div className="flex items-center justify-between gap-2">
+              <span role="status" className="text-xs text-bb-text-muted">{entriesQ.isFetching ? "Updating…" : `${displayRowsAll.length} entries loaded`}</span>
+              {["OWNER", "ADMIN", "BOOKKEEPER"].includes(myBusinessRole) ? <Button ref={mobileAddButtonRef} className="min-h-11" onClick={() => setMobileAddScope(`${selectedBusinessId}:${selectedAccountId}`)}>Add entry</Button> : null}
+            </div>
             {entriesQ.isLoading ? (
               Array.from({ length: 6 }, (_, index) => (
                 <div key={index} className="h-[5.5rem] animate-pulse rounded-xl border border-bb-border bg-bb-surface-card" />
               ))
             ) : (
-              pageRows.map((row) => (
+              <MobileRecordList
+                key={`${selectedBusinessId}:${selectedAccountId}:${serverSearch}:${serverDateFrom}:${serverDateTo}:${isNeedsReconcileView}`}
+                items={displayRowsAll}
+                hasMore={hasMoreOnServer}
+                loading={entriesQ.isFetching}
+                onLoadMore={() => setLoadedPageCount((n) => n + 1)}
+                renderItem={(row) => (
                 <FinancialRecordRow
                   key={row.id}
+                  onClick={() => { cancelEdit(); setMobileRecordId(row.id); setErr(null); }}
+                  actionLabel={`Open ${row.payee || "ledger entry"}, ${row.amountStr}`}
                   title={row.payee || "Untitled entry"}
                   amount={row.amountStr}
                   date={formatLedgerDateForDisplay(row.date)}
@@ -5231,18 +5261,18 @@ export default function LedgerPageClient() {
                   direction={row.amountNeg ? "negative" : "positive"}
                   needsAttention={row.hasDup || row.hasMissing || row.hasStale}
                 />
-              ))
+              )} />
             )}
-            {!entriesQ.isLoading && pageRows.length === 0 ? (
+            {!entriesQ.isLoading && displayRowsAll.length === 0 ? (
               <div className="rounded-xl border border-dashed border-bb-border px-4 py-8 text-center text-sm text-bb-text-muted">
                 No ledger entries match these filters.
               </div>
             ) : null}
-            <details className="rounded-xl border border-bb-border bg-bb-surface-card">
+            <details open={mobileControlsOpen} onToggle={(event) => setMobileControlsOpen(event.currentTarget.open)} className="rounded-xl border border-bb-border bg-bb-surface-card">
               <summary className="flex min-h-11 cursor-pointer items-center px-4 text-sm font-semibold text-bb-text">
                 Full ledger controls
               </summary>
-              <div className="border-t border-bb-border">
+              {mobileControlsOpen ? <div className="border-t border-bb-border">
                 <LedgerTableShell
                   colgroup={cols}
                   header={headerRow}
@@ -5250,7 +5280,7 @@ export default function LedgerPageClient() {
                   body={entriesQ.isLoading ? skeletonBodyRows : bodyRows}
                   footer={null}
                 />
-              </div>
+              </div> : null}
             </details>
           </section>
           <div className="hidden md:contents">
@@ -5359,6 +5389,48 @@ export default function LedgerPageClient() {
           }
         }}
       />
+
+      {mobileAddScope === `${selectedBusinessId}:${selectedAccountId}` ? <MobileEntryDialog
+        key={mobileAddScope} open returnFocusRef={mobileAddButtonRef} onClose={() => setMobileAddScope(null)} today={todayYmd()} categories={Array.from(categoryNameById)}
+        onSave={async (draft) => {
+          const cents = parseMoneyToCents(draft.amountStr);
+          if (!draft.payee.trim()) throw new Error("Enter a payee.");
+          if (!Number.isSafeInteger(cents) || cents === 0) throw new Error("Enter a valid, non-zero amount.");
+          await createMut.mutateAsync({ ...draft, tempId: `temp_${crypto.randomUUID()}`, ref: "", categoryId: draft.categoryId || null,
+            categoryName: categoryNameById.get(draft.categoryId) || "", method: isCashAccountType(selectedAccount?.type) ? "CASH" : "OTHER", toAccountId: "" });
+        }} /> : null}
+
+      <AppDialog open={!!mobileRecord} onClose={() => { setMobileRecordId(null); cancelEdit(); }} title="Entry details" size="sm"
+        footer={mobileRecord && !mobileRecord.isDeleted && !mobileRecord.isClosedPeriod && !mobileRecord.isOpeningBalanceEntry && mobileRecord.id !== "opening_balance" && !mobileRecord.id.startsWith("temp_") && ["OWNER", "ADMIN", "BOOKKEEPER"].includes(myBusinessRole) ? (
+          <div className="flex justify-end gap-2">
+            {editingId === mobileRecord.id && editDraft ? <>
+              <Button variant="outline" onClick={cancelEdit}>Cancel edit</Button>
+              <Button disabled={updateMut.isPending} onClick={() => triggerSaveEdit(mobileRecord.id)}>Save changes</Button>
+            </> : <Button disabled={updateMut.isPending} onClick={() => {
+              setErr(null);
+              setEditingId(mobileRecord.id);
+              setEditDraft({ date: mobileRecord.date, ref: mobileRecord.ref || "", payee: mobileRecord.payee,
+                type: uiTypeFromRaw(mobileRecord.rawType), method: uiMethodFromRaw(mobileRecord.rawMethod),
+                category: mobileRecord.category || "", categoryId: mobileRecord.categoryId ?? null,
+                amountStr: stripMoneyDisplay(mobileRecord.amountStr) });
+            }}>{updateMut.isPending ? "Saving…" : "Edit entry"}</Button>}
+          </div>
+        ) : undefined}>
+        {mobileRecord ? <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3 text-sm font-semibold"><span>{mobileRecord.payee}</span><span className="whitespace-nowrap">{mobileRecord.amountStr}</span></div>
+          {err || mutErr ? <p role="alert" className="text-sm text-bb-status-danger-fg">{err || mutErr}</p> : null}
+          {editingId === mobileRecord.id && editDraft ? <div className="grid gap-3">
+            <label className="grid gap-1 text-xs">Payee<input className="min-h-11 rounded-md border border-bb-border bg-bb-surface-card px-3 text-sm" value={editDraft.payee} onChange={(e) => setEditDraft({ ...editDraft, payee: e.target.value })} /></label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="grid gap-1 text-xs">Date<input type="date" className="min-h-11 min-w-0 rounded-md border border-bb-border bg-bb-surface-card px-2 text-sm" value={editDraft.date} onChange={(e) => setEditDraft({ ...editDraft, date: e.target.value })} /></label>
+              <label className="grid gap-1 text-xs">Amount<input inputMode="decimal" className="min-h-11 min-w-0 rounded-md border border-bb-border bg-bb-surface-card px-3 text-sm" value={editDraft.amountStr} onChange={(e) => setEditDraft({ ...editDraft, amountStr: e.target.value })} /></label>
+            </div>
+            <label className="grid gap-1 text-xs">Reference<input className="min-h-11 rounded-md border border-bb-border bg-bb-surface-card px-3 text-sm" value={editDraft.ref} onChange={(e) => setEditDraft({ ...editDraft, ref: e.target.value })} /></label>
+            {["INCOME", "EXPENSE"].includes(String(mobileRecord.rawType).toUpperCase()) ? <label className="grid gap-1 text-xs">Category<select className="min-h-11 rounded-md border border-bb-border bg-bb-surface-card px-3 text-sm" value={editDraft.categoryId || ""} onChange={(e) => setEditDraft({ ...editDraft, categoryId: e.target.value || null, category: categoryNameById.get(e.target.value) || "" })}><option value="">Uncategorized</option>{Array.from(categoryNameById).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label> : null}
+          </div> : <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm"><dt className="text-bb-text-muted">Date</dt><dd>{formatLedgerDateForDisplay(mobileRecord.date)}</dd><dt className="text-bb-text-muted">Category</dt><dd>{mobileRecord.category || "Uncategorized"}</dd><dt className="text-bb-text-muted">Status</dt><dd>{mobileRecord.status}</dd><dt className="text-bb-text-muted">Type</dt><dd>{mobileRecord.typeDisplay}</dd><dt className="text-bb-text-muted">Reference</dt><dd>{mobileRecord.ref || "—"}</dd></dl>}
+          {mobileRecord.isClosedPeriod ? <p className="text-xs text-bb-text-muted">This entry belongs to a closed period.</p> : null}
+        </div> : null}
+      </AppDialog>
 
       <AppDialog
         open={!!paymentDeleteDialog}

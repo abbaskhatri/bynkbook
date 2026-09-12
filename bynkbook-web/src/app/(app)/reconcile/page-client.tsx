@@ -37,10 +37,11 @@ import { InlineBanner } from "@/components/app/inline-banner";
 import { EmptyStateCard } from "@/components/app/empty-state";
 import { appErrorMessageOrNull } from "@/lib/errors/app-error";
 import { CategoryCombobox } from "@/components/categories/category-combobox";
+import { MobileRecordList } from "@/components/mobile/mobile-record-list";
 import { FinancialRecordRow } from "@/components/mobile/financial-record-row";
 
 import { plaidStatus, plaidSync } from "@/lib/api/plaid";
-import { waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
+import { isPlaidSyncPending, waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
 import { safeCsvCell } from "@/lib/csv";
 import { listBankTransactions, createEntryFromBankTransaction, cleanupPlaidOverlap, type BankTransactionStatusFilter } from "@/lib/api/bankTransactions";
 import { listMatches, markEntryAdjustment } from "@/lib/api/matches";
@@ -220,6 +221,7 @@ export default function ReconcilePageClient() {
   // -------------------------
   // Mutation banner (single region; CLOSED_PERIOD consistency)
   // -------------------------
+  const [mobileQueue, setMobileQueue] = useState<"bank" | "ledger">("bank");
   const [mutErr, setMutErr] = useState<string | null>(null);
   const [mutErrIsClosed, setMutErrIsClosed] = useState(false);
 
@@ -735,6 +737,7 @@ export default function ReconcilePageClient() {
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [plaidSyncing, setPlaidSyncing] = useState(false);
   const plaidSyncRequestRef = useRef(false);
+  const plaidManualAbortRef = useRef<AbortController | null>(null);
   const plaidSyncMonitorAbortRef = useRef<AbortController | null>(null);
   const plaidSyncMonitorSeqRef = useRef(0);
   const [plaidCleanupBusy, setPlaidCleanupBusy] = useState(false);
@@ -746,6 +749,8 @@ export default function ReconcilePageClient() {
 
   useEffect(() => {
     plaidSyncMonitorSeqRef.current += 1;
+    plaidManualAbortRef.current?.abort();
+    plaidManualAbortRef.current = null;
     plaidSyncMonitorAbortRef.current?.abort();
     plaidSyncMonitorAbortRef.current = null;
     plaidSyncRequestRef.current = false;
@@ -753,6 +758,8 @@ export default function ReconcilePageClient() {
 
     return () => {
       plaidSyncMonitorSeqRef.current += 1;
+      plaidManualAbortRef.current?.abort();
+      plaidManualAbortRef.current = null;
       plaidSyncMonitorAbortRef.current?.abort();
       plaidSyncMonitorAbortRef.current = null;
     };
@@ -1133,6 +1140,12 @@ export default function ReconcilePageClient() {
     ]
   );
 
+  const bankPageController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setBankLoadingMore(false);
+    return () => { bankPageController.current?.abort(); bankPageController.current = null; };
+  }, [bankScopeKey]);
+
   async function loadMoreBankTransactions() {
     if (!selectedBusinessId || !selectedAccountId) return;
 
@@ -1140,6 +1153,9 @@ export default function ReconcilePageClient() {
     const cursor = bankNextCursorByStatus[status];
     if (!cursor) return;
 
+    if (bankPageController.current) return;
+    const controller = new AbortController();
+    bankPageController.current = controller;
     setBankLoadingMore(true);
     try {
       const res = await listBankTransactions({
@@ -1150,16 +1166,23 @@ export default function ReconcilePageClient() {
         status,
         limit: BANK_TRANSACTION_PAGE_LIMIT,
         cursor,
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
       const nextItems = res?.items ?? [];
       setBankTx((prev) => mergeBankTransactions(prev, tagBankTransactionsForStatus(nextItems, status)));
       setBankNextCursorByStatus((prev) => ({
         ...prev,
         [status]: res?.nextCursor ?? null,
       }));
+    } catch (error: any) {
+      if (!controller.signal.aborted) setMutErr(error?.message ?? "Unable to load more bank transactions. Please retry.");
     } finally {
-      setBankLoadingMore(false);
+      if (bankPageController.current === controller) {
+        bankPageController.current = null;
+        setBankLoadingMore(false);
+      }
     }
   }
 
@@ -1502,7 +1525,7 @@ export default function ReconcilePageClient() {
 
     void (async () => {
       const outcome = await waitForPlaidSyncCompletion({
-        sync: () => plaidSync(businessId, accountId),
+        sync: () => plaidSync(businessId, accountId, { signal: controller.signal }),
         signal: controller.signal,
         maxAttempts: 45,
         onWaiting: (res) => {
@@ -1531,15 +1554,19 @@ export default function ReconcilePageClient() {
 
         applyCompletedPlaidSyncMessage(outcome.result);
         try {
-          setPlaid(await plaidStatus(businessId, accountId));
+          const status = await plaidStatus(businessId, accountId, controller.signal);
+          if (controller.signal.aborted || plaidSyncMonitorSeqRef.current !== sequence) return;
+          setPlaid(status);
         } catch {
           // The completed transaction refresh remains valid if status refresh is temporarily unavailable.
         }
+        if (controller.signal.aborted || plaidSyncMonitorSeqRef.current !== sequence) return;
         await refreshTablesFullyRef.current({
           preserveOnEmpty: true,
           skipLegacyMatches: true,
           silent: true,
         });
+        if (controller.signal.aborted || plaidSyncMonitorSeqRef.current !== sequence) return;
         setBankCountRefreshSeq((n) => n + 1);
       } finally {
         if (plaidSyncMonitorSeqRef.current === sequence) {
@@ -4285,8 +4312,12 @@ const displayBankActiveList = useMemo(() => {
         </AppDialog>
       </div>
 
-      <section className="space-y-4 lg:hidden" aria-label="Reconciliation work queue">
-        <div className="space-y-2">
+      <section className="space-y-2 lg:hidden" aria-label="Reconciliation work queue">
+        <div className="flex gap-1 rounded-lg border border-bb-border bg-bb-surface-soft p-1" aria-label="Choose review queue">
+          <Button className="min-h-11 flex-1" variant={mobileQueue === "bank" ? "default" : "ghost"} aria-pressed={mobileQueue === "bank"} onClick={() => setMobileQueue("bank")}>Bank · {bankPanelShowInitialLoading ? "…" : displayBankActiveList.length}</Button>
+          <Button className="min-h-11 flex-1" variant={mobileQueue === "ledger" ? "default" : "ghost"} aria-pressed={mobileQueue === "ledger"} onClick={() => setMobileQueue("ledger")}>Ledger · {entriesTruthBlocking ? "…" : displayEntriesActiveList.length}</Button>
+        </div>
+        {mobileQueue === "bank" ? <div className="space-y-2">
           <div className="flex items-end justify-between px-1">
             <div>
               <h2 className="text-sm font-semibold text-bb-text">Bank transactions</h2>
@@ -4299,7 +4330,14 @@ const displayBankActiveList = useMemo(() => {
           ) : displayBankActiveList.length === 0 ? (
             <EmptyState label={bankEmptyStateLabel} />
           ) : (
-            displayBankActiveList.slice(0, 50).map((transaction: any) => {
+            <MobileRecordList key={`${selectedBusinessId}:${selectedAccountId}:${bankEmptyStateLabel}`} items={displayBankActiveList}
+              hasMore={(bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount) > displayBankActiveList.length || !!activeBankNextCursor}
+              loading={bankLoadingMore}
+              onLoadMore={() => {
+                if (bankTab === "unmatched" && displayBankUnmatchedCount > displayBankActiveList.length) setBankUnmatchedVisibleN((n) => n + PAGE_CHUNK);
+                else if (bankTab === "matched" && displayBankMatchedCount > displayBankActiveList.length) setBankMatchedVisibleN((n) => n + PAGE_CHUNK);
+                else void loadMoreBankTransactions();
+              }} renderItem={(transaction: any) => {
               const transactionId = String(transaction.id ?? "");
               const amount = toBigIntSafe(transaction.amount_cents);
               const isMatched = isBankTxnFullyMatched(transaction);
@@ -4329,14 +4367,9 @@ const displayBankActiveList = useMemo(() => {
                   } : undefined}
                 />
               );
-            })
+            }} />
           )}
-          {displayBankActiveList.length > 50 ? (
-            <p className="px-2 text-xs text-bb-text-muted">Showing the first 50 items. Narrow the date range or search to continue.</p>
-          ) : null}
-        </div>
-
-        <div className="space-y-2">
+        </div> : <div className="space-y-2">
           <div className="flex items-end justify-between px-1">
             <div>
               <h2 className="text-sm font-semibold text-bb-text">Ledger entries</h2>
@@ -4349,7 +4382,14 @@ const displayBankActiveList = useMemo(() => {
           ) : displayEntriesActiveList.length === 0 ? (
             <EmptyState label={entriesEmptyStateLabel} />
           ) : (
-            displayEntriesActiveList.slice(0, 50).map((entry: any) => {
+            <MobileRecordList key={`${selectedBusinessId}:${selectedAccountId}:${entriesEmptyStateLabel}`} items={displayEntriesActiveList}
+              hasMore={(expectedTab === "expected" ? displayExpectedCount : displayMatchedCount) > displayEntriesActiveList.length || entriesHasMore}
+              loading={entriesBackgroundLoading || entriesQ.isFetching}
+              onLoadMore={() => {
+                if (expectedTab === "expected" && displayExpectedCount > displayEntriesActiveList.length) setExpectedVisibleN((n) => n + PAGE_CHUNK);
+                else if (expectedTab === "matched" && displayMatchedCount > displayEntriesActiveList.length) setMatchedVisibleN((n) => n + PAGE_CHUNK);
+                else setEntriesBackgroundPageCount(0);
+              }} renderItem={(entry: any) => {
               const amount = toBigIntSafe(entry.amount_cents);
               const isSaving = Boolean(entry?.__optimistic_pending) || pendingById[String(entry.id)] === true;
               const isMatched = !isSaving && matchedEntryIdSet.has(entry.id);
@@ -4379,12 +4419,9 @@ const displayBankActiveList = useMemo(() => {
                   } : undefined}
                 />
               );
-            })
+            }} />
           )}
-          {displayEntriesActiveList.length > 50 ? (
-            <p className="px-2 text-xs text-bb-text-muted">Showing the first 50 entries. Narrow the date range or search to continue.</p>
-          ) : null}
-        </div>
+        </div>}
       </section>
 
       <div className="hidden lg:grid lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-hidden">
@@ -4932,6 +4969,8 @@ const displayBankActiveList = useMemo(() => {
                         if (!selectedBusinessId || !selectedAccountId || plaidSyncRequestRef.current) return;
 
                         plaidSyncRequestRef.current = true;
+                        const controller = new AbortController();
+                        plaidManualAbortRef.current = controller;
                         setPlaidSyncing(true);
                         setSyncMsg("Contacting bank…");
                         setPendingMsg(null);
@@ -4941,9 +4980,11 @@ const displayBankActiveList = useMemo(() => {
                           const res = await plaidSync(selectedBusinessId, selectedAccountId, {
                             refreshBalance: true,
                             refreshTransactions: true,
+                            signal: controller.signal,
                           });
+                          if (controller.signal.aborted) return;
 
-                          if (res?.syncInProgress) {
+                          if (isPlaidSyncPending(res)) {
                             monitoringActiveSync = true;
                             setSyncMsg(res?.message ?? "A bank sync is already running for this account.");
                             setPendingMsgTone("muted");
@@ -4958,7 +4999,8 @@ const displayBankActiveList = useMemo(() => {
                             applyCompletedPlaidSyncMessage(res);
                           }
 
-                          const st = await plaidStatus(selectedBusinessId, selectedAccountId);
+                          const st = await plaidStatus(selectedBusinessId, selectedAccountId, controller.signal);
+                          if (controller.signal.aborted) return;
                           setPlaid({
                             ...st,
                             plaidLastSuccessfulUpdateAt:
@@ -4974,24 +5016,27 @@ const displayBankActiveList = useMemo(() => {
                               preserveOnEmpty: true,
                               skipLegacyMatches: true,
                             });
+                            if (controller.signal.aborted) return;
                             setBankCountRefreshSeq((n) => n + 1);
                           }
                         } catch (e: any) {
+                          if (controller.signal.aborted) return;
                           setSyncMsg(e?.message ?? "Unable to refresh transactions");
                           setPendingMsgTone("warning");
                           setPendingMsg(
                             e?.payload?.updatesPending
                               ? "Plaid still reports bank activity; retry after a short wait."
-                              : "No transaction changes were applied."
+                              : "Bank updates could not be confirmed. Check status before retrying."
                           );
                           try {
-                            const st = await plaidStatus(selectedBusinessId, selectedAccountId);
+                            const st = await plaidStatus(selectedBusinessId, selectedAccountId, controller.signal);
+                            if (controller.signal.aborted) return;
                             setPlaid(st);
                           } catch {
                             // Keep the existing status if the follow-up status check also fails.
                           }
                         } finally {
-                          if (!monitoringActiveSync) {
+                          if (!controller.signal.aborted && !monitoringActiveSync) {
                             plaidSyncRequestRef.current = false;
                             setPlaidSyncing(false);
                           }

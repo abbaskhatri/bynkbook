@@ -304,6 +304,9 @@ export default function IssuesPageClient() {
   const categoriesQ = useQuery({
     queryKey: ["categories", selectedBusinessId],
     enabled: !!selectedBusinessId,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     queryFn: async () => {
       if (!selectedBusinessId) return { ok: true as const, rows: [] as CategoryRow[] };
       return listCategories(selectedBusinessId, { includeArchived: false });
@@ -753,7 +756,7 @@ export default function IssuesPageClient() {
         </div>
 
         <Select value={filterIssueType} onValueChange={(v) => setFilterIssueType(v as any)}>
-          <SelectTrigger className={[selectTriggerClass, "w-[140px]"].join(" ")}>
+          <SelectTrigger aria-label="Issue type" className={[selectTriggerClass, "w-[140px]"].join(" ")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent side="bottom" align="start">
@@ -765,7 +768,7 @@ export default function IssuesPageClient() {
         </Select>
 
         <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)}>
-          <SelectTrigger className={[selectTriggerClass, "w-[110px]"].join(" ")}>
+          <SelectTrigger aria-label="Issue status" className={[selectTriggerClass, "w-[110px]"].join(" ")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent side="bottom" align="start">
@@ -775,7 +778,7 @@ export default function IssuesPageClient() {
         </Select>
 
         <Select value={filterSeverity} onValueChange={(v) => setFilterSeverity(v as any)}>
-          <SelectTrigger className={[selectTriggerClass, "w-[130px]"].join(" ")}>
+          <SelectTrigger aria-label="Issue severity" className={[selectTriggerClass, "w-[130px]"].join(" ")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent side="bottom" align="start">

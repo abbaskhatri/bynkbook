@@ -1,0 +1,7 @@
+{
+  "failedSavePreservesDraft": true,
+  "expenseCents": -1234,
+  "retryClosedAfterSuccess": true,
+  "mockedWrites": 2,
+  "liveWrites": 0
+}

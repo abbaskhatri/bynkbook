@@ -73,6 +73,7 @@ export type OperationsOverview = {
     };
   };
   categorization: {
+    sample_complete?: boolean;
     uncategorized_count: number;
     learned_merchant_rules: number;
     safe_reuse_rules: number;
@@ -82,6 +83,7 @@ export type OperationsOverview = {
   };
   transfer_candidates: TransferCandidate[];
   forecast: {
+    history_complete?: boolean;
     starting_cash_cents: string;
     weeks: Array<{
       week_start: string;

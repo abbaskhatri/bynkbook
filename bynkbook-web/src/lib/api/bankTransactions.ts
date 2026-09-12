@@ -21,6 +21,8 @@ export async function listBankTransactions(args: {
   to?: string;   // YYYY-MM-DD
   status?: BankTransactionStatusFilter;
   limit?: number;
+  signal?: AbortSignal;
+  transactionId?: string;
   cursor?: string | null;
 }): Promise<BankTransactionsListResponse> {
   const { businessId, accountId, from, to, status, limit, cursor } = args;
@@ -31,9 +33,10 @@ export async function listBankTransactions(args: {
   if (limit != null) sp.set("limit", String(limit));
   if (cursor) sp.set("cursor", cursor);
 
+  if (args.transactionId) sp.set("transactionId", args.transactionId);
   const qs = sp.toString();
   const path = `/v1/businesses/${businessId}/accounts/${accountId}/bank-transactions${qs ? `?${qs}` : ""}`;
-  return apiFetch(path, { method: "GET" });
+  return apiFetch(path, { method: "GET", signal: args.signal });
 }
 
 export async function createEntryFromBankTransaction(args: {

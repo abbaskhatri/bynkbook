@@ -14,6 +14,7 @@ import { usePreferredAccountId } from "@/lib/accountSelection";
 import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } from "@/lib/api/reports";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
+import { keepScopedData } from "@/lib/queries/keepScopedData";
 import {
   calculateCashRunway,
   isBankSnapshotComparable,
@@ -359,7 +360,7 @@ export default function DashboardPageClient() {
       }),
     enabled: dashEnabled,
     staleTime: 20_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 2: selectedBusinessId, 3: accountScopeId }),
   });
 
   const cashflowQ = useQuery({
@@ -373,7 +374,7 @@ export default function DashboardPageClient() {
       }),
     enabled: dashEnabled,
     staleTime: 20_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 2: selectedBusinessId, 3: accountScopeId }),
   });
 
   const categoriesQ = useQuery({
@@ -381,7 +382,7 @@ export default function DashboardPageClient() {
     queryFn: () => getCategories(selectedBusinessId as string, { from: range.from, to: range.to, accountId: accountScopeId }),
     enabled: dashEnabled,
     staleTime: 30_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 2: selectedBusinessId, 3: accountScopeId }),
   });
 
   const attentionSummaryQ = useQuery({
@@ -389,7 +390,7 @@ export default function DashboardPageClient() {
     queryFn: () => getAttentionSummary({ businessId: selectedBusinessId as string, accountId: issuesAccountScopeId }),
     enabled: dashEnabled && !!issuesAccountScopeId && dashIdleReady,
     staleTime: 20_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 1: selectedBusinessId || "", 2: issuesAccountScopeId || "all" }),
   });
 
   const attentionLoading = attentionSummaryQ.isLoading && !attentionSummaryQ.data;
@@ -406,10 +407,11 @@ export default function DashboardPageClient() {
         asOf: range.to,
         accountId: "all",
         includeArchived: false,
+        includeSetup: true,
       }),
     enabled: dashEnabled,
     staleTime: 20_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 2: selectedBusinessId }),
   });
 
   // Scoped summary for the selected account (or all)
@@ -423,7 +425,7 @@ export default function DashboardPageClient() {
       }),
     enabled: dashEnabled,
     staleTime: 20_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 2: selectedBusinessId, 4: accountScopeId }),
   });
 
   const [aiInsightsRequested, setAiInsightsRequested] = useState(false);
@@ -436,7 +438,7 @@ export default function DashboardPageClient() {
   const aiNarrativeQ = useQuery({
     queryKey: ["aiNarrative", selectedBusinessId, accountScopeId, range.from, range.to, range.mode],
     enabled: aiInsightsRequested && !!selectedBusinessId && !!range?.from && !!range?.to,
-    placeholderData: (prev) => prev ?? null,
+    placeholderData: keepScopedData({ 1: selectedBusinessId, 2: accountScopeId }),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
@@ -460,7 +462,7 @@ export default function DashboardPageClient() {
   const aiAnomaliesQ = useQuery({
     queryKey: ["aiAnomalies", selectedBusinessId, accountScopeId, range.from, range.to],
     enabled: aiInsightsRequested && !!selectedBusinessId && !!range?.from && !!range?.to,
-    placeholderData: (prev) => prev ?? null,
+    placeholderData: keepScopedData({ 1: selectedBusinessId, 2: accountScopeId }),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
@@ -1220,18 +1222,8 @@ export default function DashboardPageClient() {
           const expensesKpi = fmtUsdAccountingFromCents(expensesCents ?? undefined);
           const netKpi = fmtUsdAccountingFromCents(netCents ?? undefined);
 
-          // Onboarding checklist signals: derived from data already fetched.
-          // accountsAllQ.data.rows is the list of accounts (empty for new biz).
-          // categoriesQ.data.rows is the categories list.
-          // pnlQ.data has period totals — any non-zero amount means at least
-          // one entry exists in this period; otherwise we fall back to
-          // "any non-empty categories series" as a softer hint.
           const onboardingAccountsCount = (accountsAllQ.data?.rows ?? []).length;
-          const onboardingCategoriesCount = (categoriesQ.data?.rows ?? []).length;
-          const onboardingHasEntries =
-            !!(pnlQ.data?.period?.income_cents && pnlQ.data.period.income_cents !== "0") ||
-            !!(pnlQ.data?.period?.expense_cents && pnlQ.data.period.expense_cents !== "0") ||
-            (Array.isArray(pnlQ.data?.monthly) && pnlQ.data.monthly.length > 0);
+          const setup = accountsAllQ.data?.setup;
 
           const selectedAccountRow =
             accountScopeId === "all"
@@ -1257,12 +1249,12 @@ export default function DashboardPageClient() {
           return (
         <>
       {/* Onboarding checklist — only renders for businesses with incomplete setup */}
-      <OnboardingChecklist
+      {setup ? <OnboardingChecklist
         businessId={selectedBusinessId ?? ""}
         accountsCount={onboardingAccountsCount}
-        categoriesCount={onboardingCategoriesCount}
-        hasEntries={onboardingHasEntries}
-      />
+        categoriesCount={setup.categories_count}
+        hasEntries={setup.has_entries}
+      /> : null}
 
       {/* Command Center */}
       <Card className="overflow-hidden rounded-lg border border-bb-border bg-bb-surface-elevated shadow-sm !gap-0 !py-0">
@@ -1275,7 +1267,7 @@ export default function DashboardPageClient() {
                     Today&apos;s bookkeeping
                   </div>
                   <div className="mt-1 flex items-center gap-2">
-                    <h2 className="text-lg font-semibold leading-tight text-foreground">Command center</h2>
+                    <h2 className="text-lg font-semibold leading-tight text-foreground">Your next step</h2>
                     {!showAttentionLoading && nextActionsN === 0 ? (
                       <CheckCircle2 className="h-4 w-4 text-bb-status-success-fg" strokeWidth={2.2} />
                     ) : null}

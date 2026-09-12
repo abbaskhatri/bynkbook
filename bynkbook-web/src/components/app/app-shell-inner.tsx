@@ -28,12 +28,15 @@ import {
   Activity,
 } from "lucide-react";
 
+const SearchRecordDialog = dynamic(() => import("./search-record-dialog"), { ssr: false });
+
 import { useBusinesses } from "@/lib/queries/useBusinesses";
 import { isNavigationPathVisible } from "@/lib/navigationPolicy";
 import { useAccounts } from "@/lib/queries/useAccounts";
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { getConfiguredAppEnvironment } from "@/lib/appEnvironment";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
+import { keepScopedData } from "@/lib/queries/keepScopedData";
 import {
   ENTRY_CATEGORIES_CHANGED_EVENT,
   type EntryCategoriesChangedDetail,
@@ -660,7 +663,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
     },
     staleTime: ACTIVITY_TTL_MS,
     refetchOnWindowFocus: false,
-    placeholderData: (prev) => prev,
+    placeholderData: keepScopedData({ 1: businessId, 2: activityScopedAccountId ?? "all" }),
   });
 
   // Compat shims so the existing JSX below reads naturally without rewrites.
@@ -1166,6 +1169,7 @@ export default function AppShellInner({ children }: { children: React.ReactNode 
             with extra bottom padding reserved for the fixed tab bar. */}
         <main className={(noPageScroll ? "p-3 pb-[5.25rem] overflow-y-auto md:p-4 md:pb-4 md:overflow-hidden flex-1 min-h-0" : "p-3 pb-[5.25rem] md:p-5 md:pb-5 overflow-y-auto flex-1 min-h-0")}>
           {children}
+          {sp.get("focusEntryId") || sp.get("focusBankTxnId") ? <SearchRecordDialog /> : null}
         </main>
       </div>
 

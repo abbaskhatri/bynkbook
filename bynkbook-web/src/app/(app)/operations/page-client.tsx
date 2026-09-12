@@ -28,7 +28,7 @@ import { applyTransferPair, getOperationsOverview, type OperationsBankAccount, t
 import { plaidSync } from "@/lib/api/plaid";
 import { formatUsdSafe, toBigIntSafe } from "@/lib/money";
 import { describeOperationsBalance } from "@/lib/operationsBalance";
-import { waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
+import { isPlaidSyncPending, waitForPlaidSyncCompletion } from "@/lib/plaidSyncMonitor";
 
 function statusClasses(tone: "good" | "warning" | "danger" | "muted") {
   if (tone === "good") return "border-bb-status-success-border bg-bb-status-success-bg text-bb-status-success-fg";
@@ -100,21 +100,32 @@ export default function OperationsPageClient() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [bankRefreshMessage, setBankRefreshMessage] = useState<string | null>(null);
   const autoRefreshScopesRef = useRef(new Set<string>());
+  const syncScope = useRef<{ businessId: string | null; controller: AbortController } | null>(null);
+  useEffect(() => {
+    const current = { businessId, controller: new AbortController() };
+    syncScope.current = current;
+    setBankRefreshMessage(null);
+    return () => current.controller.abort();
+  }, [businessId]);
 
   const overviewQ = useQuery({
     queryKey: ["operationsOverview", businessId],
     enabled: !!businessId,
     queryFn: () => getOperationsOverview(String(businessId)),
     staleTime: 30_000,
-    refetchInterval: 60_000,
-    refetchOnWindowFocus: "always",
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: true,
     refetchOnReconnect: true,
   });
 
   const refreshBankDataMutation = useMutation({
     mutationFn: async (options: { automatic: boolean; refreshTransactions: boolean }) => {
       if (!businessId) throw new Error("Choose a business first.");
-      let latest = overviewQ.data ?? await getOperationsOverview(String(businessId));
+      const signal = syncScope.current?.controller.signal;
+      if (!signal || syncScope.current?.businessId !== businessId) throw new Error("The selected business changed.");
+      signal.throwIfAborted();
+      const latest = overviewQ.data ?? await getOperationsOverview(String(businessId));
       const attemptedAccountIds = new Set<string>();
       let refreshedAccounts = 0;
       let transactionRefreshSucceeded = false;
@@ -122,6 +133,7 @@ export default function OperationsPageClient() {
       let transactionRefreshDeferred = false;
 
       while (true) {
+        signal.throwIfAborted();
         const target = latest.bank_health.accounts.find((account) =>
           account.connected &&
           String(account.account_type ?? "").toUpperCase() !== "CASH" &&
@@ -137,10 +149,12 @@ export default function OperationsPageClient() {
         let result = await plaidSync(String(businessId), target.account_id, {
           refreshBalance: !options.automatic || target.balance_status === "STALE_SNAPSHOT",
           refreshTransactions: options.refreshTransactions,
+          signal,
         });
-        if (result?.syncInProgress) {
+        if (isPlaidSyncPending(result)) {
           const outcome = await waitForPlaidSyncCompletion({
-            sync: () => plaidSync(String(businessId), target.account_id),
+            sync: () => plaidSync(String(businessId), target.account_id, { signal }),
+            signal,
             maxAttempts: 30,
           });
           if (outcome.kind === "error") throw outcome.error;
@@ -149,24 +163,34 @@ export default function OperationsPageClient() {
           result = await plaidSync(String(businessId), target.account_id, {
             refreshBalance: !options.automatic || target.balance_status === "STALE_SNAPSHOT",
             refreshTransactions: options.refreshTransactions,
+          signal,
           });
         }
+        signal.throwIfAborted();
+        if (isPlaidSyncPending(result)) throw new Error("Bank updates are still processing. Check again shortly.");
         if (result?.ok === false) throw new Error(result?.message ?? result?.error ?? "Bank refresh failed.");
         refreshedAccounts += Number(result?.balanceUpdatedAccountIds?.length ?? 0) || 1;
         transactionRefreshSucceeded ||= result?.refreshSucceeded === true;
         transactionRefreshUnavailable ||= result?.refreshUnavailable === true;
         transactionRefreshDeferred ||= result?.refreshDeferred === true;
 
-        await queryClient.invalidateQueries({ queryKey: ["operationsOverview", businessId] });
-        latest = await queryClient.fetchQuery({
-          queryKey: ["operationsOverview", businessId],
-          queryFn: () => getOperationsOverview(String(businessId)),
-          staleTime: 0,
-        });
       }
+      signal.throwIfAborted();
+      await queryClient.invalidateQueries({ queryKey: ["operationsOverview", businessId], refetchType: "none" });
+      await queryClient.fetchQuery({
+        queryKey: ["operationsOverview", businessId],
+        queryFn: () => getOperationsOverview(String(businessId)),
+        staleTime: 0,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["accounts", businessId] }),
+        queryClient.invalidateQueries({ queryKey: ["bankTransactions", businessId] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboardExec"], refetchType: "none" }),
+      ]);
 
       return {
         ...options,
+        refreshedBusinessId: businessId,
         refreshedAccounts,
         transactionRefreshSucceeded,
         transactionRefreshUnavailable,
@@ -174,12 +198,14 @@ export default function OperationsPageClient() {
       };
     },
     onSuccess: ({
+      refreshedBusinessId,
       automatic,
       refreshedAccounts,
       transactionRefreshSucceeded,
       transactionRefreshUnavailable,
       transactionRefreshDeferred,
     }) => {
+      if (syncScope.current?.controller.signal.aborted || syncScope.current?.businessId !== refreshedBusinessId) return;
       setBankRefreshMessage(
         refreshedAccounts > 0
           ? automatic
@@ -386,7 +412,7 @@ export default function OperationsPageClient() {
             <Card className="min-w-0">
               <CardHeader className="border-b border-bb-border">
                 <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />13-week cash-flow forecast</CardTitle>
-                <CardDescription>{data.forecast.methodology}</CardDescription>
+                <CardDescription>{data.forecast.methodology}{data.forecast.history_complete === false ? " Based on the latest 5,000 entries; older history is excluded." : ""}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

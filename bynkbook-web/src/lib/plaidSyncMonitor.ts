@@ -4,6 +4,10 @@ export type PlaidSyncMonitorOutcome =
   | { kind: "cancelled" }
   | { kind: "error"; error: unknown };
 
+export function isPlaidSyncPending(result: any): boolean {
+  return Boolean(result?.syncInProgress || result?.pendingSync || result?.drainIncomplete || result?.hasMore);
+}
+
 type WaitFn = (delayMs: number, signal?: AbortSignal) => Promise<void>;
 
 function defaultWait(delayMs: number, signal?: AbortSignal) {
@@ -44,6 +48,7 @@ export async function waitForPlaidSyncCompletion(options: {
       await wait(delayMs, options.signal);
     } catch (error) {
       if (options.signal?.aborted || (error as any)?.name === "AbortError") return { kind: "cancelled" };
+      if ([400, 401, 403, 404].includes(Number((error as any)?.status))) return { kind: "error", error };
       latestError = error;
       continue;
     }
@@ -53,15 +58,20 @@ export async function waitForPlaidSyncCompletion(options: {
       latestResult = await options.sync();
       latestError = null;
     } catch (error) {
+      if (options.signal?.aborted || (error as any)?.name === "AbortError") return { kind: "cancelled" };
+      if ([400, 401, 403, 404].includes(Number((error as any)?.status))) return { kind: "error", error };
       latestError = error;
       continue;
     }
     if (options.signal?.aborted) return { kind: "cancelled" };
-    if (!latestResult?.syncInProgress) return { kind: "complete", result: latestResult };
+    if (!latestResult || latestResult.ok === false) {
+      return { kind: "error", error: new Error(latestResult?.message ?? latestResult?.error ?? "Bank sync returned no confirmation") };
+    }
+    if (!isPlaidSyncPending(latestResult)) return { kind: "complete", result: latestResult };
 
     options.onWaiting?.(latestResult, attempt + 1);
   }
 
-  if (latestResult?.syncInProgress) return { kind: "timed_out", result: latestResult };
+  if (isPlaidSyncPending(latestResult)) return { kind: "timed_out", result: latestResult };
   return { kind: "error", error: latestError ?? new Error("Unable to confirm Plaid sync completion") };
 }

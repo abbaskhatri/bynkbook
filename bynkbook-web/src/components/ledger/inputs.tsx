@@ -125,6 +125,7 @@ export function AutoInput(props: {
       <input
         ref={inputRef}
         className={inputClassName}
+        aria-label={placeholder || "Entry field"}
         placeholder={placeholder}
         value={currentValue}
         onChange={(e) => {

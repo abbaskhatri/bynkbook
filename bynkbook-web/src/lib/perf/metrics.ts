@@ -1,6 +1,6 @@
-const API_SAMPLES: Record<string, number[]> = {};
-const UI_SAMPLES: Record<string, number[]> = {};
-const COUNTERS: Record<string, number> = {};
+const API_SAMPLES: Record<string, number[]> = Object.create(null);
+const UI_SAMPLES: Record<string, number[]> = Object.create(null);
+const COUNTERS: Record<string, number> = Object.create(null);
 
 // Debug toggle (default OFF)
 // Enable via: localStorage.setItem("bynkbook.debug.perf","1") + refresh
@@ -24,7 +24,15 @@ function dlog(...args: any[]) {
   }
 }
 
+export function normalizeMetricName(name: string) {
+  return name.split("?")[0].replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ":id").slice(0, 180);
+}
+function boundKeys(store: Record<string, unknown>, name: string) {
+  if (!(name in store) && Object.keys(store).length >= 100) delete store[Object.keys(store)[0]];
+}
+
 function pushSample(store: Record<string, number[]>, name: string, ms: number) {
+  boundKeys(store, name);
   const arr = (store[name] ??= []);
   arr.push(ms);
   if (arr.length > 200) arr.splice(0, arr.length - 200);
@@ -70,6 +78,7 @@ function snapshotStore(store: Record<string, number[]>) {
 
 export const metrics = {
   timeUi(name: string, startMs: number) {
+    name = normalizeMetricName(name);
     const ms = performance.now() - startMs;
     pushSample(UI_SAMPLES, name, ms);
     dlog(`[ui] ${name} ${ms.toFixed(1)}ms`);
@@ -77,12 +86,15 @@ export const metrics = {
   },
 
   api(name: string, ms: number, status?: number) {
+    name = normalizeMetricName(name);
     pushSample(API_SAMPLES, name, ms);
     dlog(`[api] ${name} ${ms.toFixed(1)}ms status=${status ?? "?"}`);
     logSummary(name, API_SAMPLES[name]);
   },
 
   incCounter(name: string, by = 1) {
+    name = normalizeMetricName(name);
+    boundKeys(COUNTERS, name);
     COUNTERS[name] = (COUNTERS[name] ?? 0) + by;
     dlog(`[rq] ${name} count=${COUNTERS[name]}`);
   },

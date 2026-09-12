@@ -62,6 +62,7 @@ docs/**/debug*
 
 # Local Playwright auth/session files
 bynkbook-web/auth/
+.playwright-cli/
 .qa/
 .claude/
 .codex-tmp/

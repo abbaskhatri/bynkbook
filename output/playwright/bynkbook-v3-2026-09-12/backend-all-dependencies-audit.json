@@ -1,0 +1,76 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "aws-sdk": {
+      "name": "aws-sdk",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1111997,
+          "name": "aws-sdk",
+          "dependency": "aws-sdk",
+          "title": "JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3",
+          "url": "https://github.com/advisories/GHSA-j965-2qgj-vjmq",
+          "severity": "low",
+          "cwe": [
+            "CWE-20"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N"
+          },
+          "range": ">=2.0.0 <=3.0.0"
+        }
+      ],
+      "effects": [
+        "sst"
+      ],
+      "range": ">=2.0.1",
+      "nodes": [
+        "node_modules/aws-sdk"
+      ],
+      "fixAvailable": {
+        "name": "sst",
+        "version": "4.17.1",
+        "isSemVerMajor": true
+      }
+    },
+    "sst": {
+      "name": "sst",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "aws-sdk"
+      ],
+      "effects": [],
+      "range": "<=0.0.0-latest-20221215161824 || 1.16.0 - 3.0.0 || 3.9.32 - 4.0.6",
+      "nodes": [
+        "node_modules/sst"
+      ],
+      "fixAvailable": {
+        "name": "sst",
+        "version": "4.17.1",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 2,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 2
+    },
+    "dependencies": {
+      "prod": 250,
+      "dev": 209,
+      "optional": 36,
+      "peer": 17,
+      "peerOptional": 0,
+      "total": 470
+    }
+  }
+}

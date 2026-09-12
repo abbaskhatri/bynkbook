@@ -298,6 +298,7 @@ export default function VendorsPageClient() {
           className="h-11 w-full min-w-[min(18rem,80vw)] text-base md:h-7 md:w-[260px] md:text-xs"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          aria-label="Search vendors"
           placeholder="Search vendors…"
         />
       </div>
@@ -306,6 +307,7 @@ export default function VendorsPageClient() {
         <div className="text-[11px] text-bb-text-muted">Sort</div>
         <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
           <SelectTrigger
+            aria-label="Sort vendors"
             size="sm"
             className="h-11 w-[180px] border-bb-input-border bg-bb-input-bg px-3 text-base text-bb-text md:h-7 md:px-2 md:text-xs"
           >
@@ -540,17 +542,17 @@ export default function VendorsPageClient() {
         <div className="space-y-4">
           <div className="space-y-1.5">
             <div className="text-xs font-medium text-bb-text-muted">Name</div>
-            <Input className="h-9 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
+            <Input aria-label="Vendor name" className="h-9 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
           </div>
 
           <div className="space-y-1.5">
             <div className="text-xs font-medium text-bb-text-muted">Mailing address (optional)</div>
-            <Input className="h-9 text-sm" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Used when printing checks" />
+            <Input aria-label="Mailing address" className="h-9 text-sm" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Used when printing checks" />
           </div>
 
           <div className="space-y-1.5">
             <div className="text-xs font-medium text-bb-text-muted">Notes (optional)</div>
-            <Input className="h-9 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
+            <Input aria-label="Vendor notes" className="h-9 text-sm" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes" />
           </div>
 
           <div className="space-y-1.5">
