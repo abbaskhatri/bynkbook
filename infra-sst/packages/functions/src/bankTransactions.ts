@@ -513,7 +513,9 @@ async function findPossibleCreateEntryDuplicates(args: {
 
   const bankAbs = absBig(BigInt(bankTxn.amount_cents));
   const amountCandidates = Array.from(new Set([entryAmountCents, bankAbs, -bankAbs].map((v) => v.toString()))).map((v) => BigInt(v));
-  const duplicateWindowDays = CREATE_ENTRY_GENERIC_BANK_DUPLICATE_WINDOW_DAYS;
+  // Include the full reference-match window used by reconciliation. A review
+  // candidate is not permission to create a second ledger entry.
+  const duplicateWindowDays = 45;
 
   const rows = await prisma.entry.findMany({
     where: {
@@ -542,7 +544,6 @@ async function findPossibleCreateEntryDuplicates(args: {
       sourceBankTransactionId: true,
     } as any,
     orderBy: [{ date: "desc" as any }, { created_at: "desc" as any }],
-    take: 10,
   });
 
   // Build the richest possible description text for this bank transaction.
@@ -563,6 +564,11 @@ async function findPossibleCreateEntryDuplicates(args: {
       const dateDistance = dateDistanceDays(entry?.date, entryDateYmd);
       const checkNumberMatch = sameCheckNumber(bankCheckRef || bankRef || "", entry);
       const similarPayee = dateDistance <= CREATE_ENTRY_DUPLICATE_WINDOW_DAYS && hasSimilarPayee(bankFullText, entry);
+      const postingLagDays = (entryDate.getTime() - new Date(entry.date).getTime()) / 86_400_000;
+      const needsMatchReview = String(entry.status).toUpperCase() === "EXPECTED" &&
+        BigInt(entry.amount_cents) === entryAmountCents &&
+        new Date(entry.date).getTime() <= Date.now() &&
+        postingLagDays >= -1 && postingLagDays <= 14;
       const genericBankManual = isGenericBankManualDuplicateCandidate({
         bankFullText,
         bankRef,
@@ -574,9 +580,9 @@ async function findPossibleCreateEntryDuplicates(args: {
       return {
         entry,
         dateDistance,
-        duplicateReason: checkNumberMatch ? "matching_check_number" : genericBankManual ? "generic_bank_manual_same_amount" : "similar_payee",
+        duplicateReason: checkNumberMatch ? "matching_check_number" : genericBankManual ? "generic_bank_manual_same_amount" : similarPayee ? "similar_payee" : "match_review_required",
         duplicateConfidence: checkNumberMatch || genericBankManual ? "high" : "medium",
-        isDuplicateCandidate: similarPayee || genericBankManual || checkNumberMatch,
+        isDuplicateCandidate: similarPayee || genericBankManual || checkNumberMatch || needsMatchReview,
       };
     })
     .filter((candidate: any) => candidate.isDuplicateCandidate)
@@ -1198,58 +1204,16 @@ export async function handler(event: any) {
 
           const now = new Date();
 
-          // If already created, optionally allow autoMatch to create group (if requested and safe)
+          // Existing entries require an explicit match/review action, even in a bulk request.
           if (existing?.id) {
-            let createdMatchGroupId: string | null = null;
-
-            if (autoMatch) {
-              await prisma.$transaction(async (tx: any) => {
-                const txActiveGroupIds = await activeMatchGroupIds(tx, businessId, accountId);
-                const bankAlreadyMatched = await hasActiveBankMatchGroup(tx, {
-                  businessId,
-                  accountId,
-                  bankTransactionId: bankId,
-                  activeGroupIds: txActiveGroupIds,
-                });
-                if (bankAlreadyMatched) {
-                  const err: any = new Error("Bank transaction is already matched.");
-                  err.code = "ALREADY_IN_GROUP";
-                  throw err;
-                }
-
-                const entryAlreadyMatched = await hasActiveEntryMatchGroup(tx, {
-                  businessId,
-                  accountId,
-                  entryId: existing.id,
-                  activeGroupIds: txActiveGroupIds,
-                });
-                if (entryAlreadyMatched) {
-                  const err: any = new Error("Entry is already matched.");
-                  err.code = "ENTRY_ALREADY_IN_GROUP";
-                  throw err;
-                }
-
-                createdMatchGroupId = await createBankEntryMatchGroup(tx, {
-                  businessId,
-                  accountId,
-                  bankTransactionId: bankId,
-                  entryId: existing.id,
-                  bankAbs,
-                  direction: bankAmt < 0n ? "OUTFLOW" : "INFLOW",
-                  sub,
-                  now,
-                });
-              });
-            }
-
             results.push({
               bank_transaction_id: bankId,
               status: "SKIPPED",
               code: "DUPLICATE",
-              error: "Entry already exists for this bank transaction.",
+              error: "Entry already exists. Review or match it before continuing.",
               entry_id: existing.id,
-              match_group_id: createdMatchGroupId,
-              auto_matched: !!createdMatchGroupId,
+              match_group_id: null,
+              auto_matched: false,
             });
             continue;
           }

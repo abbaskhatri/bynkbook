@@ -806,7 +806,7 @@ describe("bank transaction create-entry duplicate preflight", () => {
 
   test("allows create-entry-and-match when no similar entry exists", async () => {
     const rows = [tx("bank-safe", "2026-04-26", "2026-04-26T12:00:00.000Z", { name: "SQ COFFEE HOUSE", amount_cents: -1250n })];
-    const unrelated = entry("entry-rent", "2026-04-26", -1250n, { payee: "Office rent", memo: "April rent" });
+    const unrelated = entry("entry-rent", "2026-04-26", -9900n, { payee: "Office rent", memo: "April rent" });
     const { handler, prisma } = await loadHandler({ rows, entries: [unrelated], activeGroupIds: ["group-active"] });
 
     const res = await handler(postCreateEntryEvent("bank-safe", { autoMatch: true }));
@@ -976,6 +976,38 @@ describe("bank transaction create-entry duplicate preflight", () => {
     expect(prisma.entry.create).toHaveBeenCalledTimes(1);
   });
 
+  test("select-all skips matched, pending, and delayed review rows while creating the rest", async () => {
+    const rows = [
+      tx("bank-matched", "2026-04-26", "2026-04-26T12:00:00Z"),
+      tx("bank-pending", "2026-04-26", "2026-04-26T12:00:00Z", { is_pending: true }),
+      tx("bank-review", "2026-04-26", "2026-04-26T12:00:00Z", { name: "Unfamiliar bank description", amount_cents: -1250n }),
+      tx("bank-safe", "2026-04-26", "2026-04-26T12:00:00Z", { amount_cents: -4500n }),
+    ];
+    const { handler, prisma } = await loadHandler({ rows,
+      entries: [entry("older-manual", "2026-04-13", -1250n, { payee: "Manual expense" })],
+      activeGroupIds: ["group-active"], bankTransactionsInActiveGroups: ["bank-matched"],
+    });
+    const res = await handler(postCreateEntriesBatchEvent({ items: rows.map((row) => ({ bank_transaction_id: row.id, autoMatch: true })) }));
+    const body = JSON.parse(res.body);
+    expect(body.results.map((r: any) => [r.bank_transaction_id, r.status])).toEqual([
+      ["bank-matched", "SKIPPED"], ["bank-pending", "SKIPPED"], ["bank-review", "SKIPPED"], ["bank-safe", "CREATED"],
+    ]);
+    expect(body.results[2].possible_duplicate_candidates[0].duplicate_reason).toBe("match_review_required");
+    expect(prisma.entry.create).toHaveBeenCalledTimes(1);
+    expect(prisma.matchGroup.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("single create requires review for same-amount candidates with a different description", async () => {
+    const { handler, prisma } = await loadHandler({
+      rows: [tx("bank-review", "2026-04-26", "2026-04-26T12:00:00Z", { name: "Bank description", amount_cents: -1250n })],
+      entries: [entry("manual", "2026-04-26", -1250n, { payee: "Manual expense" })],
+    });
+    const res = await handler(postCreateEntryEvent("bank-review", { autoMatch: true }));
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("POSSIBLE_DUPLICATE_ENTRY");
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+  });
+
   test("bulk create reuses trusted vendor categories instead of creating uncategorized rows", async () => {
     const rows = [tx("bank-fee", "2026-07-05", "2026-07-05T12:00:00.000Z", {
       name: "Bank of America monthly service fee",
@@ -1036,6 +1068,30 @@ describe("bank transaction create-entry duplicate preflight", () => {
         code: "POSSIBLE_DUPLICATE_ENTRY",
       })
     );
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+  });
+
+  test("bulk create leaves previously created entries for explicit matching", async () => {
+    const { handler, prisma } = await loadHandler({
+      rows: [tx("bank-existing", "2026-04-26", "2026-04-26T12:00:00Z")],
+      entries: [entry("existing", "2026-04-26", -100n, { sourceBankTransactionId: "bank-existing" })],
+    });
+    const res = await handler(postCreateEntriesBatchEvent({ items: [{ bank_transaction_id: "bank-existing", autoMatch: true }] }));
+    expect(JSON.parse(res.body).results[0]).toMatchObject({ status: "SKIPPED", auto_matched: false });
+    expect(prisma.entry.create).not.toHaveBeenCalled();
+    expect(prisma.matchGroup.create).not.toHaveBeenCalled();
+  });
+
+  test("review candidates are not hidden by ten more recent ineligible entries", async () => {
+    const { handler, prisma } = await loadHandler({
+      rows: [tx("bank-review", "2026-04-26", "2026-04-26T12:00:00Z", { amount_cents: -1250n })],
+      entries: [
+        ...Array.from({ length: 12 }, (_, i) => entry(`linked-${i}`, "2026-04-25", -1250n, { sourceBankTransactionId: `other-${i}` })),
+        entry("older-review", "2026-04-13", -1250n),
+      ],
+    });
+    const res = await handler(postCreateEntriesBatchEvent({ items: [{ bank_transaction_id: "bank-review", autoMatch: true }] }));
+    expect(JSON.parse(res.body).results[0]).toMatchObject({ status: "SKIPPED", code: "POSSIBLE_DUPLICATE_ENTRY" });
     expect(prisma.entry.create).not.toHaveBeenCalled();
   });
 

@@ -552,6 +552,7 @@ export default function ReconcilePageClient() {
   const [entriesHasMore, setEntriesHasMore] = useState(false);
   const [entriesBackgroundPageCount, setEntriesBackgroundPageCount] = useState(0);
   const [entriesBackgroundLoading, setEntriesBackgroundLoading] = useState(false);
+  const [entriesBackgroundError, setEntriesBackgroundError] = useState<string | null>(null);
   const entriesBackgroundLoadingRef = useRef(false);
 
   useEffect(() => {
@@ -562,6 +563,7 @@ export default function ReconcilePageClient() {
     setEntriesBackgroundPageCount(0);
     entriesBackgroundLoadingRef.current = false;
     setEntriesBackgroundLoading(false);
+    setEntriesBackgroundError(null);
     setExpectedVisibleN(PAGE_CHUNK);
     setMatchedVisibleN(PAGE_CHUNK);
   }, [bankScopeKey]);
@@ -577,12 +579,13 @@ export default function ReconcilePageClient() {
     setEntriesNextCursor(nextCursor);
     setEntriesHasMore(!!meta.hasMore && !!nextCursor);
     setEntriesBackgroundPageCount(0);
+    setEntriesBackgroundError(null);
   }, [bankScopeKey, entriesIsPlaceholderData, entriesQ.data, entriesQ.isLoading]);
 
   useEffect(() => {
     if (!selectedBusinessId || !selectedAccountId) return;
     if (!bankScopeKey || entriesHydratedScopeKey !== bankScopeKey) return;
-    if (entriesBackgroundLoadingRef.current || !entriesHasMore || !entriesNextCursor) return;
+    if (entriesBackgroundLoadingRef.current || entriesBackgroundError || !entriesHasMore || !entriesNextCursor) return;
     if (entriesBackgroundPageCount >= ENTRIES_BACKGROUND_MAX_PAGE_COUNT - 1) return;
 
     let cancelled = false;
@@ -629,6 +632,8 @@ export default function ReconcilePageClient() {
           setEntriesNextCursor(nextCursor);
           setEntriesHasMore(!!res.meta.hasMore && !!nextCursor);
           setEntriesBackgroundPageCount((count) => count + 1);
+        } catch {
+          if (!cancelled) setEntriesBackgroundError("Older ledger entries could not be loaded. Refresh to retry.");
         } finally {
           entriesBackgroundLoadingRef.current = false;
           setEntriesBackgroundLoading(false);
@@ -648,6 +653,7 @@ export default function ReconcilePageClient() {
     entriesHasMore,
     entriesNextCursor,
     entriesBackgroundPageCount,
+    entriesBackgroundError,
     entriesQ.data,
     from,
     to,
@@ -1598,15 +1604,17 @@ export default function ReconcilePageClient() {
     bankTxLoading ||
     matchGroupsLoading;
 
+  const entriesHistoryLoading = !entriesBackgroundError && entriesHasMore &&
+    entriesBackgroundPageCount < ENTRIES_BACKGROUND_MAX_PAGE_COUNT - 1;
   const entriesUpdating =
     plaidSyncing ||
     entriesQ.isFetching ||
-    entriesBackgroundLoading ||
+    entriesHistoryLoading ||
     matchGroupsLoading;
 
   const entriesActivityLabel = plaidSyncing
     ? "Syncing bank data…"
-    : entriesBackgroundLoading
+    : entriesHistoryLoading
       ? "Loading older ledger entries…"
       : entriesQ.isFetching
         ? "Refreshing ledger entries…"
@@ -2253,6 +2261,9 @@ export default function ReconcilePageClient() {
     }
     if (isBankTxnFullyMatched(bank) || (remainingAbsByBankTxnId.get(id) ?? 0n) === 0n) {
       return matchedOrPendingCreateEntryMessage;
+    }
+    if (bankMatchSuggestionById.has(id) || entryBySourceBankTransactionId.has(id)) {
+      return "Review or match the existing ledger entry before creating another entry.";
     }
 
     return null;
@@ -2953,7 +2964,7 @@ export default function ReconcilePageClient() {
     });
   }, [bankPendingUnmatchedIds]);
 
-  const selectedActionableBankTxnIds = useMemo(() => {
+  const selectedUnmatchedBankTxnIds = useMemo(() => {
     return Array.from(selectedBankTxnIds).filter((id) => {
       const bankId = String(id);
       const bank = bankByIdFast.get(bankId);
@@ -3131,6 +3142,13 @@ const displayBankActiveList = useMemo(() => {
     return out;
   }, [oneToOneMatchSuggestions]);
 
+  const selectedActionableBankTxnIds = useMemo(
+    () => selectedUnmatchedBankTxnIds.filter((id) =>
+      !bankMatchSuggestionById.has(id) && !entryBySourceBankTransactionId.has(id)
+    ),
+    [selectedUnmatchedBankTxnIds, bankMatchSuggestionById, entryBySourceBankTransactionId]
+  );
+
   const entryMatchSuggestionById = useMemo(() => {
     const out = new Map<string, ReconcileSuggestion>();
     for (const suggestion of oneToOneMatchSuggestions) {
@@ -3251,12 +3269,7 @@ const displayBankActiveList = useMemo(() => {
     bankTab === "unmatched" && bankPendingUnmatchedCount > 0
       ? `${bankPendingUnmatchedCount} pending shown read-only until posted.`
       : null;
-  const entriesScopeActivity = entriesBackgroundLoading
-    ? " • Loading older history"
-    : entriesQ.isFetching && entriesLoadedCount > 0
-      ? " • Refreshing ledger"
-      : "";
-  const entriesScopeCopy = `Ledger ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded${entriesScopeActivity} • Showing ${expectedTab === "expected" ? displayEntriesExpectedList.length : displayEntriesMatchedList.length} of ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
+  const entriesScopeCopy = `Ledger ${entriesLoadedCount}${entriesHitApiLimit ? "+" : ""} loaded • Showing ${expectedTab === "expected" ? displayEntriesExpectedList.length : displayEntriesMatchedList.length} of ${expectedTab === "expected" ? displayExpectedCount : displayMatchedCount}`;
   const activeBankHiddenBySearch =
     searchQ && activeBankStatusLoaded
       ? Math.max(0, activeBankLoadedRowsCount - (bankTab === "unmatched" ? displayBankUnmatchedCount : displayBankMatchedCount))
@@ -4434,15 +4447,15 @@ const displayBankActiveList = useMemo(() => {
                 <StatusChip label="Source: Ledger" tone="info" />
                 <div className="hidden sm:block text-[11px] text-bb-text-muted">Entered first, waiting for bank match</div>
               </div>
-              <div className="text-[11px] text-bb-text-muted min-h-[16px]">
-                {entriesTruthSettling || entriesUpdating ? (
-                  <span className="inline-flex items-center gap-1.5">
+            </div>
+              <div role="status" className="h-5 overflow-hidden text-[11px] text-bb-text-muted">
+                {entriesBackgroundError ? <span title={entriesBackgroundError}>{entriesBackgroundError}</span> : entriesTruthSettling || entriesUpdating ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
                     <TinySpinner />
                     <span>{entriesActivityLabel}</span>
                   </span>
                 ) : "\u00A0"}
               </div>
-            </div>
           </div>
 
           <div className="px-3 pb-1.5">
@@ -4473,7 +4486,7 @@ const displayBankActiveList = useMemo(() => {
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-bb-text">
-                    {selectedActionableBankTxnIds.length} of {selectedBankTxnIds.size} selected
+                    {selectedActionableBankTxnIds.length} eligible of {selectedBankTxnIds.size} selected
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -4506,8 +4519,8 @@ const displayBankActiveList = useMemo(() => {
                       !canWriteReconcileEffective
                         ? (reconcileWriteReason ?? noPermTitle)
                         : selectedActionableBankTxnIds.length === 0
-                          ? matchedOrPendingCreateEntryMessage
-                        : "Create entries from selected bank transactions"
+                          ? "Selected transactions are matched, pending, or need review."
+                        : "Create eligible entries; matched, pending, and review rows are skipped"
                     }
                     onClick={async () => {
                       if (!selectedBusinessId || !selectedAccountId) return;
@@ -4562,14 +4575,15 @@ const displayBankActiveList = useMemo(() => {
                         });
 
                         // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
-                        const createdIds: string[] = [];
+                        const createdIds: string[] = list
+                          .filter((r: any) => r?.status === "CREATED")
+                          .map((r: any) => String(r.bank_transaction_id));
                         setSelectedBankTxnIds((prev) => {
                           const next = new Set(prev);
                           for (const r of list) {
                             const bid = String(r?.bank_transaction_id ?? "");
                             const st = String(r?.status ?? "");
                             if (!bid) continue;
-                            if (st === "CREATED") createdIds.push(bid);
                             if (st === "CREATED" || st === "SKIPPED") next.delete(bid);
                           }
                           return next;
@@ -5220,13 +5234,15 @@ const displayBankActiveList = useMemo(() => {
           ) : null}
 
           <div className="px-3 pb-1.5">
-            <div className="flex flex-wrap items-center gap-2">
+            <div role="status" className="h-5 overflow-hidden text-[11px] text-bb-text-muted">
               {bankPanelShowStatusWhileRows ? (
-                <span className="text-[11px] text-bb-text-muted inline-flex items-center gap-1.5">
+                <span className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
                   <TinySpinner />
                   <span>{bankActivityLabel}</span>
                 </span>
               ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className={`h-7 px-3 text-xs rounded-md border ${bankTab === "unmatched" ? "border-bb-border bg-bb-surface-card text-bb-text" : "border-transparent text-bb-text-muted hover:bg-bb-table-row-hover"
