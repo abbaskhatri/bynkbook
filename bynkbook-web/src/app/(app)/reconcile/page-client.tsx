@@ -13,6 +13,7 @@ import { useEntries } from "@/lib/queries/useEntries";
 import { usePreferredAccountId } from "@/lib/accountSelection";
 import { issueCountKey } from "@/lib/queries/issueKeys";
 import { apiFetch } from "@/lib/api/client";
+import { createBankEntriesSequentially } from "@/lib/api/createBankEntriesSequentially";
 import { listEntriesPage } from "@/lib/api/entries";
 import { listCategories } from "@/lib/api/categories";
 
@@ -532,6 +533,7 @@ export default function ReconcilePageClient() {
   const [bulkCreateAutoMatch, setBulkCreateAutoMatch] = useState(true);
   const [bulkCreateResultByBankTxnId, setBulkCreateResultByBankTxnId] = useState<Record<string, any>>({});
   const [bulkCreateBusy, setBulkCreateBusy] = useState(false);
+  const [bulkCreateProgress, setBulkCreateProgress] = useState({ completed: 0, total: 0 });
 
   // -------------------------
   // Data queries
@@ -4503,11 +4505,15 @@ const displayBankActiveList = useMemo(() => {
                     <PillToggle
                       checked={bulkCreateAutoMatch}
                       onCheckedChange={(next) => setBulkCreateAutoMatch(next)}
-                      disabled={!canWriteReconcileEffective}
+                      disabled={!canWriteReconcileEffective || bulkCreateBusy}
                     />
                   </div>
                 </div>
 
+                <Button size="sm" variant="ghost" disabled={bulkCreateBusy}
+                  onClick={() => setSelectedBankTxnIds(new Set())}>
+                  Clear selection
+                </Button>
                 <HintWrap
                   disabled={!canWriteReconcileEffective}
                   reason={!canWriteReconcileEffective ? (reconcileWriteReason ?? noPermTitle) : null}
@@ -4516,7 +4522,7 @@ const displayBankActiveList = useMemo(() => {
                     variant="primary"
                     size="sm"
                     busy={bulkCreateBusy}
-                    busyLabel="Creating…"
+                    busyLabel={`Creating ${bulkCreateProgress.completed} of ${bulkCreateProgress.total}…`}
                     disabled={
                       bulkCreateBusy ||
                       !canWriteReconcileEffective ||
@@ -4552,51 +4558,36 @@ const displayBankActiveList = useMemo(() => {
                         return next;
                       });
 
+                      const createdIds: string[] = [];
                       try {
                         setBulkCreateBusy(true);
-
-                        const payload = {
-                          items: ids.map((id) => ({
-                            bank_transaction_id: id,
-                            autoMatch: bulkCreateAutoMatch === true,
-                          })),
-                        };
-
-                        const res: any = await apiFetch(
-                          `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/bank-transactions/create-entries-batch`,
-                          { method: "POST", body: JSON.stringify(payload) }
+                        setBulkCreateProgress({ completed: 0, total: ids.length });
+                        const list = await createBankEntriesSequentially(
+                          ids,
+                          async (id) => apiFetch(
+                            `/v1/businesses/${selectedBusinessId}/accounts/${selectedAccountId}/bank-transactions/create-entries-batch`,
+                            { method: "POST", body: JSON.stringify({ items: [{ bank_transaction_id: id, autoMatch: bulkCreateAutoMatch === true }] }) }
+                          ),
+                          (result, completed) => {
+                            const id = result.bank_transaction_id;
+                            setBulkCreateProgress({ completed, total: ids.length });
+                            setBulkCreateResultByBankTxnId((prev) => ({ ...prev, [id]: result }));
+                            if (result.status === "CREATED") createdIds.push(id);
+                            if (result.status === "CREATED" || result.status === "SKIPPED") {
+                              setSelectedBankTxnIds((prev) => {
+                                const next = new Set(prev);
+                                next.delete(id);
+                                return next;
+                              });
+                            }
+                          }
                         );
-
-                        const list = Array.isArray(res?.results) ? res.results : [];
                         const hasPossibleDuplicate = list.some(
                           (r: any) => String(r?.code ?? "") === "POSSIBLE_DUPLICATE_ENTRY"
                         );
-                        setCreateEntryErr(hasPossibleDuplicate ? possibleDuplicateEntryMessage : null);
+                        setCreateEntryErr(hasPossibleDuplicate ? possibleDuplicateEntryMessage :
+                          list.some((r) => r.status === "FAILED") ? "Some entries could not be created. They remain selected; review their messages before retrying." : null);
 
-                        setBulkCreateResultByBankTxnId((m) => {
-                          const next = { ...m };
-                          for (const r of list) {
-                            const bid = String(r?.bank_transaction_id ?? "");
-                            if (!bid) continue;
-                            next[bid] = r;
-                          }
-                          return next;
-                        });
-
-                        // Keep selection (user may want to retry failed), but clear ids that succeeded/skip
-                        const createdIds: string[] = list
-                          .filter((r: any) => r?.status === "CREATED")
-                          .map((r: any) => String(r.bank_transaction_id));
-                        setSelectedBankTxnIds((prev) => {
-                          const next = new Set(prev);
-                          for (const r of list) {
-                            const bid = String(r?.bank_transaction_id ?? "");
-                            const st = String(r?.status ?? "");
-                            if (!bid) continue;
-                            if (st === "CREATED" || st === "SKIPPED") next.delete(bid);
-                          }
-                          return next;
-                        });
                         if (createdIds.length > 0) {
                           setOptimisticHiddenBankTxnIds((prev) => {
                             const next = new Set(prev);
@@ -4604,17 +4595,18 @@ const displayBankActiveList = useMemo(() => {
                             return next;
                           });
                         }
+                      } catch (e: any) {
+                        applyMutationError(e, "Creation interrupted. Completed entries are saved; refresh before retrying remaining rows.");
+                      } finally {
+                        // Refresh even after a lost response: the server may have saved that entry.
                         settleReconcileInBackground("bulk-created entries", async () => {
-                          if (createdIds.length > 0) await refreshIssuesAfterBankEntryCreate();
+                          await refreshIssuesAfterBankEntryCreate();
                           setOptimisticHiddenBankTxnIds((prev) => {
                             const next = new Set(prev);
                             for (const id of createdIds) next.delete(id);
                             return next;
                           });
                         });
-                      } catch (e: any) {
-                        applyMutationError(e, "Can’t create entries");
-                      } finally {
                         setBulkCreateBusy(false);
 
                         for (const id of ids) clearPending(String(id));
@@ -5335,13 +5327,15 @@ const displayBankActiveList = useMemo(() => {
                               selectableVisibleBankIds.length > 0 &&
                               selectableVisibleBankIds.every((id) => selectedBankTxnIds.has(id))
                             }
-                            disabled={selectableVisibleBankIds.length === 0 || bulkCreateBusy}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedBankTxnIds(new Set(selectableVisibleBankIds));
-                              } else {
-                                setSelectedBankTxnIds(new Set());
-                              }
+                            ref={(input) => {
+                              if (input) input.indeterminate = selectedBankTxnIds.size > 0 &&
+                                !selectableVisibleBankIds.every((id) => selectedBankTxnIds.has(id));
+                            }}
+                            disabled={(selectableVisibleBankIds.length === 0 && selectedBankTxnIds.size === 0) || bulkCreateBusy}
+                            onChange={() => {
+                              // A partial selection must still be clearable when more rows load.
+                              setSelectedBankTxnIds((prev) => prev.size > 0
+                                ? new Set() : new Set(selectableVisibleBankIds));
                             }}
                             aria-label="Select all unmatched bank transactions"
                           />
