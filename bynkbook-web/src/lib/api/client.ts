@@ -1,4 +1,5 @@
 import { fetchAuthSession } from "aws-amplify/auth";
+import { notifyFinancialWrite } from "@/lib/queries/financialFreshness";
 import { metrics } from "@/lib/perf/metrics";
 import { expireSessionIfNeeded } from "@/lib/auth/sessionPolicy";
 
@@ -277,6 +278,7 @@ export async function apiFetch(path: string, init?: ApiFetchInit) {
   }
 
   const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) return JSON.parse(body);
-  return body;
+  const result = contentType.includes("application/json") ? JSON.parse(body) : body;
+  if (result?.ok !== false) notifyFinancialWrite(path, method);
+  return result;
 }

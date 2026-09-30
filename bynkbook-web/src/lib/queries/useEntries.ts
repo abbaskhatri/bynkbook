@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { loadEntriesForQuery, type EntryList } from "@/lib/api/entries";
 import { keepScopedData } from "./keepScopedData";
+import { FINANCIAL_STALE_TIME } from "./financialFreshness";
 
 export function useEntries(params: {
   businessId: string | null;
@@ -31,7 +32,7 @@ export function useEntries(params: {
 
     // Align entries with app-wide query discipline so page revisits,
     // focus changes, and small follow-up refreshes do not feel heavy.
-    staleTime: 30_000,
+    staleTime: FINANCIAL_STALE_TIME,
     gcTime: 10 * 60_000,
     refetchOnMount: true,
     refetchOnWindowFocus: false,

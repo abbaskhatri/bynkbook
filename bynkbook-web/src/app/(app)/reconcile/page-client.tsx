@@ -1369,6 +1369,7 @@ export default function ReconcilePageClient() {
       confirmSettle?: boolean;
       skipLegacyMatches?: boolean;
       silent?: boolean;
+      entriesChanged?: boolean;
     }
   ) {
     if (!opts?.silent) setRefreshBusy(true);
@@ -1381,7 +1382,9 @@ export default function ReconcilePageClient() {
         ...(opts ?? {}),
       });
 
-      const entriesRefresh = entriesQ.refetch ? entriesQ.refetch() : Promise.resolve(undefined);
+      const entriesRefresh = opts?.entriesChanged !== false && entriesQ.refetch
+        ? entriesQ.refetch()
+        : Promise.resolve(undefined);
 
       await Promise.all([placementTruthRefresh, entriesRefresh]);
 
@@ -1433,7 +1436,8 @@ export default function ReconcilePageClient() {
 
   function settleReconcileInBackground(
     reason: string,
-    afterRefresh?: () => void | Promise<void>
+    afterRefresh?: () => void | Promise<void>,
+    options?: { entriesChanged?: boolean }
   ) {
     void (async () => {
       try {
@@ -1441,6 +1445,7 @@ export default function ReconcilePageClient() {
           preserveOnEmpty: true,
           skipLegacyMatches: true,
           silent: true,
+          entriesChanged: options?.entriesChanged,
         });
         await afterRefresh?.();
       } catch (e: any) {
@@ -1819,15 +1824,7 @@ export default function ReconcilePageClient() {
     setBankLoadingByStatus({ unmatched: false, matched: false });
     setBankNextCursorByStatus({ all: null, unmatched: null, matched: null });
 
-    // One targeted refresh on mount / scope change (prevents “needs manual refresh” after navigation)
-    void qc.invalidateQueries({
-      predicate: (q) =>
-        Array.isArray(q.queryKey) &&
-        q.queryKey[0] === "entries" &&
-        q.queryKey[1] === selectedBusinessId &&
-        q.queryKey[2] === selectedAccountId,
-    });
-
+    // useEntries refreshes stale or invalidated data; fresh reads survive navigation.
     void refreshBankAndMatchesRef.current({ preserveOnEmpty: true, skipLegacyMatches: true, statuses: ["unmatched"] });
   }, [qc, selectedBusinessId, selectedAccountId, from, to]);
 
@@ -2189,7 +2186,8 @@ export default function ReconcilePageClient() {
       }
 
       clearMutErr();
-      settleReconcileInBackground("auto-match");
+      setBankCountRefreshSeq((n) => n + 1);
+      settleReconcileInBackground("auto-match", undefined, { entriesChanged: false });
     } catch (e: any) {
       const r = applyMutationError(e, "Can't auto-match");
       if (r.isClosed) {
@@ -3122,6 +3120,12 @@ const displayBankActiveList = useMemo(() => {
     ? displayBankUnmatchedList
     : displayBankMatchedList;
 }, [bankTab, displayBankUnmatchedList, displayBankMatchedList]);
+
+  const selectableVisibleBankIds = useMemo(() => displayBankUnmatchedList
+    .filter((row: any) => row?.id && !row.is_pending && !pendingById[String(row.id)] &&
+      !createEntryBusyByBankId[String(row.id)] && !isBankTxnFullyMatched(row))
+    .map((row: any) => String(row.id)),
+  [displayBankUnmatchedList, pendingById, createEntryBusyByBankId, isBankTxnFullyMatched]);
 
   // One shared deterministic engine powers row badges, quick matching, and
   // the Auto-match dialog. Delayed exact matches remain reviewable while only
@@ -4483,10 +4487,15 @@ const displayBankActiveList = useMemo(() => {
             </div>
 
             {bankTab === "unmatched" && selectedBankTxnIds.size > 0 ? (
-              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-bb-text">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-bb-border bg-bb-surface-card px-2 py-1.5">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="min-w-0 text-xs font-semibold text-bb-text">
                     {selectedActionableBankTxnIds.length} eligible of {selectedBankTxnIds.size} selected
+                    {selectedBankTxnIds.size > selectedActionableBankTxnIds.length ? (
+                      <span className="block text-[11px] font-normal text-bb-text-muted">
+                        {selectedBankTxnIds.size - selectedActionableBankTxnIds.length} skipped: matched, pending, or needs review.
+                      </span>
+                    ) : null}
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -5323,19 +5332,13 @@ const displayBankActiveList = useMemo(() => {
                             type="checkbox"
                             className="h-4 w-4"
                             checked={
-                              displayBankUnmatchedList.length > 0 &&
-                              selectedBankTxnIds.size === displayBankUnmatchedList.length
+                              selectableVisibleBankIds.length > 0 &&
+                              selectableVisibleBankIds.every((id) => selectedBankTxnIds.has(id))
                             }
+                            disabled={selectableVisibleBankIds.length === 0 || bulkCreateBusy}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedBankTxnIds(new Set(
-                                  displayBankUnmatchedList
-                                    .filter((x: any) => {
-                                      const id = String(x?.id ?? "");
-                                      return id && !x?.is_pending && !pendingById[id] && !isBankTxnFullyMatched(x);
-                                    })
-                                    .map((x: any) => String(x.id))
-                                ));
+                                setSelectedBankTxnIds(new Set(selectableVisibleBankIds));
                               } else {
                                 setSelectedBankTxnIds(new Set());
                               }
@@ -5381,6 +5384,8 @@ const displayBankActiveList = useMemo(() => {
                       const pendingActionReason = "Pending transaction. Actions unlock once it posts.";
                       const rowBusyReason = matchedOrPendingCreateEntryMessage;
                       const createEntryActionBlockReason = getCreateEntryActionBlockReason(txnId);
+                      const needsReview = matchSuggestion?.quality === "REVIEW" || entryBySourceBankTransactionId.has(txnId);
+                      const showCreateAction = !isMatched && !matchSuggestion && !entryBySourceBankTransactionId.has(txnId);
                       const rowTone = isPendingBankTxn ? " bg-bb-status-warning-bg" : isMatched ? " bg-primary/10" : "";
                       const actionCellBg = isPendingBankTxn ? "bg-bb-status-warning-bg" : isMatched ? "bg-primary/10" : "bg-bb-surface-card";
 
@@ -5659,14 +5664,14 @@ const displayBankActiveList = useMemo(() => {
                                       <AppTooltip content="Match with the only strong ledger entry candidate" side="left">
                                         <button
                                           type="button"
-                                          className={`h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} hover:bg-primary/15`}
-                                          aria-label="Auto-match bank transaction"
+                                          className={`h-7 px-2 shrink-0 inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-xs font-medium text-primary ${ringFocus} hover:bg-primary/15`}
+                                          aria-label="Match bank transaction"
                                           onClick={(ev) => {
                                             ev.stopPropagation();
                                             void quickMatchAt(txnId, autoCandidateEntryId);
                                           }}
                                         >
-                                          <Sparkles className="h-4 w-4" />
+                                          Match
                                         </button>
                                       </AppTooltip>
                                     );
@@ -5686,7 +5691,7 @@ const displayBankActiveList = useMemo(() => {
                                   >
                                     <button
                                       type="button"
-                                      className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn && !isRowPending ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
+                                      className={`h-7 ${needsReview ? "px-2 text-xs font-medium" : "w-7"} inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn && !isRowPending ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"}`}
                                       disabled={!canWriteReconcileEffective || isPendingBankTxn || isRowPending}
                                       title={
                                         isPendingBankTxn
@@ -5697,7 +5702,7 @@ const displayBankActiveList = useMemo(() => {
                                             ? "Review match suggestions for this bank transaction"
                                             : (reconcileWriteReason ?? noPermTitle)
                                       }
-                                      aria-label="Match bank transaction"
+                                      aria-label={needsReview ? "Review bank transaction" : "Find or review an existing ledger entry"}
                                       onClick={() => {
                                         if (isPendingBankTxn || isRowPending) return;
                                         if (!canWriteReconcileEffective) return;
@@ -5711,13 +5716,13 @@ const displayBankActiveList = useMemo(() => {
                                         void runAiSuggestForBank(t);
                                       }}
                                     >
-                                      <GitMerge className="h-4 w-4 text-bb-text" />
+                                      {needsReview ? "Review" : <GitMerge className="h-4 w-4 text-bb-text" />}
                                     </button>
                                   </HintWrap>
                                 </>
                               )}
 
-                              <HintWrap
+                              {showCreateAction ? <HintWrap
                                 disabled={!canWriteReconcileEffective || isPendingBankTxn}
                                 reason={
                                   isPendingBankTxn
@@ -5729,7 +5734,7 @@ const displayBankActiveList = useMemo(() => {
                               >
                                 <button
                                   type="button"
-                                  className={`h-7 w-7 inline-flex items-center justify-center rounded-md border border-bb-border bg-bb-surface-card ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn ? "hover:bg-bb-table-row-hover" : "opacity-50 cursor-not-allowed"
+                                  className={`h-7 px-2 text-xs font-medium inline-flex items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary ${ringFocus} ${canWriteReconcileEffective && !isPendingBankTxn ? "hover:bg-primary/15" : "opacity-50 cursor-not-allowed"
                                     }`}
                                   disabled={
                                     !canWriteReconcileEffective ||
@@ -5781,10 +5786,10 @@ const displayBankActiveList = useMemo(() => {
                                   {createEntryBusyByBankId[String(t.id)] ? (
                                     <TinySpinner />
                                   ) : (
-                                    <Plus className="h-4 w-4 text-bb-text" />
+                                    "Create"
                                   )}
                                 </button>
-                              </HintWrap>
+                              </HintWrap> : null}
 
                               {bankTab !== "matched"
                                 ? (() => {
@@ -6316,7 +6321,8 @@ const displayBankActiveList = useMemo(() => {
                         setMatchSelectedEntryIds(new Set());
                         setMatchAiSuggestions([]);
                         setMatchSuggestError(null);
-                        settleReconcileInBackground("matched transactions");
+                        setBankCountRefreshSeq((n) => n + 1);
+                        settleReconcileInBackground("matched transactions", undefined, { entriesChanged: false });
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t match transactions");
                         if (!r.isClosed) setMatchError(r.msg);
@@ -6875,7 +6881,8 @@ const displayBankActiveList = useMemo(() => {
                         setEntryMatchSelectedBankTxnIds(new Set());
                         setEntryAiSuggestions([]);
                         setEntrySuggestError(null);
-                        settleReconcileInBackground("matched entry");
+                        setBankCountRefreshSeq((n) => n + 1);
+                        settleReconcileInBackground("matched entry", undefined, { entriesChanged: false });
                       } catch (e: any) {
                         const r = applyMutationError(e, "Can’t create match");
                         if (!r.isClosed) setEntryMatchError(r.msg);

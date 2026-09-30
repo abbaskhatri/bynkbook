@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getLedgerSummary } from "@/lib/api/ledgerSummary";
 import { keepScopedData } from "./keepScopedData";
+import { FINANCIAL_STALE_TIME } from "./financialFreshness";
 
 export function useLedgerSummary(params: {
   businessId: string | null;
@@ -23,7 +24,7 @@ export function useLedgerSummary(params: {
 
     // Match entries query behavior so summary cards do not flicker or
     // refetch aggressively while row-level changes settle in the background.
-    staleTime: 30_000,
+    staleTime: FINANCIAL_STALE_TIME,
     gcTime: 10 * 60_000,
     refetchOnMount: true,
     refetchOnWindowFocus: false,

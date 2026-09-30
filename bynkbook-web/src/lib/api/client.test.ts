@@ -14,6 +14,30 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("API request lifecycle", () => {
+  test("expires financial reads only after successful writes and never changes the request", async () => {
+    const { subscribeFinancialWrites } = await import("@/lib/queries/financialFreshness");
+    const listener = vi.fn();
+    const stop = subscribeFinancialWrites(listener);
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{"ok":true}', { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { apiFetch } = await import("./client");
+    const body = '{"memo":"updated"}';
+    await apiFetch("/v1/businesses/b/accounts/a/entries/e", { method: "PATCH", body });
+    expect(listener).toHaveBeenCalledWith({ businessId: "b", accountId: "a" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH", body });
+    listener.mockClear();
+    await apiFetch("/v1/businesses/b/accounts/a/entries");
+    await apiFetch("/v1/businesses/b/accounts/a/plaid/link-token", { method: "POST", body: "{}" });
+    expect(listener).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValue(new Response('{"ok":false}', { headers: { "content-type": "application/json" } }));
+    await apiFetch("/v1/businesses/b/accounts/a/entries", { method: "POST" });
+    expect(listener).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValue(new Response('{"error":"rejected"}', { status: 403, headers: { "content-type": "application/json" } }));
+    await expect(apiFetch("/v1/businesses/b/accounts/a/entries", { method: "POST" })).rejects.toMatchObject({ status: 403 });
+    expect(listener).not.toHaveBeenCalled();
+    stop();
+  });
   test("preserves status and payload for friendly validation errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: "INVALID_INPUT", error: "Choose an account." }), {
       status: 400, headers: { "content-type": "application/json" },

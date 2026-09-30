@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "aws-amplify/auth/enable-oauth-listener";
 import { configureAmplify } from "@/lib/auth/amplify";
 import { ThemeProvider } from "@/lib/theme";
+import { invalidateFinancialReads, subscribeFinancialWrites } from "@/lib/queries/financialFreshness";
 
 const PerfOverlay = dynamic(
   () => import("@/components/app/perf-overlay").then((mod) => mod.PerfOverlay),
@@ -37,6 +38,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       })
   );
+
+  useEffect(() => subscribeFinancialWrites((scope) => {
+    void invalidateFinancialReads(queryClient, scope);
+  }), [queryClient]);
 
   return (
     <ThemeProvider>

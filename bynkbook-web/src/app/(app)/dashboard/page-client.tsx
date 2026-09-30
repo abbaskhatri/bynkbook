@@ -15,6 +15,7 @@ import { getPnlSummary, getCashflowSeries, getCategories, getAccountsSummary } f
 import { getAttentionSummary } from "@/lib/api/attentionSummary";
 import { attentionSummaryKey } from "@/lib/queries/attentionSummary";
 import { keepScopedData } from "@/lib/queries/keepScopedData";
+import { FINANCIAL_STALE_TIME } from "@/lib/queries/financialFreshness";
 import {
   calculateCashRunway,
   isBankSnapshotComparable,
@@ -359,7 +360,7 @@ export default function DashboardPageClient() {
         ytd: range.mode === "YTD",
       }),
     enabled: dashEnabled,
-    staleTime: 20_000,
+    staleTime: FINANCIAL_STALE_TIME,
     placeholderData: keepScopedData({ 2: selectedBusinessId, 3: accountScopeId }),
   });
 
@@ -373,7 +374,7 @@ export default function DashboardPageClient() {
         ytd: range.mode === "YTD",
       }),
     enabled: dashEnabled,
-    staleTime: 20_000,
+    staleTime: FINANCIAL_STALE_TIME,
     placeholderData: keepScopedData({ 2: selectedBusinessId, 3: accountScopeId }),
   });
 
@@ -381,7 +382,7 @@ export default function DashboardPageClient() {
     queryKey: ["dashboardExec", "categories", selectedBusinessId, accountScopeId, range.from, range.to, range.mode],
     queryFn: () => getCategories(selectedBusinessId as string, { from: range.from, to: range.to, accountId: accountScopeId }),
     enabled: dashEnabled,
-    staleTime: 30_000,
+    staleTime: FINANCIAL_STALE_TIME,
     placeholderData: keepScopedData({ 2: selectedBusinessId, 3: accountScopeId }),
   });
 
